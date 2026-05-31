@@ -1,26 +1,33 @@
 # Redmine Reporter Dashboards
 
-Dashboard extension for the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter)
-plugin, adding:
+A dashboard extension for the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter) plugin. Adds configurable project dashboards and replaces slow Liquid loops in report templates with fast SQL aggregations.
 
-- **Project dashboards** — configurable, tabbed dashboard pages per project with
-  drag-and-drop blocks (issues, news, documents, calendar, time log, activity,
-  saved queries and report blocks).
-- **SQL statistics** — a fast pure-SQL issue flow aggregator and a
-  `sql/stats/monthly_flow` JSON endpoint.
-- **`{% sql_aggregate %}` Liquid tag** — server-side SQL aggregation for report
-  templates, replacing expensive `{% for issue in issues %}` loops. The legacy
-  name **`{% geo_aggregate %}`** keeps working as an alias.
+## What does it do?
 
-It also carries a few performance/quality patches that re-apply, as overlays, the
-fixes that previously lived inside the reporter plugin so that **the third-party
-`redmine_reporter` plugin can stay pristine** and receive vendor updates cleanly.
+### Project dashboards
+
+Each project gets its own dashboard page with tabs. Drag widgets into position or stack multiple tabs side by side:
+
+- **Issues** — a filtered issue list driven by a saved query
+- **Report** — a Reporter report block embedded directly on the dashboard
+- **Activity**, **Calendar**, **News**, **Documents**, **Time log**
+
+Each tab is configured independently per project and per role.
+
+### `{% sql_aggregate %}` Liquid tag
+
+The standard Liquid approach in Reporter templates iterates over all issues as objects:
+
+```liquid
+{% for issue in issues %}...{% endfor %}
+```
+
+With hundreds or thousands of issues that gets slow. The `{% sql_aggregate %}` tag does the same work entirely in SQL — no Issue objects loaded, no memory pressure — and returns the result as a Liquid variable you can use directly in your template.
 
 ## Requirements
 
 - Redmine 5.0 or higher
-- `redmine_reporter` plugin, version 2.0.5 or higher (hard dependency — this
-  plugin will refuse to load without it)
+- `redmine_reporter` plugin version 2.0.5 or higher
 
 ## Installation
 
@@ -32,96 +39,132 @@ bundle install
 bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 ```
 
-Restart Redmine afterwards.
+Restart Redmine after installation.
 
 ## Enabling the dashboard for a project
 
-The dashboard is a standard Redmine project module. The reporter performance
-patches, SQL statistics endpoint and Liquid aggregation tag are plugin-wide and
-remain active regardless of whether a specific project enables the dashboard
-module.
+1. Open **Project → Settings → Modules** and enable **Project dashboard**.
+2. Assign permissions to the relevant roles:
+   - `view_reporter_project_page` — view the dashboard
+   - `manage_reporter_project_page` — add and rearrange blocks
+   - `manage_reporter_project_tabs` — create and rename tabs
+3. A **Project dashboard** link appears in the project menu. The first visit automatically creates a default tab.
 
-1. Open **Project → Settings → Modules** and enable **Project dashboard** for the
-   project.
-2. Grant the `view_reporter_project_page` / `manage_reporter_project_page` /
-   `manage_reporter_project_tabs` permissions to the relevant roles.
-3. A **Project dashboard** entry appears in the project menu. The first visit
-   creates the default dashboard tab automatically when no tab exists yet.
+## Using the `{% sql_aggregate %}` tag
 
-Existing installations that used the previous **Project dashboard** settings tab
-can manually enable the new project module on the few projects that should keep
-using dashboards; no data migration is required for the dashboard tabs/widgets
-already stored by this plugin.
+Place the tag at the top of your Reporter template. It writes the result into a Liquid variable (`stats` by default) that you can then use freely.
 
-## Testing
+### Time series — created and closed per period
 
-The `.codex/` scripts spin up a Redmine checkout and run the suite. Because this
-plugin depends on `redmine_reporter`, provide a reporter checkout alongside (a
-sibling `../redmine_reporter` directory is picked up automatically, or set
-`REPORTER_PLUGIN_PATH`):
+```liquid
+{% sql_aggregate from: issues, period: month, periods: 6,
+   closed_statuses: "Closed;Rejected", assign_to: stats %}
 
-```bash
-./.codex/redmine_clone.sh 5.1-stable
-./.codex/test_setup.sh
-./.codex/test_plugin.sh
+| Month | Created | Closed |
+|-------|---------|--------|
+{% for i in (0..5) %}| {{ stats.labels[i] }} | {{ stats.created[i] }} | {{ stats.closed[i] }} |
+{% endfor %}
+
+Currently open: **{{ stats.open_now }}** — Total: **{{ stats.total }}**
 ```
 
-- The **RSpec** specs (`spec/`) cover the SQL aggregation code and run standalone —
-  they need neither `redmine_reporter` nor any credential.
-- The **minitest** suite (`test/`) covers the dashboard controllers/models/helper
-  and boots the full Redmine app, so it needs `redmine_reporter` installed.
+Four period sizes are supported: `day`, `week`, `month` (default) and `year`.
 
-### Providing the `redmine_reporter` dependency
+| Parameter | Default | Maximum |
+|-----------|---------|---------|
+| `period: day` | 30 days | 90 |
+| `period: week` | 13 weeks | 52 |
+| `period: month` | 6 months | 24 |
+| `period: year` | 3 years | 10 |
 
-`redmine_reporter` is a private hard dependency. The only thing that ever needs a
-credential is *fetching it over the network into a fresh machine*. Wherever a
-checkout is already on disk next to this plugin, setup is zero-config.
+### Categorical breakdown
 
-| Environment | How reporter is provided | Credential needed |
-| --- | --- | --- |
-| **Local** | `redmine_clone.sh` copies the sibling `../redmine_reporter` (rsync, no git) | No |
-| **Cloud agent** (Codex / Claude Code) with reporter pre-seeded | sibling checkout, or `REPORTER_PLUGIN_PATH` | No |
-| **Cloud agent** with only this repo checked out | a setup step must clone reporter | Yes (token / platform auth) |
-| **GitHub Actions** | `actions/checkout` of the private repo | Yes — `REPORTER_REPO_TOKEN` secret |
+With `group_by` the tag switches to a category summary instead of a time series.
 
-**Local / cloud — point the script at any reporter checkout:**
+```liquid
+{% sql_aggregate from: issues, group_by: status, assign_to: by_status %}
 
-```bash
-# Default: a sibling directory ../redmine_reporter is detected automatically.
-./.codex/redmine_clone.sh 5.1-stable
-
-# Or place reporter anywhere and point REPORTER_PLUGIN_PATH at it:
-REPORTER_PLUGIN_PATH=/abs/path/to/redmine_reporter ./.codex/redmine_clone.sh 5.1-stable
+{% for bucket in by_status.buckets %}
+- {{ bucket.label }}: {{ bucket.count }}
+{% endfor %}
+Total: {{ by_status.total }}
 ```
 
-If reporter is not found, `redmine_clone.sh` prints a warning and continues. The
-`.codex` setup/test scripts then run the standalone RSpec specs and skip the
-minitest suite that boots Redmine, unless full dependency enforcement is enabled:
+Supported `group_by` values:
 
-```bash
-# Fail instead of skipping when redmine_reporter is missing.
-REQUIRE_REPORTER_PLUGIN=1 ./.codex/test_setup.sh
-REQUIRE_REPORTER_PLUGIN=1 ./.codex/test_plugin.sh
+| Value | Groups by |
+|-------|-----------|
+| `status` | Issue status |
+| `priority` | Priority |
+| `tracker` | Tracker |
+| `assignee` | Assigned user |
+| `author` | Author |
+| `category` | Category |
+| `version` | Target version |
+
+### More examples
+
+**Weekly throughput — last quarter:**
+
+```liquid
+{% sql_aggregate from: issues, period: week, periods: 13,
+   closed_statuses: "Closed", assign_to: weekly %}
+
+{% for i in (0..12) %}
+Week {{ weekly.labels[i] }}: {{ weekly.created[i] }} created, {{ weekly.closed[i] }} closed
+{% endfor %}
 ```
 
-`CI=true` also enables this strict mode by default; set
-`REQUIRE_REPORTER_PLUGIN=0` only for an intentional standalone-spec run.
+**Top trackers:**
 
-**Cloud agent that must fetch reporter** — add a setup step before the test
-scripts that clones it next to this plugin using a read-only credential provided
-by the platform. Prefer platform authentication, a deploy key, or a masked secret
-instead of pasting a token into shell history. For example, after authenticating
-with GitHub CLI:
+```liquid
+{% sql_aggregate from: issues, group_by: tracker, assign_to: by_tracker %}
 
-```bash
-gh repo clone jcatrysse/redmine_reporter ../redmine_reporter
+{% for bucket in by_tracker.buckets %}
+{{ bucket.label }} — {{ bucket.count }} issues
+{% endfor %}
 ```
 
-**GitHub Actions** — create a fine-grained PAT (or deploy key) with read-only
-`Contents` access to `redmine_reporter`, store it on *this* repo as the
-`REPORTER_REPO_TOKEN` secret, and the workflows check reporter out automatically.
-The secret is encrypted and never exposed in the public source. Adjust the
-`repository:` line in `.github/workflows/*.yml` if your reporter repo path differs.
+**Via a saved query (query_id):**
+
+When the Reporter plugin exposes `query_id` in the template context:
+
+```liquid
+{% sql_aggregate query_id: query_id, period: month, periods: 3,
+   closed_statuses: "Closed;Rejected", assign_to: stats %}
+```
+
+### Result structure
+
+**Time series** (`assign_to: stats`):
+
+| Key | Type | Content |
+|-----|------|---------|
+| `stats.labels` | array | Period labels, oldest first |
+| `stats.created` | array | Issues created per period |
+| `stats.closed` | array | Issues closed per period |
+| `stats.open_now` | integer | Current number of open issues |
+| `stats.total` | integer | Total issues in scope |
+| `stats.period` | string | Period used (`month`, `week`, …) |
+| `stats.periods` | integer | Number of periods in the series |
+
+**Breakdown** (`assign_to: by_status`):
+
+| Key | Type | Content |
+|-----|------|---------|
+| `by_status.buckets` | array | `[{label, count}, ...]` sorted by count descending |
+| `by_status.total` | integer | Sum of all counts |
+| `by_status.group_by` | string | Grouping used |
+
+### Legacy alias
+
+The tag was previously called `{% geo_aggregate %}`. That name still works as an alias so existing templates keep working without changes.
+
+## Questions or issues?
+
+Open an issue on [GitHub Issues](https://github.com/jcatrysse/redmine_reporter_dashboards/issues).
+
+Contributing to the code? See [CONTRIBUTING.md](CONTRIBUTING.md) for the developer setup, test instructions and how the CI workflows work.
 
 ## License
 
