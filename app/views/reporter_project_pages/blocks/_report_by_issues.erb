@@ -1,0 +1,20 @@
+<%
+  block ||= 'report_by_issues'
+  settings ||= tab.block_settings(block)
+  query = IssueQuery.visible.where(project_id: [nil, project.id]).find_by(id: settings[:query_id])
+  report_template = IssueListReportTemplate.find_by(id: settings[:report_template_id])
+%>
+
+<% if query && report_template %>
+  <%= render partial: 'reporter_project_pages/report',
+             locals: { block: block, settings: settings, query: query,
+                       collection: query.base_scope, report_template: report_template } %>
+<% elsif editable %>
+  <%= render partial: 'reporter_project_pages/report_settings',
+             locals: { block: block, settings: settings, report_type: :issues,
+                       queries: IssueQuery.visible.where(project_id: [nil, project.id]).sorted,
+                       report_templates: IssueListReportTemplate.in_project_and_global(project),
+                       project: project, tab: tab } %>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>

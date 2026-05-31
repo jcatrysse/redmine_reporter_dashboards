@@ -1,0 +1,15 @@
+it:
+  label_reporter_project_page: Dashboard del progetto
+  project_module_reporter_project_dashboards: Dashboard del progetto
+  label_reporter_dashboard_tabs: Schede del dashboard
+  label_reporter_dashboard_tab_add: Aggiungi scheda
+  label_reporter_dashboard_tab_order: Ordine
+  label_reporter_dashboard_tabs_required: È richiesta almeno una scheda del dashboard
+  label_reporter_items_limit: Elementi da visualizzare
+  label_reporter_default_dashboard_tab: Panoramica
+  label_reporter_report_template: Modello di report
+  label_move_left: Sposta a sinistra
+  label_move_right: Sposta a destra
+  permission_view_reporter_project_page: Visualizza dashboard del progetto
+  permission_manage_reporter_project_page: Gestisci i widget del dashboard del progetto
+  permission_manage_reporter_project_tabs: Gestisci le schede del dashboard del progetto

@@ -1,0 +1,33 @@
+<% if editable %>
+  <div class="contextual">
+    <%= link_to_function sprite_icon('settings', l(:label_options)),
+                         "$('##{block}-settings').toggle();",
+                         class: 'icon-only icon-settings',
+                         title: l(:label_options) %>
+  </div>
+<% end %>
+
+<h3><%= l(:label_document_plural) %></h3>
+
+<% if editable %>
+  <div id="<%= block %>-settings" style="display:none;">
+    <%= form_tag(project_reporter_page_path(project, tab: tab.id), remote: true) do %>
+      <div class="box">
+        <p>
+          <label>
+            <%= l(:label_reporter_items_limit) %>:
+            <%= select_tag "settings[#{block}][limit]", reporter_project_limit_options(reporter_project_block_limit(settings)) %>
+          </label>
+        </p>
+      </div>
+      <p>
+        <%= submit_tag l(:button_save) %>
+        <%= link_to_function l(:button_cancel), "$('##{block}-settings').toggle();" %>
+      </p>
+    <% end %>
+  </div>
+<% end %>
+
+<div id="document-list">
+  <%= render partial: 'documents/document', collection: documents %>
+</div>

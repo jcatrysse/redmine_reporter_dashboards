@@ -1,0 +1,28 @@
+/* Project dashboard styles for redmine_reporter_dashboards. */
+
+#reporter-project-page .reporter-columns { display: flex; gap: 16px; }
+#reporter-project-page .reporter-columns + .reporter-columns { margin-top: 16px; }
+#reporter-project-page .reporter-column,
+#reporter-project-page .reporter-column-full { flex: 1 1 0; min-width: 0; }
+#reporter-project-page .reporter-column-full { width: 100%; }
+#reporter-project-page .reporter-column-collapsed { display: none; }
+
+/* While dragging, reveal all drop targets with a dashed outline. */
+#reporter-project-page .reporter-dragging .reporter-column,
+#reporter-project-page .reporter-dragging .reporter-column-full {
+  border: 1px dashed #d4d4d4;
+  border-radius: 4px;
+  padding: 8px;
+  min-height: 60px;
+  background-color: #fafafa;
+}
+#reporter-project-page .reporter-dragging .reporter-column.dragging,
+#reporter-project-page .reporter-dragging .reporter-column-full.dragging { background-color: #f0f7ff; }
+
+#reporter-project-page .mypage-box { margin-bottom: 12px; }
+
+#reporter-dashboard-settings h3 .reporter-dashboard-tab-order { float: right; }
+#reporter-dashboard-settings h3 .reporter-dashboard-tab-order a { margin-left: 4px; }
+
+.reporter-dashboard-tab-order { margin-left: 6px; }
+.reporter-dashboard-tab-order a { margin-left: 4px; }

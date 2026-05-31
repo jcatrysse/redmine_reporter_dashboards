@@ -1,0 +1,20 @@
+<%
+  block ||= 'report_by_spent_time'
+  settings ||= tab.block_settings(block)
+  query = TimeEntryQuery.visible.where(project_id: [nil, project.id]).find_by(id: settings[:query_id])
+  report_template = TimeEntriesReportTemplate.find_by(id: settings[:report_template_id])
+%>
+
+<% if query && report_template %>
+  <%= render partial: 'reporter_project_pages/report',
+             locals: { block: block, settings: settings, query: query,
+                       collection: query.results_scope, report_template: report_template } %>
+<% elsif editable %>
+  <%= render partial: 'reporter_project_pages/report_settings',
+             locals: { block: block, settings: settings, report_type: :spent_time,
+                       queries: TimeEntryQuery.visible.where(project_id: [nil, project.id]).sorted,
+                       report_templates: TimeEntriesReportTemplate.in_project_and_global(project),
+                       project: project, tab: tab } %>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>

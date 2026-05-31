@@ -1,0 +1,15 @@
+pt-BR:
+  label_reporter_project_page: Painel do projeto
+  project_module_reporter_project_dashboards: Painel do projeto
+  label_reporter_dashboard_tabs: Abas do painel
+  label_reporter_dashboard_tab_add: Adicionar aba
+  label_reporter_dashboard_tab_order: Ordem
+  label_reporter_dashboard_tabs_required: Pelo menos uma aba do painel é necessária
+  label_reporter_items_limit: Itens a exibir
+  label_reporter_default_dashboard_tab: Visão geral
+  label_reporter_report_template: Modelo de relatório
+  label_move_left: Mover para a esquerda
+  label_move_right: Mover para a direita
+  permission_view_reporter_project_page: Ver painel do projeto
+  permission_manage_reporter_project_page: Gerenciar widgets do painel do projeto
+  permission_manage_reporter_project_tabs: Gerenciar abas do painel do projeto

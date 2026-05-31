@@ -1,0 +1,15 @@
+hu:
+  label_reporter_project_page: Projekt irányítópult
+  project_module_reporter_project_dashboards: Projekt irányítópult
+  label_reporter_dashboard_tabs: Irányítópult lapok
+  label_reporter_dashboard_tab_add: Lap hozzáadása
+  label_reporter_dashboard_tab_order: Sorrend
+  label_reporter_dashboard_tabs_required: Legalább egy irányítópult-lap szükséges
+  label_reporter_items_limit: Megjelenítendő elemek száma
+  label_reporter_default_dashboard_tab: Áttekintés
+  label_reporter_report_template: Jelentéssablon
+  label_move_left: Mozgatás balra
+  label_move_right: Mozgatás jobbra
+  permission_view_reporter_project_page: Projekt irányítópult megtekintése
+  permission_manage_reporter_project_page: Projekt irányítópult widgetek kezelése
+  permission_manage_reporter_project_tabs: Projekt irányítópult lapok kezelése

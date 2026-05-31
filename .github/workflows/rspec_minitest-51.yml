@@ -1,0 +1,115 @@
+name: Plugin Specs (Redmine 5.1)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: RSpec tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://redmine:redmine@localhost:5432/redmine_test
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+
+      - name: Clone Redmine 5.1
+        run: |
+          git clone --depth 1 --branch 5.1-stable https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/$(basename "$GITHUB_WORKSPACE")
+          rsync -a --exclude redmine/ --exclude .git/ ./ redmine/plugins/$(basename "$GITHUB_WORKSPACE")/
+
+      # redmine_reporter is a private hard dependency. The minitest suite boots the
+      # full Redmine app, so reporter must be present or init.rb raises. Provide a
+      # read-only credential (fine-grained PAT or deploy key) as the
+      # REPORTER_REPO_TOKEN secret. Adjust `repository` if your reporter repo path
+      # differs. The rspec specs do not need this; minitest does.
+      - name: Checkout redmine_reporter dependency (private)
+        uses: actions/checkout@v4
+        with:
+          repository: jcatrysse/redmine_reporter
+          token: ${{ secrets.REPORTER_REPO_TOKEN }}
+          path: redmine/plugins/redmine_reporter
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev nodejs
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.2.5
+          bundler-cache: false
+          working-directory: redmine
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: postgresql
+            database: redmine_test
+            host: localhost
+            username: redmine
+            password: redmine
+            encoding: unicode
+          EOF
+        working-directory: redmine
+
+      - name: Configure pg build flags
+        run: bundle config build.pg --with-pg-config=/usr/bin/pg_config
+        working-directory: redmine
+
+      - name: Install gems
+        run: bundle install
+        working-directory: redmine
+
+      - name: Populate test database
+        run: |
+          bundle exec rake db:drop
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+        working-directory: redmine
+
+      - name: Migrate plugins
+        run: bundle exec rake redmine:plugins:migrate
+        working-directory: redmine
+
+      - name: Run plugin tests
+        run: |
+          mkdir -p tmp/test-results
+          plugin_name="$(basename "$GITHUB_WORKSPACE")"
+          plugin_dir="plugins/$plugin_name"
+          ran_tests=false
+
+          if [ -d "$plugin_dir/spec" ]; then
+            bundle exec rspec "$plugin_dir/spec" --format progress
+            ran_tests=true
+          fi
+
+          if [ -d "$plugin_dir/test" ]; then
+            bundle exec rake redmine:plugins:test NAME="$plugin_name"
+            ran_tests=true
+          fi
+
+          if [ "$ran_tests" = false ]; then
+            echo "No spec/ or test/ directory found for $plugin_name." >&2
+            exit 1
+          fi
+        working-directory: redmine

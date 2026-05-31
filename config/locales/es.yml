@@ -1,0 +1,15 @@
+es:
+  label_reporter_project_page: Panel del proyecto
+  project_module_reporter_project_dashboards: Panel del proyecto
+  label_reporter_dashboard_tabs: Pestañas del panel
+  label_reporter_dashboard_tab_add: Añadir pestaña
+  label_reporter_dashboard_tab_order: Orden
+  label_reporter_dashboard_tabs_required: Se requiere al menos una pestaña del panel
+  label_reporter_items_limit: Elementos a mostrar
+  label_reporter_default_dashboard_tab: Resumen
+  label_reporter_report_template: Plantilla de informe
+  label_move_left: Mover a la izquierda
+  label_move_right: Mover a la derecha
+  permission_view_reporter_project_page: Ver panel del proyecto
+  permission_manage_reporter_project_page: Gestionar widgets del panel del proyecto
+  permission_manage_reporter_project_tabs: Gestionar pestañas del panel del proyecto

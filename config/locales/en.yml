@@ -1,0 +1,15 @@
+en:
+  label_reporter_project_page: Project dashboard
+  project_module_reporter_project_dashboards: Project dashboard
+  label_reporter_dashboard_tabs: Dashboard tabs
+  label_reporter_dashboard_tab_add: Add tab
+  label_reporter_dashboard_tab_order: Order
+  label_reporter_dashboard_tabs_required: At least one dashboard tab is required
+  label_reporter_items_limit: Items to display
+  label_reporter_default_dashboard_tab: Overview
+  label_reporter_report_template: Report template
+  label_move_left: Move left
+  label_move_right: Move right
+  permission_view_reporter_project_page: View project dashboard
+  permission_manage_reporter_project_page: Manage project dashboard widgets
+  permission_manage_reporter_project_tabs: Manage project dashboard tabs

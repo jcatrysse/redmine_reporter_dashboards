@@ -1,0 +1,15 @@
+ru:
+  label_reporter_project_page: Панель проекта
+  project_module_reporter_project_dashboards: Панель проекта
+  label_reporter_dashboard_tabs: Вкладки панели
+  label_reporter_dashboard_tab_add: Добавить вкладку
+  label_reporter_dashboard_tab_order: Порядок
+  label_reporter_dashboard_tabs_required: Требуется хотя бы одна вкладка панели
+  label_reporter_items_limit: Количество отображаемых элементов
+  label_reporter_default_dashboard_tab: Обзор
+  label_reporter_report_template: Шаблон отчёта
+  label_move_left: Переместить влево
+  label_move_right: Переместить вправо
+  permission_view_reporter_project_page: Просмотр панели проекта
+  permission_manage_reporter_project_page: Управление виджетами панели проекта
+  permission_manage_reporter_project_tabs: Управление вкладками панели проекта

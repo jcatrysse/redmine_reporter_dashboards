@@ -1,0 +1,15 @@
+de:
+  label_reporter_project_page: Projekt-Dashboard
+  project_module_reporter_project_dashboards: Projekt-Dashboard
+  label_reporter_dashboard_tabs: Dashboard-Tabs
+  label_reporter_dashboard_tab_add: Tab hinzufügen
+  label_reporter_dashboard_tab_order: Reihenfolge
+  label_reporter_dashboard_tabs_required: Mindestens ein Dashboard-Tab ist erforderlich
+  label_reporter_items_limit: Anzahl der anzuzeigenden Einträge
+  label_reporter_default_dashboard_tab: Übersicht
+  label_reporter_report_template: Berichtvorlage
+  label_move_left: Nach links verschieben
+  label_move_right: Nach rechts verschieben
+  permission_view_reporter_project_page: Projekt-Dashboard anzeigen
+  permission_manage_reporter_project_page: Projekt-Dashboard-Widgets verwalten
+  permission_manage_reporter_project_tabs: Projekt-Dashboard-Tabs verwalten

@@ -1,0 +1,2 @@
+$("#reporter-block-<%= escape_javascript @block %>").remove();
+$("#reporter-block-select").replaceWith("<%= escape_javascript reporter_project_block_select_tag(@tab, @project) %>");

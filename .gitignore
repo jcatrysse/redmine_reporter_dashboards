@@ -1,0 +1,15 @@
+# Redmine checkout used by .codex/redmine_clone.sh for running tests locally
+redmine/
+
+# Bundler
+.bundle/
+vendor/bundle/
+
+# Ruby
+*.gem
+*.rbc
+.rbenv-gemsets
+
+# Coverage / test artefacts
+coverage/
+tmp/

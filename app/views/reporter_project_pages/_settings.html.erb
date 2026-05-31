@@ -1,0 +1,66 @@
+<div id="reporter-dashboard-settings" class="box" style="display: none;">
+  <h3>
+    <%= show_new_tab ? l(:label_reporter_dashboard_tab_add) : l(:label_settings) + ': ' + tab.title %>
+    <% unless show_new_tab %>
+      <span class="reporter-dashboard-tab-order">
+        <% unless tab.first? %>
+          <%= link_to sprite_icon('arrow-left', l(:label_move_left)),
+                      order_reporter_project_tab_path(project, tab, direction: 'left'),
+                      method: :post,
+                      title: l(:label_move_left) %>
+        <% end %>
+        <% unless tab.last? %>
+          <%= link_to sprite_icon('arrow-right', l(:label_move_right)),
+                      order_reporter_project_tab_path(project, tab, direction: 'right'),
+                      method: :post,
+                      title: l(:label_move_right) %>
+        <% end %>
+      </span>
+    <% end %>
+  </h3>
+
+  <% if show_new_tab %>
+    <%= form_tag(create_reporter_project_tab_path(project), method: :post, class: 'box tabular') do %>
+      <p>
+        <label for="reporter_project_tab_title"><%= l(:label_title) %></label>
+        <%= text_field_tag 'reporter_project_tab[title]', '', size: 40 %>
+      </p>
+      <p>
+        <label for="reporter_project_tab_description" class="bold"><%= l(:field_description) %></label>
+        <%= text_area_tag 'reporter_project_tab[description]', '', rows: 6, cols: 60, class: 'wiki-edit' %>
+        <%= wikitoolbar_for 'reporter_project_tab_description' %>
+      </p>
+      <p class="buttons">
+        <%= submit_tag l(:button_add), class: 'button-small' %>
+        <%= link_to l(:button_cancel),
+                    '#',
+                    class: 'button reporter-dashboard-settings-cancel' %>
+      </p>
+    <% end %>
+  <% else %>
+    <%= form_tag(update_reporter_project_tab_path(project, tab), method: :patch, class: 'box tabular') do %>
+      <p>
+        <label for="reporter_project_tab_title_<%= tab.id %>"><%= l(:label_title) %></label>
+        <%= text_field_tag 'reporter_project_tab[title]', tab.title, id: "reporter_project_tab_title_#{tab.id}", size: 40 %>
+      </p>
+      <p>
+        <label for="reporter_project_tab_description_<%= tab.id %>" class="bold"><%= l(:field_description) %></label>
+        <%= text_area_tag 'reporter_project_tab[description]',
+                          tab.description,
+                          id: "reporter_project_tab_description_#{tab.id}",
+                          rows: 6,
+                          cols: 60,
+                          class: 'wiki-edit' %>
+        <%= wikitoolbar_for "reporter_project_tab_description_#{tab.id}" %>
+      </p>
+      <p class="buttons">
+        <%= submit_tag l(:button_save), class: 'button-small' %>
+        <%= link_to l(:button_cancel),
+                    '#',
+                    class: 'button reporter-dashboard-settings-cancel' %>
+        <%= delete_link delete_reporter_project_tab_path(project, tab),
+                        data: { confirm: l(:text_are_you_sure) } %>
+      </p>
+    <% end %>
+  <% end %>
+</div>

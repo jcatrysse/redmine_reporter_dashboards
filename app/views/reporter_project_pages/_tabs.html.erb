@@ -1,0 +1,23 @@
+<div class="tabs">
+  <ul>
+    <% tabs.each do |tab| %>
+      <li>
+        <%= link_to h(tab.title),
+                    project_reporter_page_path(project, tab: tab.id),
+                    id: "reporter-tab-#{tab.id}",
+                    class: (tab == selected_tab && !show_new_tab ? 'selected' : nil) %>
+      </li>
+    <% end %>
+    <% if User.current.allowed_to?(:manage_reporter_project_tabs, project) %>
+      <li>
+        <%= link_to l(:label_reporter_dashboard_tab_add),
+                    project_reporter_page_path(project,
+                                               tab: selected_tab.id,
+                                               new_tab: '1',
+                                               anchor: 'reporter-dashboard-settings'),
+                    id: 'reporter-tab-add',
+                    class: (show_new_tab ? 'selected' : nil) %>
+      </li>
+    <% end %>
+  </ul>
+</div>

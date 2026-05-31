@@ -1,0 +1,22 @@
+<%#
+  Override of redmine_reporter's app/views/my/blocks/_report_by_issues.erb.
+
+  Carries the performance fix: feed the report a lazy AR relation
+  (query.base_scope) instead of query.issues, which materialises every issue
+  into memory. This override wins over the vendor partial because
+  redmine_reporter_dashboards sorts after redmine_reporter in the plugin view
+  load path. If the vendor rewrites this partial, revisit this override.
+%>
+<%
+  block ||= 'report_by_issues'
+  settings ||= User.current.pref.my_page_settings(block) # The settings variable not defined in Redmine versions < 3.4
+  query = IssueQuery.visible.find_by(id: settings[:query_id])
+  report_template = IssueListReportTemplate.find_by(id: settings[:report_template_id])
+%>
+
+<% if query && report_template %>
+  <%= render partial: 'my/report', locals: { block: block, settings: settings, query: query, collection: query.base_scope, report_template: report_template } %>
+<% else %>
+  <%= render partial: 'my/report_settings',
+             locals: { block: block, settings: settings, queries: IssueQuery.visible, report_templates: IssueListReportTemplate.all } %>
+<% end %>

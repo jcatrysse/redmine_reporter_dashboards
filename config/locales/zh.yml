@@ -1,0 +1,15 @@
+zh:
+  label_reporter_project_page: 项目仪表板
+  project_module_reporter_project_dashboards: 项目仪表板
+  label_reporter_dashboard_tabs: 仪表板标签
+  label_reporter_dashboard_tab_add: 添加标签
+  label_reporter_dashboard_tab_order: 顺序
+  label_reporter_dashboard_tabs_required: 至少需要一个仪表板标签
+  label_reporter_items_limit: 显示项目数
+  label_reporter_default_dashboard_tab: 概览
+  label_reporter_report_template: 报告模板
+  label_move_left: 向左移动
+  label_move_right: 向右移动
+  permission_view_reporter_project_page: 查看项目仪表板
+  permission_manage_reporter_project_page: 管理项目仪表板小部件
+  permission_manage_reporter_project_tabs: 管理项目仪表板标签

@@ -1,0 +1,15 @@
+pl:
+  label_reporter_project_page: Panel projektu
+  project_module_reporter_project_dashboards: Panel projektu
+  label_reporter_dashboard_tabs: Zakładki panelu
+  label_reporter_dashboard_tab_add: Dodaj zakładkę
+  label_reporter_dashboard_tab_order: Kolejność
+  label_reporter_dashboard_tabs_required: Wymagana jest co najmniej jedna zakładka panelu
+  label_reporter_items_limit: Liczba elementów do wyświetlenia
+  label_reporter_default_dashboard_tab: Przegląd
+  label_reporter_report_template: Szablon raportu
+  label_move_left: Przenieś w lewo
+  label_move_right: Przenieś w prawo
+  permission_view_reporter_project_page: Wyświetl panel projektu
+  permission_manage_reporter_project_page: Zarządzaj widgetami panelu projektu
+  permission_manage_reporter_project_tabs: Zarządzaj zakładkami panelu projektu

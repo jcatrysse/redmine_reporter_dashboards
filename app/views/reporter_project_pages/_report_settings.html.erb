@@ -1,0 +1,25 @@
+<h3>
+  <%= report_type == :issues ? l(:report_by_issues) : l(:report_by_spent_time) %>
+</h3>
+
+<div id="<%= block %>-settings">
+  <%= form_tag(project_reporter_page_path(project, tab: tab.id), remote: true) do %>
+    <div class="box report-settings">
+      <p>
+        <label>
+          <%= l(:label_query) %>
+          <%= select_tag "settings[#{block}][query_id]",
+                         content_tag('option') + options_from_collection_for_select(queries, :id, :name, settings[:query_id]) %>
+        </label>
+        <label>
+          <%= l(:label_reporter_report_template) %>
+          <%= select_tag "settings[#{block}][report_template_id]",
+                         content_tag('option') + options_from_collection_for_select(report_templates, :id, :name, settings[:report_template_id]) %>
+        </label>
+      </p>
+    </div>
+    <p>
+      <%= submit_tag l(:button_save) %>
+    </p>
+  <% end %>
+</div>

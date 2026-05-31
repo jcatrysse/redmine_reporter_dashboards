@@ -1,0 +1,3 @@
+<% @updated_blocks.each do |block| %>
+  $("#reporter-block-<%= block %>").replaceWith("<%= escape_javascript render_reporter_project_block(block.to_s, @tab, @project) %>");
+<% end %>

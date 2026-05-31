@@ -1,0 +1,44 @@
+<%#
+  Override of redmine_reporter's app/views/my/_report.erb.
+
+  Fixes:
+  1. Issue-count line: when `collection` is a lazy AR relation (base_scope) rather
+     than a loaded Array, call .size only when it is supported.
+  2. Iframe resize: .load() was removed in jQuery 3; use .on('load', …) with the
+     same multi-property height calculation as the project-dashboard version.
+
+  This override wins over the vendor partial because redmine_reporter_dashboards
+  sorts after redmine_reporter in the plugin view load path.
+%>
+<h3>
+  <%= report_template.name %>
+
+  (<%= "#{query.project} |" if query.project %>
+
+  <% options = (query.try(:as_params) || {}) %>
+  <% if query.is_a?(IssueQuery) %>
+    <%= link_to query.name, _project_issues_path(query.project, options) %>
+  <% else %>
+    <%= link_to query.name, _time_entries_path(query.project, nil, options) %>
+  <% end %>)
+
+  (<%= collection.respond_to?(:size) ? collection.size : collection %>)
+</h3>
+
+<% iframe_id = "#{block}-report-content-frame" %>
+<iframe src="<%= report_content_report_template_path(report_template, query_id: query.id) %>"
+        id="<%= iframe_id %>"
+        width="100%"
+        scrolling="no"
+        frameborder="no"></iframe>
+
+<%= javascript_tag do %>
+  $('#<%= iframe_id %>').on('load', function () {
+    var frame = this;
+    var doc = frame.contentWindow.document;
+    var body = doc.body;
+    var html = doc.documentElement;
+    var height = Math.max(body.scrollHeight, body.offsetHeight, html.clientHeight, html.scrollHeight, html.offsetHeight);
+    $(frame).height(height);
+  });
+<% end %>
