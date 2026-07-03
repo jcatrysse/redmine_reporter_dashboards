@@ -16,7 +16,19 @@ require 'stringio'
 module RedmineReporterDashboards
   module Patches
     module ReportPatch
-      def to_pdf
+      # Applies to ALL Reporter PDF paths (dashboard export, Reporter's own
+      # preview/export, scheduled reports), since they all call Report#to_pdf.
+      #
+      # ONLY when the report renders a JavaScript chart (a <canvas>) do we:
+      #   * inject ES2015 polyfills so it draws under wkhtmltopdf's old WebKit
+      #     instead of an empty canvas, and
+      #   * add a bounded javascript_delay so asynchronously-loaded chart scripts
+      #     (e.g. Chart.js from a CDN) finish before the page is captured. A fixed
+      #     delay is used rather than --window-status so a template that never
+      #     signals readiness cannot hang the export.
+      # Plain (chart-less) reports get neither, so they keep exporting at full
+      # speed. `options` overrides these defaults.
+      def to_pdf(options = {})
         exe_path = Redmine::Configuration['wkhtmltopdf_exe_path']
         if exe_path.blank? && defined?(Gem)
           spec = Gem::Specification.find_all_by_name('wkhtmltopdf-binary').first
@@ -26,17 +38,32 @@ module RedmineReporterDashboards
           WickedPdf.config = { exe_path: exe_path }
         end
         wicked_pdf = WickedPdf.new
-        wicked_pdf.pdf_from_string(
-          @content,
+
+        content = @content
+        pdf_options = {
           encoding: 'UTF-8',
           page_size: 'A4',
           orientation: @orientation == ReportTemplate::ORIENTATION_LANDSCAPE ? 'Landscape' : 'Portrait',
           lowquality: wicked_pdf.binary_version.to_s == "0.12.4",
           margin: { top: 20, bottom: 20, left: 20, right: 20 },
           footer: { right: '[page]/[topage]' }
-        )
+        }
+
+        if RedmineReporterDashboards::PdfPolyfills.charts?(content)
+          content = RedmineReporterDashboards::PdfPolyfills.inject(content)
+          pdf_options[:javascript_delay] = 3000
+          pdf_options[:no_stop_slow_scripts] = true
+        end
+
+        wicked_pdf.pdf_from_string(content, pdf_options.merge(options || {}))
       rescue StandardError => e
-        Rails.logger.error("[report_patch] PDF generation failed: #{e.message}")
+        # Log enough to tell the two common causes apart: the wkhtmltopdf binary
+        # not being runnable (missing shared libs — "cannot open shared object
+        # file" / "version `LIBJPEG_8.0' not found") vs. an actual rendering
+        # error. The exe path and first backtrace line pinpoint which.
+        Rails.logger.error("[report_patch] PDF generation failed (#{e.class}): #{e.message}")
+        Rails.logger.error("[report_patch]   exe_path=#{exe_path.inspect}")
+        Rails.logger.error("[report_patch]   #{e.backtrace.first}") if e.backtrace&.first
         nil
       end
 

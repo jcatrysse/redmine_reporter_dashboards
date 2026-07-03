@@ -33,25 +33,34 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     assert_select 'input[name="reporter_project_tab[title]"][value="Middle"]', 1
   end
 
-  def test_show_collapses_empty_columns
+  def test_show_renders_nodata_when_layout_empty
     get :show, params: { project_id: @project.identifier, tab: @tab.id }
     assert_response :success
-    # All groups (GROUPS has 7 entries) should be collapsed when the layout is empty.
-    expected_collapsed = RedmineReporterDashboards::ProjectPage::GROUPS.size
-    assert_select '.reporter-column-collapsible.reporter-column-collapsed', expected_collapsed
+    assert_select '#reporter-project-page .nodata', 1
+    assert_select '#reporter-project-page .reporter-row', 0
   end
 
-  def test_show_keeps_column_visible_when_blocks_present
-    layout = RedmineReporterDashboards::ProjectPage.default_layout.merge('left' => ['unknown_block'])
-    @tab.update!(layout: layout)
+  def test_show_renders_block_in_a_row
+    @tab.update!(layout: [['activity']])
 
     get :show, params: { project_id: @project.identifier, tab: @tab.id }
     assert_response :success
-    assert_select '#reporter-list-left.reporter-column-collapsible.reporter-column-collapsed', 0
+    assert_select '#reporter-project-page .reporter-row #reporter-block-activity', 1
+    assert_select '#reporter-project-page .nodata', 0
+  end
+
+  def test_show_renders_move_controls_for_multi_widget_row
+    @tab.update!(layout: [['activity', 'news']])
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+    assert_response :success
+    # activity (left cell) can move right; news (right cell) can move left.
+    assert_select "#reporter-block-activity a[href*='direction=right']", 1
+    assert_select "#reporter-block-news a[href*='direction=left']", 1
   end
 
   def test_show_with_activity_block
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['activity']))
+    @tab.update!(layout: [['activity']])
 
     get :show, params: { project_id: @project.identifier, tab: @tab.id }
 
@@ -61,7 +70,7 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
   end
 
   def test_show_with_activity_block_instance_suffix
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['activity__2']))
+    @tab.update!(layout: [['activity__2']])
 
     get :show, params: { project_id: @project.identifier, tab: @tab.id }
 
@@ -71,7 +80,7 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
   end
 
   def test_show_with_timelog_block_uses_block_variable
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['timelog']))
+    @tab.update!(layout: [['timelog']])
 
     get :show, params: { project_id: @project.identifier, tab: @tab.id }
 
@@ -83,7 +92,7 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
   end
 
   def test_show_with_timelog_block_suffix_uses_block_variable
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['timelog__2']))
+    @tab.update!(layout: [['timelog__2']])
 
     get :show, params: { project_id: @project.identifier, tab: @tab.id }
 
@@ -97,7 +106,7 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
   def test_show_with_activity_block_without_manage_permission
     role = Role.find(1)
     role.remove_permission! :manage_reporter_project_page
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['activity']))
+    @tab.update!(layout: [['activity']])
 
     get :show, params: { project_id: @project.identifier, tab: @tab.id }
 
@@ -105,12 +114,13 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     assert_select '#reporter-block-activity', 1
     assert_select '#activity-settings', 0
     assert_select '.icon-only.icon-close', 0
+    assert_select '.reporter-move-controls', 0
   ensure
     role.add_permission! :manage_reporter_project_page
   end
 
   def test_update_page_ignores_malformed_settings
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['news']))
+    @tab.update!(layout: [['news']])
 
     compatible_xhr_request :post, :update_page, project_id: @project.identifier, tab: @tab.id, settings: 'invalid'
 
@@ -127,7 +137,7 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
   end
 
   def test_update_page_saves_valid_block_settings
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['news']))
+    @tab.update!(layout: [['news']])
 
     compatible_xhr_request :post, :update_page, project_id: @project.identifier, tab: @tab.id,
                                                 settings: { news: { limit: '10' } }
@@ -136,43 +146,47 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     assert_equal '10', @tab.reload.block_settings('news')[:limit]
   end
 
-  def test_order_blocks_ignores_malformed_blocks_param
-    layout = RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['news'])
-    @tab.update!(layout: layout)
+  def test_move_block_ignores_absent_block
+    @tab.update!(layout: [['news']])
 
-    post :order_blocks, params: { project_id: @project.identifier, tab: @tab.id, group: 'top', blocks: 'news' }
+    post :move_block, params: { project_id: @project.identifier, tab: @tab.id, block: 'activity', direction: 'up' }
 
-    assert_response :success
-    assert_equal ['news'], @tab.reload.block_layout['top']
+    assert_response :redirect
+    assert_equal [['news']], @tab.reload.block_rows
   end
 
-  def test_order_blocks_reorders_blocks
-    layout = RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['news', 'activity'])
-    @tab.update!(layout: layout)
+  def test_move_block_reorders_within_row
+    @tab.update!(layout: [['news', 'activity']])
 
-    post :order_blocks, params: {
-      project_id: @project.identifier, tab: @tab.id,
-      group: 'top', blocks: ['activity', 'news']
-    }
+    post :move_block, params: { project_id: @project.identifier, tab: @tab.id, block: 'activity', direction: 'left' }
 
-    assert_response :success
-    assert_equal ['activity', 'news'], @tab.reload.block_layout['top']
+    assert_response :redirect
+    assert_equal [['activity', 'news']], @tab.reload.block_rows
+  end
+
+  def test_move_block_up_merges_rows
+    @tab.update!(layout: [['news'], ['activity']])
+
+    post :move_block, params: { project_id: @project.identifier, tab: @tab.id, block: 'activity', direction: 'up' }
+
+    assert_response :redirect
+    assert_equal [['news', 'activity']], @tab.reload.block_rows
   end
 
   def test_add_block
-    compatible_xhr_request :post, :add_block, project_id: @project.identifier, tab: @tab.id, block: 'news'
+    post :add_block, params: { project_id: @project.identifier, tab: @tab.id, block: 'news' }
 
-    assert_response :success
-    assert_includes @tab.reload.block_layout['top'], 'news'
+    assert_response :redirect
+    assert_includes @tab.reload.block_rows.flatten, 'news'
   end
 
   def test_remove_block
-    @tab.update!(layout: RedmineReporterDashboards::ProjectPage.default_layout.merge('top' => ['news']))
+    @tab.update!(layout: [['news']])
 
-    compatible_xhr_request :post, :remove_block, project_id: @project.identifier, tab: @tab.id, block: 'news'
+    post :remove_block, params: { project_id: @project.identifier, tab: @tab.id, block: 'news' }
 
-    assert_response :success
-    refute_includes @tab.reload.block_layout.values.flatten, 'news'
+    assert_response :redirect
+    refute_includes @tab.reload.block_rows.flatten, 'news'
   end
 
   def test_show_requires_dashboard_module
@@ -189,5 +203,16 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     end
     assert_response :success
     assert_select '.tabs a.selected', I18n.t(:label_reporter_default_dashboard_tab)
+  end
+
+  def test_report_pdf_unknown_block_returns_404
+    get :report_pdf, params: { project_id: @project.identifier, tab: @tab.id, block: 'not_a_block' }
+    assert_response :not_found
+  end
+
+  def test_report_pdf_without_configured_query_returns_404
+    # report_by_issues is a valid block, but the tab has no query/template configured.
+    get :report_pdf, params: { project_id: @project.identifier, tab: @tab.id, block: 'report_by_issues' }
+    assert_response :not_found
   end
 end

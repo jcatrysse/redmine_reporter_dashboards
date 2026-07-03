@@ -7,7 +7,7 @@
 
 <div class="contextual">
   <% if manage_reporter_project_page?(@project) && !show_new_tab %>
-    <%= form_tag(add_reporter_project_block_path(@project, tab: @tab.id), remote: true, id: 'reporter-block-form', authenticity_token: true) do %>
+    <%= form_tag(add_reporter_project_block_path(@project, tab: @tab.id), id: 'reporter-block-form', authenticity_token: true) do %>
       <%= label_tag('reporter-block-select', l(:button_add)) %>:
       <%= reporter_project_block_select_tag(@tab, @project) %>
     <% end %>
@@ -36,44 +36,18 @@
 <% end %>
 
 <% unless show_new_tab %>
-  <div id="reporter-project-page"
-       <% if manage_reporter_project_page?(@project) %>data-reporter-order-url="<%= order_reporter_project_blocks_path(@project, tab: @tab.id) %>"<% end %>>
-    <% top_collapsed = @blocks['top'].blank? %>
-    <div class="reporter-columns reporter-columns-full">
-      <div id="reporter-list-top" class="block-receiver reporter-column-full reporter-column-collapsible <%= 'reporter-column-collapsed' if top_collapsed %>">
-        <%= render_reporter_project_blocks(@blocks['top'], @tab, @project) %>
-      </div>
-    </div>
-
-    <% top_left_collapsed = @blocks['top-left'].blank? %>
-    <% top_middle_collapsed = @blocks['top-middle'].blank? %>
-    <% top_right_collapsed = @blocks['top-right'].blank? %>
-    <div class="reporter-columns reporter-columns-top">
-      <div id="reporter-list-top-left" class="block-receiver reporter-column reporter-column-collapsible <%= 'reporter-column-collapsed' if top_left_collapsed %>">
-        <%= render_reporter_project_blocks(@blocks['top-left'], @tab, @project) %>
-      </div>
-      <div id="reporter-list-top-middle" class="block-receiver reporter-column reporter-column-optional reporter-column-collapsible <%= 'reporter-column-collapsed' if top_middle_collapsed %>">
-        <%= render_reporter_project_blocks(@blocks['top-middle'], @tab, @project) %>
-      </div>
-      <div id="reporter-list-top-right" class="block-receiver reporter-column reporter-column-collapsible <%= 'reporter-column-collapsed' if top_right_collapsed %>">
-        <%= render_reporter_project_blocks(@blocks['top-right'], @tab, @project) %>
-      </div>
-    </div>
-
-    <% left_collapsed = @blocks['left'].blank? %>
-    <% middle_collapsed = @blocks['middle'].blank? %>
-    <% right_collapsed = @blocks['right'].blank? %>
-    <div class="reporter-columns reporter-columns-bottom">
-      <div id="reporter-list-left" class="block-receiver reporter-column reporter-column-collapsible <%= 'reporter-column-collapsed' if left_collapsed %>">
-        <%= render_reporter_project_blocks(@blocks['left'], @tab, @project) %>
-      </div>
-      <div id="reporter-list-middle" class="block-receiver reporter-column reporter-column-optional reporter-column-collapsible <%= 'reporter-column-collapsed' if middle_collapsed %>">
-        <%= render_reporter_project_blocks(@blocks['middle'], @tab, @project) %>
-      </div>
-      <div id="reporter-list-right" class="block-receiver reporter-column reporter-column-collapsible <%= 'reporter-column-collapsed' if right_collapsed %>">
-        <%= render_reporter_project_blocks(@blocks['right'], @tab, @project) %>
-      </div>
-    </div>
+  <div id="reporter-project-page">
+    <% if @rows.blank? %>
+      <p class="nodata"><%= l(:label_no_data) %></p>
+    <% else %>
+      <% @rows.each do |row| %>
+        <% row_content = render_reporter_project_blocks(row, @tab, @project) %>
+        <% next if row_content.blank? %>
+        <div class="reporter-row">
+          <%= row_content %>
+        </div>
+      <% end %>
+    <% end %>
   </div>
 
   <%= context_menu %>

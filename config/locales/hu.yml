@@ -8,8 +8,12 @@ hu:
   label_reporter_items_limit: Megjelenítendő elemek száma
   label_reporter_default_dashboard_tab: Áttekintés
   label_reporter_report_template: Jelentéssablon
+  label_reporter_export_report_pdf: Jelentés exportálása PDF-be
+  error_reporter_pdf_generation_failed: A jelentés PDF-je nem készíthető el. Kérjük, próbálja újra, vagy forduljon egy rendszergazdához.
   label_move_left: Mozgatás balra
   label_move_right: Mozgatás jobbra
+  label_move_up: Mozgatás felfelé
+  label_move_down: Mozgatás lefelé
   permission_view_reporter_project_page: Projekt irányítópult megtekintése
   permission_manage_reporter_project_page: Projekt irányítópult widgetek kezelése
   permission_manage_reporter_project_tabs: Projekt irányítópult lapok kezelése

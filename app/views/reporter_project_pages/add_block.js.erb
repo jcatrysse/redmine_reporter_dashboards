@@ -1,3 +1,0 @@
-$("#reporter-block-<%= escape_javascript @block %>").remove();
-$("#reporter-list-top").prepend("<%= escape_javascript render_reporter_project_blocks([@block], @tab, @project) %>");
-$("#reporter-block-select").replaceWith("<%= escape_javascript reporter_project_block_select_tag(@tab, @project) %>");

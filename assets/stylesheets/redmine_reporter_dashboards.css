@@ -1,26 +1,24 @@
 /* Project dashboard styles for redmine_reporter_dashboards. */
 
-#reporter-project-page .reporter-columns { display: flex; gap: 16px; }
-#reporter-project-page .reporter-columns + .reporter-columns { margin-top: 16px; }
-#reporter-project-page .reporter-column,
-#reporter-project-page .reporter-column-full { flex: 1 1 0; min-width: 0; }
-#reporter-project-page .reporter-column-full { width: 100%; }
-#reporter-project-page .reporter-column-collapsed { display: none; }
-
-/* While dragging, reveal all drop targets with a dashed outline. */
-#reporter-project-page .reporter-dragging .reporter-column,
-#reporter-project-page .reporter-dragging .reporter-column-full {
-  border: 1px dashed #d4d4d4;
-  border-radius: 4px;
-  padding: 8px;
-  min-height: 60px;
-  background-color: #fafafa;
-}
-#reporter-project-page .reporter-dragging .reporter-column.dragging,
-#reporter-project-page .reporter-dragging .reporter-column-full.dragging { background-color: #f0f7ff; }
+/* Each layout row is a flex line; widgets in the row share the width evenly.
+   flex-wrap + a non-zero flex-basis lets widgets wrap onto multiple lines on
+   narrow screens instead of being squeezed to unreadable widths. */
+#reporter-project-page .reporter-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+#reporter-project-page .reporter-row + .reporter-row { margin-top: 16px; }
+#reporter-project-page .reporter-row > .mypage-box { flex: 1 1 320px; min-width: 0; margin-bottom: 0; }
 
 #reporter-project-page .mypage-box { margin-bottom: 12px; }
 
+/* "Export as PDF" link in a report widget header. */
+.reporter-report-pdf { margin-left: 6px; font-weight: normal; }
+
+/* Per-widget move controls, shown in the widget's contextual corner. */
+.reporter-move-controls { display: inline-flex; gap: 2px; margin-right: 4px; vertical-align: middle; }
+.reporter-move-control { display: inline-flex; align-items: center; }
+.reporter-move-control--glyph { text-decoration: none; font-size: 11px; line-height: 1; }
+.reporter-move-control--glyph span { display: inline-block; }
+
+/* Tab ordering re-uses the same controls. */
 #reporter-dashboard-settings h3 .reporter-dashboard-tab-order { float: right; }
 #reporter-dashboard-settings h3 .reporter-dashboard-tab-order a { margin-left: 4px; }
 

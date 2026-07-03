@@ -4,16 +4,10 @@
     <% unless show_new_tab %>
       <span class="reporter-dashboard-tab-order">
         <% unless tab.first? %>
-          <%= link_to sprite_icon('arrow-left', l(:label_move_left)),
-                      order_reporter_project_tab_path(project, tab, direction: 'left'),
-                      method: :post,
-                      title: l(:label_move_left) %>
+          <%= reporter_dashboard_move_link('left', order_reporter_project_tab_path(project, tab, direction: 'left')) %>
         <% end %>
         <% unless tab.last? %>
-          <%= link_to sprite_icon('arrow-right', l(:label_move_right)),
-                      order_reporter_project_tab_path(project, tab, direction: 'right'),
-                      method: :post,
-                      title: l(:label_move_right) %>
+          <%= reporter_dashboard_move_link('right', order_reporter_project_tab_path(project, tab, direction: 'right')) %>
         <% end %>
       </span>
     <% end %>
@@ -22,7 +16,7 @@
   <% if show_new_tab %>
     <%= form_tag(create_reporter_project_tab_path(project), method: :post, class: 'box tabular') do %>
       <p>
-        <label for="reporter_project_tab_title"><%= l(:label_title) %></label>
+        <label for="reporter_project_tab_title"><%= l(:field_title) %></label>
         <%= text_field_tag 'reporter_project_tab[title]', '', size: 40 %>
       </p>
       <p>
@@ -40,7 +34,7 @@
   <% else %>
     <%= form_tag(update_reporter_project_tab_path(project, tab), method: :patch, class: 'box tabular') do %>
       <p>
-        <label for="reporter_project_tab_title_<%= tab.id %>"><%= l(:label_title) %></label>
+        <label for="reporter_project_tab_title_<%= tab.id %>"><%= l(:field_title) %></label>
         <%= text_field_tag 'reporter_project_tab[title]', tab.title, id: "reporter_project_tab_title_#{tab.id}", size: 40 %>
       </p>
       <p>

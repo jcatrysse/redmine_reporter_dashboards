@@ -7,8 +7,8 @@ class ReporterProjectPagesController < ApplicationController
   before_action :require_dashboard_module
   before_action :authorize, unless: :current_user_admin?
   before_action :find_tabs
-  before_action :find_tab, only: [:show, :update_page, :add_block, :remove_block, :order_blocks]
-  before_action :require_manage_page, only: [:update_page, :add_block, :remove_block, :order_blocks]
+  before_action :find_tab, only: [:show, :update_page, :add_block, :remove_block, :move_block]
+  before_action :require_manage_page, only: [:update_page, :add_block, :remove_block, :move_block]
 
   helper :issues
   helper :queries
@@ -18,8 +18,7 @@ class ReporterProjectPagesController < ApplicationController
   helper :reporter_project_pages
 
   def show
-    @groups = RedmineReporterDashboards::ProjectPage.groups
-    @blocks = @tab.block_layout
+    @rows = @tab.block_rows
   end
 
   def update_page
@@ -40,10 +39,7 @@ class ReporterProjectPagesController < ApplicationController
     @block = params[:block]
     if @tab.add_block(@block)
       @tab.save
-      respond_to do |format|
-        format.html { redirect_to project_reporter_page_path(@project, tab: @tab.id) }
-        format.js
-      end
+      redirect_to project_reporter_page_path(@project, tab: @tab.id)
     else
       render_error status: 422
     end
@@ -53,20 +49,65 @@ class ReporterProjectPagesController < ApplicationController
     @block = params[:block]
     @tab.remove_block(@block)
     @tab.save
-    respond_to do |format|
-      format.html { redirect_to project_reporter_page_path(@project, tab: @tab.id) }
-      format.js
-    end
+    redirect_to project_reporter_page_path(@project, tab: @tab.id)
   end
 
-  def order_blocks
-    blocks = params[:blocks].is_a?(Array) ? params[:blocks] : []
-    @tab.order_blocks(params[:group], blocks)
+  def move_block
+    @tab.move_block(params[:block], params[:direction])
     @tab.save
-    head :ok
+    redirect_to project_reporter_page_path(@project, tab: @tab.id)
+  end
+
+  # Render the same report a dashboard widget shows, as a PDF, reusing the
+  # Reporter plugin's own generation (generate_reports + Report#to_pdf) and the
+  # 'reports' PDF layout. Tied to the configured widget (tab + block) rather than
+  # arbitrary query/template ids, so it exposes nothing the widget doesn't.
+  def report_pdf
+    tab   = @tabs.find_by(id: params[:tab])
+    block = params[:block].to_s
+    return render_404 unless tab && RedmineReporterDashboards::ProjectPage.find_block(block)
+
+    query, report_template, collection = reporter_report_for(block, tab.block_settings(block))
+    return render_404 unless query && report_template
+
+    report = report_template.generate_reports(collection, query.id).first
+    return render_404 unless report
+
+    apply_layout!(report.content, 'reports')
+    # PDF chart rendering (polyfills) + wait-for-charts delay are handled centrally
+    # in Report#to_pdf (report_patch), so every Reporter PDF path benefits.
+    pdf = report.to_pdf
+    # to_pdf returns nil when wkhtmltopdf fails (missing binary, render error);
+    # send_data would raise on nil, so surface a clean error instead of a 500.
+    return render_error(message: l(:error_reporter_pdf_generation_failed), status: 500) if pdf.blank?
+
+    send_data pdf,
+              type: 'application/pdf',
+              filename: report.filename,
+              disposition: params[:download].present? ? 'attachment' : 'inline'
   end
 
   private
+
+  # Resolve the query, report template and AR collection for a report widget,
+  # mirroring the two report block partials (and the helper's permission guard:
+  # spent-time reports require the time-entries permission).
+  def reporter_report_for(block, settings)
+    case block.to_s.sub(/__\d+\z/, '')
+    when 'report_by_issues'
+      query = IssueQuery.visible.where(project_id: [nil, @project.id]).find_by(id: settings[:query_id])
+      template = IssueListReportTemplate.find_by(id: settings[:report_template_id])
+      [query, template, query&.base_scope]
+    when 'report_by_spent_time'
+      return [nil, nil, nil] unless User.current.allowed_to?(:view_time_entries, @project, global: true)
+
+      query = TimeEntryQuery.visible.where(project_id: [nil, @project.id]).find_by(id: settings[:query_id])
+      template = TimeEntriesReportTemplate.find_by(id: settings[:report_template_id])
+      [query, template, query&.results_scope]
+    else
+      [nil, nil, nil]
+    end
+  end
 
   def require_dashboard_module
     return if @project.module_enabled?(:reporter_project_dashboards)

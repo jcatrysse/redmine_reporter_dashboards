@@ -4,7 +4,6 @@ module RedmineReporterDashboards
   module ProjectPage
     include Redmine::I18n
 
-    GROUPS = ['top', 'top-left', 'top-middle', 'top-right', 'left', 'middle', 'right'].freeze
     MAX_BLOCK_OCCURS = 15
 
     CORE_BLOCKS = {
@@ -19,10 +18,6 @@ module RedmineReporterDashboards
       'timelog' => { label: :label_spent_time },
       'activity' => { label: :label_activity }
     }.freeze
-
-    def self.groups
-      GROUPS.dup.freeze
-    end
 
     def self.blocks
       CORE_BLOCKS.merge(additional_blocks).freeze
@@ -66,16 +61,10 @@ module RedmineReporterDashboards
       end
     end
 
+    # A fresh dashboard starts with no rows; widgets add their own rows as they
+    # are placed. The layout is an ordered Array of rows (see RowLayout).
     def self.default_layout
-      {
-        'top' => [],
-        'top-left' => [],
-        'top-middle' => [],
-        'top-right' => [],
-        'left' => [],
-        'middle' => [],
-        'right' => []
-      }
+      []
     end
   end
 end

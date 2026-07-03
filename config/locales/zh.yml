@@ -8,8 +8,12 @@ zh:
   label_reporter_items_limit: 显示项目数
   label_reporter_default_dashboard_tab: 概览
   label_reporter_report_template: 报告模板
+  label_reporter_export_report_pdf: 导出报告为 PDF
+  error_reporter_pdf_generation_failed: 无法生成报表 PDF。请重试或联系管理员。
   label_move_left: 向左移动
   label_move_right: 向右移动
+  label_move_up: 向上移动
+  label_move_down: 向下移动
   permission_view_reporter_project_page: 查看项目仪表板
   permission_manage_reporter_project_page: 管理项目仪表板小部件
   permission_manage_reporter_project_tabs: 管理项目仪表板标签

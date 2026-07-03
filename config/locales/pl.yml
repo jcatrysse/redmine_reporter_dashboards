@@ -8,8 +8,12 @@ pl:
   label_reporter_items_limit: Liczba elementów do wyświetlenia
   label_reporter_default_dashboard_tab: Przegląd
   label_reporter_report_template: Szablon raportu
+  label_reporter_export_report_pdf: Eksportuj raport do PDF
+  error_reporter_pdf_generation_failed: Nie można wygenerować pliku PDF raportu. Spróbuj ponownie lub skontaktuj się z administratorem.
   label_move_left: Przenieś w lewo
   label_move_right: Przenieś w prawo
+  label_move_up: Przenieś w górę
+  label_move_down: Przenieś w dół
   permission_view_reporter_project_page: Wyświetl panel projektu
   permission_manage_reporter_project_page: Zarządzaj widgetami panelu projektu
   permission_manage_reporter_project_tabs: Zarządzaj zakładkami panelu projektu

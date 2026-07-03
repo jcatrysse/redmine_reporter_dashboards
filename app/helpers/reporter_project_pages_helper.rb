@@ -3,6 +3,48 @@
 module ReporterProjectPagesHelper
   REPORTER_PROJECT_LIMITS = [5, 10, 25, 50, 100].freeze
 
+  # Directional controls. On Redmine 6 (SVG icon sprite) we use the core
+  # angle-* icons, all four of which exist in the core sprite. On Redmine 5,
+  # which has no SVG sprite and no complete arrow set in its CSS icon font, we
+  # fall back to accessible Unicode arrow glyphs so the buttons render on both.
+  REPORTER_MOVE_ICONS = {
+    'up' => 'angle-up', 'down' => 'angle-down',
+    'left' => 'angle-left', 'right' => 'angle-right'
+  }.freeze
+  REPORTER_MOVE_GLYPHS = {
+    'up' => "▲", 'down' => "▼", 'left' => "◀", 'right' => "▶"
+  }.freeze
+  REPORTER_MOVE_LABELS = {
+    'up' => :label_move_up, 'down' => :label_move_down,
+    'left' => :label_move_left, 'right' => :label_move_right
+  }.freeze
+
+  # True when the running Redmine renders icons through the SVG sprite system
+  # introduced in Redmine 6.0 (IconsHelper#sprite_icon).
+  def reporter_dashboard_svg_icons?
+    Redmine::VERSION::MAJOR >= 6
+  end
+
+  # A single move control (link) rendered version-safely. Used both for widget
+  # movement and for tab ordering, so the two stay visually consistent and both
+  # work on Redmine 5 and 6.
+  def reporter_dashboard_move_link(direction, url)
+    direction = direction.to_s
+    label = l(REPORTER_MOVE_LABELS[direction])
+
+    if reporter_dashboard_svg_icons?
+      link_to sprite_icon(REPORTER_MOVE_ICONS[direction], label), url,
+              method: :post, class: 'icon-only reporter-move-control',
+              title: label, 'aria-label' => label
+    else
+      glyph = content_tag('span', REPORTER_MOVE_GLYPHS[direction], 'aria-hidden' => 'true')
+      link_to glyph, url,
+              method: :post,
+              class: 'reporter-move-control reporter-move-control--glyph',
+              title: label, 'aria-label' => label
+    end
+  end
+
   def render_reporter_project_blocks(blocks, tab, project)
     content = ''.html_safe
     if blocks.present?
@@ -26,17 +68,36 @@ module ReporterProjectPagesHelper
     if content.present?
       contextual = ''.html_safe
       if manage_reporter_project_page?(project)
-        handle = content_tag('span', sprite_icon('reorder', ''), class: 'icon-only icon-sort-handle sort-handle',
-                                                           'aria-label': l(:button_move))
+        moves = reporter_project_block_move_controls(block, tab, project)
         close = link_to(sprite_icon('close', l(:button_delete)),
                         remove_reporter_project_block_path(project_id: project.id, block: block, tab: tab.id),
-                        remote: true, method: :post,
+                        method: :post,
                         class: 'icon-only icon-close', title: l(:button_delete))
-        contextual = content_tag('div', handle + close, class: 'contextual')
+        contextual = content_tag('div', moves + close, class: 'contextual')
       end
 
       content_tag('div', contextual + content, class: 'mypage-box', id: "reporter-block-#{block}")
     end
+  end
+
+  # Up/down/left/right buttons for a widget. A direction is only rendered when
+  # the move would actually change the layout (RowLayout#can_move?), so widgets
+  # at an edge don't show dead controls.
+  def reporter_project_block_move_controls(block, tab, project)
+    controls = ''.html_safe
+    RedmineReporterDashboards::RowLayout::DIRECTIONS.each do |direction|
+      next unless tab.can_move_block?(block, direction)
+
+      controls << reporter_dashboard_move_link(
+        direction,
+        move_reporter_project_block_path(project_id: project.id, block: block, tab: tab.id, direction: direction)
+      )
+    end
+    # A widget alone on the page can't move in any direction; don't emit an empty
+    # wrapper (it would still add margin next to the close button).
+    return ''.html_safe if controls.blank?
+
+    content_tag('span', controls, class: 'reporter-move-controls')
   end
 
   def render_reporter_project_block_content(block, tab, project)
@@ -68,7 +129,7 @@ module ReporterProjectPagesHelper
   end
 
   def reporter_project_block_select_tag(tab, project)
-    blocks_in_use = tab.block_layout.values.flatten
+    blocks_in_use = tab.block_rows.flatten
     options = content_tag('option')
     RedmineReporterDashboards::ProjectPage.block_options(blocks_in_use).each do |label, block|
       options << content_tag('option', label, value: block, disabled: block.blank?)

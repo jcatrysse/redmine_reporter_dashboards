@@ -8,8 +8,12 @@ ru:
   label_reporter_items_limit: Количество отображаемых элементов
   label_reporter_default_dashboard_tab: Обзор
   label_reporter_report_template: Шаблон отчёта
+  label_reporter_export_report_pdf: Экспортировать отчёт в PDF
+  error_reporter_pdf_generation_failed: Не удалось создать PDF-файл отчёта. Повторите попытку или обратитесь к администратору.
   label_move_left: Переместить влево
   label_move_right: Переместить вправо
+  label_move_up: Переместить вверх
+  label_move_down: Переместить вниз
   permission_view_reporter_project_page: Просмотр панели проекта
   permission_manage_reporter_project_page: Управление виджетами панели проекта
   permission_manage_reporter_project_tabs: Управление вкладками панели проекта

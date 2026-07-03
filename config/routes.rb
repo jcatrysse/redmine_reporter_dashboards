@@ -5,7 +5,8 @@ get 'projects/:project_id/reporter', to: 'reporter_project_pages#show', as: 'pro
 post 'projects/:project_id/reporter', to: 'reporter_project_pages#update_page'
 post 'projects/:project_id/reporter/add_block', to: 'reporter_project_pages#add_block', as: 'add_reporter_project_block'
 post 'projects/:project_id/reporter/remove_block', to: 'reporter_project_pages#remove_block', as: 'remove_reporter_project_block'
-post 'projects/:project_id/reporter/order_blocks', to: 'reporter_project_pages#order_blocks', as: 'order_reporter_project_blocks'
+post 'projects/:project_id/reporter/move_block', to: 'reporter_project_pages#move_block', as: 'move_reporter_project_block'
+get 'projects/:project_id/reporter/report_pdf', to: 'reporter_project_pages#report_pdf', as: 'report_pdf_reporter_project_page'
 
 post 'projects/:project_id/reporter/tabs', to: 'reporter_project_tabs#create', as: 'create_reporter_project_tab'
 match 'projects/:project_id/reporter/tabs/:id', to: 'reporter_project_tabs#update', via: :patch, as: 'update_reporter_project_tab'

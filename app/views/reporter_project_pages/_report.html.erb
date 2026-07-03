@@ -11,6 +11,17 @@
   <% end %>)
 
   (<%= collection.respond_to?(:size) ? collection.size : collection %>)
+
+  <%# Icon-only PDF link. sprite_icon MUST keep its label: on Redmine 5 it renders
+      no <svg>, so without a label the link_to body is empty and Rails prints the
+      href as the visible link text. The label gives the link a body (and the
+      accessible name); the `icon-only` class hides that text while `icon icon-pdf`
+      shows the glyph (background image on R5, SVG sprite on R6). %>
+  <%= link_to sprite_icon('application-pdf', l(:label_reporter_export_report_pdf)),
+              report_pdf_reporter_project_page_path(project, tab: tab.id, block: block),
+              class: 'icon icon-pdf icon-only reporter-report-pdf',
+              target: '_blank', rel: 'noopener',
+              title: l(:label_reporter_export_report_pdf) %>
 </h3>
 
 <% iframe_id = "#{block}-report-content-frame" %>
@@ -23,10 +34,22 @@
 <%= javascript_tag do %>
   $('#<%= iframe_id %>').on('load', function () {
     var frame = this;
-    var doc = frame.contentWindow.document;
-    var body = doc.body;
-    var html = doc.documentElement;
-    var height = Math.max(body.scrollHeight, body.offsetHeight, html.clientHeight, html.scrollHeight, html.offsetHeight);
-    $(frame).height(height);
+    function fit() {
+      var doc = frame.contentWindow.document;
+      var body = doc && doc.body;
+      if (!body) { return; }
+      // Measure the CONTENT (body) height only — not documentElement, which is
+      // always at least the frame's own height and would keep the frame from
+      // shrinking.
+      var height = Math.max(body.scrollHeight, body.offsetHeight);
+      if (height > 0) { $(frame).height(height); }
+    }
+    fit();
+    // Re-fit a few times to catch layout that settles after the load event
+    // (web fonts, the asynchronously loaded Chart.js). This is safe as long as
+    // report charts have a fixed size: give each canvas an explicit width/height
+    // and use Chart.js responsive:false. The content height then does not depend
+    // on the frame height, so these re-measures cannot grow the frame in a loop.
+    [250, 700, 1500].forEach(function (delay) { setTimeout(fit, delay); });
   });
 <% end %>

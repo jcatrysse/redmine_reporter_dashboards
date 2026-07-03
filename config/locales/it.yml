@@ -8,8 +8,12 @@ it:
   label_reporter_items_limit: Elementi da visualizzare
   label_reporter_default_dashboard_tab: Panoramica
   label_reporter_report_template: Modello di report
+  label_reporter_export_report_pdf: Esporta report in PDF
+  error_reporter_pdf_generation_failed: Impossibile generare il PDF del report. Riprova o contatta un amministratore.
   label_move_left: Sposta a sinistra
   label_move_right: Sposta a destra
+  label_move_up: Sposta su
+  label_move_down: Sposta giù
   permission_view_reporter_project_page: Visualizza dashboard del progetto
   permission_manage_reporter_project_page: Gestisci i widget del dashboard del progetto
   permission_manage_reporter_project_tabs: Gestisci le schede del dashboard del progetto

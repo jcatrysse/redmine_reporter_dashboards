@@ -6,13 +6,13 @@ A dashboard extension for the [Redmine Reporter](https://www.redmineup.com/pages
 
 ### Project dashboards
 
-Each project gets its own dashboard page with tabs. Drag widgets into position or stack multiple tabs side by side:
+Each project gets its own dashboard page with tabs. Arrange widgets with simple up/down/left/right buttons — stack them one per line or place several per line, in any arrangement:
 
 - **Issues** — a filtered issue list driven by a saved query
 - **Report** — a Reporter report block embedded directly on the dashboard
 - **Activity**, **Calendar**, **News**, **Documents**, **Time log**
 
-Each tab is configured independently per project and per role.
+Widgets are laid out as ordered rows. **Up** / **down** move a widget to the adjacent row (joining it, or splitting onto a new line); **left** / **right** reorder it within its row. There is no drag-and-drop, and the controls work on both Redmine 5 and Redmine 6. Each tab is configured independently per project and per role.
 
 ### `{% sql_aggregate %}` Liquid tag
 
@@ -23,6 +23,10 @@ The standard Liquid approach in Reporter templates iterates over all issues as o
 ```
 
 With hundreds or thousands of issues that gets slow. The `{% sql_aggregate %}` tag does the same work entirely in SQL — no Issue objects loaded, no memory pressure — and returns the result as a Liquid variable you can use directly in your template.
+
+### `{% geo_version_map %}` Liquid tag
+
+The Reporter issue drop exposes `issue.version` as a scalar (the name only), with no id. That makes it impossible to build version-filtered URLs — roadmap, issues list, time entries — from a template. The `{% geo_version_map %}` tag provides a lookup from version name to its id and metadata so you can construct those links.
 
 ## Requirements
 
@@ -159,6 +163,117 @@ When the Reporter plugin exposes `query_id` in the template context:
 ### Legacy alias
 
 The tag was previously called `{% geo_aggregate %}`. That name still works as an alias so existing templates keep working without changes.
+
+## Using the `{% geo_version_map %}` tag
+
+Place the tag near the top of your Reporter template. It writes a lookup table into a Liquid variable (`geo_versions` by default), keyed by version name.
+
+```liquid
+{% geo_version_map assign_to: geo_versions %}
+
+{% for issue in issues %}
+{% assign v = geo_versions[issue.version] %}
+- {{ issue.subject }} — [roadmap](/projects/{{ v.project }}/roadmap) ·
+  [issues](/projects/{{ v.project }}/issues?set_filter=1&fixed_version_id={{ v.id }}) ·
+  [time entries](/projects/{{ v.project }}/time_entries?set_filter=1&issue.fixed_version_id={{ v.id }})
+{% endfor %}
+```
+
+By default the map covers every version (`Version.all`). Pass a project identifier to limit it to that project's shared versions:
+
+```liquid
+{% geo_version_map project: my-project, assign_to: geo_versions %}
+```
+
+The `project:` value is a literal identifier (not a Liquid variable). It is resolved by identifier first, then by numeric id. If the project cannot be found, the map is left empty rather than falling back to every version.
+
+### Result structure
+
+Each entry is keyed by the version **name**; the value exposes:
+
+| Key | Type | Content |
+|-----|------|---------|
+| `.id` | integer | Version id (use it in `fixed_version_id` filters) |
+| `.effective_date` | date / nil | The version's due date, or empty when unset |
+| `.status` | string | `open`, `locked` or `closed` |
+| `.project` | string | Identifier of the project the version belongs to |
+
+Look up a version by name — typically the scalar `issue.version` from the issue drop:
+
+```liquid
+{{ geo_versions[issue.version].id }}
+```
+
+If the name is unknown (for example an issue with no target version), the lookup returns nothing and the surrounding template still renders. The tag itself produces no output; on any error it assigns an empty map so the template never crashes.
+
+## `issue.target_version` in report templates
+
+Reporter's issue drop exposes `issue.version` as a scalar (the name only). This plugin adds `issue.target_version`, a drop wrapping the issue's target version with everything needed to build links — and **all URLs are absolute**, so they keep working when a report is exported to PDF by wkhtmltopdf.
+
+```liquid
+{% if issue.target_version %}
+  <a href="{{ issue.target_version.roadmap_url }}">{{ issue.target_version.name }}</a>
+  · <a href="{{ issue.target_version.open_issues_url }}">Open issues</a>
+  · <a href="{{ issue.target_version.time_url }}">Time entries</a>
+{% endif %}
+```
+
+| Accessor | Content |
+|----------|---------|
+| `.id` `.name` `.description` | Version identity |
+| `.effective_date` | Due date (`Date` or empty) |
+| `.status` | `open` / `locked` / `closed` |
+| `.completed_percent` | Completion percentage |
+| `.project_identifier` | Identifier of the version's project |
+| `.url` | Absolute link to the version page |
+| `.roadmap_url` | Absolute link to the project roadmap |
+| `.issues_url` / `.open_issues_url` / `.closed_issues_url` | Absolute issue-list links filtered by this version (all / open / closed) |
+| `.time_url` | Absolute time-entries link filtered by this version |
+
+`issue.target_version` is `nil` when the issue has no target version, so guard with `{% if issue.target_version %}`. See [`examples/sample_report_template.liquid`](examples/sample_report_template.liquid) for it in a full template alongside `{% sql_aggregate %}` and a Chart.js chart.
+
+## Exporting a report widget to PDF
+
+Report widgets show an **Export as PDF** link in their header. It opens the same report the widget renders — for the widget's configured query — as a PDF in a new tab, reusing the Reporter plugin's own PDF generation. (PDF output requires wkhtmltopdf to be configured for Reporter, the same as Reporter's own report preview.)
+
+## Charts in report templates (Chart.js in the PDF)
+
+Reporter renders report PDFs through **wkhtmltopdf**, whose WebKit engine is from
+around 2011: it has no ES2015 and no CSS flexbox. This plugin makes JavaScript
+charts (Chart.js and friends) render in every Reporter PDF automatically — when a
+report contains a `<canvas>`, it injects the ES2015 polyfills the old engine is
+missing and adds a bounded wait so asynchronously-loaded chart scripts finish
+before the page is captured. Chart-less reports are untouched (no delay).
+
+Your template still has to stay within what that old engine can lay out. Follow
+these four rules and a chart-heavy report renders the same in the browser and the
+PDF:
+
+1. **No flexbox** — `display:flex` collapses to a single column in the PDF. Use
+   `inline-block`, `float`, or tables for multi-column layouts.
+2. **Charts: `responsive: false` + an explicit `width`/`height` on the
+   `<canvas>`** (e.g. `<canvas width="470" height="300">`). This is the one that
+   most often bites: wkhtmltopdf's WebKit fires no resize events, so Chart.js
+   `responsive: true` reads a container width of `0` and draws an **empty**
+   canvas — the charts come out blank while everything around them renders. A
+   fixed-size canvas renders reliably. Add `max-width:100%; height:auto` in CSS so
+   the fixed-size canvas still scales down proportionally in a narrower on-screen
+   column (e.g. a dashboard tile) while staying crisp at native size in the PDF.
+3. **Disable animation** — `options.animation = { duration: 0 }` so wkhtmltopdf
+   never snapshots a chart mid-animation (a blank/half-drawn canvas).
+4. **Use Chart.js 2.8**, not 3/4 — the injected polyfills target what 2.8 needs;
+   3/4 require far more modern JS. Chart.js is loaded from a CDN, so the Redmine
+   host needs outbound access to it at PDF time (or host `Chart.min.js` locally
+   and point your template at that URL).
+5. **Wrap your chart JS in an IIFE** (`(function(){ … })();`) and avoid top-level
+   `var` names that collide with window properties — `closed`, `open`, `name`,
+   `top`, `status`, `length`. A global `var closed = [...]` silently fails
+   (`window.closed` is a read-only boolean), so `closed[i]` becomes `undefined`
+   and the data turns to `NaN`. Function scope avoids this entirely.
+
+A complete, self-contained example that combines `{% sql_aggregate %}`,
+`{% geo_version_map %}`, `issue.target_version` and a PDF-safe Chart.js chart is in
+[`examples/sample_report_template.liquid`](examples/sample_report_template.liquid).
 
 ## Questions or issues?
 

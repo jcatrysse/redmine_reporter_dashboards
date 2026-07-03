@@ -8,8 +8,12 @@ en:
   label_reporter_items_limit: Items to display
   label_reporter_default_dashboard_tab: Overview
   label_reporter_report_template: Report template
+  label_reporter_export_report_pdf: Export report as PDF
+  error_reporter_pdf_generation_failed: Could not generate the report PDF. Please try again or contact an administrator.
   label_move_left: Move left
   label_move_right: Move right
+  label_move_up: Move up
+  label_move_down: Move down
   permission_view_reporter_project_page: View project dashboard
   permission_manage_reporter_project_page: Manage project dashboard widgets
   permission_manage_reporter_project_tabs: Manage project dashboard tabs

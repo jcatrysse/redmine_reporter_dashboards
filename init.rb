@@ -25,7 +25,7 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
   author 'Jan Catrysse'
   description 'Dashboard extension for the Redmine Reporter plugin, adding project dashboards, ' \
               'SQL-based issue statistics and Liquid aggregation tags.'
-  version '0.1.0'
+  version '0.2.0'
   url 'https://github.com/jcatrysse/redmine_reporter_dashboards'
   author_url 'https://github.com/jcatrysse'
 
@@ -33,9 +33,9 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
   requires_redmine_plugin :redmine_reporter, version_or_higher: '2.0.5'
 
   project_module :reporter_project_dashboards do
-    permission :view_reporter_project_page, { reporter_project_pages: [:show] }, read: true
+    permission :view_reporter_project_page, { reporter_project_pages: [:show, :report_pdf] }, read: true
     permission :manage_reporter_project_page, {
-      reporter_project_pages: [:update_page, :add_block, :remove_block, :order_blocks]
+      reporter_project_pages: [:update_page, :add_block, :remove_block, :move_block]
     }
     permission :manage_reporter_project_tabs, {
       reporter_project_tabs: [:create, :update, :destroy, :order]
@@ -68,8 +68,14 @@ end
 # ---------------------------------------------------------------------------
 class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
   def after_plugins_loaded(_context = {})
-    RedmineReporterDashboards.load_patches
+    # Register the Liquid tags/drops FIRST and independently. Report templates
+    # depend on {% sql_aggregate %} / {% geo_aggregate %}, so their registration
+    # must never be skipped because an unrelated later step (patch loading)
+    # raised. Each register_* method rescues its own errors.
     RedmineReporterDashboards.register_sql_aggregate_tag
+    RedmineReporterDashboards.register_geo_version_map_tag
+    RedmineReporterDashboards.register_issue_target_version_drop
+    RedmineReporterDashboards.load_patches
     RedmineReporterDashboards.apply_reporter_patches
   end
 end

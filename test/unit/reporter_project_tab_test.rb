@@ -9,82 +9,116 @@ class ReporterProjectTabTest < ActiveSupport::TestCase
 
   def test_defaults
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
-    assert_equal RedmineReporterDashboards::ProjectPage.default_layout, tab.block_layout
+    assert_equal [], tab.block_rows
     assert_equal({}, tab.block_settings)
-    tab.block_layout.each_value do |blocks|
-      assert_empty blocks
-    end
   end
 
-  def test_block_layout_does_not_dirty_record_on_read
+  def test_block_rows_does_not_dirty_record_on_read
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
     tab.reload
-    _layout = tab.block_layout
+    _rows = tab.block_rows
     # Pure getter must not mark the record as changed
-    assert_not tab.changed?, 'block_layout should not mark the record dirty'
+    assert_not tab.changed?, 'block_rows should not mark the record dirty'
   end
 
-  def test_block_layout_merges_new_groups
+  def test_legacy_region_hash_layout_converts_to_rows
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
-    tab.block_layout = { 'left' => ['news'] }
-    tab.save!
-    layout = tab.block_layout
-    assert_equal ['news'], layout['left']
-    assert_equal [], layout['top-middle']
-    assert_equal [], layout['middle']
+    # A record saved under the old region-hash format is converted on read.
+    tab.layout = { 'top' => ['news'], 'left' => ['activity'], 'middle' => [] }
+
+    assert_equal [['news'], ['activity']], tab.block_rows
   end
 
-  def test_add_block_persists_to_layout
+  def test_save_migrates_legacy_layout_to_rows
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.layout = { 'top' => ['news'], 'left' => ['activity'] }
+    tab.save!
+
+    assert_equal [['news'], ['activity']], tab.reload.layout
+  end
+
+  def test_add_block_persists_as_top_row
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
     tab.add_block('news')
     tab.save!
-    assert_includes tab.reload.block_layout['top'], 'news'
+    assert_equal [['news']], tab.reload.block_rows
   end
 
   def test_add_and_remove_block
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
     tab.add_block('news')
     tab.save!
-    assert_includes tab.block_layout['top'], 'news'
+    assert_includes tab.block_rows.flatten, 'news'
 
     tab.remove_block('news')
     tab.save!
-    refute_includes tab.block_layout['top'], 'news'
+    refute_includes tab.block_rows.flatten, 'news'
+    assert_equal [], tab.reload.block_rows
   end
 
-  def test_add_block_moves_existing_block_to_top
+  def test_add_block_moves_existing_block_to_top_row
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
-    tab.layout = { 'left' => ['news'], 'top' => [] }
-    tab.save!
+    tab.update!(layout: [['activity'], ['news']])
 
     tab.add_block('news')
     tab.save!
 
-    assert_includes tab.reload.block_layout['top'], 'news'
-    refute_includes tab.block_layout['left'], 'news'
+    assert_equal [['news'], ['activity']], tab.reload.block_rows
   end
 
-  def test_order_blocks_ignores_unknown_group
+  def test_add_block_rejects_invalid_block
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
-    layout = tab.block_layout.deep_dup
-    tab.order_blocks('unknown', ['news'])
-    assert_equal layout, tab.block_layout
+    assert_nil tab.add_block('definitely_not_a_block')
+    assert_equal [], tab.block_rows
   end
 
-  def test_order_blocks_reorders_within_group
+  def test_move_block_left_reorders_within_row
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
-    tab.add_block('news')
-    tab.add_block('activity')
+    tab.update!(layout: [['news', 'activity']])
+
+    tab.move_block('activity', 'left')
     tab.save!
 
-    top_blocks = tab.block_layout['top']
-    assert_equal 2, top_blocks.size
+    assert_equal [['activity', 'news']], tab.reload.block_rows
+  end
 
-    reversed = top_blocks.reverse
-    tab.order_blocks('top', reversed)
+  def test_move_block_up_merges_into_row_above
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.update!(layout: [['news'], ['activity']])
+
+    tab.move_block('activity', 'up')
     tab.save!
 
-    assert_equal reversed, tab.reload.block_layout['top']
+    assert_equal [['news', 'activity']], tab.reload.block_rows
+  end
+
+  def test_move_block_down_splits_onto_new_row
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.update!(layout: [['news', 'activity']])
+
+    tab.move_block('news', 'down')
+    tab.save!
+
+    assert_equal [['activity'], ['news']], tab.reload.block_rows
+  end
+
+  def test_move_block_ignores_unknown_direction
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.update!(layout: [['news', 'activity']])
+
+    tab.move_block('news', 'sideways')
+    tab.save!
+
+    assert_equal [['news', 'activity']], tab.reload.block_rows
+  end
+
+  def test_can_move_block_reports_edges
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.update!(layout: [['news', 'activity']])
+
+    assert_not tab.can_move_block?('news', 'left')
+    assert tab.can_move_block?('news', 'right')
+    assert tab.can_move_block?('news', 'down')
   end
 
   def test_clear_unused_block_settings_on_remove

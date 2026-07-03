@@ -8,7 +8,8 @@
 <% if query && report_template %>
   <%= render partial: 'reporter_project_pages/report',
              locals: { block: block, settings: settings, query: query,
-                       collection: query.results_scope, report_template: report_template } %>
+                       collection: query.results_scope, report_template: report_template,
+                       project: project, tab: tab } %>
 <% elsif editable %>
   <%= render partial: 'reporter_project_pages/report_settings',
              locals: { block: block, settings: settings, report_type: :spent_time,
