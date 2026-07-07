@@ -79,6 +79,7 @@ module RedmineReporterDashboards
     return unless defined?(::Liquid::Drop)
 
     require File.join(lib_root, 'redmine_reporter_dashboards/liquid/version_drop')
+    require File.join(lib_root, 'redmine_reporter_dashboards/liquid/custom_field_value_drop')
     require File.join(lib_root, 'redmine_reporter_dashboards/liquid/issue_drop_patch')
 
     klass = Object.const_get('RedmineReporter::Liquid::Drops::IssueDrop')

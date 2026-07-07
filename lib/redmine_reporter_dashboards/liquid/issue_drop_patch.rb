@@ -27,6 +27,17 @@ module RedmineReporterDashboards
         version = issue.fixed_version
         version && RedmineReporterDashboards::Liquid::VersionDrop.new(version)
       end
+
+      # Access ANY custom field on the issue by id from a template, e.g.
+      # `{{ issue.custom_field_value[20] }}`. Returns a drop whose bracket lookup
+      # reads Issue#custom_field_value(id); nil when the wrapped object cannot
+      # answer (so `nil` renders empty / coerces to 0 in the template).
+      def custom_field_value
+        issue = defined?(@issue) ? @issue : nil
+        return nil unless issue.respond_to?(:custom_field_value)
+
+        RedmineReporterDashboards::Liquid::CustomFieldValueDrop.new(issue)
+      end
     end
   end
 end

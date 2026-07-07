@@ -2,6 +2,16 @@
 
 All notable changes to this plugin are documented in this file.
 
+## [0.3.0] - 2026-07-07
+
+- Expose `issue.custom_field_value` on the Reporter issue drop: a by-**id**
+  accessor for **any** custom field, e.g. `{{ issue.custom_field_value[20] }}`
+  (the id may be an integer, string, or Liquid variable). Complements Reporter's
+  by-name `custom_field` filter and is stable across field renames/translations.
+  Returns the raw stored value (`nil` when unset) via `Issue#custom_field_value`;
+  added through the same prepend as `issue.target_version`, so no Reporter file
+  is edited.
+
 ## [0.2.0] - 2026-07-04
 
 - When PDF generation fails, log the error class, the wkhtmltopdf exe path and

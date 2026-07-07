@@ -1,0 +1,605 @@
+{% comment %}
+=====================================================================
+ GEOxyz - Version status dashboard v6 (Redmine Reporter / Liquid + Chart.js 2.8)
+ Source query: issues grouped by fixed_version.
+ One card per version. Active versions (open issues) first, then completed.
+
+ REQUIRES the issue.target_version drop (redmine_reporter_dashboards). No fallback:
+ if the drop is absent, links are empty. The drop returns ABSOLUTE urls so links
+ also work in the PDF export.
+
+ Cost (optional): read via the issue.custom_field_value[<id>] drop, which returns
+ ANY custom field by id (redmine_reporter_dashboards). The two cost field ids are
+ set once in cf_est_cost / cf_actual_cost below - change them to match your Redmine
+ (any id works). Unset fields are empty (-> 0), so the cost widgets, badge, KPI tile
+ and chart appear ONLY for versions/reports that actually carry cost data.
+
+ Estimated = sum of OWN estimated_hours over all issues (roadmap total).
+ Completion is issue-count based (see in-page note under the first chart).
+
+ Card accent (active versions only): red left border = problem
+ (overdue / has overdue open issues / over budget hours / over budget cost),
+ amber = watch (behind schedule / CPI < 1 / cost CPI < 1). No accent otherwise.
+=====================================================================
+{% endcomment %}
+{% assign closed_statuses = 'Closed;Rejected' | split: ';' %}
+{% assign today = 'now' | date: '%s' %}
+{% assign date_format = '%d/%m/%Y' %}
+
+{% comment %} cost custom field ids - point these at any custom field in your Redmine {% endcomment %}
+{% assign cf_est_cost = 20 %}
+{% assign cf_actual_cost = 21 %}
+
+{% comment %} project context (no hardcoding) {% endcomment %}
+{% assign proj_ident = '' %}
+{% assign proj_name = '' %}
+{% for issue in issues %}
+  {% assign proj_ident = issue.project.identifier %}
+  {% assign proj_name = issue.project.name %}
+  {% break %}
+{% endfor %}
+
+<style>
+html, body { background:#fff; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; }
+.geo-head { padding:14px 16px 4px 16px; }
+.geo-head h1 { font-size:20px; margin:0 0 2px 0; }
+.geo-head .sub { font-size:12px; color:#666; margin:0; }
+
+/* NOTE: layout uses inline-block + float, NOT flexbox. The PDF export runs
+   through wkhtmltopdf's WebKit (~2011), which has no flexbox, so a flex layout
+   collapses into a single column in the PDF. Floats/inline-block render the same
+   in the browser and in the PDF. */
+
+.kpi-row { padding:10px 16px; font-size:0; }  /* font-size:0 kills inline-block whitespace */
+.kpi { display:inline-block; vertical-align:top; width:19.2%; margin-right:1%; box-sizing:border-box; -webkit-box-sizing:border-box;
+       border:1px solid #e2e2e2; border-radius:10px; padding:10px 12px; background:#fafafa; }
+.kpi:last-child { margin-right:0; }
+.kpi .lbl { font-size:11px; color:#777; margin:0 0 4px 0; text-transform:uppercase; letter-spacing:.03em; }
+.kpi .val { font-size:22px; font-weight:700; margin:0; }
+.kpi .val small { font-size:12px; font-weight:400; color:#888; }
+/* 6-up KPI layout, applied per-tile (class "k6") when the budget tile is present.
+   Deliberately a PLAIN single-class selector (not `.kpi.k6` or `.kpi-row.six .kpi`):
+   wkhtmltopdf's old WebKit did not honour the compound/descendant override, so the
+   6th tile stayed at the 5-up width and wrapped to a second row. `.k6` wins over
+   `.kpi` by being declared later (equal specificity). */
+.k6 { width:15.5%; margin-right:0.8%; }
+
+.charts-row { padding:6px 16px 12px 16px; font-size:0; }
+.chart-box { display:inline-block; vertical-align:top; width:49%; margin-right:2%; box-sizing:border-box; -webkit-box-sizing:border-box;
+             border:1px solid #e2e2e2; border-radius:10px; padding:10px; }
+.chart-box:last-child { margin-right:0; }
+.chart-box .t { font-size:13px; font-weight:700; margin:0 0 6px 0; }
+/* 3-up charts, applied per-box (class "c3") when the cost chart is present. Plain
+   single-class selector for the same wkhtmltopdf reason as .k6 above. */
+.c3 { width:31.5%; margin-right:1.5%; }
+/* Charts use responsive:false with explicit canvas width/height (see the
+   <canvas> tags and the chart script). wkhtmltopdf's old WebKit fires no resize
+   events, so Chart.js responsive:true reads a container width of 0 and draws
+   nothing; a fixed-size canvas renders reliably. max-width keeps it inside the
+   box on a narrower screen. */
+.chart-box canvas { cursor:pointer; max-width:100%; }
+
+.cards { padding:6px 16px 20px 16px; }
+.card { border:1px solid #dcdcdc; border-radius:12px; padding:12px 14px; margin-bottom:12px; page-break-inside:avoid; }
+.card.done { background:#fbfbfb; }
+.card.warn { border-left:4px solid #ffa600; }
+.card.alert { border-left:4px solid #c0392b; }
+
+.card-top:after { content:""; display:table; clear:both; }
+.card-top > div { float:left; max-width:78%; }
+.card-title { font-size:15px; font-weight:700; margin:0; }
+.card-title a { color:#1b3a6b; text-decoration:none; }
+.card-title a:hover { text-decoration:underline; }
+.card-dates { font-size:11px; color:#666; margin:3px 0 0 0; }
+.badge { float:right; display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; color:#fff; white-space:nowrap; margin-left:6px; }
+.b-done { background:#6b7280; } .b-ontrack { background:#00a6a6; } .b-ahead { background:#2f7d32; }
+.b-behind { background:#d45087; } .b-overdue { background:#c0392b; } .b-nodate { background:#b0b0b0; }
+
+.card-body { margin-top:10px; }
+.card-body:after { content:""; display:table; clear:both; }
+.col-l { float:left; width:57%; }
+.col-r { float:right; width:40%; font-size:12px; }
+
+.barwrap { margin:2px 0 10px 0; }
+.barwrap .cap { font-size:11px; color:#555; margin-bottom:3px; }
+.barwrap .cap:after { content:""; display:table; clear:both; }
+.barwrap .cap span:first-child { float:left; }
+.barwrap .cap span:last-child { float:right; }
+.track { position:relative; height:18px; background:#eee; border-radius:9px; overflow:hidden; }
+.seg { height:100%; float:left; }
+.seg-closed { background:#1b7837; } .seg-open { background:#a6dba0; }
+.seg-spent { background:#2f4b7c; } .seg-spent-over { background:#c0392b; }
+.today-mark { position:absolute; top:-3px; bottom:-3px; width:2px; background:#111; }
+.today-mark .lab { position:absolute; top:-14px; left:-14px; font-size:9px; color:#111; white-space:nowrap; }
+.legend { font-size:10px; color:#666; margin-top:2px; }
+.legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin:0 3px 0 8px; vertical-align:middle; }
+.meta table { width:100%; border-collapse:collapse; }
+.meta td { padding:3px 0; border-bottom:1px dotted #eee; vertical-align:top; }
+.meta td:last-child { text-align:right; }
+.meta .flag { color:#c0392b; font-weight:700; } .meta .ok { color:#2f7d32; font-weight:700; }
+.links { margin-top:4px; }
+.links a { display:inline-block; margin-right:10px; font-size:11px; color:#2f4b7c; text-decoration:none; border-bottom:1px solid #cbd5e1; }
+.small-note { font-size:10px; color:#888; margin-top:6px; line-height:1.4; }
+
+/* Cost: a violet bar (distinct from the blue "hours" bar). Budget health is
+   carried by a colored budget badge in the card header (green/amber/red/grey);
+   the bar itself turns red only when over budget. */
+.cost-ok { background:#2f7d32; } .cost-watch { background:#ffa600; }
+.cost-over { background:#c0392b; } .cost-none { background:#6b7280; }
+.seg-cost { background:#7a5195; } .seg-cost-over { background:#c0392b; }
+@media print { .card { page-break-inside:avoid; } }
+</style>
+
+<script>
+(function(){
+  if (!window.__geoWkhtmlStatusInit) { window.__geoWkhtmlStatusInit = true; window.status = "loading"; }
+  window.__geoChartsPending = window.__geoChartsPending || 0;
+  window.geoChartBegin = window.geoChartBegin || function(){ window.__geoChartsPending += 1; window.status = "loading"; };
+  window.geoChartEnd = window.geoChartEnd || function(){ window.__geoChartsPending -= 1; if (window.__geoChartsPending <= 0){ window.__geoChartsPending = 0; window.status = "done"; } };
+  if (!window.__geoLineDashPatchApplied) {
+    window.__geoLineDashPatchApplied = true;
+    (function(setLineDash){ if(!window.CanvasRenderingContext2D||!CanvasRenderingContext2D.prototype.setLineDash) return;
+      CanvasRenderingContext2D.prototype.setLineDash=function(){ if(!arguments[0]||!arguments[0].length){arguments[0]=[0,0];} return setLineDash.apply(this,arguments); };
+    })(CanvasRenderingContext2D.prototype.setLineDash);
+  }
+  window.GEO_COLORS = window.GEO_COLORS || {
+    palette:['#003f5c','#2f4b7c','#665191','#a05195','#d45087','#f95d6a','#ff7c43','#ffa600','#00a6a6','#7a5195'],
+    good:'#00a6a6', warn:'#ffa600', bad:'#d45087', blue:'#2f4b7c', green:'#1b7837',
+    cost_est:'#a05195', cost_actual:'#665191'
+  };
+  window.GEO_CHARTJS_SRC = window.GEO_CHARTJS_SRC || "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js";
+  window.__geoChartJsReadyCbs = window.__geoChartJsReadyCbs || [];
+  window.__geoChartJsLoading = window.__geoChartJsLoading || false;
+  window.whenChartJsReady = window.whenChartJsReady || function(cb){
+    if (window.Chart){ cb(); return; }
+    window.__geoChartJsReadyCbs.push(cb);
+    if (window.__geoChartJsLoading) return;
+    window.__geoChartJsLoading = true;
+    var s=document.createElement("script"); s.src=window.GEO_CHARTJS_SRC;
+    s.onload=function(){ window.__geoChartJsLoading=false; var l=window.__geoChartJsReadyCbs.splice(0); for(var i=0;i<l.length;i++){try{l[i]();}catch(e){}} };
+    s.onerror=function(){ window.__geoChartJsLoading=false; var l=window.__geoChartJsReadyCbs.splice(0); for(var i=0;i<l.length;i++){try{l[i]();}catch(e){}} window.status="done"; };
+    document.head.appendChild(s);
+  };
+  window.whenChartJsReady(function(){});
+})();
+</script>
+
+{% comment %} ===== PASS 1: unique version names (array + uniq) ===== {% endcomment %}
+{% assign vnames = '' %}
+{% for issue in issues %}
+  {% assign vn = issue.version %}{% if vn == blank %}{% assign vn = 'None' %}{% endif %}
+  {% assign vnames = vnames | append: vn | append: '|;|' %}
+{% endfor %}
+{% assign vnames = vnames | split: '|;|' | uniq %}
+
+{% comment %} ===== PASS 2: main loop ===== {% endcomment %}
+{% assign active_html = '' %}
+{% assign done_html = '' %}
+{% assign ch_labels = '' %}
+{% assign ch_urls = '' %}
+{% assign ch_completed = '' %}
+{% assign ch_elapsed = '' %}
+{% assign ch_est = '' %}
+{% assign ch_spent = '' %}
+{% assign cc_labels = '' %}
+{% assign cc_urls = '' %}
+{% assign cc_est = '' %}
+{% assign cc_actual = '' %}
+{% assign g_est = 0 %}
+{% assign g_spent = 0 %}
+{% assign g_total = 0 %}
+{% assign g_closed = 0 %}
+{% assign g_opendone = 0 %}
+{% assign g_est_cost = 0 %}
+{% assign g_actual_cost = 0 %}
+{% assign n_active = 0 %}
+{% assign n_versions = 0 %}
+{% assign n_cost_versions = 0 %}
+
+{% for vname in vnames %}
+  {% assign n_versions = n_versions | plus: 1 %}
+  {% assign v_total = 0 %}
+  {% assign v_closed = 0 %}
+  {% assign v_open = 0 %}
+  {% assign v_opendone = 0 %}
+  {% assign v_est = 0 %}
+  {% assign v_spent = 0 %}
+  {% assign v_est_cost = 0 %}
+  {% assign v_actual_cost = 0 %}
+  {% assign v_noest = 0 %}
+  {% assign v_overdue = 0 %}
+  {% assign v_unassigned = 0 %}
+  {% assign v_minstart = '' %}
+  {% assign v_maxdue = '' %}
+  {% assign v_id = '' %}
+  {% assign v_eff = '' %}
+  {% assign url_version = '' %}
+  {% assign url_all = '' %}
+  {% assign url_open = '' %}
+  {% assign url_closed = '' %}
+  {% assign url_time = '' %}
+
+  {% for issue in issues %}
+    {% assign ivn = issue.version %}{% if ivn == blank %}{% assign ivn = 'None' %}{% endif %}
+    {% if ivn == vname %}
+      {% assign v_total = v_total | plus: 1 %}
+
+      {% comment %} version metadata + absolute links from the drop, once {% endcomment %}
+      {% if url_version == '' %}
+        {% assign tv = issue.target_version %}
+        {% if tv %}
+          {% assign v_id = tv.id %}
+          {% assign v_eff = tv.effective_date %}
+          {% assign url_version = tv.url %}
+          {% assign url_all = tv.issues_url %}
+          {% assign url_open = tv.open_issues_url %}
+          {% assign url_closed = tv.closed_issues_url %}
+          {% assign url_time = tv.time_url %}
+        {% endif %}
+      {% endif %}
+
+      {% assign dr = issue.done_ratio | times: 1 %}
+      {% if closed_statuses contains issue.status %}
+        {% assign v_closed = v_closed | plus: 1 %}
+      {% else %}
+        {% assign v_open = v_open | plus: 1 %}
+        {% assign v_opendone = v_opendone | plus: dr %}
+        {% if issue.assignee == blank %}{% assign v_unassigned = v_unassigned | plus: 1 %}{% endif %}
+        {% if issue.due_date != blank %}
+          {% assign dsec = issue.due_date | date: '%s' %}
+          {% if dsec < today %}{% assign v_overdue = v_overdue | plus: 1 %}{% endif %}
+        {% endif %}
+      {% endif %}
+      {% if issue.estimated_hours == blank %}
+        {% assign v_noest = v_noest | plus: 1 %}
+      {% else %}
+        {% assign v_est = v_est | plus: issue.estimated_hours %}
+      {% endif %}
+      {% if issue.spent_hours != blank %}{% assign v_spent = v_spent | plus: issue.spent_hours %}{% endif %}
+
+      {% comment %} optional cost custom fields, read by id (0 when unset on the issue) {% endcomment %}
+      {% assign iec = issue.custom_field_value[cf_est_cost] | times: 1.0 %}
+      {% assign iac = issue.custom_field_value[cf_actual_cost] | times: 1.0 %}
+      {% if iec > 0 %}{% assign v_est_cost = v_est_cost | plus: iec %}{% endif %}
+      {% if iac > 0 %}{% assign v_actual_cost = v_actual_cost | plus: iac %}{% endif %}
+
+      {% if issue.start_date != blank %}
+        {% assign ss = issue.start_date | date: '%s' %}
+        {% if v_minstart == '' %}{% assign v_minstart = ss %}{% elsif ss < v_minstart %}{% assign v_minstart = ss %}{% endif %}
+      {% endif %}
+      {% if issue.due_date != blank %}
+        {% assign ds = issue.due_date | date: '%s' %}
+        {% if v_maxdue == '' %}{% assign v_maxdue = ds %}{% elsif ds > v_maxdue %}{% assign v_maxdue = ds %}{% endif %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+
+  {% assign completed = 0 %}
+  {% assign seg_closed = 0 %}
+  {% assign seg_open = 0 %}
+  {% if v_total > 0 %}
+    {% assign closed_pts = v_closed | times: 100 %}
+    {% assign completed = closed_pts | plus: v_opendone | divided_by: v_total %}
+    {% assign seg_closed = closed_pts | divided_by: v_total %}
+    {% assign seg_open = v_opendone | divided_by: v_total %}
+  {% endif %}
+
+  {% assign has_dates = false %}
+  {% assign elapsed = 0 %}
+  {% if v_minstart != '' and v_maxdue != '' and v_maxdue > v_minstart %}
+    {% assign has_dates = true %}
+    {% assign span = v_maxdue | minus: v_minstart %}
+    {% assign gone = today | minus: v_minstart %}
+    {% assign elapsed = gone | times: 100 | divided_by: span %}
+    {% if elapsed < 0 %}{% assign elapsed = 0 %}{% endif %}
+    {% if elapsed > 100 %}{% assign elapsed = 100 %}{% endif %}
+  {% endif %}
+
+  {% assign badge_class = 'b-nodate' %}
+  {% assign badge_txt = 'No dates' %}
+  {% if v_open == 0 %}
+    {% assign badge_class = 'b-done' %}{% assign badge_txt = 'Done' %}
+  {% elsif has_dates and today > v_maxdue %}
+    {% assign badge_class = 'b-overdue' %}{% assign badge_txt = 'Overdue' %}
+  {% elsif has_dates %}
+    {% assign gap = completed | minus: elapsed %}
+    {% if gap >= 5 %}{% assign badge_class = 'b-ahead' %}{% assign badge_txt = 'Ahead of schedule' %}
+    {% elsif gap <= -5 %}{% assign badge_class = 'b-behind' %}{% assign badge_txt = 'Behind schedule' %}
+    {% else %}{% assign badge_class = 'b-ontrack' %}{% assign badge_txt = 'On track' %}{% endif %}
+  {% endif %}
+
+  {% assign spent_pct = 0 %}
+  {% assign cpi = 0 %}
+  {% if v_est > 0 %}
+    {% assign spent_pct = v_spent | times: 100 | divided_by: v_est | round: 0 %}
+    {% assign earned = v_est | times: completed | divided_by: 100 %}
+    {% if v_spent > 0 %}{% assign cpi = earned | divided_by: v_spent | round: 2 %}{% endif %}
+  {% endif %}
+
+  {% comment %} cost aggregation (optional). has_cost gates every cost element. {% endcomment %}
+  {% assign has_cost = false %}
+  {% if v_est_cost > 0 or v_actual_cost > 0 %}{% assign has_cost = true %}{% endif %}
+  {% assign cost_pct = 0 %}
+  {% assign cost_cpi = 0 %}
+  {% assign cost_state = 'none' %}
+  {% if v_est_cost > 0 %}
+    {% assign cost_pct = v_actual_cost | times: 100 | divided_by: v_est_cost | round: 0 %}
+    {% assign earned_cost = v_est_cost | times: completed | divided_by: 100 %}
+    {% if v_actual_cost > 0 %}{% assign cost_cpi = earned_cost | divided_by: v_actual_cost | round: 2 %}{% endif %}
+    {% assign cost_state = 'ok' %}
+    {% if cost_pct > 100 %}{% assign cost_state = 'over' %}
+    {% elsif cost_pct >= 85 %}{% assign cost_state = 'watch' %}
+    {% elsif cost_cpi > 0 and cost_cpi < 1 %}{% assign cost_state = 'watch' %}{% endif %}
+  {% endif %}
+
+  {% comment %} card severity accent (active versions only) {% endcomment %}
+  {% assign card_flag = '' %}
+  {% if v_open > 0 %}
+    {% if badge_txt == 'Overdue' %}{% assign card_flag = 'alert' %}
+    {% elsif v_overdue > 0 %}{% assign card_flag = 'alert' %}
+    {% elsif spent_pct > 100 %}{% assign card_flag = 'alert' %}
+    {% elsif cost_pct > 100 %}{% assign card_flag = 'alert' %}
+    {% elsif badge_txt == 'Behind schedule' %}{% assign card_flag = 'warn' %}
+    {% elsif cpi > 0 and cpi < 1 %}{% assign card_flag = 'warn' %}
+    {% elsif cost_cpi > 0 and cost_cpi < 1 %}{% assign card_flag = 'warn' %}
+    {% endif %}
+  {% endif %}
+
+  {% assign g_est = g_est | plus: v_est %}
+  {% assign g_spent = g_spent | plus: v_spent %}
+  {% assign g_total = g_total | plus: v_total %}
+  {% assign g_closed = g_closed | plus: v_closed %}
+  {% assign g_opendone = g_opendone | plus: v_opendone %}
+  {% assign g_est_cost = g_est_cost | plus: v_est_cost %}
+  {% assign g_actual_cost = g_actual_cost | plus: v_actual_cost %}
+
+  {% assign safe = vname | replace: "'", '' | replace: '"', '' %}
+
+  {% comment %} cost chart data: every version that carries cost (active AND completed) {% endcomment %}
+  {% if has_cost %}
+    {% assign n_cost_versions = n_cost_versions | plus: 1 %}
+    {% assign cc_labels = cc_labels | append: "'" | append: safe | append: "'," %}
+    {% assign cc_urls = cc_urls | append: "'" | append: url_version | append: "'," %}
+    {% assign cc_est = cc_est | append: v_est_cost | append: ',' %}
+    {% assign cc_actual = cc_actual | append: v_actual_cost | append: ',' %}
+  {% endif %}
+
+  {% capture card %}
+  <div class="card {% if v_open == 0 %}done{% endif %} {{ card_flag }}">
+    <div class="card-top">
+      <div>
+        <p class="card-title"><a href="{{ url_version }}" target="_blank" rel="noopener noreferrer">{{ vname }}</a></p>
+        <p class="card-dates">
+          {% if has_dates %}{{ v_minstart | date: date_format }} &rarr; {{ v_maxdue | date: date_format }}{% else %}period unknown (no start/due date on issues){% endif %}
+          {% if v_eff != blank %} &nbsp;|&nbsp; version target: {{ v_eff | date: date_format }}{% endif %}
+        </p>
+      </div>
+      <span class="badge {{ badge_class }}">{{ badge_txt }}</span>
+      {% comment %} budget status badge: floats right, so placing it after the schedule
+         badge renders it to the LEFT of it. Color carries budget health. {% endcomment %}
+      {% if has_cost %}<span class="badge cost-{{ cost_state }}">&euro; Budget</span>{% endif %}
+    </div>
+
+    <div class="card-body">
+      <div class="col-l">
+        <div class="barwrap">
+          <div class="cap"><span>Progress (issues)</span><span>{{ completed }}% complete</span></div>
+          <div class="track">
+            <div class="seg seg-closed" style="width:{{ seg_closed }}%;"></div>
+            <div class="seg seg-open" style="width:{{ seg_open }}%;"></div>
+            {% if has_dates %}<div class="today-mark" style="left:{{ elapsed }}%;"><span class="lab">today</span></div>{% endif %}
+          </div>
+          <div class="legend">
+            <i style="background:#1b7837;"></i>closed {{ seg_closed }}%
+            <i style="background:#a6dba0;"></i>open in progress {{ seg_open }}%
+            {% if has_dates %}&nbsp;|&nbsp; time elapsed {{ elapsed }}%{% endif %}
+          </div>
+        </div>
+
+        <div class="barwrap">
+          <div class="cap"><span>Hours (spent vs estimated)</span>
+            <span>{% if v_est > 0 %}{{ v_spent }} / {{ v_est }} h ({{ spent_pct }}%){% else %}{{ v_spent }} h logged, no estimate{% endif %}</span>
+          </div>
+          <div class="track">
+            {% if v_est > 0 %}{% assign spentbar = spent_pct %}{% if spentbar > 100 %}{% assign spentbar = 100 %}{% endif %}
+              <div class="seg {% if spent_pct > 100 %}seg-spent-over{% else %}seg-spent{% endif %}" style="width:{{ spentbar }}%;"></div>{% endif %}
+          </div>
+          <div class="legend">
+            {% if v_est > 0 %}{% if spent_pct > 100 %}over budget by {{ spent_pct | minus: 100 }}%{% else %}{{ spent_pct }}% of budget used{% endif %}{% else %}no estimated hours set{% endif %}
+          </div>
+        </div>
+
+        {% if has_cost %}
+        <div class="barwrap">
+          <div class="cap"><span>Cost (actual vs estimated)</span>
+            <span>{% if v_est_cost > 0 %}&euro;{{ v_actual_cost | round: 0 }} / &euro;{{ v_est_cost | round: 0 }} ({{ cost_pct }}%){% else %}&euro;{{ v_actual_cost | round: 0 }} actual, no budget{% endif %}</span>
+          </div>
+          <div class="track">
+            {% if v_est_cost > 0 %}{% assign costbar = cost_pct %}{% if costbar > 100 %}{% assign costbar = 100 %}{% endif %}
+              <div class="seg {% if cost_pct > 100 %}seg-cost-over{% else %}seg-cost{% endif %}" style="width:{{ costbar }}%;"></div>{% endif %}
+          </div>
+          <div class="legend">
+            {% if v_est_cost > 0 %}{% if cost_pct > 100 %}over budget by {{ cost_pct | minus: 100 }}%{% else %}{{ cost_pct }}% of budget used{% endif %}{% else %}no estimated cost set{% endif %}
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="links">
+          <a href="{{ url_version }}" target="_blank" rel="noopener noreferrer">Roadmap</a>
+          <a href="{{ url_all }}" target="_blank" rel="noopener noreferrer">All issues {{ v_total }}</a>
+          <a href="{{ url_open }}" target="_blank" rel="noopener noreferrer">Open {{ v_open }}</a>
+          <a href="{{ url_closed }}" target="_blank" rel="noopener noreferrer">Closed {{ v_closed }}</a>
+          <a href="{{ url_time }}" target="_blank" rel="noopener noreferrer">Time</a>
+        </div>
+      </div>
+
+      <div class="col-r meta">
+        <table><tbody>
+          <tr><td>Issues (open / closed)</td><td>{{ v_open }} / {{ v_closed }}</td></tr>
+          <tr><td>Complete</td><td>{{ completed }}%</td></tr>
+          {% if has_dates %}<tr><td>Time elapsed</td><td>{{ elapsed }}%</td></tr>{% endif %}
+          <tr><td>Estimated / Spent</td><td>{{ v_est }} / {{ v_spent }} h</td></tr>
+          {% if v_est > 0 %}
+            {% if v_open > 0 %}
+              <tr><td>Efficiency index (CPI)</td><td>{% if cpi > 0 %}<span class="{% if cpi >= 1 %}ok{% else %}flag{% endif %}">{{ cpi }}</span>{% else %}-{% endif %}</td></tr>
+            {% else %}
+              {% assign hours_var = spent_pct | minus: 100 %}
+              <tr><td>Hours variance (final)</td><td><span class="{% if hours_var <= 0 %}ok{% else %}flag{% endif %}">{% if hours_var > 0 %}+{% endif %}{{ hours_var }}%</span></td></tr>
+            {% endif %}
+          {% endif %}
+          {% if has_cost %}
+            <tr><td>Estimated / Actual cost</td><td>&euro;{{ v_est_cost | round: 0 }} / &euro;{{ v_actual_cost | round: 0 }}</td></tr>
+            {% if v_est_cost > 0 %}
+              {% if v_open > 0 %}
+                <tr><td>Budget used</td><td><span class="{% if cost_pct > 100 %}flag{% else %}ok{% endif %}">{{ cost_pct }}%</span></td></tr>
+                {% if cost_cpi > 0 %}<tr><td>Cost index (CPI &euro;)</td><td><span class="{% if cost_cpi >= 1 %}ok{% else %}flag{% endif %}">{{ cost_cpi }}</span></td></tr>{% endif %}
+              {% else %}
+                {% assign cost_var = cost_pct | minus: 100 %}
+                <tr><td>Cost variance (final)</td><td><span class="{% if cost_var <= 0 %}ok{% else %}flag{% endif %}">{% if cost_var > 0 %}+{% endif %}{{ cost_var }}%</span></td></tr>
+              {% endif %}
+            {% endif %}
+          {% endif %}
+          {% if v_overdue > 0 %}<tr><td>Open issues overdue</td><td class="flag">{{ v_overdue }}</td></tr>{% endif %}
+          {% if v_unassigned > 0 %}<tr><td>Open unassigned</td><td class="flag">{{ v_unassigned }}</td></tr>{% endif %}
+          {% if v_noest > 0 %}<tr><td>Issues without estimate</td><td class="flag">{{ v_noest }} / {{ v_total }}</td></tr>{% endif %}
+        </tbody></table>
+        {% if v_est > 0 and v_open > 0 %}<div class="small-note">CPI = earned hours (est &times; %complete) / spent hours. &ge; 1 is good, &lt; 1 means more hours than progress.</div>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endcapture %}
+
+  {% if v_open > 0 %}
+    {% assign active_html = active_html | append: card %}
+    {% assign n_active = n_active | plus: 1 %}
+    {% assign ch_labels = ch_labels | append: "'" | append: safe | append: "'," %}
+    {% assign ch_urls = ch_urls | append: "'" | append: url_version | append: "'," %}
+    {% assign ch_completed = ch_completed | append: completed | append: ',' %}
+    {% assign ch_elapsed = ch_elapsed | append: elapsed | append: ',' %}
+    {% assign ch_est = ch_est | append: v_est | append: ',' %}
+    {% assign ch_spent = ch_spent | append: v_spent | append: ',' %}
+  {% else %}
+    {% assign done_html = done_html | append: card %}
+  {% endif %}
+{% endfor %}
+
+{% assign g_completed = 0 %}
+{% if g_total > 0 %}{% assign g_closed_pts = g_closed | times: 100 %}{% assign g_completed = g_closed_pts | plus: g_opendone | divided_by: g_total %}{% endif %}
+{% assign g_spent_pct = 0 %}
+{% if g_est > 0 %}{% assign g_spent_pct = g_spent | times: 100 | divided_by: g_est | round: 0 %}{% endif %}
+{% assign g_has_cost = false %}
+{% if g_est_cost > 0 or g_actual_cost > 0 %}{% assign g_has_cost = true %}{% endif %}
+{% assign g_cost_pct = 0 %}
+{% if g_est_cost > 0 %}{% assign g_cost_pct = g_actual_cost | times: 100 | divided_by: g_est_cost | round: 0 %}{% endif %}
+
+<div class="geo-head">
+  <h1>GEOxyz &middot; Version status dashboard</h1>
+  <p class="sub">Project: {{ proj_name }} ({{ proj_ident }}) &middot; generated {{ today | date: date_format }} &middot; {{ n_versions }} versions ({{ n_active }} active)</p>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi{% if g_has_cost %} k6{% endif %}"><p class="lbl">Versions</p><p class="val">{{ n_versions }} <small>/ {{ n_active }} active</small></p></div>
+  <div class="kpi{% if g_has_cost %} k6{% endif %}"><p class="lbl">Issues</p><p class="val">{{ g_total }}</p></div>
+  <div class="kpi{% if g_has_cost %} k6{% endif %}"><p class="lbl">Complete (issues)</p><p class="val">{{ g_completed }}%</p></div>
+  <div class="kpi{% if g_has_cost %} k6{% endif %}"><p class="lbl">Estimated</p><p class="val">{{ g_est }} <small>h</small></p></div>
+  <div class="kpi{% if g_has_cost %} k6{% endif %}"><p class="lbl">Spent</p><p class="val">{{ g_spent }} <small>h ({{ g_spent_pct }}%)</small></p></div>
+  {% if g_has_cost %}<div class="kpi k6"><p class="lbl">Budget (&euro;)</p><p class="val">&euro;{{ g_actual_cost | round: 0 }} <small>/ &euro;{{ g_est_cost | round: 0 }} ({{ g_cost_pct }}%)</small></p></div>{% endif %}
+</div>
+
+<div class="charts-row">
+  <div class="chart-box{% if n_cost_versions > 0 %} c3{% endif %}">
+    <p class="t">Progress vs time elapsed (active versions)</p>
+    {% if ch_labels == '' %}<p class="small-note">No active versions to show.</p>{% else %}<canvas id="chart_schedule" width="900" height="300"></canvas>
+    <div class="small-note">
+      <b>Completed %</b>: share of issues done. Closed issues count as 100%, open issues count by their % done, averaged over all issues in the version.<br>
+      <b>Time elapsed %</b>: where today sits between the earliest start date and the latest due date of the version's issues.<br>
+      Completed bar shorter than time elapsed = behind schedule. Click a bar to open the version.
+    </div>{% endif %}
+  </div>
+  <div class="chart-box{% if n_cost_versions > 0 %} c3{% endif %}">
+    <p class="t">Estimated vs Spent hours (active versions)</p>
+    {% if ch_labels == '' %}<p class="small-note">No active versions to show.</p>{% else %}<canvas id="chart_hours" width="900" height="300"></canvas>
+    <div class="small-note">Spent above estimated = over budget. Click a bar to open the version.</div>{% endif %}
+  </div>
+  {% if n_cost_versions > 0 %}
+  <div class="chart-box c3">
+    <p class="t">Estimated vs Actual cost (versions with cost)</p>
+    <canvas id="chart_cost" width="900" height="300"></canvas>
+    <div class="small-note">Sum of Estimated / Actual cost per version. Actual above estimated = over budget. Click a bar to open the version.</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="cards">
+  {{ active_html }}
+  {% if done_html != '' %}
+    <p class="card-dates" style="margin:14px 4px 6px 4px; font-weight:700; color:#444;">Completed versions</p>
+    {{ done_html }}
+  {% endif %}
+</div>
+
+<script>
+(function(){
+  var labels    = [{{ ch_labels }}];
+  var urls      = [{{ ch_urls }}];
+  var completed = [{{ ch_completed }}];
+  var elapsed   = [{{ ch_elapsed }}];
+  var est       = [{{ ch_est }}];
+  var spent     = [{{ ch_spent }}];
+
+  var cost_labels = [{{ cc_labels }}];
+  var cost_urls   = [{{ cc_urls }}];
+  var cost_est    = [{{ cc_est }}];
+  var cost_actual = [{{ cc_actual }}];
+
+  function openFrom(urlList, chart, evt){
+    var pts = chart.getElementAtEvent(evt);
+    if (pts && pts.length){ var u = urlList[pts[0]._index]; if (u) window.open(u, '_blank'); }
+  }
+
+  geoChartBegin();
+  whenChartJsReady(function(){
+    try {
+      if (document.getElementById('chart_schedule') && labels.length) {
+        new Chart(document.getElementById('chart_schedule'), {
+          type: 'horizontalBar',
+          data: { labels: labels, datasets: [
+            { label:'Completed %', data: completed, backgroundColor: GEO_COLORS.good },
+            { label:'Time elapsed %', data: elapsed, backgroundColor: GEO_COLORS.warn } ]},
+          options: { responsive:false, maintainAspectRatio:false,
+            onClick: function(e){ openFrom(urls, this, e); },
+            legend:{ position:'bottom', labels:{ boxWidth:10, fontSize:10 } },
+            scales:{ xAxes:[{ ticks:{ beginAtZero:true, max:100, fontSize:10 } }], yAxes:[{ ticks:{ fontSize:9 } }] },
+            animation:{ duration:0 } }
+        });
+      }
+      if (document.getElementById('chart_hours') && labels.length) {
+        new Chart(document.getElementById('chart_hours'), {
+          type: 'horizontalBar',
+          data: { labels: labels, datasets: [
+            { label:'Estimated', data: est, backgroundColor: GEO_COLORS.blue },
+            { label:'Spent', data: spent, backgroundColor: GEO_COLORS.bad } ]},
+          options: { responsive:false, maintainAspectRatio:false,
+            onClick: function(e){ openFrom(urls, this, e); },
+            legend:{ position:'bottom', labels:{ boxWidth:10, fontSize:10 } },
+            scales:{ xAxes:[{ ticks:{ beginAtZero:true, fontSize:10 } }], yAxes:[{ ticks:{ fontSize:9 } }] },
+            animation:{ duration:0 } }
+        });
+      }
+      if (document.getElementById('chart_cost') && cost_labels.length) {
+        new Chart(document.getElementById('chart_cost'), {
+          type: 'horizontalBar',
+          data: { labels: cost_labels, datasets: [
+            { label:'Estimated cost', data: cost_est, backgroundColor: GEO_COLORS.cost_est },
+            { label:'Actual cost', data: cost_actual, backgroundColor: GEO_COLORS.cost_actual } ]},
+          options: { responsive:false, maintainAspectRatio:false,
+            onClick: function(e){ openFrom(cost_urls, this, e); },
+            legend:{ position:'bottom', labels:{ boxWidth:10, fontSize:10 } },
+            scales:{ xAxes:[{ ticks:{ beginAtZero:true, fontSize:10 } }], yAxes:[{ ticks:{ fontSize:9 } }] },
+            animation:{ duration:0 } }
+        });
+      }
+    } finally { geoChartEnd(); }
+  });
+})();
+</script>

@@ -232,6 +232,24 @@ Reporter's issue drop exposes `issue.version` as a scalar (the name only). This 
 
 `issue.target_version` is `nil` when the issue has no target version, so guard with `{% if issue.target_version %}`. See [`examples/sample_report_template.liquid`](examples/sample_report_template.liquid) for it in a full template alongside `{% sql_aggregate %}` and a Chart.js chart.
 
+## `issue.custom_field_value[id]` in report templates
+
+Reporter's `{{ issue | custom_field: "Name" }}` filter looks a custom field up by **name**. When you'd rather read a custom field **by id** — stable across renames and translations — this plugin adds `issue.custom_field_value`, a drop whose bracket lookup returns **any** custom field by id:
+
+```liquid
+{{ issue.custom_field_value[20] }}                     {% comment %} value of custom field 20 {% endcomment %}
+{% assign fid = 21 %}{{ issue.custom_field_value[fid] }} {% comment %} id from a variable {% endcomment %}
+```
+
+The id can be an integer literal, a string, or a Liquid variable. The **raw stored value** is returned (a `String` for text/numeric fields, an `Array` for multi-value fields, empty/`nil` when the field is unset on the issue). For numeric fields, coerce in the template — `nil`/`""` become `0`:
+
+```liquid
+{% assign cost = issue.custom_field_value[20] | times: 1.0 %}
+{% if cost > 0 %}Cost: {{ cost | round: 0 }}{% endif %}
+```
+
+Under the hood it reads `Issue#custom_field_value(id)` (Redmine's `Acts::Customizable`). See [`examples/version_status_dashboard.liquid`](examples/version_status_dashboard.liquid), which sets two field ids at the top (`cf_est_cost` / `cf_actual_cost`) and uses this accessor to drive a per-version budget bar, badge, KPI tile and chart.
+
 ## Exporting a report widget to PDF
 
 Report widgets show an **Export as PDF** link in their header. It opens the same report the widget renders — for the widget's configured query — as a PDF in a new tab, reusing the Reporter plugin's own PDF generation. (PDF output requires wkhtmltopdf to be configured for Reporter, the same as Reporter's own report preview.)
