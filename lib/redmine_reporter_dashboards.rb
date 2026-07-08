@@ -52,6 +52,23 @@ module RedmineReporterDashboards
     Rails.logger.warn("[reporter_dashboards] sql_aggregate tag registration failed: #{e.message}")
   end
 
+  # Liquid tag that aggregates a report's issues per target version entirely in
+  # SQL, so version dashboards avoid an O(versions x issues) Liquid loop.
+  VERSION_ROLLUP_TAG_NAME = 'version_rollup'
+
+  # Register the version_rollup Liquid tag. Mirrors register_sql_aggregate_tag:
+  # only registers when Liquid is available and degrades gracefully otherwise.
+  def register_version_rollup_tag
+    require File.join(lib_root, 'sql_aggregation/query_aggregator')
+
+    return unless defined?(::Liquid::Tag)
+
+    require File.join(lib_root, 'sql_aggregation/liquid_version_rollup_tag')
+    ::Liquid::Template.register_tag(VERSION_ROLLUP_TAG_NAME, SqlAggregation::LiquidVersionRollupTag)
+  rescue => e
+    Rails.logger.warn("[reporter_dashboards] version_rollup tag registration failed: #{e.message}")
+  end
+
   # Liquid tag exposing a version-name → id/metadata lookup, so report templates
   # can build version-filtered URLs from the Reporter issue drop (which only
   # exposes issue.version as a scalar name).

@@ -28,6 +28,10 @@ With hundreds or thousands of issues that gets slow. The `{% sql_aggregate %}` t
 
 The Reporter issue drop exposes `issue.version` as a scalar (the name only), with no id. That makes it impossible to build version-filtered URLs — roadmap, issues list, time entries — from a template. The `{% geo_version_map %}` tag provides a lookup from version name to its id and metadata so you can construct those links.
 
+### `{% version_rollup %}` Liquid tag
+
+A per-**target-version** rollup, computed entirely in SQL. A "one card per version" dashboard normally loops over every version *and* every issue (`O(versions × issues)`) in Liquid, which gets very slow with many issues. `{% version_rollup %}` returns one ready-to-render row per version — counts, hours, min/max dates and summed numeric custom fields (e.g. cost) — in a handful of grouped queries, so the template only loops over the (few) versions.
+
 ## Requirements
 
 - Redmine 5.0 or higher
@@ -205,6 +209,38 @@ Look up a version by name — typically the scalar `issue.version` from the issu
 ```
 
 If the name is unknown (for example an issue with no target version), the lookup returns nothing and the surrounding template still renders. The tag itself produces no output; on any error it assigns an empty map so the template never crashes.
+
+## Using the `{% version_rollup %}` tag
+
+Aggregates the report's issues per target version in SQL and assigns a ready-to-render Array. Use it instead of a nested `{% for version %}{% for issue %}` loop when you build a per-version dashboard.
+
+```liquid
+{% version_rollup from: issues, closed_statuses: "Closed;Rejected", cost_fields: "20,21", assign_to: versions %}
+{% for v in versions %}
+  <h3><a href="{{ v.version.url }}">{{ v.name }}</a></h3>   {# v.version is a VersionDrop, nil for the "None" bucket #}
+  {{ v.open }} open / {{ v.closed }} closed · {{ v.spent_hours }} / {{ v.est_hours }} h
+  {% if v.cost['20'] or v.cost['21'] %}budget {{ v.cost['21'] }} / {{ v.cost['20'] }}{% endif %}
+{% endfor %}
+```
+
+Params: `from` (issues drop, default `issues`), `closed_statuses` (semicolon/comma-separated names; else the `is_closed` flag), `cost_fields` (semicolon/comma-separated numeric custom field ids to sum), `assign_to` (default `versions`).
+
+### Result structure
+
+One row per target version (a nil version → name `None`), sorted by name. String keys, so Liquid dot-access works:
+
+| Key | Type | Content |
+|-----|------|---------|
+| `.name` | string | Version name (`None` for issues with no target version) |
+| `.version` | drop / nil | A `VersionDrop` (absolute, PDF-safe URLs: `.url`, `.roadmap_url`, `.issues_url`, …); nil for `None` |
+| `.total` `.open` `.closed` | integer | Issue counts |
+| `.open_done_sum` | integer | Σ `done_ratio` over open issues (for % complete) |
+| `.overdue_open` `.unassigned_open` `.no_estimate` | integer | Flag counts |
+| `.est_hours` `.spent_hours` | float | Σ estimated / spent hours |
+| `.start_date` `.due_date` | date / nil | MIN start / MAX due over the version's issues |
+| `.cost` | hash | `{ "<field_id>" => float }` summed per numeric custom field |
+
+Cost sums mirror Redmine's own numeric custom-field totalling (`joins(:custom_values)`, empty values skipped, `CAST(... AS decimal)`), so they are correct on PostgreSQL and MySQL. On any error the tag assigns an empty Array so the template never crashes. See [`examples/version_status_dashboard.liquid`](examples/version_status_dashboard.liquid) for a full dashboard built on this tag.
 
 ## `issue.target_version` in report templates
 

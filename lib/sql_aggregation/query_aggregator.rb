@@ -132,6 +132,83 @@ module SqlAggregation
     end
 
     # ------------------------------------------------------------------
+    # Per-version rollup — one row per fixed_version, all in SQL
+    # ------------------------------------------------------------------
+    #
+    # Replaces an O(versions x issues) Liquid loop with a handful of grouped SQL
+    # queries (each a single indexed GROUP BY over the scope). Returns an Array
+    # of per-version Hashes with STRING keys (Liquid dot-access friendly), one per
+    # fixed_version_id present in the scope (a nil version_id = issues with no
+    # target version):
+    #
+    #   version_id       — Integer or nil
+    #   total            — issue count
+    #   open / closed    — counts (closed via closed_statuses, else is_closed flag)
+    #   open_done_sum    — SUM(done_ratio) over OPEN issues (for % complete)
+    #   overdue_open     — open issues past due
+    #   unassigned_open  — open issues with no assignee
+    #   no_estimate      — issues with a NULL estimated_hours
+    #   est_hours        — SUM(estimated_hours)
+    #   spent_hours      — SUM(time_entries.hours) of the version's own issues
+    #   start_date       — MIN(start_date)  (Date or nil)
+    #   due_date         — MAX(due_date)    (Date or nil)
+    #   cost             — { "<field_id>" => Float } summed per numeric custom field
+    #
+    # closed_statuses — Array of status NAMES; falls back to is_closed when empty.
+    # cost_field_ids  — Array of numeric custom field ids to SUM per version.
+    def self.version_rollup(scope, closed_statuses: [], cost_field_ids: [])
+      base       = scope.unscope(:order)
+      closed_ids = resolve_closed_ids(closed_statuses)
+
+      totals = base.group(:fixed_version_id).count
+      return [] if totals.empty?
+
+      open_scope    = closed_ids.empty? ? base : base.where.not(status_id: closed_ids)
+      closed_by     = closed_ids.empty? ? {} : base.where(status_id: closed_ids).group(:fixed_version_id).count
+      open_by       = open_scope.group(:fixed_version_id).count
+      done_by       = open_scope.group(:fixed_version_id).sum(:done_ratio)
+      overdue_by    = open_scope.where('issues.due_date < ?', Date.today).group(:fixed_version_id).count
+      unassigned_by = open_scope.where(assigned_to_id: nil).group(:fixed_version_id).count
+      noest_by      = base.where(estimated_hours: nil).group(:fixed_version_id).count
+      est_by        = base.group(:fixed_version_id).sum(:estimated_hours)
+      start_by      = base.group(:fixed_version_id).minimum(:start_date)
+      due_by        = base.group(:fixed_version_id).maximum(:due_date)
+      spent_by      = base.joins(:time_entries).group(:fixed_version_id).sum('time_entries.hours')
+
+      # Cost custom fields: mirror Redmine's Numeric#total_for_scope
+      # (lib/redmine/field_format.rb) — join custom_values, skip empty strings so
+      # the numeric CAST is safe on both PostgreSQL and MySQL — plus a GROUP BY.
+      cost_by = {} # "field_id" => { version_id => BigDecimal }
+      Array(cost_field_ids).map { |id| id.to_i }.reject(&:zero?).uniq.each do |fid|
+        cost_by[fid.to_s] = base.joins(:custom_values)
+          .where(custom_values: { custom_field_id: fid })
+          .where.not(custom_values: { value: '' })
+          .group(:fixed_version_id)
+          .sum("CAST(#{CustomValue.table_name}.value AS decimal(30,3))")
+      end
+
+      totals.keys.map do |vid|
+        cost = {}
+        cost_by.each { |fid, by_version| (v = by_version[vid]) && cost[fid] = v.to_f }
+        {
+          'version_id'      => vid,
+          'total'           => totals[vid]        || 0,
+          'open'            => open_by[vid]       || 0,
+          'closed'          => closed_by[vid]     || 0,
+          'open_done_sum'   => (done_by[vid]      || 0).to_i,
+          'overdue_open'    => overdue_by[vid]    || 0,
+          'unassigned_open' => unassigned_by[vid] || 0,
+          'no_estimate'     => noest_by[vid]      || 0,
+          'est_hours'       => (est_by[vid]       || 0).to_f,
+          'spent_hours'     => (spent_by[vid]     || 0).to_f,
+          'start_date'      => start_by[vid],
+          'due_date'        => due_by[vid],
+          'cost'            => cost
+        }
+      end
+    end
+
+    # ------------------------------------------------------------------
     # Label generation — one label per period, oldest first
     # ------------------------------------------------------------------
 

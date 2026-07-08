@@ -4,7 +4,7 @@ require_relative '../spec_helper'
 require_relative '../../lib/redmine_reporter_dashboards/liquid/version_drop'
 
 # Minimal stand-ins so the drop can be exercised without booting Redmine.
-VersionDropProject = Struct.new(:identifier)
+VersionDropProject = Struct.new(:identifier, :name)
 VersionDropVersion = Struct.new(:id, :name, :description, :effective_date, :status, :completed_percent, :project)
 
 # Setting stub declaring the class methods the drop calls (satisfies
@@ -15,7 +15,7 @@ class VersionDropSettingStub
 end
 
 RSpec.describe RedmineReporterDashboards::Liquid::VersionDrop do
-  let(:project) { VersionDropProject.new('geoxyz') }
+  let(:project) { VersionDropProject.new('geoxyz', 'GEOxyz') }
   let(:version) do
     VersionDropVersion.new(42, '2025.1', 'Spring release', Date.new(2025, 3, 31), 'open', 60, project)
   end
@@ -37,6 +37,7 @@ RSpec.describe RedmineReporterDashboards::Liquid::VersionDrop do
       expect(drop.status).to eq('open')
       expect(drop.completed_percent).to eq(60)
       expect(drop.project_identifier).to eq('geoxyz')
+      expect(drop.project_name).to eq('GEOxyz')
     end
 
     it 'returns a nil effective_date unchanged (not coerced)' do
@@ -44,9 +45,10 @@ RSpec.describe RedmineReporterDashboards::Liquid::VersionDrop do
       expect(drop.effective_date).to be_nil
     end
 
-    it 'returns nil project_identifier when the version has no project' do
+    it 'returns nil project_identifier and project_name when the version has no project' do
       version.project = nil
       expect(drop.project_identifier).to be_nil
+      expect(drop.project_name).to be_nil
     end
   end
 

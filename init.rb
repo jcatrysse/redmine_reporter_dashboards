@@ -25,7 +25,7 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
   author 'Jan Catrysse'
   description 'Dashboard extension for the Redmine Reporter plugin, adding project dashboards, ' \
               'SQL-based issue statistics and Liquid aggregation tags.'
-  version '0.3.0'
+  version '0.4.0'
   url 'https://github.com/jcatrysse/redmine_reporter_dashboards'
   author_url 'https://github.com/jcatrysse'
 
@@ -73,6 +73,7 @@ class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
     # must never be skipped because an unrelated later step (patch loading)
     # raised. Each register_* method rescues its own errors.
     RedmineReporterDashboards.register_sql_aggregate_tag
+    RedmineReporterDashboards.register_version_rollup_tag
     RedmineReporterDashboards.register_geo_version_map_tag
     RedmineReporterDashboards.register_issue_target_version_drop
     RedmineReporterDashboards.load_patches

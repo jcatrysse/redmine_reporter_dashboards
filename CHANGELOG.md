@@ -2,7 +2,23 @@
 
 All notable changes to this plugin are documented in this file.
 
-## [0.3.0] - 2026-07-07
+## [0.4.0] - 2026-07-08
+
+- Harden the version status dashboard example against injection: version names are
+  HTML-escaped in the card title and stripped of angle brackets before going into
+  the Chart.js label arrays (defence in depth; names are manager-controlled).
+- Add the `{% version_rollup %}` Liquid tag: aggregates a report's issues per
+  target version entirely in SQL (counts, estimated/spent hours, MIN start / MAX
+  due dates, and summed numeric custom fields such as cost) and returns one
+  ready-to-render row per version. Replaces the `O(versions × issues)` Liquid
+  double loop that made per-version dashboards slow on large issue sets. Cost
+  sums mirror Redmine's own numeric custom-field totalling, so they are correct
+  on PostgreSQL and MySQL. Scope resolution is now shared with `{% sql_aggregate %}`
+  (extracted to `SqlAggregation::ScopeResolution`). `examples/version_status_dashboard.liquid`
+  now builds on this tag and no longer iterates issues in Liquid.
+- Add `VersionDrop#project_name` (alongside `project_identifier`).
+
+- ## [0.3.0] - 2026-07-07 
 
 - Expose `issue.custom_field_value` on the Reporter issue drop: a by-**id**
   accessor for **any** custom field, e.g. `{{ issue.custom_field_value[20] }}`

@@ -54,6 +54,10 @@ module RedmineReporterDashboards
         @version.project&.identifier
       end
 
+      def project_name
+        @version.project&.name
+      end
+
       # ---- absolute URLs -----------------------------------------------------
 
       def url
