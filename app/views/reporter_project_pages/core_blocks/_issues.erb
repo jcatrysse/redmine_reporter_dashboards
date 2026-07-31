@@ -10,7 +10,10 @@
 <h3>
   <%= "#{query.project} |" if query.project %>
   <%= link_to query.name, _project_issues_path(query.project, query.as_params) %>
-  (<%= issues.size %>)
+  <%# Total number of matching issues, not the number of rows shown: the widget
+      limit (see label_reporter_items_limit) caps `issues`, so `issues.size` would
+      report the limit. Same as core's my/blocks/_issues.erb. %>
+  (<%= query.issue_count %>)
 </h3>
 
 <% if editable %>

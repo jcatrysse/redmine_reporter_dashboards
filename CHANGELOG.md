@@ -2,6 +2,15 @@
 
 All notable changes to this plugin are documented in this file.
 
+## [0.4.1] - 2026-07-31
+
+- Fix the issue count next to a dashboard issue widget's title: it showed the
+  number of rows rendered, so a widget limited to 25 items read "(25)" even when
+  the query matched 43 issues. It now reports the number of issues the query
+  matches (`IssueQuery#issue_count`), like Redmine's own My page widget and like
+  the per-group badges inside the widget already did. Affects all five issue
+  widgets (assigned to me, reported by me, updated by me, watched, custom query).
+
 ## [0.4.0] - 2026-07-08
 
 - Harden the version status dashboard example against injection: version names are

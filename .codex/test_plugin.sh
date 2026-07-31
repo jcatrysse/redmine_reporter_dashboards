@@ -5,6 +5,10 @@ REDMINE_DIR="${REDMINE_DIR:-redmine}"
 PLUGIN_NAME="$(basename "$(pwd)")"
 MISE_BIN="${MISE_BIN:-mise}"
 REPORTER_PLUGIN_NAME="${REPORTER_PLUGIN_NAME:-redmine_reporter}"
+# redmine:plugins:test boots Rails through db:test:prepare, which loads the
+# default (development) environment unless told otherwise -- and test_setup.sh
+# installs gems `without development`, so that environment cannot even load.
+export RAILS_ENV="${RAILS_ENV:-test}"
 
 reporter_required() {
   case "${REQUIRE_REPORTER_PLUGIN:-}" in
@@ -74,7 +78,9 @@ run_command() {
 ran_tests=false
 
 if [ -d "$SPEC_DIR" ]; then
-  run_command bundle exec rspec "$SPEC_DIR" --format progress
+  # The specs `require 'spec_helper'`, which resolves against the load path. rspec
+  # runs from the Redmine root, so the plugin's spec/ must be put on it explicitly.
+  run_command bundle exec rspec -I "$SPEC_DIR" "$SPEC_DIR" --format progress
   ran_tests=true
 fi
 

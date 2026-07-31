@@ -99,7 +99,9 @@ jobs:
           ran_tests=false
 
           if [ -d "$plugin_dir/spec" ]; then
-            bundle exec rspec "$plugin_dir/spec" --format progress
+            # The specs `require 'spec_helper'`; rspec runs from the Redmine root,
+            # so the plugin's spec/ must be put on the load path explicitly.
+            bundle exec rspec -I "$plugin_dir/spec" "$plugin_dir/spec" --format progress
             ran_tests=true
           fi
 

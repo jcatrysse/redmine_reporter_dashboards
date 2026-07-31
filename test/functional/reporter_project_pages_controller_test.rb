@@ -3,10 +3,14 @@
 require File.expand_path('../test_helper', __dir__)
 
 class ReporterProjectPagesControllerTest < ActionController::TestCase
-  fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules
+  fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules,
+           :issues, :issue_statuses, :trackers, :projects_trackers, :enumerations
+
+  ISSUE_COUNT_MARKER = 'ZZWidgetCount'
 
   def setup
     @project = Project.find(1)
+    Role.find(1).add_permission! :view_issues
     Role.find(1).add_permission! :view_reporter_project_page
     Role.find(1).add_permission! :manage_reporter_project_page
     Role.find(1).add_permission! :manage_reporter_project_tabs
@@ -205,6 +209,66 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     assert_select '.tabs a.selected', I18n.t(:label_reporter_default_dashboard_tab)
   end
 
+  # The count next to an issue widget's title is the number of issues the query
+  # matches, not the number of rows the widget shows: a widget limited to 5 rows
+  # out of 7 matching issues must still read "(7)".
+  def test_show_issue_widget_count_is_the_total_not_the_limit
+    generate_marked_issues(7)
+    show_issue_query_widget(limit: '5')
+
+    assert_response :success
+    assert_widget_count 'issuequery', 7
+    assert_select '#reporter-block-issuequery table.issues tbody tr.hascontextmenu', 5
+  end
+
+  def test_show_issue_widget_count_matches_rows_when_unlimited
+    generate_marked_issues(7)
+    show_issue_query_widget(limit: '0')
+
+    assert_response :success
+    assert_widget_count 'issuequery', 7
+    assert_select '#reporter-block-issuequery table.issues tbody tr.hascontextmenu', 7
+  end
+
+  def test_show_issue_widget_count_is_zero_without_matching_issues
+    show_issue_query_widget(limit: '5')
+
+    assert_response :success
+    assert_widget_count 'issuequery', 0
+    assert_select '#reporter-block-issuequery table.issues', 0
+    assert_select '#reporter-block-issuequery .nodata', 1
+  end
+
+  # Grouping is a plugin addition on top of core's my-page widget. Core renders
+  # the per-group badges from the *unlimited* counts, so the widget total has to
+  # agree with them rather than with the number of rendered rows.
+  def test_show_grouped_issue_widget_count_matches_sum_of_group_badges
+    generate_marked_issues(7)
+    show_issue_query_widget(limit: '5', group_by: 'tracker')
+
+    assert_response :success
+    assert_widget_count 'issuequery', 7
+    badges = css_select('#reporter-block-issuequery tr.group span.badge-count').map { |span| span.text.to_i }
+    assert badges.any?, 'Expected the grouped list to render group badges'
+    assert_equal 7, badges.sum
+  end
+
+  # The four built-in issue widgets build an unsaved IssueQuery in the helper;
+  # issue_count must work there too (and still ignore the row limit, 10 by
+  # default). Asserted as ">= what this test created" rather than an exact number,
+  # so the fixtures' own assigned issues (and Setting.display_subprojects_issues?)
+  # cannot make it brittle.
+  def test_show_assigned_to_me_widget_count_is_the_total_not_the_limit
+    generate_marked_issues(12, assigned_to: User.find_by!(login: 'jsmith'))
+    @tab.update!(layout: [['issuesassignedtome']])
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    assert_operator widget_count('issuesassignedtome'), :>=, 12
+    assert_select '#reporter-block-issuesassignedtome table.issues tbody tr.hascontextmenu', 10
+  end
+
   def test_report_pdf_unknown_block_returns_404
     get :report_pdf, params: { project_id: @project.identifier, tab: @tab.id, block: 'not_a_block' }
     assert_response :not_found
@@ -214,5 +278,49 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     # report_by_issues is a valid block, but the tab has no query/template configured.
     get :report_pdf, params: { project_id: @project.identifier, tab: @tab.id, block: 'report_by_issues' }
     assert_response :not_found
+  end
+
+  private
+
+  # The "(n)" behind a widget title. Asserted on the extracted heading text so a
+  # failure shows the rendered title instead of a bare selector count.
+  def assert_widget_count(block, expected)
+    assert_match(/\(#{expected}\)/, widget_heading(block))
+  end
+
+  def widget_count(block)
+    heading = widget_heading(block)
+    count = heading[/\((\d+)\)/, 1]
+    assert count, "Expected widget #{block} to render a count, got #{heading.inspect}"
+    count.to_i
+  end
+
+  def widget_heading(block)
+    heading = css_select("#reporter-block-#{block} h3").first
+    assert heading, "Expected widget #{block} to render a heading"
+    heading.text.squish
+  end
+
+  # Issues tagged with a marker subject, so the count assertions below depend on
+  # what the test creates and not on how many issues the fixtures happen to hold.
+  def generate_marked_issues(count, attributes = {})
+    Array.new(count) do |index|
+      Issue.generate!(attributes.merge(project: @project,
+                                       subject: "#{ISSUE_COUNT_MARKER} #{index}"))
+    end
+  end
+
+  # A saved, project-scoped query matching only the marked issues, rendered
+  # through the issuequery widget with the given block settings.
+  def show_issue_query_widget(settings)
+    query = IssueQuery.create!(project: @project,
+                               name: 'Marked issues',
+                               user: User.find_by!(login: 'jsmith'),
+                               filters: { 'subject' => { operator: '~', values: [ISSUE_COUNT_MARKER] } },
+                               column_names: %w[tracker status subject])
+    @tab.update!(layout: [['issuequery']],
+                 settings: { 'issuequery' => settings.merge(query_id: query.id) })
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
   end
 end
