@@ -88,24 +88,38 @@ module VersionMapping
         if @raw_params.key?('project')
           project = resolve_project
           if project.nil?
-            Rails.logger.warn("[geo_version_map] project '#{@raw_params['project']}' not found — assigning empty map")
+            Rails.logger.warn("[geo_version_map] project '#{@raw_params['project']}' not found or not " \
+                              'visible to the current user — assigning empty map')
             return []
           end
-          project.shared_versions
+          only_visible(project.shared_versions)
         else
-          Version.all
+          # Version.visible, not Version.all: the map carries version names,
+          # dates and project identifiers, and a report template must not become
+          # a way to read them out of projects the viewer cannot see.
+          Version.visible(User.current)
         end
 
       scope.respond_to?(:includes) ? scope.includes(:project) : scope
     end
 
+    # shared_versions can reach into other projects that share their versions,
+    # so it is narrowed too. Guarded: older Redmine returns an Array here.
+    def only_visible(versions)
+      return versions unless versions.respond_to?(:visible)
+
+      versions.visible(User.current)
+    end
+
     # project: is a LITERAL identifier (not a Liquid variable), matching the tag
-    # contract. Try identifier first, then fall back to a numeric id.
+    # contract. Try identifier first, then fall back to a numeric id. Both go
+    # through Project.visible, so an unknown and an invisible project are
+    # indistinguishable from the template's point of view.
     def resolve_project
       identifier = @raw_params['project']
       return nil if identifier.nil? || identifier.empty?
 
-      Project.find_by(identifier: identifier) || Project.find_by(id: identifier)
+      Project.visible.find_by(identifier: identifier) || Project.visible.find_by(id: identifier)
     end
 
     # ------------------------------------------------------------------

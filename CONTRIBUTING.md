@@ -17,7 +17,11 @@ The `.codex/` scripts handle everything:
 ./.codex/test_plugin.sh                 # run RSpec + minitest
 ```
 
-Supported Redmine versions: `5.1-stable`, `6.0-stable`, `6.1-stable`.
+Supported Redmine versions: `5.1-stable`, `6.0-stable`, `6.1-stable` — see the
+support matrix in the README. Redmine 7.0 (Rails 8.1) and MySQL/MariaDB are
+**not** covered by a workflow; `requires_redmine` is pinned to 5.1 so the
+plugin's claim matches what is tested. Widening either means adding the
+corresponding workflow first.
 
 ## Test suites
 

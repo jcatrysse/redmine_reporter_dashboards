@@ -25,11 +25,11 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
   author 'Jan Catrysse'
   description 'Dashboard extension for the Redmine Reporter plugin, adding project dashboards, ' \
               'SQL-based issue statistics and Liquid aggregation tags.'
-  version '0.4.1'
+  version '0.5.0'
   url 'https://github.com/jcatrysse/redmine_reporter_dashboards'
   author_url 'https://github.com/jcatrysse'
 
-  requires_redmine version_or_higher: '5.0'
+  requires_redmine version_or_higher: '5.1'
   requires_redmine_plugin :redmine_reporter, version_or_higher: '2.0.5'
 
   project_module :reporter_project_dashboards do

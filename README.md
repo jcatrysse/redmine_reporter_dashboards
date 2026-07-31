@@ -34,8 +34,24 @@ A per-**target-version** rollup, computed entirely in SQL. A "one card per versi
 
 ## Requirements
 
-- Redmine 5.0 or higher
 - `redmine_reporter` plugin version 2.0.5 or higher
+- PostgreSQL or MySQL/MariaDB. The SQL aggregation tags use adapter-specific date
+  formatting and refuse to guess on any other database — SQLite is not supported.
+
+### Support matrix
+
+Supported means: exercised by the CI workflows in `.github/workflows/`.
+
+| Redmine | Rails | Ruby (upstream range) | Database | Status |
+|---------|-------|------------------------|----------|--------|
+| 5.1 | 6.1 | >= 2.7, < 3.3 | PostgreSQL | tested |
+| 6.0 | 7.1 | >= 3.0, < 3.4 | PostgreSQL | tested |
+| 6.1 | 7.2 | >= 3.2, < 3.5 | PostgreSQL | tested |
+| 7.0 | 8.1 | >= 3.2, < 4.1 | — | **not tested — do not assume it works** |
+| any | — | — | MySQL/MariaDB | **not tested in CI** — the code is written for it and the SQL is adapter-aware, but no workflow proves it |
+
+`requires_redmine` is set to 5.1 to match this table. Earlier 5.x releases may
+well work; they are simply not tested, so the plugin does not claim them.
 
 ## Installation
 
@@ -98,7 +114,9 @@ With `group_by` the tag switches to a category summary instead of a time series.
 Total: {{ by_status.total }}
 ```
 
-Supported `group_by` values:
+### Dimensions
+
+`group_by` — and the second dimension `split_by` — accept any of these:
 
 | Value | Groups by |
 |-------|-----------|
@@ -109,6 +127,71 @@ Supported `group_by` values:
 | `author` | Author |
 | `category` | Category |
 | `version` | Target version |
+| `cf_<id>` | An **issue custom field** by numeric id, e.g. `cf_92` |
+| `period` | Date bucket — see `period` / `periods` / `date_field` |
+| `age` | Age bucket — see `age_buckets` / `age_field` |
+| `flags` | Scalar governance counters. `group_by` only, never `split_by` |
+
+Custom fields are resolved to their **labels**, not their stored values: for
+`enumeration` and `depending_enumeration` fields Redmine stores the enumeration
+id in `custom_values.value` (Department "Survey" is stored as `415`), so grouping
+in Liquid would need a hardcoded id-to-label map. The tag resolves the label
+through the field's own format, falling back to the enumeration name and finally
+to the raw value.
+
+An unusable dimension — a `cf_` id that does not exist, is not an issue custom
+field, or is not numeric — logs a warning and yields the empty result. It never
+raises, so a typo cannot take down a dashboard or a PDF export.
+
+**Custom field visibility is enforced**, the same way Redmine enforces it when a
+query groups or sorts on a custom field: if the field is restricted to roles, a
+viewer without one of those roles does not see its values. Their issues are
+still counted, but they land in the no-value bucket. A report can therefore be
+shared without leaking the values of a restricted field.
+
+### Parameters
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `assign_to` | `stats` | Result variable name |
+| `from` | `issues` | Liquid variable holding the issues drop |
+| `query_id` | – | Aggregate a saved `IssueQuery` instead |
+| `group_by` | – | Dimension; switches to breakdown mode |
+| `split_by` | – | Second dimension; requires `group_by`, produces a crosstab |
+| `period` | `month` | `day` / `week` / `month` / `year` |
+| `periods` | 30 / 13 / 6 / 3 | Capped at 90 / 52 / 24 / 10 |
+| `months` | – | Legacy alias for `periods` when `period: month` |
+| `date_field` | `created` | `created` or `closed` — which timestamp `period` buckets on |
+| `closed_statuses` | – | Semicolon/comma-separated status **names**; omit to use the `is_closed` flag |
+| `sort` | `count` | `count` (desc), `label` (asc, natural), `position` (field-defined order) |
+| `limit` | `0` | Keep the top N rows; the rest collapses into one `Other` row |
+| `other_label` | `Other` | Label of the collapsed row |
+| `empty_label` | `(none)` | Label of the no-value row (`Unassigned` for `assignee`, `None` for the other core fields) |
+| `age_buckets` | `30;60;90;180` | Ascending day boundaries, semicolon or comma separated (max 24) |
+| `age_field` | `created` | `created`, `updated` or `due` |
+| `user_label` | `name` | `name` (display name) or `login`, for `assignee` / `author` |
+
+An invalid enum-ish value (`sort: banana`, `age_field: banana`) falls back to the
+default and logs a warning — it never raises.
+
+**Ordering.** Sorted rows first, then the `Other` row, then the no-value row.
+Both special rows always sit at the end, whatever `sort` says. `sort: position`
+uses the custom field's own value order (`CustomFieldEnumeration#position`, or
+the index in `possible_values`); values with no known position sort last. For
+core fields, `position` behaves like `label`.
+
+**`sort`, `limit` and `other_label` are ignored for `period` and `age`.** Those
+axes are always chronological / ascending and always contain every bucket in the
+window, including the empty ones, so a chart's x-axis has no gaps.
+
+**`group_by: period` also restricts the aggregation to that window**, exactly like
+the time-series mode: `total` is the window total, not the size of the query.
+With `date_field: closed` only issues actually closed inside the window are
+counted at all — issues that are still open have no `closed_on` date.
+
+Independently of `limit`, the number of rows and of series is capped at **200**;
+anything beyond that collapses into `Other` and sets `truncated` to `true`. This
+protects a dashboard from a `group_by` on a free-text custom field.
 
 ### More examples
 
@@ -142,6 +225,93 @@ When the Reporter plugin exposes `query_id` in the template context:
    closed_statuses: "Closed;Rejected", assign_to: stats %}
 ```
 
+**Issues per department (custom field 92), top 10 plus "Other":**
+
+```liquid
+{% sql_aggregate from: issues, group_by: cf_92, sort: count, limit: 10,
+   other_label: "Other departments", assign_to: by_dept %}
+
+### {{ by_dept.field_name }}
+{% for bucket in by_dept.buckets %}
+- {{ bucket.label }} — {{ bucket.count }}
+{% endfor %}
+Total: {{ by_dept.total }}{% if by_dept.truncated %} (long tail grouped){% endif %}
+```
+
+**Department × Lesson Type — a stacked Chart.js bar chart in one call:**
+
+```liquid
+{% sql_aggregate from: issues, group_by: cf_92, split_by: cf_86,
+   sort: position, assign_to: xtab %}
+
+<canvas id="deptChart" width="600" height="320"></canvas>
+<script>
+new Chart(document.getElementById('deptChart').getContext('2d'), {
+  type: 'bar',
+  data: {
+    labels: [{% for row in xtab.rows %}"{{ row.label | escape }}"{% unless forloop.last %},{% endunless %}{% endfor %}],
+    datasets: [
+      {% for name in xtab.series %}
+      {
+        label: "{{ name | escape }}",
+        backgroundColor: ['#4e79a7', '#e15759', '#59a14f'][{{ forloop.index0 }} % 3],
+        data: [{% for row in xtab.rows %}{{ row.cells[name] }}{% unless forloop.last %},{% endunless %}{% endfor %}]
+      }{% unless forloop.last %},{% endunless %}
+      {% endfor %}
+    ]
+  },
+  options: { responsive: false, animation: false,
+             scales: { xAxes: [{ stacked: true }], yAxes: [{ stacked: true, ticks: { beginAtZero: true } }] } }
+});
+</script>
+```
+
+`xtab.matrix` is the same data as one array per row, so
+`data: [{{ row.counts | join: "," }}]` works too. Every row has exactly
+`series.length` entries and every entry is a real number — never `nil` — so the
+generated JavaScript is always valid.
+
+**Lesson Type per month — a time axis split by a custom field:**
+
+```liquid
+{% sql_aggregate from: issues, group_by: period, split_by: cf_86,
+   period: month, periods: 12, date_field: created, assign_to: per_month %}
+
+| Month | {% for s in per_month.series %}{{ s }} | {% endfor %}
+|-------|{% for s in per_month.series %}---|{% endfor %}
+{% for row in per_month.rows %}| {{ row.label }} | {% for n in row.counts %}{{ n }} | {% endfor %}
+{% endfor %}
+```
+
+Every month in the window is present, including months with no issues, so the
+axis is continuous.
+
+**Age histogram — how old is the open work?**
+
+```liquid
+{% sql_aggregate from: issues, group_by: age, age_buckets: "30;60;90;180",
+   age_field: created, assign_to: ages %}
+
+{% for bucket in ages.buckets %}
+{{ bucket.label }} days: {{ bucket.count }}
+{% endfor %}
+```
+
+Buckets come back in ascending age order (`0-30`, `31-60`, `61-90`, `91-180`,
+`>180`), including empty ones. Issues whose date field is `NULL` (relevant for
+`age_field: due`) land in the `(none)` bucket, not in the oldest one.
+
+**Governance KPI tiles:**
+
+```liquid
+{% sql_aggregate from: issues, group_by: flags,
+   closed_statuses: "Closed;Rejected", assign_to: kpi %}
+
+{{ kpi.total }} issues · {{ kpi.open }} open · {{ kpi.closed }} closed
+{{ kpi.unassigned }} unassigned · {{ kpi.overdue }} overdue
+{% if kpi.oldest_open_days %}Oldest open item: {{ kpi.oldest_open_days }} days{% endif %}
+```
+
 ### Result structure
 
 **Time series** (`assign_to: stats`):
@@ -163,6 +333,71 @@ When the Reporter plugin exposes `query_id` in the template context:
 | `by_status.buckets` | array | `[{label, count}, ...]` sorted by count descending |
 | `by_status.total` | integer | Sum of all counts |
 | `by_status.group_by` | string | Grouping used |
+
+A breakdown over a custom field, `period`, `age`, or any core field combined with
+one of the new parameters additionally exposes:
+
+| Key | Type | Content |
+|-----|------|---------|
+| `.dimension` | string | The dimension that was requested (`cf_92`) |
+| `.field_name` | string | Human name of the custom field (`Department`); nil for core and pseudo dimensions |
+| `.multi_value` | boolean | True when the custom field accepts several values per issue |
+| `.truncated` | boolean | True when `limit` or the 200-row cap collapsed rows into `Other` |
+
+**Crosstab** (`split_by` present):
+
+| Key | Type | Content |
+|-----|------|---------|
+| `.series` | array | Series labels — the `split_by` axis |
+| `.rows` | array | `[{label, total, counts, cells}, ...]` |
+| `.rows[].counts` | array | One number per series, aligned with `.series` |
+| `.rows[].cells` | hash | The same numbers keyed by series label |
+| `.matrix` | array | Rows × series, aligned with `.rows` and `.series` |
+| `.columns` | array | Per-series totals, aligned with `.series` |
+| `.buckets` | array | Row totals as `[{label, count}]`, for templates that only need one dimension |
+| `.total` | integer | Sum of the whole matrix |
+| `.split_by` | string | Second dimension requested |
+| `.series_field_name` | string | Human name of the second custom field |
+
+`matrix` and `counts` are dense: every row has exactly `series.length` integers,
+zeros included, so `{{ row.counts | join: "," }}` always produces valid
+JavaScript.
+
+**Flags** (`group_by: flags`):
+
+`total`, `open`, `closed`, `assigned`, `unassigned`, `with_due_date`,
+`without_due_date`, `overdue`, `no_estimate`, `oldest_open_days`,
+`newest_open_days`. They are available both at the top level (`{{ kpi.total }}`)
+and under `flags` (`{{ kpi.flags.total }}`). `open` / `closed` honour
+`closed_statuses`, `overdue` counts open issues past their due date, and the
+`*_open_days` values are `nil` when nothing is open.
+
+On any error — an unresolvable scope, an invalid dimension, a database problem —
+the tag assigns an empty-safe result with **all** of these keys (empty arrays,
+zeros, `false`) and logs to `Rails.logger`, so a template that reads `res.rows`
+or `res.series` still renders.
+
+### Notes and caveats
+
+- **Counting.** The dimension path counts `COUNT(DISTINCT issues.id)`, because the
+  query's own scope may already join tables that multiply rows (a filter on a
+  custom field, watchers, spent time) and the custom field dimension adds a join
+  of its own. The seven core fields keep their original plain `COUNT(*)` when
+  used without any of the new parameters, so existing templates are unaffected.
+- **Multi-valued custom fields.** An issue with several values is counted once per
+  value, so the bucket counts sum to more than the number of issues. Check
+  `.multi_value` if that matters for the caption you print.
+- **Labels come from your data.** Custom field values, user names and version
+  names end up in the result. Escape them in HTML and in Chart.js label arrays
+  (`{{ label | escape }}`), exactly as the version dashboard example does.
+- **Duplicate series labels.** If two stored values resolve to the same label,
+  `series` contains that label twice and `cells` keeps only the last of them;
+  `counts` and `matrix` stay correct and aligned.
+- **Cost.** The aggregation itself is always a single `COUNT … GROUP BY`, one or
+  two dimensions alike. Label resolution adds at most one batched primary-key
+  lookup per dimension (one more when `sort: position` needs the enumeration
+  order). `flags` runs a handful of small aggregates. No issue is ever loaded
+  into Ruby, and nothing is done per row.
 
 ### Legacy alias
 

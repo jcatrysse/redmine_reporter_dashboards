@@ -56,12 +56,21 @@ ProjectRecord = Struct.new(:id, :identifier)
 # avoid "already initialized constant" warnings when stub_const re-creates the class.
 class IssueStub
   class << self
-    attr_accessor :grouped_result, :count_result, :in_group
+    attr_accessor :grouped_result, :count_result, :in_group, :visible_args, :count_columns
 
     def reset(grouped_result: {}, count_result: 0)
       @grouped_result = grouped_result
       @count_result   = count_result
       @in_group       = false
+      @visible_args   = nil
+      @count_columns  = []
+      self
+    end
+
+    # Redmine's Issue.visible(user, project: project) scope.
+    def visible(*args)
+      @visible_args = args
+      @in_group     = false
       self
     end
 
@@ -83,7 +92,8 @@ class IssueStub
       self
     end
 
-    def count
+    def count(column = nil)
+      (@count_columns ||= []) << column
       @in_group ? (@grouped_result || {}) : (@count_result || 0)
     end
   end
@@ -189,6 +199,30 @@ RSpec.describe SqlStatsController do
       it 'includes a generated_at ISO8601 timestamp' do
         controller.monthly_flow
         expect(rendered[:json][:generated_at]).to match(/\A\d{4}-\d{2}-\d{2}T/)
+      end
+    end
+
+    context 'issue visibility' do
+      before { controller.params = { project_id: 'it-support' } }
+
+      it 'aggregates over Issue.visible, not the raw project scope' do
+        controller.monthly_flow
+        expect(IssueStub.visible_args).not_to be_nil
+      end
+
+      it 'scopes visibility to the current user' do
+        controller.monthly_flow
+        expect(IssueStub.visible_args.first).to be(User.current)
+      end
+
+      it 'limits the visible scope to the requested project' do
+        controller.monthly_flow
+        expect(IssueStub.visible_args.last).to eq(project: ProjectRecord.new(7, 'it-support'))
+      end
+
+      it 'counts issues rather than joined rows' do
+        controller.monthly_flow
+        expect(IssueStub.count_columns.uniq).to eq(['DISTINCT issues.id'])
       end
     end
 

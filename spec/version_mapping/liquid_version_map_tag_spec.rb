@@ -61,10 +61,17 @@ VersionMapProject = Struct.new(:identifier)
 # examples override them with `allow(...).to receive(...)`.
 class VersionMapVersionClass
   def self.all; end
+  def self.visible(*); end
 end
 
 class VersionMapProjectClass
   def self.find_by(**); end
+  def self.visible; end
+end
+
+# User.current, needed by the visibility scopes.
+class VersionMapUserClass
+  def self.current; @current ||= Object.new; end
 end
 
 RSpec.describe VersionMapping::LiquidVersionMapTag do
@@ -78,6 +85,9 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
   before do
     stub_const('Version', VersionMapVersionClass)
     stub_const('Project', VersionMapProjectClass)
+    stub_const('User',    VersionMapUserClass)
+    # Project.visible.find_by(...) — the visible scope returns the class itself.
+    allow(Project).to receive(:visible).and_return(Project)
   end
 
   def build_tag(markup)
@@ -96,12 +106,20 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
     scope
   end
 
+  # shared_versions is narrowed with .visible when it supports it (an AR
+  # relation); older Redmine hands back a plain Array, which must still work.
+  def shared_scope_stub(versions)
+    scope = scope_stub(versions)
+    allow(scope).to receive(:visible).and_return(scope)
+    scope
+  end
+
   # ------------------------------------------------------------------
   # Version.all path (no project: param)
   # ------------------------------------------------------------------
 
-  describe 'without a project param (Version.all)' do
-    before { allow(Version).to receive(:all).and_return(scope_stub([v1, v2])) }
+  describe 'without a project param (every visible version)' do
+    before { allow(Version).to receive(:visible).and_return(scope_stub([v1, v2])) }
 
     it 'builds a map keyed by version name with string-keyed metadata' do
       ctx = build_context
@@ -146,7 +164,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
 
     it 'eager-loads :project to avoid an N+1' do
       scope = scope_stub([v1])
-      allow(Version).to receive(:all).and_return(scope)
+      allow(Version).to receive(:visible).and_return(scope)
 
       expect(scope).to receive(:includes).with(:project).and_return(scope)
 
@@ -154,11 +172,67 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
     end
 
     it 'assigns an empty hash when there are no versions' do
-      allow(Version).to receive(:all).and_return(scope_stub([]))
+      allow(Version).to receive(:visible).and_return(scope_stub([]))
       ctx = build_context
       build_tag('assign_to: geo_versions').render(ctx)
 
       expect(ctx.scopes.last['geo_versions']).to eq({})
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # Visibility
+  # ------------------------------------------------------------------
+
+  describe 'visibility' do
+    it 'builds the full map from the visible versions only' do
+      expect(Version).to receive(:visible).with(User.current).and_return(scope_stub([v1]))
+
+      build_tag('assign_to: geo_versions').render(build_context)
+    end
+
+    it 'never reads every version in the database' do
+      allow(Version).to receive(:visible).and_return(scope_stub([v1]))
+      expect(Version).not_to receive(:all)
+
+      build_tag('assign_to: geo_versions').render(build_context)
+    end
+
+    it 'resolves project: through the visible project scope' do
+      project = double('project', shared_versions: shared_scope_stub([v1]))
+      expect(Project).to receive(:visible).at_least(:once).and_return(Project)
+      allow(Project).to receive(:find_by).with(identifier: 'proj-a').and_return(project)
+
+      build_tag('project: proj-a, assign_to: geo_versions').render(build_context)
+    end
+
+    it 'treats an invisible project like a missing one' do
+      allow(Project).to receive(:find_by).and_return(nil)
+
+      ctx = build_context
+      build_tag('project: secret-project, assign_to: geo_versions').render(ctx)
+
+      expect(ctx.scopes.last['geo_versions']).to eq({})
+    end
+
+    it 'narrows shared_versions to the visible ones' do
+      shared = shared_scope_stub([v1])
+      project = double('project', shared_versions: shared)
+      allow(Project).to receive(:find_by).with(identifier: 'proj-a').and_return(project)
+
+      expect(shared).to receive(:visible).with(User.current).and_return(shared)
+
+      build_tag('project: proj-a, assign_to: geo_versions').render(build_context)
+    end
+
+    it 'still works when shared_versions is a plain Array' do
+      project = double('project', shared_versions: [v1])
+      allow(Project).to receive(:find_by).with(identifier: 'proj-a').and_return(project)
+
+      ctx = build_context
+      build_tag('project: proj-a, assign_to: geo_versions').render(ctx)
+
+      expect(ctx.scopes.last['geo_versions'].keys).to eq(['1.0'])
     end
   end
 
@@ -168,7 +242,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
 
   describe 'with a project param' do
     it 'resolves the project by identifier and uses shared_versions' do
-      project = double('project', shared_versions: scope_stub([v1, v3]))
+      project = double('project', shared_versions: shared_scope_stub([v1, v3]))
       allow(Project).to receive(:find_by).with(identifier: 'proj-a').and_return(project)
 
       ctx = build_context
@@ -181,7 +255,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
     end
 
     it 'falls back to lookup by id when identifier is not found' do
-      project = double('project', shared_versions: scope_stub([v1]))
+      project = double('project', shared_versions: shared_scope_stub([v1]))
       allow(Project).to receive(:find_by).with(identifier: '5').and_return(nil)
       allow(Project).to receive(:find_by).with(id: '5').and_return(project)
 
@@ -191,11 +265,11 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
       expect(ctx.scopes.last['geo_versions'].keys).to contain_exactly('1.0')
     end
 
-    it 'never touches Version.all when a project resolves' do
-      project = double('project', shared_versions: scope_stub([v1]))
+    it 'never widens to every version when a project resolves' do
+      project = double('project', shared_versions: shared_scope_stub([v1]))
       allow(Project).to receive(:find_by).with(identifier: 'proj-a').and_return(project)
 
-      expect(Version).not_to receive(:all)
+      expect(Version).not_to receive(:visible)
 
       build_tag('project: proj-a, assign_to: geo_versions').render(build_context)
     end
@@ -205,7 +279,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
 
       # project: was explicitly requested, so an unresolved project must NOT fall
       # back to the global version set.
-      expect(Version).not_to receive(:all)
+      expect(Version).not_to receive(:visible)
 
       ctx = build_context
       result = build_tag('project: does-not-exist, assign_to: geo_versions').render(ctx)
@@ -221,7 +295,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
 
   describe 'error handling' do
     it 'assigns an empty hash and returns blank when the query raises' do
-      allow(Version).to receive(:all).and_raise(StandardError, 'db error')
+      allow(Version).to receive(:visible).and_raise(StandardError, 'db error')
 
       ctx = build_context
       tag = build_tag('assign_to: geo_versions')
@@ -232,7 +306,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
     end
 
     it 'uses the resolved assign_to name in the rescue path' do
-      allow(Version).to receive(:all).and_raise(StandardError, 'boom')
+      allow(Version).to receive(:visible).and_raise(StandardError, 'boom')
 
       ctx = build_context
       build_tag('assign_to: custom_name').render(ctx)

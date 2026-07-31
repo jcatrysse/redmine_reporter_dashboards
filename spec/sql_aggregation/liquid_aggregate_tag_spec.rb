@@ -70,8 +70,15 @@ class LiquidTagScopeStub
   def not(*);   self; end
   def group(*); self; end
   def unscope(*); self; end
-  def count;    0;    end
+  def count(*);  0;   end
   def base_scope; self; end
+end
+
+# Minimal User stub — the query_id path is visibility-scoped, which needs User.current.
+class LiquidTagUserStub
+  def self.current
+    @current ||= Object.new
+  end
 end
 
 # Minimal IssueStatus stub
@@ -86,6 +93,16 @@ class LiquidTagIssueQueryStub
 
   def initialize(scope)
     @base_scope = scope
+  end
+
+  # Redmine's Query.visible is a class method returning a relation.
+  def self.visible(*args)
+    @visible_args = args
+    self
+  end
+
+  def self.visible_args
+    @visible_args
   end
 
   def self.find_by(id:)
@@ -103,12 +120,17 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   let(:scope)           { LiquidTagScopeStub.new }
   let(:agg_result)      { { 'labels' => ['2026-05'], 'created' => [3], 'closed' => [2], 'open_now' => 5, 'total' => 10, 'period' => 'month', 'periods' => 6 } }
   let(:breakdown_result){ { 'buckets' => [{ 'label' => 'Bug', 'count' => 42 }], 'total' => 42, 'group_by' => 'tracker' } }
+  let(:dimension_result){ { 'buckets' => [{ 'label' => 'Survey', 'count' => 18 }], 'total' => 18, 'group_by' => 'cf_92', 'dimension' => 'cf_92', 'field_name' => 'Department', 'multi_value' => false, 'truncated' => false } }
+  let(:flags_result)    { { 'total' => 49, 'open' => 45, 'flags' => { 'total' => 49 }, 'group_by' => 'flags' } }
 
   before do
     stub_const('IssueStatus', LiquidTagIssueStatusStub)
     stub_const('IssueQuery',  LiquidTagIssueQueryStub)
+    stub_const('User',        LiquidTagUserStub)
     allow(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
     allow(SqlAggregation::QueryAggregator).to receive(:breakdown).and_return(breakdown_result)
+    allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(dimension_result)
+    allow(SqlAggregation::QueryAggregator).to receive(:flags).and_return(flags_result)
   end
 
   def build_tag(markup)
@@ -199,6 +221,35 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       tag.render(ctx)
 
       expect(ctx.scopes.last['stats']['total']).to eq(0)
+    end
+
+    it 'looks the query up through the visibility scope' do
+      build_tag('query_id: 42, assign_to: stats').render(build_context)
+
+      expect(LiquidTagIssueQueryStub.visible_args).to eq([User.current])
+    end
+
+    it 'assigns the empty result for a query the user may not see' do
+      # visible(...) returns a relation that simply does not contain the id.
+      allow(LiquidTagIssueQueryStub).to receive(:visible).and_return(
+        Class.new { def self.find_by(id:); nil; end }
+      )
+      expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
+
+      ctx = build_context
+      build_tag('query_id: 42, assign_to: stats').render(ctx)
+
+      expect(ctx.scopes.last['stats']['total']).to eq(0)
+    end
+
+    it 'logs why an invisible query was skipped' do
+      allow(LiquidTagIssueQueryStub).to receive(:visible).and_return(
+        Class.new { def self.find_by(id:); nil; end }
+      )
+      allow(Rails.logger).to receive(:warn) # the tag also logs "no scope resolved"
+      expect(Rails.logger).to receive(:warn).with(/not visible to the current user/)
+
+      build_tag('query_id: 42, assign_to: stats').render(build_context)
     end
   end
 
@@ -531,6 +582,321 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       tag.render(ctx)
 
       expect(ctx.scopes.last['stats']).to have_key('buckets')
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # Dimension mode — cf_<id>, split_by, period, age, flags
+  # ------------------------------------------------------------------
+
+  describe 'dimension mode' do
+    let(:drop) do
+      obj = Object.new
+      obj.instance_variable_set(:@issues, scope)
+      obj
+    end
+
+    def render(markup, assigns = {})
+      ctx = build_context(assigns.merge('issues' => drop))
+      build_tag(markup).render(ctx)
+      ctx
+    end
+
+    context 'dispatch' do
+      it 'keeps the legacy breakdown path for a core field with no new parameters' do
+        expect(SqlAggregation::QueryAggregator).to receive(:breakdown).with(scope, group_by: 'status')
+        expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+
+        render('from: issues, group_by: status, assign_to: stats')
+      end
+
+      it 'keeps the legacy path for an unknown core-style group_by with no new parameters' do
+        expect(SqlAggregation::QueryAggregator).to receive(:breakdown).with(scope, group_by: 'nonexistent')
+
+        render('from: issues, group_by: nonexistent, assign_to: stats')
+      end
+
+      it 'switches to the dimension path for cf_<id>' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(group_by: 'cf_92'))
+        expect(SqlAggregation::QueryAggregator).not_to receive(:breakdown)
+
+        render('from: issues, group_by: cf_92, assign_to: stats')
+      end
+
+      it 'switches to the dimension path when a core field is combined with a new parameter' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(group_by: 'status', sort: 'label'))
+
+        render('from: issues, group_by: status, sort: label, assign_to: stats')
+      end
+
+      it 'switches to the dimension path for period' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(group_by: 'period'))
+
+        render('from: issues, group_by: period, assign_to: stats')
+      end
+
+      it 'switches to the dimension path for age' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(group_by: 'age'))
+
+        render('from: issues, group_by: age, assign_to: stats')
+      end
+
+      it 'calls flags for group_by: flags' do
+        expect(SqlAggregation::QueryAggregator).to receive(:flags)
+          .with(scope, closed_statuses: ['Closed', 'Rejected'])
+
+        render('from: issues, group_by: flags, closed_statuses: "Closed;Rejected", assign_to: kpi')
+      end
+
+      it 'assigns the flags result' do
+        ctx = render('from: issues, group_by: flags, assign_to: kpi')
+        expect(ctx.scopes.last['kpi']).to eq(flags_result)
+      end
+
+      it 'still runs the time series when neither group_by nor split_by is given' do
+        expect(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
+        expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+
+        render('from: issues, period: month, periods: 6, assign_to: stats')
+      end
+
+      it 'works under the legacy geo_aggregate tag name' do
+        ctx = build_context('issues' => drop)
+        tag = described_class.new('geo_aggregate', 'from: issues, group_by: cf_92, assign_to: stats', [])
+
+        expect(tag.render(ctx)).to eq('')
+        expect(ctx.scopes.last['stats']).to eq(dimension_result)
+      end
+    end
+
+    context 'parameter parsing' do
+      it 'passes split_by' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(group_by: 'cf_92', split_by: 'cf_86'))
+
+        render('from: issues, group_by: cf_92, split_by: cf_86, assign_to: stats')
+      end
+
+      it 'passes nil split_by when it is absent' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(split_by: nil))
+
+        render('from: issues, group_by: cf_92, sort: label, assign_to: stats')
+      end
+
+      it 'passes sort' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(sort: 'position'))
+
+        render('from: issues, group_by: cf_87, sort: position, assign_to: stats')
+      end
+
+      it 'defaults sort to count' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(sort: 'count'))
+
+        render('from: issues, group_by: cf_92, assign_to: stats')
+      end
+
+      it 'passes an invalid sort through so the aggregator can warn and fall back' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(sort: 'banana'))
+
+        render('from: issues, group_by: cf_92, sort: banana, assign_to: stats')
+      end
+
+      it 'passes limit as an integer' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(limit: 10))
+
+        render('from: issues, group_by: cf_99, limit: 10, assign_to: stats')
+      end
+
+      it 'defaults limit to 0' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(limit: 0))
+
+        render('from: issues, group_by: cf_92, assign_to: stats')
+      end
+
+      it 'parses a double-quoted other_label' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(other_label: 'All the rest'))
+
+        render('from: issues, group_by: cf_99, limit: 5, other_label: "All the rest", assign_to: stats')
+      end
+
+      it 'parses a single-quoted empty_label' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(empty_label: 'No department'))
+
+        render("from: issues, group_by: cf_92, empty_label: 'No department', assign_to: stats")
+      end
+
+      it 'passes nil empty_label when it is absent so each dimension keeps its own default' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(empty_label: nil))
+
+        render('from: issues, group_by: cf_92, assign_to: stats')
+      end
+
+      it 'splits age_buckets on semicolons' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(age_buckets: ['7', '30', '90']))
+
+        render('from: issues, group_by: age, age_buckets: "7;30;90", assign_to: stats')
+      end
+
+      it 'splits age_buckets on commas' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(age_buckets: ['7', '30']))
+
+        render('from: issues, group_by: age, age_buckets: "7,30", assign_to: stats')
+      end
+
+      it 'passes nil age_buckets when absent' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(age_buckets: nil))
+
+        render('from: issues, group_by: age, assign_to: stats')
+      end
+
+      it 'passes age_field' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(age_field: 'due'))
+
+        render('from: issues, group_by: age, age_field: due, assign_to: stats')
+      end
+
+      it 'passes date_field' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(date_field: 'closed'))
+
+        render('from: issues, group_by: period, date_field: closed, assign_to: stats')
+      end
+
+      it 'passes user_label' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(user_label: 'login'))
+
+        render('from: issues, group_by: assignee, user_label: login, assign_to: stats')
+      end
+
+      it 'passes period and periods to the period dimension' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(period: 'week', periods: 13))
+
+        render('from: issues, group_by: period, period: week, periods: 13, assign_to: stats')
+      end
+
+      it 'still honours the legacy months alias in dimension mode' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(period: 'month', periods: 12))
+
+        render('from: issues, group_by: period, months: 12, assign_to: stats')
+      end
+
+      it 'resolves a dimension given as a Liquid variable' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(group_by: 'cf_92', split_by: 'cf_86'))
+
+        render('from: issues, group_by: dim, split_by: split, assign_to: stats',
+               'dim' => 'cf_92', 'split' => 'cf_86')
+      end
+
+      it 'resolves limit given as a Liquid variable' do
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .with(scope, hash_including(limit: 7))
+
+        render('from: issues, group_by: cf_99, limit: top_n, assign_to: stats', 'top_n' => 7)
+      end
+    end
+
+    context 'rejected combinations' do
+      it 'rejects split_by without group_by' do
+        expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+        expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
+
+        ctx = render('from: issues, split_by: cf_86, assign_to: stats')
+        expect(ctx.scopes.last['stats']['total']).to eq(0)
+      end
+
+      it 'logs a warning for split_by without group_by' do
+        expect(Rails.logger).to receive(:warn).with(/split_by needs a group_by/)
+
+        render('from: issues, split_by: cf_86, assign_to: stats')
+      end
+
+      it 'rejects split_by: flags' do
+        expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+
+        ctx = render('from: issues, group_by: cf_92, split_by: flags, assign_to: stats')
+        expect(ctx.scopes.last['stats']['total']).to eq(0)
+      end
+
+      it 'logs a warning for split_by: flags' do
+        expect(Rails.logger).to receive(:warn).with(/flags is not a valid split_by/)
+
+        render('from: issues, group_by: cf_92, split_by: flags, assign_to: stats')
+      end
+
+      it 'assigns the empty result when the aggregator rejects the dimension' do
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(nil)
+
+        ctx = render('from: issues, group_by: cf_0, assign_to: stats')
+        expect(ctx.scopes.last['stats']['buckets']).to eq([])
+        expect(ctx.scopes.last['stats']['total']).to eq(0)
+      end
+
+      it 'returns an empty string even when the dimension is rejected' do
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(nil)
+
+        ctx = build_context('issues' => drop)
+        expect(build_tag('from: issues, group_by: cf_0, assign_to: stats').render(ctx)).to eq('')
+      end
+
+      it 'never raises when the dimension aggregation blows up' do
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_raise(StandardError, 'boom')
+
+        ctx = build_context('issues' => drop)
+        expect { build_tag('from: issues, group_by: cf_92, assign_to: stats').render(ctx) }.not_to raise_error
+        expect(ctx.scopes.last['stats']['total']).to eq(0)
+      end
+    end
+
+    context 'empty result' do
+      let(:empty) do
+        ctx = build_context('issues' => nil)
+        build_tag('from: issues, group_by: cf_92, split_by: cf_86, assign_to: stats').render(ctx)
+        ctx.scopes.last['stats']
+      end
+
+      it 'exposes every crosstab key as an empty array' do
+        expect(empty.values_at('series', 'rows', 'matrix', 'columns')).to all(eq([]))
+      end
+
+      it 'exposes flags as an empty hash' do
+        expect(empty['flags']).to eq({})
+      end
+
+      it 'exposes the dimension metadata as nil / false' do
+        expect(empty['dimension']).to be_nil
+        expect(empty['split_by']).to be_nil
+        expect(empty['field_name']).to be_nil
+        expect(empty['series_field_name']).to be_nil
+        expect(empty['multi_value']).to be(false)
+        expect(empty['truncated']).to be(false)
+      end
+
+      it 'keeps the historical time-series keys' do
+        expect(empty.values_at('labels', 'created', 'closed')).to all(eq([]))
+        expect(empty['open_now']).to eq(0)
+        expect(empty['total']).to eq(0)
+      end
     end
   end
 

@@ -13,8 +13,13 @@ class SqlStatsController < ApplicationController
     raw    = params[:months].to_i
     months = raw.positive? ? [raw, 24].min : 6
 
+    # Issue.visible, not Issue.where(project_id:): :view_issues on the project is
+    # not the whole story. Redmine also hides private issues and, per role,
+    # whole trackers. Aggregating over the raw project scope would let a user who
+    # may see *some* issues read totals, statuses and a time series covering the
+    # ones they may not.
     result = SqlAggregation::QueryAggregator.aggregate(
-      Issue.where(project_id: project.id),
+      Issue.visible(User.current, project: project),
       period:  'month',
       periods: months
     )

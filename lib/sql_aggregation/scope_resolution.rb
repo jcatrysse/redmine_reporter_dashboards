@@ -74,12 +74,21 @@ module SqlAggregation
       nil
     end
 
+    # IssueQuery.visible, not IssueQuery.find_by: base_scope starts from
+    # Issue.visible, so issue data never leaks — but an arbitrary id would still
+    # let a template aggregate through someone else's private query and learn
+    # that it exists. Redmine's own query lookups are visibility-scoped; so is
+    # this one.
     def scope_from_query_id(param, context)
       qid = (context[param] || param).to_i
       return nil if qid.zero?
 
-      query = IssueQuery.find_by(id: qid)
-      return nil unless query
+      query = IssueQuery.visible(User.current).find_by(id: qid)
+      if query.nil?
+        Rails.logger.warn("[sql_aggregation] query ##{qid} does not exist or is not visible " \
+                          'to the current user — skipping aggregation')
+        return nil
+      end
 
       query.base_scope
     rescue => e
