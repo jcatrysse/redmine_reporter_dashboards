@@ -26,15 +26,33 @@ class ReporterProjectTabsController < ApplicationController
     end
   end
 
+  # "At least one tab must remain" was checked with a count and then acted on, which
+  # is a race: two people deleting the last two tabs at the same moment both saw a
+  # count of 2, and both deletes went through. The count, the choice of the tab to
+  # land on and the delete now happen under a lock on the project row, so the second
+  # request sees the first one's result and is refused.
+  #
+  # A project that has never had its dashboard written to legitimately has no tabs at
+  # all — `show` renders an unsaved default one — but that state cannot reach this
+  # action, because find_tab resolves the tab by id and 404s when it is gone.
   def destroy
-    if @project.reporter_project_tabs.count <= 1
-      flash[:error] = l(:label_reporter_dashboard_tabs_required)
-      redirect_to project_reporter_page_path(@project, tab: @tab.id, anchor: 'reporter-dashboard-settings')
-    else
-      next_id = @project.reporter_project_tabs.where.not(id: @tab.id).order(:position).first&.id
-      @tab.destroy
-      redirect_to project_reporter_page_path(@project, tab: next_id, anchor: 'reporter-dashboard-settings')
+    next_id = nil
+
+    destroyed = @project.with_lock do
+      if @project.reporter_project_tabs.count <= 1
+        false
+      else
+        next_id = @project.reporter_project_tabs.where.not(id: @tab.id).order(:position).first&.id
+        @tab.destroy
+      end
     end
+
+    unless destroyed
+      flash[:error] = l(:label_reporter_dashboard_tabs_required)
+      next_id = @tab.id
+    end
+
+    redirect_to project_reporter_page_path(@project, tab: next_id, anchor: 'reporter-dashboard-settings')
   end
 
   def order

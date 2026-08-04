@@ -10,6 +10,8 @@ zh:
   label_reporter_report_template: 报告模板
   label_reporter_export_report_pdf: 导出报告为 PDF
   error_reporter_pdf_generation_failed: 无法生成报表 PDF。请重试或联系管理员。
+  error_reporter_dashboard_save_failed: 无法保存仪表板。
+  error_reporter_widget_render_failed: 无法显示此小部件。详情请查看应用程序日志。
   label_move_left: 向左移动
   label_move_right: 向右移动
   label_move_up: 向上移动

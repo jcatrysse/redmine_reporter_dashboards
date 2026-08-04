@@ -32,7 +32,13 @@ class RollupScope
     self
   end
 
+  # The cost join is now an aliased raw INNER join carrying the field's visibility
+  # clause, so the field id is read out of the SQL instead of a where(custom_values:).
   def joins(assoc)
+    if assoc.is_a?(String) && (match = assoc[/custom_field_id = (\d+)/, 1])
+      return fork(cf_id: match.to_i)
+    end
+
     fork(join: assoc)
   end
 
@@ -102,6 +108,31 @@ class RollupScope
   end
 end
 
+# A numeric issue custom field, visible to everyone.
+class RollupCostFieldStub
+  attr_reader :id
+
+  def initialize(id)
+    @id = id
+  end
+
+  def name
+    "Cost #{@id}"
+  end
+
+  def type
+    'IssueCustomField'
+  end
+
+  def field_format
+    'float'
+  end
+
+  def visibility_by_project_condition
+    '1=1'
+  end
+end
+
 RSpec.describe SqlAggregation::QueryAggregator do
   describe '.version_rollup' do
     before do
@@ -117,6 +148,22 @@ RSpec.describe SqlAggregation::QueryAggregator do
       stub_const('CustomValue', Class.new do
         def self.table_name
           'custom_values'
+        end
+      end)
+      # version_rollup now resolves each cost field, so it can refuse a restricted one
+      # and put the field's own visibility clause in the join.
+      stub_const('User', Class.new { def self.current; :viewer; end })
+      stub_const('CustomField', Class.new do
+        def self.find_by(id:)
+          RollupCostFieldStub.new(id.to_i)
+        end
+
+        def self.visible(_user)
+          self
+        end
+
+        def self.exists?(id:)
+          true
         end
       end)
     end
@@ -191,6 +238,65 @@ RSpec.describe SqlAggregation::QueryAggregator do
     it 'returns an empty array when there are no issues' do
       empty = RollupScope.new(total: {})
       expect(described_class.version_rollup(empty)).to eq([])
+    end
+
+    it 'restricts spent time to the entries the viewer may see' do
+      # Redmine applies TimeEntry.visible_condition everywhere it reports spent time.
+      stub_const('TimeEntry', Class.new do
+        def self.visible_condition(_user)
+          'projects.id IN (1,2)'
+        end
+      end)
+      conditions = []
+      allow_any_instance_of(RollupScope).to receive(:where).and_wrap_original do |original, *args|
+        conditions << args.first
+        original.call(*args)
+      end
+      described_class.version_rollup(scope, closed_statuses: ['Closed'])
+      expect(conditions.grep(String).join(' ')).to include('projects.id IN (1,2)')
+    end
+
+    it 'carries the field visibility clause into each cost join' do
+      joins = []
+      allow_any_instance_of(RollupScope).to receive(:joins).and_wrap_original do |original, *args|
+        joins << args.first
+        original.call(*args)
+      end
+      described_class.version_rollup(scope, closed_statuses: ['Closed'], cost_field_ids: [20])
+      cost_join = joins.grep(String).find { |j| j.include?('custom_field_id = 20') }
+      expect(cost_join).to include('INNER JOIN custom_values rrd_cv_cost0', '1=1')
+    end
+
+    it 'gives each cost field its own alias, so two of them cannot collide' do
+      joins = []
+      allow_any_instance_of(RollupScope).to receive(:joins).and_wrap_original do |original, *args|
+        joins << args.first
+        original.call(*args)
+      end
+      described_class.version_rollup(scope, closed_statuses: ['Closed'], cost_field_ids: [20, 21])
+      aliases = joins.grep(String).map { |j| j[/rrd_cv_cost\d/] }.compact
+      expect(aliases).to eq(%w[rrd_cv_cost0 rrd_cv_cost1])
+    end
+
+    it 'skips a cost field the viewer may not see' do
+      stub_const('CustomField', Class.new do
+        def self.find_by(id:)
+          RollupCostFieldStub.new(id.to_i)
+        end
+
+        def self.visible(_user)
+          self
+        end
+
+        def self.exists?(id:)
+          id.to_i == 21
+        end
+      end)
+      allow(Rails.logger).to receive(:warn)
+      expect(Rails.logger).to receive(:warn).with(/cost field #20 is not a usable issue custom field/)
+      rows = described_class.version_rollup(scope, closed_statuses: ['Closed'],
+                                                   cost_field_ids: [20, 21])
+      expect(rows.first['cost'].keys).to eq(['21'])
     end
 
     it 'skips the cost queries when no cost_field_ids are given' do

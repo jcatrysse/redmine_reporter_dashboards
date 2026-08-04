@@ -72,6 +72,8 @@ class LiquidTagScopeStub
   def unscope(*); self; end
   def count(*);  0;   end
   def base_scope; self; end
+  # ScopeResolution intersects a drop-resolved scope with Issue.visible.
+  def merge(*); self; end
 end
 
 # Minimal User stub — the query_id path is visibility-scoped, which needs User.current.
@@ -90,9 +92,20 @@ end
 # Minimal IssueQuery stub
 class LiquidTagIssueQueryStub
   attr_reader :base_scope
+  attr_writer :visible
 
   def initialize(scope)
     @base_scope = scope
+    @visible    = true
+  end
+
+  def id
+    42
+  end
+
+  # Query#visible? — the drill-through gate calls it for every source.
+  def visible?(*)
+    @visible
   end
 
   # Redmine's Query.visible is a class method returning a relation.
@@ -113,6 +126,119 @@ class LiquidTagIssueQueryStub
   def self.register(id, scope)
     @registry ||= {}
     @registry[id] = new(scope)
+  end
+end
+
+# Redmine's SortCriteria, reduced to the one method Query#as_params calls.
+class DrillTagSortCriteria
+  def initialize(param = 'priority:desc')
+    @param = param
+  end
+
+  def to_param
+    @param
+  end
+end
+
+DrillTagProject = Struct.new(:id, :identifier)
+
+# An IssueQuery stub that answers BOTH roles the tag needs: base_scope for the
+# aggregation and the drill-through API (filters / columns / grouping / totals /
+# sort / available_filters / as_params) for the URLs. #as_params is transcribed
+# from Query#as_params, new_record? branch.
+class DrillTagQueryStub
+  class << self
+    attr_accessor :available_filters_config
+
+    # Redmine's Query.visible is a class method returning a relation.
+    def visible(*)
+      self
+    end
+
+    def registry
+      @registry ||= {}
+    end
+
+    def find_by(id:)
+      registry[id]
+    end
+  end
+  self.available_filters_config = {
+    'status_id'      => { type: :list_status },
+    'assigned_to_id' => { type: :list_optional },
+    'due_date'       => { type: :date },
+    'created_on'     => { type: :date_past },
+    'cf_92'          => { type: :list_optional },
+    'cf_86'          => { type: :list_optional }
+  }
+
+  attr_accessor :filters, :column_names, :group_by, :totalable_names, :sort_criteria
+  attr_reader :project, :base_scope
+
+  def initialize(scope = nil, name: '_', project: nil)
+    @base_scope      = scope
+    @name            = name
+    @project         = project
+    @filters         = { 'status_id' => { operator: 'o', values: [''] } }
+    @column_names    = %i[tracker status subject]
+    @group_by        = nil
+    @totalable_names = []
+    @sort_criteria   = DrillTagSortCriteria.new
+  end
+
+  def available_filters
+    self.class.available_filters_config
+  end
+
+  def id
+    7
+  end
+
+  def visible?(*)
+    true
+  end
+
+  def type_for(field)
+    available_filters[field] && available_filters[field][:type]
+  end
+
+  # Query.operators_by_filter_type, transcribed for the types used here.
+  def operators_by_filter_type
+    {
+      list: ['=', '!'],
+      list_status: ['o', '=', '!', 'ev', '!ev', 'cf', 'c', '*'],
+      list_optional: ['=', '!', '!*', '*'],
+      date: ['=', '>=', '<=', '><', '!*', '*'],
+      date_past: ['=', '>=', '<=', '><', '!*', '*']
+    }
+  end
+
+  def as_params
+    params = {}
+    filters.each do |field, options|
+      params[:f] ||= []
+      params[:f] << field
+      params[:op] ||= {}
+      params[:op][field] = options[:operator]
+      params[:v] ||= {}
+      params[:v][field] = options[:values]
+    end
+    params[:c] = column_names
+    params[:group_by] = group_by.to_s unless group_by.nil? || group_by.to_s.empty?
+    params[:t] = totalable_names.map(&:to_s) if totalable_names.any?
+    params[:sort] = sort_criteria.to_param
+    params[:set_filter] = 1
+    params
+  end
+end
+
+class DrillTagSettingStub
+  def self.protocol
+    'https'
+  end
+
+  def self.host_name
+    'redmine.example'
   end
 end
 
@@ -897,6 +1023,942 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
         expect(empty['open_now']).to eq(0)
         expect(empty['total']).to eq(0)
       end
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # group_by: completeness
+  # ------------------------------------------------------------------
+
+  describe 'group_by: completeness' do
+    let(:drop) do
+      obj = Object.new
+      obj.instance_variable_set(:@issues, scope)
+      obj
+    end
+
+    let(:completeness_result) do
+      {
+        'buckets' => [
+          { 'label' => 'Vessel', 'count' => 34, 'empty' => 15, 'total' => 49, 'pct' => 69,
+            'value' => 'cf_94',
+            'filter'       => { 'field' => 'cf_94', 'operator' => '*',  'values' => [''] },
+            'empty_filter' => { 'field' => 'cf_94', 'operator' => '!*', 'values' => [''] } },
+          # status_id is :list_status, which offers * but NOT !* — the case where only
+          # half of the pair can be linked.
+          { 'label' => 'Status', 'count' => 49, 'empty' => 0, 'total' => 49, 'pct' => 100,
+            'value' => 'status_id',
+            'filter'       => { 'field' => 'status_id', 'operator' => '*',  'values' => [''] },
+            'empty_filter' => { 'field' => 'status_id', 'operator' => '!*', 'values' => [''] } }
+        ],
+        'total' => 49, 'group_by' => 'completeness', 'dimension' => 'completeness',
+        'fields' => %w[cf_94 status_id]
+      }
+    end
+
+    before { allow(SqlAggregation::QueryAggregator).to receive(:completeness).and_return(completeness_result) }
+
+    def render(markup, assigns = {})
+      ctx = build_context(assigns.merge('issues' => drop))
+      build_tag(markup).render(ctx)
+      ctx
+    end
+
+    it 'splits the fields list on semicolons' do
+      expect(SqlAggregation::QueryAggregator).to receive(:completeness)
+        .with(scope, fields: %w[cf_94 cf_99 assigned_to_id])
+
+      render('from: issues, group_by: completeness, fields: "cf_94;cf_99;assigned_to_id", assign_to: x')
+    end
+
+    it 'splits on commas as well' do
+      expect(SqlAggregation::QueryAggregator).to receive(:completeness)
+        .with(scope, fields: %w[cf_94 due_date])
+
+      render('from: issues, group_by: completeness, fields: "cf_94,due_date", assign_to: x')
+    end
+
+    it 'passes nil when fields is absent, so the aggregator does the complaining' do
+      expect(SqlAggregation::QueryAggregator).to receive(:completeness).with(scope, fields: nil)
+
+      render('from: issues, group_by: completeness, assign_to: x')
+    end
+
+    it 'never calls the dimension path' do
+      expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+      expect(SqlAggregation::QueryAggregator).not_to receive(:breakdown)
+
+      render('from: issues, group_by: completeness, fields: "due_date", assign_to: x')
+    end
+
+    it 'assigns the result' do
+      ctx = render('from: issues, group_by: completeness, fields: "cf_94", assign_to: x')
+      expect(ctx.scopes.last['x']['buckets'].first['pct']).to eq(69)
+    end
+
+    it 'assigns the empty result when the aggregator refuses' do
+      allow(SqlAggregation::QueryAggregator).to receive(:completeness).and_return(nil)
+      ctx = render('from: issues, group_by: completeness, assign_to: x')
+      expect(ctx.scopes.last['x']['fields']).to eq([])
+      expect(ctx.scopes.last['x']['total']).to eq(0)
+    end
+
+    it 'warns that completeness ignores the measure' do
+      expect(Rails.logger).to receive(:warn).with(/measure: is ignored by group_by: completeness/)
+      render('from: issues, group_by: completeness, fields: "due_date", measure: distinct, ' \
+             'of: author, assign_to: x')
+    end
+
+    it 'is rejected as a split_by' do
+      expect(Rails.logger).to receive(:warn).with(/completeness is not a valid split_by/)
+      ctx = render('from: issues, group_by: cf_92, split_by: completeness, assign_to: x')
+      expect(ctx.scopes.last['x']['total']).to eq(0)
+    end
+
+    describe 'with drill: true' do
+      let(:project) { DrillTagProject.new(7, 'ops') }
+      let(:query)   { DrillTagQueryStub.new(scope, project: project) }
+
+      before do
+        stub_const('IssueQuery', DrillTagQueryStub)
+        stub_const('Setting', DrillTagSettingStub)
+        DrillTagQueryStub.available_filters_config =
+          DrillTagQueryStub.available_filters_config.merge('cf_94' => { type: :list_optional })
+      end
+
+      after do
+        DrillTagQueryStub.available_filters_config =
+          DrillTagQueryStub.available_filters_config.reject { |key, _| key == 'cf_94' }
+      end
+
+      subject(:res) do
+        ctx = build_context({}, { sql_issue_query: query })
+        build_tag('group_by: completeness, fields: "cf_94;status_id", drill: true, assign_to: x')
+          .render(ctx)
+        ctx.scopes.last['x']
+      end
+
+      it 'links the filled side with the is-set operator' do
+        expect(res['buckets'].first['url']).to include('op%5Bcf_94%5D=%2A')
+      end
+
+      it 'links the empty side separately, with the is-not-set operator' do
+        expect(res['buckets'].first['empty_url']).to include('op%5Bcf_94%5D=%21%2A')
+      end
+
+      it 'never puts the empty link in url' do
+        expect(res['buckets'].first['url']).not_to include('%21%2A')
+      end
+
+      it 'leaves empty_url nil where Redmine does not allow the not-set operator' do
+        expect(res['buckets'].last['empty_url']).to be_nil
+      end
+
+      it 'still links the filled side of that same field' do
+        expect(res['buckets'].last['url']).to include('op%5Bstatus_id%5D=%2A')
+      end
+
+      it 'inherits the report query filters in both links' do
+        expect(res['buckets'].first['url']).to include('f%5B%5D=status_id')
+        expect(res['buckets'].first['empty_url']).to include('f%5B%5D=status_id')
+      end
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # measure: / of:
+  # ------------------------------------------------------------------
+
+  describe 'measure' do
+    let(:drop) do
+      obj = Object.new
+      obj.instance_variable_set(:@issues, scope)
+      obj
+    end
+
+    def render(markup)
+      ctx = build_context('issues' => drop)
+      build_tag(markup).render(ctx)
+      ctx
+    end
+
+    it 'defaults to count' do
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(measure: 'count', of: ''))
+
+      render('from: issues, group_by: cf_92, assign_to: stats')
+    end
+
+    it 'passes the measure and its field through' do
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(measure: 'distinct', of: 'author'))
+
+      render('from: issues, group_by: period, measure: distinct, of: author, assign_to: stats')
+    end
+
+    it 'leaves the legacy breakdown path for a real measure' do
+      expect(SqlAggregation::QueryAggregator).not_to receive(:breakdown)
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(measure: 'distinct'))
+
+      render('from: issues, group_by: status, measure: distinct, of: author, assign_to: stats')
+    end
+
+    it 'keeps the legacy breakdown path for measure: count' do
+      expect(SqlAggregation::QueryAggregator).to receive(:breakdown).with(scope, group_by: 'status')
+      expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+
+      render('from: issues, group_by: status, measure: count, assign_to: stats')
+    end
+
+    it 'switches to the dimension path for of: alone, so it is never silently ignored' do
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(of: 'author'))
+
+      render('from: issues, group_by: status, of: author, assign_to: stats')
+    end
+
+    it 'resolves the measure from a Liquid variable' do
+      ctx = build_context('issues' => drop, 'm' => 'distinct')
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(measure: 'distinct'))
+
+      build_tag('from: issues, group_by: cf_92, measure: m, of: author, assign_to: stats').render(ctx)
+    end
+
+    it 'warns that the time series always counts issues' do
+      expect(Rails.logger).to receive(:warn).with(/measure: needs a group_by/)
+
+      render('from: issues, measure: distinct, of: author, assign_to: stats')
+    end
+
+    it 'warns that flags ignores the measure' do
+      expect(Rails.logger).to receive(:warn).with(/measure: is ignored by group_by: flags/)
+
+      render('from: issues, group_by: flags, measure: distinct, of: author, assign_to: kpi')
+    end
+
+    it 'assigns the empty result when the aggregator refuses the measure' do
+      allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(nil)
+
+      ctx = render('from: issues, group_by: cf_92, measure: sum, of: cf_96, assign_to: stats')
+      expect(ctx.scopes.last['stats']['total']).to eq(0)
+      expect(ctx.scopes.last['stats']['measure']).to be_nil
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # Visibility of a drop-resolved scope
+  # ------------------------------------------------------------------
+
+  describe 'a scope resolved from a drop' do
+    # Issue.visible is the guarantee the register and query_id paths get for free from
+    # base_scope; a drop is whatever the render context happens to hold.
+    let(:visible_marker) { LiquidTagScopeStub.new }
+
+    let(:issue_class) do
+      marker = visible_marker
+      Class.new do
+        define_singleton_method(:_marker) { marker }
+        define_singleton_method(:visible) { |_user| _marker }
+      end
+    end
+
+    let(:drop) do
+      obj = Object.new
+      obj.instance_variable_set(:@issues, scope)
+      obj
+    end
+
+    before { stub_const('Issue', issue_class) }
+
+    it 'is intersected with what the current user may see' do
+      merged = LiquidTagScopeStub.new
+      expect(scope).to receive(:merge).with(visible_marker).and_return(merged)
+      expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
+        .with(merged, anything).and_return(agg_result)
+
+      build_tag('from: issues, assign_to: stats').render(build_context('issues' => drop))
+    end
+
+    it 'leaves the register path alone — base_scope is Issue.visible already' do
+      query = LiquidTagIssueQueryStub.new(scope)
+      expect(scope).not_to receive(:merge)
+      expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
+        .with(scope, anything).and_return(agg_result)
+
+      build_tag('from: issues, assign_to: stats')
+        .render(build_context({}, { sql_issue_query: query }))
+    end
+
+    it 'leaves the query_id path alone for the same reason' do
+      LiquidTagIssueQueryStub.register(42, scope)
+      expect(scope).not_to receive(:merge)
+
+      build_tag('query_id: 42, assign_to: stats').render(build_context)
+    end
+
+    it 'uses the scope as resolved when the intersection cannot be applied' do
+      allow(scope).to receive(:merge).and_raise(StandardError, 'not a relation')
+      expect(Rails.logger).to receive(:warn).with(/could not intersect the resolved scope/)
+      expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
+        .with(scope, anything).and_return(agg_result)
+
+      build_tag('from: issues, assign_to: stats').render(build_context('issues' => drop))
+    end
+
+    it 'still returns nil when the drop resolves to nothing' do
+      ctx = build_context('issues' => nil)
+      build_tag('from: issues, assign_to: stats').render(ctx)
+      expect(ctx.scopes.last['stats']['total']).to eq(0)
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # IssueQuery resolution (drill-through prerequisite)
+  # ------------------------------------------------------------------
+
+  describe '#resolve_query' do
+    let(:query) { LiquidTagIssueQueryStub.new(scope) }
+
+    def resolve(markup, assigns = {}, registers = {})
+      build_tag(markup).resolve_query(build_context(assigns, registers))
+    end
+
+    after { Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = nil }
+
+    it 'resolves the query_id param through the visibility scope' do
+      LiquidTagIssueQueryStub.register(42, scope)
+      expect(resolve('query_id: 42')).to be(LiquidTagIssueQueryStub.find_by(id: 42))
+      expect(LiquidTagIssueQueryStub.visible_args).to eq([User.current])
+    end
+
+    it 'resolves a query_id given as a Liquid variable' do
+      LiquidTagIssueQueryStub.register(7, scope)
+      expect(resolve('query_id: my_qid', 'my_qid' => 7)).not_to be_nil
+    end
+
+    it 'returns nil — never raises — for a query the user may not see' do
+      allow(LiquidTagIssueQueryStub).to receive(:visible).and_return(
+        Class.new { def self.find_by(id:); nil; end }
+      )
+      expect { resolve('query_id: 42') }.not_to raise_error
+      expect(resolve('query_id: 42')).to be_nil
+    end
+
+    it 'does not fall back to the registers when an explicit query_id fails' do
+      allow(LiquidTagIssueQueryStub).to receive(:visible).and_return(
+        Class.new { def self.find_by(id:); nil; end }
+      )
+      expect(resolve('query_id: 999', {}, { sql_issue_query: query })).to be_nil
+    end
+
+    it 'resolves the :sql_issue_query register' do
+      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be(query)
+    end
+
+    it 'resolves the :container register when it IS an IssueQuery' do
+      expect(resolve('from: issues', {}, { container: query })).to be(query)
+    end
+
+    it 'resolves the @query ivar of the :container register' do
+      container = Object.new
+      container.instance_variable_set(:@query, query)
+      expect(resolve('from: issues', {}, { container: container })).to be(query)
+    end
+
+    it 'resolves the @query ivar of the :controller register' do
+      controller = double('controller')
+      allow(controller).to receive(:instance_variable_get).with(:@query).and_return(query)
+      expect(resolve('from: issues', {}, { controller: controller })).to be(query)
+    end
+
+    it 'resolves the thread-local ReporterListPatch sets' do
+      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = query
+      expect(resolve('from: issues')).to be(query)
+    end
+
+    it 'prefers the registers over the thread-local' do
+      other = LiquidTagIssueQueryStub.new(LiquidTagScopeStub.new)
+      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = other
+      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be(query)
+    end
+
+    it 'prefers :sql_issue_query over :container and :controller' do
+      other      = LiquidTagIssueQueryStub.new(LiquidTagScopeStub.new)
+      controller = double('controller')
+      allow(controller).to receive(:instance_variable_get).with(:@query).and_return(other)
+      registers = { sql_issue_query: query, container: other, controller: controller }
+      expect(resolve('from: issues', {}, registers)).to be(query)
+    end
+
+    it 'refuses a query the viewer may not see, whatever the source' do
+      query.visible = false
+      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be_nil
+    end
+
+    it 'refuses an invisible query from the thread-local too' do
+      # ReporterListPatch resolves it with a bare find_by, because that lookup also
+      # feeds base_scope — so the gate has to sit on the reading side.
+      query.visible = false
+      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = query
+      expect(resolve('from: issues')).to be_nil
+    end
+
+    it 'says why an invisible query was refused' do
+      query.visible = false
+      expect(Rails.logger).to receive(:warn).with(/not visible to the current user/)
+      resolve('from: issues', {}, { sql_issue_query: query })
+    end
+
+    it 'never raises when the visibility check itself blows up' do
+      allow(query).to receive(:visible?).and_raise(StandardError, 'no user')
+      expect { resolve('from: issues', {}, { sql_issue_query: query }) }.not_to raise_error
+      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be_nil
+    end
+
+    it 'accepts a query object that has no visible? at all' do
+      bare = Class.new(LiquidTagIssueQueryStub) { undef_method :visible? }.new(scope)
+      stub_const('IssueQuery', bare.class)
+      expect(resolve('from: issues', {}, { sql_issue_query: bare })).to be(bare)
+    end
+
+    it 'returns nil when nothing holds a query' do
+      expect(resolve('from: issues')).to be_nil
+    end
+
+    it 'ignores a register that is not an IssueQuery' do
+      expect(resolve('from: issues', {}, { container: scope, controller: Object.new })).to be_nil
+    end
+
+    it 'ignores a thread-local that is not an IssueQuery' do
+      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = scope
+      expect(resolve('from: issues')).to be_nil
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # drill: true
+  # ------------------------------------------------------------------
+
+  describe 'drill: true' do
+    let(:project) { DrillTagProject.new(7, 'ops') }
+    let(:query)   { DrillTagQueryStub.new(scope, project: project) }
+
+    let(:dimension_with_filters) do
+      {
+        'buckets' => [
+          { 'label' => 'Survey', 'count' => 18, 'value' => '415',
+            'filter' => { 'field' => 'cf_92', 'operator' => '=', 'values' => ['415'] } },
+          { 'label' => 'Other', 'count' => 3, 'value' => nil, 'values' => %w[580 581],
+            'filter' => { 'field' => 'cf_92', 'operator' => '=', 'values' => %w[580 581] } },
+          { 'label' => '(none)', 'count' => 5, 'value' => nil,
+            'filter' => { 'field' => 'cf_92', 'operator' => '!*', 'values' => [''] } },
+          { 'label' => 'Unfilterable', 'count' => 1, 'value' => 'x', 'filter' => nil }
+        ],
+        'total' => 27, 'group_by' => 'cf_92', 'dimension' => 'cf_92'
+      }
+    end
+
+    let(:crosstab_with_filters) do
+      {
+        'series' => ['Positive', 'Negative'],
+        'series_entries' => [
+          { 'label' => 'Positive', 'value' => '345',
+            'filter' => { 'field' => 'cf_86', 'operator' => '=', 'values' => ['345'] } },
+          { 'label' => 'Negative', 'value' => '346', 'filter' => nil }
+        ],
+        'rows' => [
+          { 'label' => 'Survey', 'total' => 4, 'counts' => [4, 0], 'value' => '415',
+            'filter' => { 'field' => 'cf_92', 'operator' => '=', 'values' => ['415'] } },
+          { 'label' => '(none)', 'total' => 1, 'counts' => [0, 1], 'value' => nil,
+            'filter' => { 'field' => 'cf_92', 'operator' => '!*', 'values' => [''] } }
+        ],
+        'matrix' => [[4, 0], [0, 1]],
+        'buckets' => [], 'total' => 5, 'group_by' => 'cf_92', 'split_by' => 'cf_86'
+      }
+    end
+
+    let(:flags_with_stages) do
+      {
+        'total' => 49, 'assigned' => 24, 'with_due_date' => 7, 'closed' => 4,
+        'flags' => { 'total' => 49 }, 'buckets' => [], 'group_by' => 'flags',
+        'stages' => [
+          { 'key' => 'total', 'label' => 'Registered', 'count' => 49, 'filter' => nil },
+          { 'key' => 'assigned', 'label' => 'Has assignee', 'count' => 24,
+            'filter' => { 'field' => 'assigned_to_id', 'operator' => '*', 'values' => [''] } },
+          { 'key' => 'with_due_date', 'label' => 'Has due date', 'count' => 7,
+            'filter' => { 'field' => 'due_date', 'operator' => '*', 'values' => [''] } },
+          { 'key' => 'closed', 'label' => 'Closed', 'count' => 4,
+            'filter' => { 'field' => 'status_id', 'operator' => 'c', 'values' => [''] } }
+        ]
+      }
+    end
+
+    before do
+      stub_const('IssueQuery', DrillTagQueryStub)
+      stub_const('Setting', DrillTagSettingStub)
+    end
+
+    # registers hold the query; the same object answers base_scope, so the
+    # aggregation and the URLs come from one source, exactly as in production.
+    def render(markup, result: dimension_with_filters, registers: nil)
+      allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(result)
+      allow(SqlAggregation::QueryAggregator).to receive(:flags).and_return(result)
+      ctx = build_context({}, registers.nil? ? { sql_issue_query: query } : registers)
+      build_tag(markup).render(ctx)
+      ctx.scopes.last['stats']
+    end
+
+    describe 'a breakdown' do
+      subject(:res) { render('group_by: cf_92, drill: true, assign_to: stats') }
+
+      it 'reports drill-through as available' do
+        expect(res['drill_available']).to be(true)
+      end
+
+      it 'exposes the report query itself as base_url' do
+        expect(res['base_url']).to start_with('https://redmine.example/projects/ops/issues?')
+        expect(res['base_url']).to include('set_filter=1')
+      end
+
+      it 'gives every expressible bucket a URL' do
+        expect(res['buckets'][0]['url']).to include('v%5Bcf_92%5D%5B%5D=415')
+      end
+
+      it 'inherits the report filters in every element URL' do
+        expect(res['buckets'][0]['url']).to include('f%5B%5D=status_id', 'op%5Bstatus_id%5D=o')
+      end
+
+      it 'links an Other row to the union of its collapsed values' do
+        expect(res['buckets'][1]['url']).to include('v%5Bcf_92%5D%5B%5D=580', 'v%5Bcf_92%5D%5B%5D=581')
+      end
+
+      it 'links the empty bucket with the "none" operator' do
+        expect(res['buckets'][2]['url']).to include('op%5Bcf_92%5D=%21%2A')
+      end
+
+      it 'leaves an inexpressible bucket without a URL' do
+        expect(res['buckets'][3]['url']).to be_nil
+      end
+
+      it 'keeps the labels and counts it was given' do
+        expect(res['buckets'].map { |b| b['label'] })
+          .to eq(['Survey', 'Other', '(none)', 'Unfilterable'])
+        expect(res['buckets'].map { |b| b['count'] }).to eq([18, 3, 5, 1])
+      end
+
+      it 'leaves the legacy breakdown path for drill: true' do
+        expect(SqlAggregation::QueryAggregator).not_to receive(:breakdown)
+        expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .and_return(dimension_with_filters)
+
+        ctx = build_context({}, { sql_issue_query: query })
+        build_tag('group_by: status, drill: true, assign_to: stats').render(ctx)
+      end
+
+      it 'keeps the legacy breakdown path for a falsy drill' do
+        expect(SqlAggregation::QueryAggregator).to receive(:breakdown).and_return(breakdown_result)
+        expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+
+        ctx = build_context({}, { sql_issue_query: query })
+        build_tag('group_by: status, drill: false, assign_to: stats').render(ctx)
+      end
+
+      it 'accepts drill given as a Liquid boolean variable' do
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .and_return(dimension_with_filters)
+        ctx = build_context({ 'enabled' => true }, { sql_issue_query: query })
+        build_tag('group_by: cf_92, drill: enabled, assign_to: stats').render(ctx)
+        expect(ctx.scopes.last['stats']['drill_available']).to be(true)
+      end
+
+      # The base URL is ~186 characters and a filtered one ~241, so a 200 cap
+      # keeps the base and refuses every element instead of truncating one.
+      # Liquid parses a template once and renders the same tag instance again,
+      # possibly concurrently and with different assigns, so nothing that depends
+      # on the context may be cached on the tag.
+      it 'reads drill from the context of every render, not just the first' do
+        # A fresh result per call, exactly as the aggregator produces one.
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown) do
+          Marshal.load(Marshal.dump(dimension_with_filters))
+        end
+        tag = build_tag('group_by: cf_92, drill: enabled, assign_to: stats')
+
+        first = build_context({ 'enabled' => true }, { sql_issue_query: query })
+        tag.render(first)
+        second = build_context({ 'enabled' => false }, { sql_issue_query: query })
+        tag.render(second)
+
+        expect(first.scopes.last['stats']['drill_available']).to be(true)
+        expect(second.scopes.last['stats']).not_to have_key('drill_available')
+      end
+
+      # A full element URL is ~241 characters here and ~194 without the inherited
+      # columns, so a 200 cap keeps the link and sheds only the cosmetics.
+      context 'with a drill_max_url that the full URL does not fit' do
+        subject(:res) { render('group_by: cf_92, drill: true, drill_max_url: 200, assign_to: stats') }
+
+        it 'keeps the link and drops the inherited columns instead' do
+          expect(res['buckets'][0]['url']).not_to be_nil
+          expect(res['buckets'][0]['url']).not_to include('c%5B%5D')
+        end
+
+        it 'keeps the filters, which are what makes the URL match the element' do
+          expect(res['buckets'][0]['url']).to include('f%5B%5D=cf_92', 'f%5B%5D=status_id')
+        end
+
+        it 'reports the degradation so a template can explain the layout' do
+          expect(res['drill_degraded']).to be(true)
+        end
+
+        it 'says so once in the log' do
+          allow(Rails.logger).to receive(:warn) # the base URL logs its own degradation first
+          expect(Rails.logger).to receive(:warn).once.with(/for cf_92 is \d+ characters, over the 200 cap/)
+          render('group_by: cf_92, drill: true, drill_max_url: 200, assign_to: stats')
+        end
+      end
+
+      context 'with a drill_max_url that not even the filters fit' do
+        subject(:res) { render('group_by: cf_92, drill: true, drill_max_url: 170, assign_to: stats') }
+
+        it 'gives up on the element URLs rather than truncating one' do
+          expect(res['buckets'].map { |b| b['url'] }).to all(be_nil)
+        end
+
+        it 'still reports the base URL, which does fit' do
+          expect(res['drill_available']).to be(true)
+          expect(res['base_url']).not_to be_nil
+        end
+
+        it 'logs the real length and the cap' do
+          allow(Rails.logger).to receive(:warn) # the degradation ladder logs on the way down
+          expect(Rails.logger).to receive(:warn)
+            .with(/still \d+ characters with filters alone, over the 170 cap/)
+          render('group_by: cf_92, drill: true, drill_max_url: 170, assign_to: stats')
+        end
+      end
+
+      it 'keeps the whole URL, columns and all, at the default cap' do
+        res = render('group_by: cf_92, drill: true, assign_to: stats')
+        expect(res['buckets'][0]['url']).to include('c%5B%5D=tracker')
+        expect(res['drill_degraded']).to be(false)
+      end
+
+      describe 'drill_inherit' do
+        it 'inherits everything by default' do
+          res = render('group_by: cf_92, drill: true, assign_to: stats')
+          expect(res['buckets'][0]['url']).to include('c%5B%5D=tracker', 'sort=priority%3Adesc')
+        end
+
+        it 'inherits the filters only when asked to' do
+          res = render('group_by: cf_92, drill: true, drill_inherit: filters, assign_to: stats')
+          url = res['buckets'][0]['url']
+          expect(url).to include('f%5B%5D=cf_92', 'f%5B%5D=status_id', 'set_filter=1')
+          expect(url).not_to include('c%5B%5D', 'sort=', 'group_by=')
+        end
+
+        it 'warns and inherits everything for an unknown value' do
+          expect(Rails.logger).to receive(:warn).with(/unknown drill_inherit/)
+          res = render('group_by: cf_92, drill: true, drill_inherit: banana, assign_to: stats')
+          expect(res['buckets'][0]['url']).to include('c%5B%5D=tracker')
+        end
+      end
+    end
+
+    describe 'a crosstab' do
+      subject(:res) do
+        render('group_by: cf_92, split_by: cf_86, drill: true, assign_to: stats',
+               result: crosstab_with_filters)
+      end
+
+      it 'keeps series an array of label strings' do
+        expect(res['series']).to eq(['Positive', 'Negative'])
+      end
+
+      it 'gives every series entry a URL' do
+        expect(res['series_entries'][0]['url']).to include('v%5Bcf_86%5D%5B%5D=345')
+      end
+
+      it 'gives every row a URL' do
+        expect(res['rows'][0]['url']).to include('v%5Bcf_92%5D%5B%5D=415')
+      end
+
+      it 'builds cell_urls aligned with matrix' do
+        expect(res['cell_urls'].length).to eq(res['matrix'].length)
+        expect(res['cell_urls'].map(&:length)).to eq(res['matrix'].map(&:length))
+      end
+
+      it 'combines the row filter and the series filter in a cell URL' do
+        expect(res['cell_urls'][0][0]).to include('v%5Bcf_92%5D%5B%5D=415', 'v%5Bcf_86%5D%5B%5D=345')
+      end
+
+      it 'reports the cell grid as complete' do
+        expect(res['cell_urls_truncated']).to be(false)
+      end
+
+      it 'keeps the array dense where a filter is missing' do
+        expect(res['cell_urls'][0][1]).to be_nil
+        expect(res['cell_urls'][1][1]).to be_nil
+      end
+
+      it 'combines the empty-bucket row filter with a series filter' do
+        expect(res['cell_urls'][1][0]).to include('op%5Bcf_92%5D=%21%2A', 'v%5Bcf_86%5D%5B%5D=345')
+      end
+    end
+
+    describe 'flags' do
+      subject(:res) { render('group_by: flags, drill: true, assign_to: stats', result: flags_with_stages) }
+
+      it 'links the total stage to the report query unchanged' do
+        expect(res['stages'][0]['url']).to eq(res['base_url'])
+      end
+
+      it 'links the assignee stage with the "is set" operator' do
+        expect(res['stages'][1]['url']).to include('op%5Bassigned_to_id%5D=%2A')
+      end
+
+      it 'links the due date stage' do
+        expect(res['stages'][2]['url']).to include('f%5B%5D=due_date')
+      end
+
+      it 'links the closed stage with the closed operator' do
+        expect(res['stages'][3]['url']).to include('op%5Bstatus_id%5D=c')
+      end
+
+      it 'warns that an explicit closed_statuses can disagree with the closed stage' do
+        expect(Rails.logger).to receive(:warn).with(/closed stage links to status_id=c/)
+        render('group_by: flags, drill: true, closed_statuses: "Done", assign_to: stats',
+               result: flags_with_stages)
+      end
+
+      it 'stays quiet without an explicit closed_statuses' do
+        expect(Rails.logger).not_to receive(:warn).with(/closed stage links to status_id=c/)
+        render('group_by: flags, drill: true, assign_to: stats', result: flags_with_stages)
+      end
+    end
+
+    describe 'when no IssueQuery can be resolved' do
+      subject(:res) do
+        render('group_by: cf_92, drill: true, assign_to: stats',
+               registers: { container: scope })
+      end
+
+      it 'reports drill-through as unavailable' do
+        expect(res['drill_available']).to be(false)
+      end
+
+      it 'emits no base_url' do
+        expect(res).not_to have_key('base_url')
+      end
+
+      it 'emits no element URLs at all' do
+        expect(res['buckets'].map { |b| b.key?('url') }).to all(be(false))
+      end
+
+      it 'still returns the counts' do
+        expect(res['total']).to eq(27)
+      end
+
+      it 'says why in the log' do
+        expect(Rails.logger).to receive(:warn).with(/no IssueQuery could be resolved/)
+        render('group_by: cf_92, drill: true, assign_to: stats', registers: { container: scope })
+      end
+    end
+
+    describe 'the time series' do
+      it 'reports drill-through as unavailable and points at group_by: period' do
+        expect(Rails.logger).to receive(:warn).with(/use group_by: period/)
+        ctx = build_context({}, { sql_issue_query: query })
+        build_tag('drill: true, assign_to: stats').render(ctx)
+        expect(ctx.scopes.last['stats']['drill_available']).to be(false)
+        expect(ctx.scopes.last['stats']).not_to have_key('base_url')
+      end
+    end
+
+    describe 'the query source' do
+      after { DrillTagQueryStub.registry.clear }
+
+      it 'uses the query named by query_id: for the URLs' do
+        DrillTagQueryStub.registry[42] =
+          DrillTagQueryStub.new(scope, project: DrillTagProject.new(9, 'other'))
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+          .and_return(dimension_with_filters)
+
+        ctx = build_context({}, { sql_issue_query: query })
+        build_tag('query_id: 42, group_by: cf_92, drill: true, assign_to: stats').render(ctx)
+
+        expect(ctx.scopes.last['stats']['base_url']).to include('/projects/other/issues')
+      end
+
+      it 'uses the thread-local when nothing else holds a query' do
+        Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = query
+        res = render('group_by: cf_92, drill: true, assign_to: stats', registers: { container: scope })
+        expect(res['drill_available']).to be(true)
+      ensure
+        Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = nil
+      end
+    end
+
+    describe 'when even the base URL does not fit' do
+      subject(:res) { render('group_by: cf_92, drill: true, drill_max_url: 50, assign_to: stats') }
+
+      it 'reports drill-through as unavailable' do
+        expect(res['drill_available']).to be(false)
+      end
+
+      it 'emits no base_url and no element URLs' do
+        expect(res).not_to have_key('base_url')
+        expect(res['buckets'].map { |b| b.key?('url') }).to all(be(false))
+      end
+    end
+
+    describe 'a crosstab of one custom field against itself' do
+      let(:same_field) do
+        filter = ->(value) { { 'field' => 'cf_92', 'operator' => '=', 'values' => [value] } }
+        {
+          'series' => %w[Survey Geotech],
+          'series_entries' => [{ 'label' => 'Survey', 'value' => '415', 'filter' => filter.call('415') },
+                               { 'label' => 'Geotech', 'value' => '416', 'filter' => filter.call('416') }],
+          'rows' => [{ 'label' => 'Survey', 'counts' => [3, 1], 'filter' => filter.call('415') },
+                     { 'label' => 'Geotech', 'counts' => [1, 2], 'filter' => filter.call('416') }],
+          'matrix' => [[3, 1], [1, 2]], 'total' => 7
+        }
+      end
+
+      subject(:res) do
+        render('group_by: cf_92, split_by: cf_92, drill: true, assign_to: stats', result: same_field)
+      end
+
+      it 'links the diagonal, where both filters agree' do
+        expect(res['cell_urls'][0][0]).to include('v%5Bcf_92%5D%5B%5D=415')
+        expect(res['cell_urls'][1][1]).to include('v%5Bcf_92%5D%5B%5D=416')
+      end
+
+      it 'refuses the off-diagonal, which Redmine cannot express as one filter' do
+        expect(res['cell_urls'][0][1]).to be_nil
+        expect(res['cell_urls'][1][0]).to be_nil
+      end
+    end
+
+    describe 'a crosstab past the cell cap' do
+      let(:huge) do
+        filter = ->(i) { { 'field' => 'cf_92', 'operator' => '=', 'values' => [i.to_s] } }
+        rows   = (1..71).map { |i| { 'label' => "r#{i}", 'counts' => [0], 'filter' => filter.call(i) } }
+        series = (1..71).map { |i| { 'label' => "s#{i}", 'filter' => filter.call(i) } }
+        { 'series' => series.map { |e| e['label'] }, 'series_entries' => series,
+          'rows' => rows, 'matrix' => rows.map { [0] }, 'total' => 0 }
+      end
+
+      subject(:res) do
+        render('group_by: cf_92, split_by: cf_86, drill: true, assign_to: stats', result: huge)
+      end
+
+      it 'keeps cell_urls dense and aligned' do
+        expect(res['cell_urls'].length).to eq(71)
+        expect(res['cell_urls'].map(&:length).uniq).to eq([71])
+      end
+
+      it 'leaves every entry nil rather than emitting megabytes of markup' do
+        expect(res['cell_urls'].flatten.compact).to be_empty
+      end
+
+      it 'says so in the log' do
+        expect(Rails.logger).to receive(:warn).with(/drill-through cell cap/)
+        render('group_by: cf_92, split_by: cf_86, drill: true, assign_to: stats', result: huge)
+      end
+
+      it 'still links the rows themselves' do
+        expect(res['rows'].first['url']).not_to be_nil
+      end
+    end
+
+    describe 'when the aggregation itself fails' do
+      it 'assigns the empty result, with drill-through reported unavailable' do
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(nil)
+        ctx = build_context({}, { sql_issue_query: query })
+        build_tag('group_by: cf_0, drill: true, assign_to: stats').render(ctx)
+
+        expect(ctx.scopes.last['stats']['drill_available']).to be(false)
+        expect(ctx.scopes.last['stats']['base_url']).to be_nil
+        expect(ctx.scopes.last['stats']['cell_urls']).to eq([])
+      end
+    end
+
+    describe 'failure modes' do
+      it 'keeps the counts when URL building blows up' do
+        allow(SqlAggregation::DrillThrough).to receive(:build).and_raise(StandardError, 'boom')
+        res = render('group_by: cf_92, drill: true, assign_to: stats')
+        expect(res['total']).to eq(27)
+        expect(res['drill_available']).to be(false)
+      end
+
+      it 'keeps cell_urls aligned with matrix even when an entry carries no filter' do
+        broken = {
+          'series' => %w[a b],
+          'series_entries' => [{ 'label' => 'a' }, 'nonsense'],
+          'rows' => [{ 'label' => 'r', 'counts' => [0, 0],
+                       'filter' => { 'field' => 'cf_92', 'operator' => '=', 'values' => ['415'] } }],
+          'matrix' => [[0, 0]], 'total' => 0
+        }
+        res = render('group_by: cf_92, split_by: cf_86, drill: true, assign_to: stats', result: broken)
+        expect(res['cell_urls']).to eq([[nil, nil]])
+      end
+
+      it 'tolerates a result whose buckets are not hashes' do
+        weird = { 'buckets' => ['nonsense'], 'total' => 0 }
+        expect { render('group_by: cf_92, drill: true, assign_to: stats', result: weird) }
+          .not_to raise_error
+      end
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # Regression: nothing changes without drill
+  # ------------------------------------------------------------------
+
+  describe 'without drill' do
+    let(:drop) do
+      obj = Object.new
+      obj.instance_variable_set(:@issues, scope)
+      obj
+    end
+
+    it 'returns the time series result unchanged' do
+      ctx = build_context('issues' => drop)
+      build_tag('from: issues, assign_to: stats').render(ctx)
+      expect(ctx.scopes.last['stats']).to eq(agg_result)
+    end
+
+    it 'returns the legacy core-field breakdown unchanged' do
+      ctx = build_context('issues' => drop)
+      build_tag('from: issues, group_by: tracker, assign_to: stats').render(ctx)
+      expect(ctx.scopes.last['stats']).to eq(breakdown_result)
+    end
+
+    it 'returns the dimension result unchanged' do
+      ctx = build_context('issues' => drop)
+      build_tag('from: issues, group_by: cf_92, assign_to: stats').render(ctx)
+      expect(ctx.scopes.last['stats']).to eq(dimension_result)
+    end
+
+    it 'returns the flags result unchanged' do
+      ctx = build_context('issues' => drop)
+      build_tag('from: issues, group_by: flags, assign_to: kpi').render(ctx)
+      expect(ctx.scopes.last['kpi']).to eq(flags_result)
+    end
+
+    it 'never resolves an IssueQuery for the URLs' do
+      ctx = build_context('issues' => drop)
+      tag = build_tag('from: issues, group_by: cf_92, assign_to: stats')
+      expect(tag).not_to receive(:resolve_query)
+      tag.render(ctx)
+    end
+
+    it 'never builds a drill-through builder' do
+      expect(SqlAggregation::DrillThrough).not_to receive(:build)
+      ctx = build_context('issues' => drop)
+      build_tag('from: issues, group_by: cf_92, assign_to: stats').render(ctx)
     end
   end
 

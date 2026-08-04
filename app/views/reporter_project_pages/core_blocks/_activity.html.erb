@@ -11,7 +11,7 @@
 
 <% if editable %>
   <div id="<%= block %>-settings" style="display:none;">
-    <%= form_tag(project_reporter_page_path(project, tab: tab.id), remote: true) do %>
+    <%= form_tag(project_reporter_page_path(project, tab: tab.id), method: :patch, remote: true) do %>
       <div class="box">
         <p>
           <label>

@@ -10,6 +10,8 @@ it:
   label_reporter_report_template: Modello di report
   label_reporter_export_report_pdf: Esporta report in PDF
   error_reporter_pdf_generation_failed: Impossibile generare il PDF del report. Riprova o contatta un amministratore.
+  error_reporter_dashboard_save_failed: Impossibile salvare il dashboard.
+  error_reporter_widget_render_failed: Impossibile visualizzare questo widget. Consulta il log dell'applicazione per i dettagli.
   label_move_left: Sposta a sinistra
   label_move_right: Sposta a destra
   label_move_up: Sposta su

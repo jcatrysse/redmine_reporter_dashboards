@@ -15,13 +15,23 @@ end
 
 unless defined?(ActiveRecord::Base)
   module ActiveRecord
-    # Minimal stand-in for Rails' bind-parameter substitution, enough for the
-    # age dimension's CASE expression.
+    # Minimal stand-in for Rails' bind-parameter substitution: enough for the age
+    # dimension's CASE expression and the open_at_end aggregates. Numbers are left
+    # bare and arrays expanded to a comma list, like the real thing — a stub that
+    # quoted an id list would hide a malformed IN clause instead of showing it.
     class Base
       def self.sanitize_sql_array(array)
         sql, *binds = array
-        binds.each { |bind| sql = sql.sub('?', "'#{bind}'") }
+        binds.each { |bind| sql = sql.sub('?', quote_bind(bind)) }
         sql
+      end
+
+      def self.quote_bind(bind)
+        case bind
+        when Numeric then bind.to_s
+        when Array   then bind.map { |value| quote_bind(value) }.join(',')
+        else "'#{bind}'"
+        end
       end
     end
   end
@@ -52,8 +62,8 @@ require_relative '../../lib/sql_aggregation/query_aggregator'
 #
 # Dimension fixtures:
 #   grouped_counts   — keyed by the group expression(s) as passed to #group:
-#                        "NULLIF(rrd_cv_g.value, '')"                => {'415'=>3}
-#                        ["NULLIF(...g...)", "NULLIF(...s...)"]      => {['415','345']=>3}
+#                        "rrd_cv_g.value"                            => {'415'=>3}
+#                        ["rrd_cv_g.value", "rrd_cv_s.value"]        => {['415','345']=>3}
 #                        :any                                        => matches any grouping
 #   flag_counts      — keyed by the sorted filter symbols applied so far, e.g.
 #                        { [] => 49, [:closed] => 2, [:open, :overdue] => 3 }
@@ -62,11 +72,14 @@ require_relative '../../lib/sql_aggregation/query_aggregator'
 # Recorders (joins_sql, group_expressions, count_columns) are shared with every
 # derived copy, so a spec can assert on what the final chained scope received.
 class ScopeStub
-  attr_reader :last_group_field, :conditions, :joins_sql, :group_expressions, :count_columns
+  attr_reader :last_group_field, :conditions, :joins_sql, :group_expressions, :count_columns,
+              :pluck_expressions, :sum_columns, :average_columns, :where_conditions,
+              :picked
 
   def initialize(created_counts: {}, closed_counts: {}, open_count: 5, total: 10,
                  breakdown_counts: {}, grouped_counts: {}, flag_counts: nil,
-                 minimums: {}, maximums: {})
+                 minimums: {}, maximums: {}, pluck_rows: [], sums: nil, averages: nil,
+                 ordered_dates: [])
     @created_counts    = created_counts
     @closed_counts     = closed_counts
     @open_count        = open_count
@@ -84,6 +97,16 @@ class ScopeStub
     @joins_sql         = []
     @group_expressions = []
     @count_columns     = []
+    @pluck_rows        = pluck_rows
+    @pluck_expressions = []
+    @sums              = sums
+    @averages          = averages
+    @sum_columns       = []
+    @average_columns   = []
+    @where_conditions  = []
+    @ordered_dates     = ordered_dates
+    @offset            = 0
+    @picked            = []
   end
 
   def unscope(*)
@@ -96,6 +119,7 @@ class ScopeStub
   end
 
   def where(cond = nil, *_args)
+    @where_conditions << cond
     copy = dup
     copy.instance_variable_set(:@conditions, @conditions.merge(cond.is_a?(Hash) ? cond : {}))
     copy.instance_variable_set(:@filters, @filters + Array(filter_for(cond)))
@@ -120,12 +144,56 @@ class ScopeStub
     copy
   end
 
+  # Conditional-aggregate rows: {[matcher, ...] => [v1, v2]} is overkill, so the
+  # fixture is a lambda over the expression list, or a flat Array reused per call.
+  def pluck(*expressions)
+    @pluck_expressions.concat(expressions)
+    answer = @pluck_rows.respond_to?(:call) ? @pluck_rows.call(expressions) : @pluck_rows
+    row    = Array(answer).first(expressions.length)
+    row += [0] * (expressions.length - row.length) if row.length < expressions.length
+    expressions.length == 1 ? row : [row]
+  end
+
+  # Percentile reads: reorder(...).offset(n).limit(1).pick(:created_on). The fixture
+  # is the ordered list of open created_on values, so a spec states the population
+  # and the code has to pick the right place in it.
+  def reorder(*)
+    dup
+  end
+
+  def offset(n)
+    copy = dup
+    copy.instance_variable_set(:@offset, n)
+    copy
+  end
+
+  def limit(_n)
+    dup
+  end
+
+  def pick(column)
+    @picked << [@offset, column]
+    @ordered_dates[@offset]
+  end
+
   def minimum(field)
     @minimums[field]
   end
 
   def maximum(field)
     @maximums[field]
+  end
+
+  # Measure aggregates. The fixtures are keyed exactly like grouped_counts, so a
+  # spec says which expression it expects to see.
+  def sum(expression)
+    @sum_columns << expression
+    answer(@sums, expression)
+  end
+
+  def average(expression)
+    @average_columns << expression
+    answer(@averages, expression)
   end
 
   def count(column = nil)
@@ -143,6 +211,24 @@ class ScopeStub
   end
 
   private
+
+  # A fixture keys on the aggregate expression, on :any, or is the bare value. A
+  # grouped call answers the per-group Hash; an ungrouped one (the `total`) answers
+  # a scalar, so a Hash fixture is reduced — enough for a stub, and it keeps the
+  # per-bucket fixtures readable.
+  def answer(fixture, expression)
+    value = if fixture.is_a?(Hash) && (fixture.key?(expression) || fixture.key?(:any))
+      fixture.key?(expression) ? fixture[expression] : fixture[:any]
+    else
+      fixture
+    end
+
+    if @grouped
+      value.is_a?(Hash) ? value : {}
+    else
+      value.is_a?(Hash) ? value.values.compact.sum : value
+    end
+  end
 
   def grouped_count
     return @grouped_counts.fetch(@group_fields) if @grouped_counts.key?(@group_fields)
@@ -239,11 +325,25 @@ class FormatStub
 end
 
 # CustomField.find_by(id:) over a fixed {id => CustomFieldStub} map.
+#
+# `visible_ids` opts into Redmine's CustomField.visible gate: when given, only those
+# ids are visible to the current user. Omitted, the class does not respond to
+# .visible at all, which is how the aggregator recognises a non-Redmine stub and
+# skips the check — that is what keeps the label-resolution specs free of role setup.
 module CustomFieldRegistryStub
-  def self.build(map)
+  def self.build(map, visible_ids: nil)
     Class.new do
       define_singleton_method(:_map) { map }
       define_singleton_method(:find_by) { |id:| _map[id.to_i] }
+      next if visible_ids.nil?
+
+      define_singleton_method(:_visible_ids) { visible_ids }
+      define_singleton_method(:visible) do |_user|
+        Class.new do
+          define_singleton_method(:_ids) { visible_ids }
+          define_singleton_method(:exists?) { |id:| _ids.include?(id.to_i) }
+        end
+      end
     end
   end
 end
@@ -435,7 +535,8 @@ RSpec.describe SqlAggregation::QueryAggregator do
       subject(:result) { described_class.aggregate(scope, period: 'month', periods: 6) }
 
       it 'returns expected keys including period and periods' do
-        expect(result.keys).to match_array(%w[labels created closed open_now total period periods])
+        expect(result.keys)
+        .to match_array(%w[labels created closed open_at_end open_now total period periods])
       end
 
       it 'echoes period type' do
@@ -598,6 +699,143 @@ RSpec.describe SqlAggregation::QueryAggregator do
   # ------------------------------------------------------------------
   # .breakdown — categorical grouping
   # ------------------------------------------------------------------
+
+  # ==================================================================
+  # .aggregate — open_at_end
+  # ==================================================================
+
+  describe '.aggregate open_at_end' do
+    let(:labels) { described_class.build_labels(6, 'month') }
+
+    # One conditional aggregate per period, so the fixture is just the row.
+    def scope_with(row, **opts)
+      ScopeStub.new(pluck_rows: row, **opts)
+    end
+
+    it 'returns one value per label' do
+      scope = scope_with([31, 34, 38, 41, 39, 44])
+      r = described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(r['open_at_end']).to eq([31, 34, 38, 41, 39, 44])
+      expect(r['open_at_end'].length).to eq(r['labels'].length)
+    end
+
+    it 'asks for exactly one aggregate per period' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(scope.pluck_expressions.length).to eq(6)
+    end
+
+    it 'counts issues that existed at the end of the period, not those created in it' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(scope.pluck_expressions.first).to include('issues.created_on <')
+    end
+
+    it 'counts an issue with no closed_on as open' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      # NOT(closed_on IS NOT NULL AND ...) — a NULL closed_on can never be closed.
+      expect(scope.pluck_expressions.first).to include('NOT (issues.closed_on IS NOT NULL')
+    end
+
+    it 'excludes an issue closed before the end of the period' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(scope.pluck_expressions.first).to include('issues.closed_on <')
+    end
+
+    it 'counts per issue, not per joined row' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(scope.pluck_expressions.first).to start_with('COUNT(DISTINCT CASE WHEN ')
+      expect(scope.pluck_expressions.first).to end_with('THEN issues.id END)')
+    end
+
+    # closed_on survives a reopen (Issue#update_closed_on preserves it), so reading it
+    # alone would report an issue that is open again today as closed ever since the
+    # closing it once had. The conjunction is what makes the series right; do not
+    # simplify it to a closed_on test.
+    it 'requires the CURRENT status to be closed, not just a closed_on in the past' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(scope.pluck_expressions.first)
+        .to match(/closed_on IS NOT NULL AND issues\.closed_on < '[^']+' AND issues\.status_id IN/)
+    end
+
+    it 'honours closed_statuses, like the closed series does' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6,
+                                       closed_statuses: ['Closed', 'Rejected'])
+      expect(scope.pluck_expressions.first).to include('issues.status_id IN (3,4)')
+    end
+
+    it 'treats every issue as open when no status is closed' do
+      IssueStatusStubClass.closed_ids = []
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(scope.pluck_expressions.first).not_to include('status_id')
+      expect(scope.pluck_expressions.first).to include('issues.created_on <')
+    end
+
+    it 'binds the period ends instead of interpolating them' do
+      scope = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      # sanitize_sql_array is the binding path; the spec stub renders binds quoted.
+      expect(scope.pluck_expressions.first).to match(/'\d{4}-\d{2}-\d{2}/)
+      expect(scope.pluck_expressions.first).not_to include('?')
+    end
+
+    it 'ends each period at midnight starting the next one' do
+      scope  = scope_with([0] * 6)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+      first  = Date.strptime(labels.first, '%Y-%m')
+      expect(scope.pluck_expressions.first).to include((first.next_month).strftime('%Y-%m-%d'))
+    end
+
+    it 'uses the last day of the bucket for a day period' do
+      day   = described_class.build_labels(2, 'day').last
+      scope = scope_with([0, 0])
+      described_class.aggregate(scope, period: 'day', periods: 2)
+      expect(scope.pluck_expressions.last).to include((Date.parse(day) + 1).strftime('%Y-%m-%d'))
+    end
+
+    # 61 periods is 30 + 30 + 1: the last chunk is the awkward one, because pluck
+    # answers a bare value for one column and a row for several.
+    it 'keeps the values aligned with the labels across chunk boundaries' do
+      counter = 0
+      scope   = ScopeStub.new(pluck_rows: ->(exprs) { exprs.map { counter += 1 } })
+      r = described_class.aggregate(scope, period: 'day', periods: 61)
+      expect(r['open_at_end']).to eq((1..61).to_a)
+    end
+
+    it 'chunks the aggregates for a wide window instead of one huge statement' do
+      scope = scope_with(->(exprs) { [0] * exprs.length })
+      described_class.aggregate(scope, period: 'day', periods: 90)
+      # 90 periods / 30 per statement
+      expect(scope.pluck_expressions.length).to eq(90)
+      expect(scope.count_columns.length).to be > 0
+    end
+
+    it 'returns zeros rather than raising when the aggregate fails' do
+      scope = ScopeStub.new(pluck_rows: [])
+      allow(scope).to receive(:pluck).and_raise(StandardError, 'no db')
+      r = described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(r['open_at_end']).to eq([0] * 6)
+    end
+
+    it 'logs when the aggregate fails' do
+      scope = ScopeStub.new(pluck_rows: [])
+      allow(scope).to receive(:pluck).and_raise(StandardError, 'no db')
+      expect(Rails.logger).to receive(:warn).with(/open_at_end could not be computed/)
+      described_class.aggregate(scope, period: 'month', periods: 6)
+    end
+
+    it 'coerces database strings to integers' do
+      scope = scope_with(%w[7 8 9 10 11 12])
+      r = described_class.aggregate(scope, period: 'month', periods: 6)
+      expect(r['open_at_end']).to eq([7, 8, 9, 10, 11, 12])
+    end
+  end
 
   describe '.breakdown' do
     let(:status_stub)   { LookupStub.build(1 => 'New', 3 => 'Closed', 5 => 'In Progress') }
@@ -931,6 +1169,13 @@ RSpec.describe SqlAggregation::QueryAggregator do
   # ------------------------------------------------------------------
 
   describe '.period_from' do
+    # The clock is pinned, not read: period_from and build_labels must agree on
+    # ONE date, and comparing two live reads would be timezone- and
+    # midnight-dependent rather than a statement about the code.
+    let(:frozen_date) { Date.new(2026, 5, 17) }
+
+    before { allow(described_class).to receive(:current_date).and_return(frozen_date) }
+
     it 'starts at the oldest month build_labels produces' do
       oldest = described_class.build_labels(6, 'month').first
       expect(described_class.send(:period_from, 6, 'month').strftime('%Y-%m')).to eq(oldest)
@@ -954,11 +1199,23 @@ RSpec.describe SqlAggregation::QueryAggregator do
 
     it 'covers the current period when only one is asked for' do
       expect(described_class.send(:period_from, 1, 'month').strftime('%Y-%m'))
-        .to eq(Date.today.strftime('%Y-%m'))
+        .to eq(frozen_date.strftime('%Y-%m'))
+    end
+
+    it 'starts at midnight, not at the current time of day' do
+      expect(described_class.send(:period_from, 1, 'month').strftime('%Y-%m-%d %H:%M:%S'))
+        .to eq('2026-05-01 00:00:00')
     end
 
     it 'never reaches into the future for a zero or negative count' do
       expect(described_class.send(:period_from, 0, 'month')).to be <= Time.now
+    end
+
+    it 'uses one clock for the window and the labels, whatever the host timezone is' do
+      # Time.zone is what n.months.ago and the UTC-stored timestamps already use;
+      # Date.today follows the server's system timezone and used to disagree.
+      allow(described_class).to receive(:current_date).and_call_original
+      expect(described_class.send(:current_date)).to eq(Time.zone.today)
     end
   end
 
@@ -1015,8 +1272,8 @@ RSpec.describe SqlAggregation::QueryAggregator do
   # ==================================================================
 
   describe '.dimension_breakdown' do
-    let(:group_g) { "NULLIF(rrd_cv_g.value, '')" }
-    let(:group_s) { "NULLIF(rrd_cv_s.value, '')" }
+    let(:group_g) { 'rrd_cv_g.value' }
+    let(:group_s) { 'rrd_cv_s.value' }
 
     let(:enum_format) { FormatStub.new { |_cf, raw| ALL_ENUM_FIXTURE.dig(raw.to_i, :name) } }
     # cf 92 and cf 86 are enumeration fields in the target Redmine.
@@ -1064,7 +1321,7 @@ RSpec.describe SqlAggregation::QueryAggregator do
       end
 
       it 'puts the no-value bucket last regardless of its count' do
-        expect(result['buckets'].last).to eq('label' => '(none)', 'count' => 5)
+        expect(result['buckets'].last).to include('label' => '(none)', 'count' => 5)
       end
 
       it 'sums every bucket into total' do
@@ -1152,9 +1409,17 @@ RSpec.describe SqlAggregation::QueryAggregator do
         described_class.dimension_breakdown(scope, group_by: 'cf_92')
       end
 
-      it 'groups on NULLIF so empty strings join the NULL bucket' do
+      # The empty-string rows are kept out by the join instead, so the GROUP BY is a
+      # bare column — MariaDB's ONLY_FULL_GROUP_BY rejects a NULLIF there.
+      it 'groups on the bare custom value column, not on a NULLIF expression' do
         result
-        expect(scope.group_expressions).to eq([group_g])
+        expect(scope.group_expressions).to eq(['rrd_cv_g.value'])
+        expect(scope.group_expressions.join).not_to include('NULLIF')
+      end
+
+      it 'keeps the empty-string rows out of the join so they reach the NULL bucket' do
+        result
+        expect(scope.joins_sql.join).to include("rrd_cv_g.value <> ''")
       end
 
       it 'reports multi_value true for a multi-valued field' do
@@ -1211,6 +1476,68 @@ RSpec.describe SqlAggregation::QueryAggregator do
 
     # An issue custom field is recognised by its STI class, not by an attribute:
     # CustomField has no customized_type column and no such method.
+    context 'a custom field the viewer may not see' do
+      let(:scope) { ScopeStub.new(grouped_counts: { group_g => { '415' => 3 } }) }
+
+      before do
+        stub_const('User', Class.new { def self.current; :viewer; end })
+        stub_const('CustomField',
+                   CustomFieldRegistryStub.build({ 92 => department, 86 => lesson_type },
+                                                 visible_ids: [86]))
+      end
+
+      # Redmine builds a query's custom-field filters from CustomField.visible, so a
+      # restricted field is absent from this user's filter list entirely — including
+      # its name. The values were already protected; the name was not.
+      it 'is refused as a dimension rather than charted as one big (none) bucket' do
+        expect(described_class.dimension_breakdown(scope, group_by: 'cf_92')).to be_nil
+      end
+
+      it 'says why' do
+        # The caller also logs its own generic "not usable" line; the precise reason
+        # comes first.
+        allow(Rails.logger).to receive(:warn)
+        expect(Rails.logger).to receive(:warn).with(/restricted to roles the current user does not have/)
+        described_class.dimension_breakdown(scope, group_by: 'cf_92')
+      end
+
+      it 'does not leak the field name through field_name' do
+        allow(Rails.logger).to receive(:warn)
+        expect(described_class.dimension_breakdown(scope, group_by: 'cf_92')).to be_nil
+      end
+
+      it 'still allows a field the viewer IS entitled to' do
+        r = described_class.dimension_breakdown(scope, group_by: 'cf_86')
+        expect(r['field_name']).to eq('Lesson Type')
+      end
+
+      it 'is refused as a measure' do
+        allow(Rails.logger).to receive(:warn)
+        expect(described_class.dimension_breakdown(scope, group_by: 'cf_86',
+                                                         measure: 'distinct', of: 'cf_92')).to be_nil
+      end
+
+      it 'is skipped by completeness, which keeps the fields that are visible' do
+        allow(Rails.logger).to receive(:warn)
+        r = described_class.completeness(ScopeStub.new(total: 10, pluck_rows: [4]),
+                                        fields: %w[cf_92 cf_86])
+        expect(r['fields']).to eq(%w[cf_86])
+        expect(r['buckets'].map { |b| b['label'] }).to eq(['Lesson Type'])
+      end
+
+      it 'fails closed when the check itself blows up' do
+        field = department # a real issue custom field, so only the gate can refuse it
+        stub_const('CustomField', Class.new do
+          define_singleton_method(:_field) { field }
+          define_singleton_method(:find_by) { |id:| _field }
+          define_singleton_method(:visible) { |_user| raise StandardError, 'no memberships' }
+        end)
+        allow(Rails.logger).to receive(:warn)
+        expect(Rails.logger).to receive(:warn).with(/could not check the visibility of custom field/)
+        expect(described_class.dimension_breakdown(scope, group_by: 'cf_92')).to be_nil
+      end
+    end
+
     context 'identifying an issue custom field' do
       let(:scope) { ScopeStub.new(grouped_counts: { group_g => { '415' => 3 } }) }
 
@@ -1418,11 +1745,11 @@ RSpec.describe SqlAggregation::QueryAggregator do
       end
 
       it 'sums the collapsed rows into Other' do
-        expect(result['buckets'][3]).to eq('label' => 'Other', 'count' => 2)
+        expect(result['buckets'][3]).to include('label' => 'Other', 'count' => 2)
       end
 
       it 'keeps the empty bucket out of the collapse' do
-        expect(result['buckets'].last).to eq('label' => '(none)', 'count' => 4)
+        expect(result['buckets'].last).to include('label' => '(none)', 'count' => 4)
       end
 
       it 'flags the result as truncated' do
@@ -1559,7 +1886,8 @@ RSpec.describe SqlAggregation::QueryAggregator do
       end
 
       it 'mirrors the row totals in buckets' do
-        expect(result['buckets']).to eq(result['rows'].map { |r| { 'label' => r['label'], 'count' => r['total'] } })
+        expect(result['buckets'].map { |b| b.values_at('label', 'count') })
+          .to eq(result['rows'].map { |r| r.values_at('label', 'total') })
       end
 
       it 'totals the whole matrix' do
@@ -1715,7 +2043,7 @@ RSpec.describe SqlAggregation::QueryAggregator do
       end
 
       it 'puts issues with no date in the empty bucket, not the oldest one' do
-        expect(result['buckets'].last).to eq('label' => '(none)', 'count' => 1)
+        expect(result['buckets'].last).to include('label' => '(none)', 'count' => 1)
       end
 
       it 'ignores sort and limit' do
@@ -1739,7 +2067,7 @@ RSpec.describe SqlAggregation::QueryAggregator do
       it 'keeps counts for a value outside the expected bucket list rather than dropping them' do
         odd = ScopeStub.new(grouped_counts: { any: { '0-30' => 2, 'unexpected' => 5 } })
         r = described_class.dimension_breakdown(odd, group_by: 'age')
-        expect(r['buckets'].last).to eq('label' => 'unexpected', 'count' => 5)
+        expect(r['buckets'].last).to include('label' => 'unexpected', 'count' => 5)
         expect(r['total']).to eq(7)
       end
 
@@ -1849,13 +2177,14 @@ RSpec.describe SqlAggregation::QueryAggregator do
         custom_fields[92] = CustomFieldStub.new(id: 92, name: 'Count',
                                                 format: FormatStub.new { |_cf, raw| raw })
         r = described_class.dimension_breakdown(scope, group_by: 'cf_92')
-        expect(r['buckets']).to eq([{ 'label' => '0', 'count' => 3 }])
+        expect(r['buckets'].length).to eq(1)
+        expect(r['buckets'].first).to include('label' => '0', 'count' => 3)
       end
 
       it 'collapses whitespace-only values into the empty bucket' do
         scope = ScopeStub.new(grouped_counts: { group_g => { '  ' => 2, '415' => 1 } })
         r = described_class.dimension_breakdown(scope, group_by: 'cf_92')
-        expect(r['buckets'].last).to eq('label' => '(none)', 'count' => 2)
+        expect(r['buckets'].last).to include('label' => '(none)', 'count' => 2)
       end
 
       it 'produces the same order however the database returns the rows' do
@@ -1894,8 +2223,847 @@ RSpec.describe SqlAggregation::QueryAggregator do
         scope = ScopeStub.new(grouped_counts: { assigned_to_id: { 10 => 3 } })
         stub_const('User', Class.new { def self.where(*); raise StandardError, 'no db'; end })
         r = described_class.dimension_breakdown(scope, group_by: 'assignee')
-        expect(r['buckets']).to eq([{ 'label' => 'Assignee #10', 'count' => 3 }])
+        expect(r['buckets'].length).to eq(1)
+        expect(r['buckets'].first).to include('label' => 'Assignee #10', 'count' => 3)
       end
+    end
+
+    # ----------------------------------------------------------------
+    # measure: / of:
+    # ----------------------------------------------------------------
+
+    context 'measure' do
+      let(:numeric_cf) do
+        CustomFieldStub.new(id: 95, name: 'Hours lost', field_format: 'float')
+      end
+      let(:text_cf) { CustomFieldStub.new(id: 96, name: 'Notes', field_format: 'string') }
+
+      before { custom_fields.merge!(95 => numeric_cf, 96 => text_cf) }
+
+      context 'count (the default)' do
+        let(:scope) { ScopeStub.new(grouped_counts: { group_g => { '415' => 18, '416' => 9 } }) }
+
+        it 'is unchanged, and reports itself as count' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92')
+          expect(r['buckets'].map { |b| b['count'] }).to eq([18, 9])
+          expect(r['measure']).to eq('count')
+          expect(r['measure_field']).to be_nil
+        end
+
+        it 'still counts distinct issues, not rows' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92')
+          expect(scope.count_columns).to include('DISTINCT issues.id')
+        end
+
+        it 'keeps total as the sum of the buckets, so a multi-value field still exceeds it' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92')
+          expect(r['total']).to eq(27)
+        end
+
+        it 'warns that of: is meaningless without a real measure' do
+          expect(Rails.logger).to receive(:warn).with(/ignored by measure: count/)
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', of: 'author')
+        end
+      end
+
+      context 'distinct on a core reference' do
+        let(:scope) do
+          ScopeStub.new(grouped_counts: { group_g => { '415' => 4, '416' => 2 } }, total: 5)
+        end
+
+        subject(:result) do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'distinct', of: 'author')
+        end
+
+        it 'counts distinct authors per bucket' do
+          expect(result['buckets'].map { |b| b['count'] }).to eq([4, 2])
+        end
+
+        it 'reports the measure and its field' do
+          expect(result['measure']).to eq('distinct')
+          expect(result['measure_field']).to eq('author')
+        end
+
+        it 'counts DISTINCT on the author column' do
+          result
+          expect(scope.count_columns).to include('DISTINCT issues.author_id')
+        end
+
+        it 'takes total from its own aggregate, not the bucket sum' do
+          # 4 + 2 = 6 authors per bucket, but only 5 distinct people overall.
+          expect(result['total']).to eq(5)
+        end
+
+        it 'adds no join for a core reference' do
+          result
+          expect(scope.joins_sql.grep(/time_entries/)).to be_empty
+        end
+      end
+
+      context 'distinct on a custom field' do
+        let(:scope) { ScopeStub.new(grouped_counts: { group_g => { '415' => 3 } }, total: 3) }
+
+        it 'counts DISTINCT on the measure alias, never the dimension alias' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'distinct', of: 'cf_96')
+          expect(scope.count_columns).to include("DISTINCT NULLIF(rrd_cv_m.value, '')")
+        end
+
+        it 'joins custom_values under its own alias' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'distinct', of: 'cf_96')
+          aliases = scope.joins_sql.grep(String).map { |j| j[/rrd_cv_\w/] }.compact
+          expect(aliases).to eq(%w[rrd_cv_g rrd_cv_m])
+        end
+
+        it 'cannot collide with the group_by and split_by aliases' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', split_by: 'cf_86',
+                                                     measure: 'distinct', of: 'cf_96')
+          aliases = scope.joins_sql.grep(String).map { |j| j[/rrd_cv_\w/] }.compact
+          expect(aliases).to eq(%w[rrd_cv_g rrd_cv_s rrd_cv_m])
+        end
+
+        it 'carries the field visibility condition, like the dimension join does' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'distinct', of: 'cf_96')
+          expect(cv_join(scope, 'rrd_cv_m')).to include('custom_field_id = 96', '1=1')
+        end
+
+        it 'accepts a non-numeric format for distinct' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                        measure: 'distinct', of: 'cf_96')
+          expect(r['measure_field']).to eq('cf_96')
+        end
+      end
+
+      context 'sum' do
+        let(:scope) do
+          ScopeStub.new(grouped_counts: { group_g => { '415' => 1 } },
+                        sums: { :any => { '415' => 12.5, '416' => 3.25 } })
+        end
+
+        it 'sums a core numeric column per bucket' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                        measure: 'sum', of: 'estimated_hours')
+          expect(r['buckets'].map { |b| b['count'] }).to eq([12.5, 3.25])
+        end
+
+        it 'applies SUM to the column, not to a count' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'sum', of: 'estimated_hours')
+          expect(scope.sum_columns).to include('issues.estimated_hours')
+        end
+
+        it 'sums a numeric custom field through a cast' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'sum', of: 'cf_95')
+          expect(scope.sum_columns.first).to include('CAST(', "NULLIF(rrd_cv_m.value, '')")
+        end
+
+        it 'casts to numeric on PostgreSQL' do
+          described_class.instance_variable_set(:@adapter_family, :postgresql)
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', measure: 'sum', of: 'cf_95')
+          expect(scope.sum_columns.first).to eq("CAST(NULLIF(rrd_cv_m.value, '') AS numeric)")
+        end
+
+        it 'casts to DECIMAL on MySQL' do
+          described_class.instance_variable_set(:@adapter_family, :mysql)
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', measure: 'sum', of: 'cf_95')
+          expect(scope.sum_columns.first).to eq("CAST(NULLIF(rrd_cv_m.value, '') AS DECIMAL(20,4))")
+        end
+
+        it 'left joins time entries for spent_hours, so a bucket with none still reports zero' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'sum', of: 'spent_hours')
+          expect(scope.joins_sql.grep(/time_entries/).first).to start_with('LEFT OUTER JOIN time_entries')
+          expect(scope.sum_columns).to include('time_entries.hours')
+        end
+
+        # Redmine applies TimeEntry.visible_condition everywhere it sums spent time:
+        # :view_time_entries is per project and a role can be limited to its own
+        # entries, so a raw join would report hours the viewer may not see.
+        it 'restricts spent_hours to the time entries the viewer may see' do
+          stub_const('User', Class.new { def self.current; :viewer; end })
+          stub_const('TimeEntry', Class.new do
+            def self.visible_condition(_user)
+              'projects.id IN (1,2) AND time_entries.user_id = 5'
+            end
+          end)
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'sum', of: 'spent_hours')
+          join = scope.joins_sql.grep(/time_entries/).first
+          expect(join).to include('AND (projects.id IN (1,2) AND time_entries.user_id = 5)')
+        end
+
+        it 'keeps that condition in the ON clause, so the join stays outer' do
+          stub_const('User', Class.new { def self.current; :viewer; end })
+          stub_const('TimeEntry', Class.new { def self.visible_condition(_u); 'projects.id IN (1)'; end })
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'sum', of: 'spent_hours')
+          expect(scope.where_conditions.compact.join(' ')).not_to include('projects.id IN (1)')
+        end
+
+        # group_by: status, not cf_92: the custom-field dimension joins projects for its
+        # own visibility clause, which would make this pass whatever the measure did.
+        it 'joins projects, which the visibility condition reads' do
+          core = ScopeStub.new(sums: { any: { 1 => 4.0 } }, breakdown_counts: { status_id: { 1 => 1 } })
+          described_class.dimension_breakdown(core, group_by: 'status', sort: 'label',
+                                                    measure: 'sum', of: 'spent_hours')
+          expect(core.joins_sql).to include(:project)
+        end
+
+        it 'adds no projects join for a measure that does not need one' do
+          core = ScopeStub.new(sums: { any: { 1 => 4.0 } }, breakdown_counts: { status_id: { 1 => 1 } })
+          described_class.dimension_breakdown(core, group_by: 'status', sort: 'label',
+                                                    measure: 'sum', of: 'estimated_hours')
+          expect(core.joins_sql).to be_empty
+        end
+
+        it 'reports no spent time at all when the condition cannot be built' do
+          stub_const('User', Class.new { def self.current; :viewer; end })
+          stub_const('TimeEntry', Class.new do
+            def self.visible_condition(_user)
+              raise StandardError, 'no user'
+            end
+          end)
+          expect(Rails.logger).to receive(:warn).with(/could not build the time entry visibility/)
+          described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                     measure: 'sum', of: 'spent_hours')
+          expect(scope.joins_sql.grep(/time_entries/).first).to include('AND (1=0)')
+        end
+
+        it 'returns floats' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                        measure: 'sum', of: 'estimated_hours')
+          expect(r['buckets'].first['count']).to be_a(Float)
+        end
+      end
+
+      context 'avg' do
+        let(:scope) do
+          ScopeStub.new(grouped_counts: { group_g => { '415' => 1 } },
+                        averages: { :any => { '415' => 4.666666, '416' => 2.0 } })
+        end
+
+        it 'rounds to two decimals in Ruby, so both adapters agree' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                        measure: 'avg', of: 'estimated_hours')
+          expect(r['buckets'].map { |b| b['count'] }).to eq([4.67, 2.0])
+        end
+
+        it 'refuses spent_hours, which would average time entries rather than issues' do
+          expect(Rails.logger).to receive(:warn).with(/avg is not supported for spent_hours/)
+          expect(described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                           measure: 'avg', of: 'spent_hours')).to be_nil
+        end
+      end
+
+      context 'refusals' do
+        let(:scope) { ScopeStub.new(grouped_counts: { group_g => { '415' => 3 } }) }
+
+        it 'refuses a non-numeric custom field for sum' do
+          expect(Rails.logger).to receive(:warn).with(/cf_96 is not a numeric custom field/)
+          expect(described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                           measure: 'sum', of: 'cf_96')).to be_nil
+        end
+
+        it 'refuses a reference field for avg' do
+          expect(Rails.logger).to receive(:warn).with(/of: author is a reference, not a number/)
+          expect(described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                           measure: 'avg', of: 'author')).to be_nil
+        end
+
+        it 'refuses a measure with no of: field' do
+          expect(Rails.logger).to receive(:warn).with(/measure: distinct needs an of: field/)
+          expect(described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                           measure: 'distinct')).to be_nil
+        end
+
+        it 'refuses an unknown measure' do
+          expect(Rails.logger).to receive(:warn).with(/unknown measure "median"/)
+          expect(described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                           measure: 'median', of: 'author')).to be_nil
+        end
+
+        it 'refuses an unknown of: field' do
+          expect(Rails.logger).to receive(:warn).with(/unknown of: "banana"/)
+          expect(described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                           measure: 'distinct', of: 'banana')).to be_nil
+        end
+
+        it 'refuses a custom field that is not an issue custom field' do
+          expect(Rails.logger).to receive(:warn).with(/custom field #77 does not exist/)
+          expect(described_class.dimension_breakdown(scope, group_by: 'cf_92',
+                                                           measure: 'distinct', of: 'cf_77')).to be_nil
+        end
+      end
+
+      context 'a collapsed Other bucket' do
+        # The ungrouped aggregate answers 3; adding the two collapsed values would
+        # give 4, which is exactly the error a distinct count must not make.
+        let(:scope) do
+          ScopeStub.new(grouped_counts: { group_g => { '415' => 5, '416' => 4, '417' => 3,
+                                                      '580' => 2, '581' => 2 } },
+                        total: 3)
+        end
+
+        it 'sums the collapsed values for an additive measure' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92', limit: 3)
+          expect(r['buckets'][3]['count']).to eq(4)
+        end
+
+        it 'aggregates its own value for a distinct count instead of adding up' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92', limit: 3,
+                                                        measure: 'distinct', of: 'author')
+          expect(r['buckets'][3]['count']).to eq(3)
+        end
+
+        it 'restricts that aggregate to the collapsed values' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', limit: 3,
+                                                     measure: 'distinct', of: 'author')
+          expect(scope.where_conditions.compact.join(' '))
+            .to include("rrd_cv_g.value IN ('580','581')")
+        end
+
+        it 'does not run that extra aggregate for a plain count' do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', limit: 3)
+          expect(scope.where_conditions.compact.join(' ')).not_to include('IN (')
+        end
+      end
+
+      context 'a crosstab with a collapsed row' do
+        # limit: 1 keeps 415 and collapses 580 and 581 into Other. Summing their cells
+        # would give 4; the row's own aggregate says 5, which is the point.
+        let(:scope) do
+          ScopeStub.new(grouped_counts: {
+                          [group_g, group_s] => { %w[415 345] => 3, %w[580 345] => 2,
+                                                  %w[581 345] => 2 },
+                          group_g            => { '415' => 3, '580' => 2, '581' => 2 },
+                          group_s            => { '345' => 5 }
+                        }, total: 5)
+        end
+
+        subject(:result) do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', split_by: 'cf_86',
+                                                     limit: 1, measure: 'distinct', of: 'author')
+        end
+
+        it 'takes the collapsed row cells from their own aggregate, not from the sum' do
+          expect(result['rows'].map { |r| r['label'] }).to eq(['Survey', 'Other'])
+          expect(result['matrix']).to eq([[3], [5]])
+        end
+
+        it 'restricts that aggregate to the collapsed values' do
+          result
+          expect(scope.where_conditions.compact.join(' '))
+            .to include("rrd_cv_g.value IN ('580','581')")
+        end
+
+        it 'sums the collapsed row cells for an additive measure, as before' do
+          r = described_class.dimension_breakdown(scope, group_by: 'cf_92', split_by: 'cf_86',
+                                                         limit: 1)
+          expect(r['matrix']).to eq([[3], [4]])
+        end
+      end
+
+      context 'a crosstab' do
+        let(:scope) do
+          ScopeStub.new(grouped_counts: {
+                          [group_g, group_s] => { %w[415 345] => 3, %w[416 346] => 2 },
+                          group_g            => { '415' => 3, '416' => 2 },
+                          group_s            => { '345' => 3, '346' => 2 }
+                        }, total: 4)
+        end
+
+        subject(:result) do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', split_by: 'cf_86',
+                                                     measure: 'distinct', of: 'author')
+        end
+
+        it 'keeps the cells from the two-dimensional aggregate' do
+          expect(result['matrix']).to eq([[3, 0], [0, 2]])
+        end
+
+        it 'takes the row totals from their own aggregate, not from the cells' do
+          expect(result['rows'].map { |r| r['total'] }).to eq([3, 2])
+        end
+
+        it 'takes the column totals from their own aggregate' do
+          expect(result['columns']).to eq([3, 2])
+        end
+
+        it 'takes the grand total from the whole scope' do
+          expect(result['total']).to eq(4)
+        end
+
+        it 'reports the measure' do
+          expect(result['measure']).to eq('distinct')
+        end
+      end
+    end
+
+    # ----------------------------------------------------------------
+    # Drill-through descriptors (value / values / filter)
+    # ----------------------------------------------------------------
+
+    context 'drill-through descriptors' do
+      context 'a custom field dimension' do
+        let(:scope) do
+          ScopeStub.new(grouped_counts: { group_g => { '415' => 18, '416' => 9, nil => 5 } })
+        end
+
+        subject(:buckets) { described_class.dimension_breakdown(scope, group_by: 'cf_92')['buckets'] }
+
+        it 'exposes the raw stored value, not the label' do
+          expect(buckets.map { |b| b['value'] }).to eq(['415', '416', nil])
+        end
+
+        it 'keeps the labels untouched' do
+          expect(buckets.map { |b| b['label'] }).to eq(['Survey', 'Geotech', '(none)'])
+        end
+
+        it 'describes the cf_<id> equality filter' do
+          expect(buckets.first['filter']).to eq('field' => 'cf_92', 'operator' => '=', 'values' => ['415'])
+        end
+
+        it 'describes the empty bucket as Redmine\'s "none" operator with one blank value' do
+          expect(buckets.last['filter']).to eq('field' => 'cf_92', 'operator' => '!*', 'values' => [''])
+        end
+
+        it 'gives the empty bucket no raw value' do
+          expect(buckets.last['value']).to be_nil
+        end
+
+        it 'exposes values only on a collapsed Other row' do
+          expect(buckets.map { |b| b.key?('values') }).to all(be(false))
+        end
+      end
+
+      context 'a collapsed Other row' do
+        let(:scope) do
+          ScopeStub.new(grouped_counts: { group_g => { '415' => 18, '416' => 9, '417' => 4,
+                                                      '580' => 2, '581' => 1, nil => 3 } })
+        end
+
+        subject(:other) do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', limit: 3)['buckets'][3]
+        end
+
+        it 'is labelled Other' do
+          expect(other['label']).to eq('Other')
+        end
+
+        it 'has no single raw value' do
+          expect(other['value']).to be_nil
+        end
+
+        it 'lists every collapsed raw value' do
+          expect(other['values']).to eq(%w[580 581])
+        end
+
+        it 'links to the union of the collapsed values' do
+          expect(other['filter']).to eq('field' => 'cf_92', 'operator' => '=', 'values' => %w[580 581])
+        end
+      end
+
+      context 'the core dimensions' do
+        {
+          'status'   => %w[status_id 1],
+          'priority' => %w[priority_id 1],
+          'tracker'  => %w[tracker_id 1],
+          'category' => %w[category_id 1],
+          'version'  => %w[fixed_version_id 1],
+          'author'   => %w[author_id 1]
+        }.each do |dimension, (field, _value)|
+          it "maps #{dimension} onto the #{field} filter" do
+            column = SqlAggregation::QueryAggregator::BREAKDOWN_CONFIG[dimension][:field]
+            scope  = ScopeStub.new(grouped_counts: { column => { 1 => 3 } })
+            r      = described_class.dimension_breakdown(scope, group_by: dimension, sort: 'label')
+            expect(r['buckets'].first['filter'])
+              .to eq('field' => field, 'operator' => '=', 'values' => ['1'])
+          end
+        end
+
+        it 'maps assignee onto assigned_to_id' do
+          stub_const('User', UserRegistryStub.build([UserRecordStub.new(10, 'jdoe', 'Jane Doe')]))
+          scope = ScopeStub.new(grouped_counts: { assigned_to_id: { 10 => 3, nil => 2 } })
+          r     = described_class.dimension_breakdown(scope, group_by: 'assignee')
+          expect(r['buckets'].first['filter'])
+            .to eq('field' => 'assigned_to_id', 'operator' => '=', 'values' => ['10'])
+        end
+
+        it 'describes the unassigned bucket as assigned_to_id "none"' do
+          stub_const('User', UserRegistryStub.build([UserRecordStub.new(10, 'jdoe', 'Jane Doe')]))
+          scope = ScopeStub.new(grouped_counts: { assigned_to_id: { 10 => 3, nil => 2 } })
+          r     = described_class.dimension_breakdown(scope, group_by: 'assignee')
+          expect(r['buckets'].last['filter'])
+            .to eq('field' => 'assigned_to_id', 'operator' => '!*', 'values' => [''])
+        end
+      end
+
+      context 'the period dimension' do
+        let(:labels) { described_class.build_labels(3, 'month') }
+        let(:scope)  { ScopeStub.new(grouped_counts: { any: { labels[2] => 7 } }) }
+
+        it 'describes a month bucket as an absolute created_on range' do
+          r     = described_class.dimension_breakdown(scope, group_by: 'period', periods: 3)
+          first = Date.strptime(labels[2], '%Y-%m')
+          expect(r['buckets'].last['filter']).to eq(
+            'field' => 'created_on', 'operator' => '><',
+            'values' => [first.strftime('%Y-%m-%d'), (first.next_month - 1).strftime('%Y-%m-%d')]
+          )
+        end
+
+        it 'exposes the bucket key as the raw value' do
+          r = described_class.dimension_breakdown(scope, group_by: 'period', periods: 3)
+          expect(r['buckets'].last['value']).to eq(labels[2])
+        end
+
+        it 'uses closed_on for date_field: closed' do
+          r = described_class.dimension_breakdown(scope, group_by: 'period', periods: 3,
+                                                        date_field: 'closed')
+          expect(r['buckets'].last['filter']['field']).to eq('closed_on')
+        end
+
+        it 'describes a day bucket as a single day' do
+          day   = described_class.build_labels(2, 'day').last
+          scope = ScopeStub.new(grouped_counts: { any: { day => 1 } })
+          r     = described_class.dimension_breakdown(scope, group_by: 'period', period: 'day', periods: 2)
+          expect(r['buckets'].last['filter']['values']).to eq([day, day])
+        end
+
+        it 'describes a week bucket as its Monday to Sunday' do
+          week  = described_class.build_labels(2, 'week').last
+          scope = ScopeStub.new(grouped_counts: { any: { week => 1 } })
+          r     = described_class.dimension_breakdown(scope, group_by: 'period', period: 'week', periods: 2)
+          year, number = week.split('-W')
+          monday = Date.commercial(year.to_i, number.to_i, 1)
+          expect(r['buckets'].last['filter']['values'])
+            .to eq([monday.strftime('%Y-%m-%d'), (monday + 6).strftime('%Y-%m-%d')])
+        end
+
+        it 'describes a year bucket as January to December' do
+          year  = described_class.build_labels(2, 'year').last
+          scope = ScopeStub.new(grouped_counts: { any: { year => 1 } })
+          r     = described_class.dimension_breakdown(scope, group_by: 'period', period: 'year', periods: 2)
+          expect(r['buckets'].last['filter']['values']).to eq(["#{year}-01-01", "#{year}-12-31"])
+        end
+
+        it 'gives no filter to a group value that is not a period label' do
+          odd = ScopeStub.new(grouped_counts: { any: { 'not-a-period' => 3 } })
+          r   = described_class.dimension_breakdown(odd, group_by: 'period', periods: 3)
+          expect(r['buckets'].last['filter']).to be_nil
+        end
+      end
+
+      context 'the age dimension' do
+        # Pinned: the bucket bounds and the SQL must be derived from the same date,
+        # and a live read would make the expectation timezone-dependent.
+        let(:today) { Date.new(2026, 5, 17) }
+
+        before { allow(described_class).to receive(:current_date).and_return(today) }
+        let(:scope) do
+          ScopeStub.new(grouped_counts: { any: { '0-30' => 4, '31-60' => 3, '>180' => 2, nil => 1 } })
+        end
+
+        subject(:buckets) { described_class.dimension_breakdown(scope, group_by: 'age')['buckets'] }
+
+        it 'leaves the newest bucket open at the recent end' do
+          expect(buckets.first['filter']).to eq(
+            'field' => 'created_on', 'operator' => '>=',
+            'values' => [(today - 30).strftime('%Y-%m-%d')]
+          )
+        end
+
+        it 'describes a middle bucket as the exact range its label names' do
+          expect(buckets[1]['filter']).to eq(
+            'field' => 'created_on', 'operator' => '><',
+            'values' => [(today - 60).strftime('%Y-%m-%d'), (today - 31).strftime('%Y-%m-%d')]
+          )
+        end
+
+        it 'leaves the oldest bucket open at the old end' do
+          expect(buckets[4]['filter']).to eq(
+            'field' => 'created_on', 'operator' => '<=',
+            'values' => [(today - 181).strftime('%Y-%m-%d')]
+          )
+        end
+
+        it 'produces contiguous, non-overlapping ranges' do
+          upper = buckets[1]['filter']['values'].last
+          lower = buckets.first['filter']['values'].first
+          expect(Date.parse(upper) + 1).to eq(Date.parse(lower))
+        end
+
+        it 'uses due_date for age_field: due' do
+          r = described_class.dimension_breakdown(scope, group_by: 'age', age_field: 'due')
+          expect(r['buckets'].first['filter']).to eq(
+            'field' => 'due_date', 'operator' => '>=',
+            'values' => [(today - 30).strftime('%Y-%m-%d')]
+          )
+        end
+
+        it 'uses updated_on for age_field: updated' do
+          r = described_class.dimension_breakdown(scope, group_by: 'age', age_field: 'updated')
+          expect(r['buckets'].first['filter']['field']).to eq('updated_on')
+        end
+
+        it 'describes the no-date bucket as due_date "none"' do
+          r = described_class.dimension_breakdown(scope, group_by: 'age', age_field: 'due')
+          expect(r['buckets'].last['filter']).to eq(
+            'field' => 'due_date', 'operator' => '!*', 'values' => ['']
+          )
+        end
+
+        it 'follows custom boundaries' do
+          short = ScopeStub.new(grouped_counts: { any: { '8-14' => 3 } })
+          r     = described_class.dimension_breakdown(short, group_by: 'age', age_buckets: [7, 14])
+          expect(r['buckets'][1]['filter']['values'])
+            .to eq([(today - 14).strftime('%Y-%m-%d'), (today - 8).strftime('%Y-%m-%d')])
+        end
+
+        it 'gives no filter to a group value that is not an age label' do
+          odd = ScopeStub.new(grouped_counts: { any: { 'unexpected' => 5 } })
+          r   = described_class.dimension_breakdown(odd, group_by: 'age')
+          expect(r['buckets'].last['filter']).to be_nil
+        end
+      end
+
+      context 'a crosstab' do
+        let(:scope) do
+          ScopeStub.new(grouped_counts: {
+                          [group_g, group_s] => { %w[415 345] => 4, %w[416 346] => 1 }
+                        })
+        end
+
+        subject(:result) do
+          described_class.dimension_breakdown(scope, group_by: 'cf_92', split_by: 'cf_86')
+        end
+
+        it 'keeps series an array of label strings' do
+          expect(result['series']).to eq(['Positive', 'Negative'])
+        end
+
+        it 'describes each series in series_entries, aligned with series' do
+          expect(result['series_entries'].map { |e| e['label'] }).to eq(result['series'])
+          expect(result['series_entries'].map { |e| e['value'] }).to eq(%w[345 346])
+        end
+
+        it 'gives every series entry its own filter' do
+          expect(result['series_entries'].first['filter'])
+            .to eq('field' => 'cf_86', 'operator' => '=', 'values' => ['345'])
+        end
+
+        it 'gives every row its own filter' do
+          expect(result['rows'].first['filter'])
+            .to eq('field' => 'cf_92', 'operator' => '=', 'values' => ['415'])
+        end
+
+        it 'keeps the historical row keys' do
+          expect(result['rows'].first).to include('label', 'total', 'counts', 'cells')
+        end
+
+        it 'mirrors the row descriptors in buckets' do
+          expect(result['buckets'].first['filter']).to eq(result['rows'].first['filter'])
+          expect(result['buckets'].first['value']).to eq(result['rows'].first['value'])
+        end
+      end
+
+      it 'has no url keys of its own — the tag adds those' do
+        scope = ScopeStub.new(grouped_counts: { group_g => { '415' => 3 } })
+        r     = described_class.dimension_breakdown(scope, group_by: 'cf_92')
+        expect(r).not_to have_key('drill_available')
+        expect(r).not_to have_key('base_url')
+        expect(r['buckets'].first).not_to have_key('url')
+      end
+    end
+  end
+
+  # ==================================================================
+  # .completeness
+  # ==================================================================
+
+  describe '.completeness' do
+    let(:vessel)     { CustomFieldStub.new(id: 94, name: 'Vessel') }
+    let(:sensor)     { CustomFieldStub.new(id: 99, name: 'Sensor') }
+    let(:project_cf) { CustomFieldStub.new(id: 77, name: 'Budget code', type: 'ProjectCustomField') }
+
+    before do
+      stub_const('CustomField',
+                 CustomFieldRegistryStub.build({ 94 => vessel, 99 => sensor, 77 => project_cf }))
+      stub_const('CustomValue', CustomValueStub)
+    end
+
+    # 49 issues; the fixture answers the conditional aggregates in field order.
+    def scope_with(*filled)
+      ScopeStub.new(total: 49, pluck_rows: filled)
+    end
+
+    subject(:result) do
+      described_class.completeness(scope_with(34, 11, 24), fields: %w[cf_94 cf_99 assigned_to_id])
+    end
+
+    it 'returns one bucket per field, in the order given' do
+      expect(result['buckets'].map { |b| b['label'] }).to eq(['Vessel', 'Sensor', 'Assignee'])
+    end
+
+    it 'reports the filled count as count, so an existing bar chart works unchanged' do
+      expect(result['buckets'].map { |b| b['count'] }).to eq([34, 11, 24])
+    end
+
+    it 'reports the empty count as the remainder' do
+      expect(result['buckets'].map { |b| b['empty'] }).to eq([15, 38, 25])
+    end
+
+    it 'reports the issue total on every bucket' do
+      expect(result['buckets'].map { |b| b['total'] }).to all(eq(49))
+    end
+
+    it 'rounds the percentage to an integer' do
+      expect(result['buckets'].map { |b| b['pct'] }).to eq([69, 22, 49])
+    end
+
+    it 'exposes the field key as the bucket value' do
+      expect(result['buckets'].map { |b| b['value'] }).to eq(%w[cf_94 cf_99 assigned_to_id])
+    end
+
+    it 'reports the issue count as the result total, not the sum of the buckets' do
+      expect(result['total']).to eq(49)
+    end
+
+    it 'echoes the resolved field list' do
+      expect(result['fields']).to eq(%w[cf_94 cf_99 assigned_to_id])
+    end
+
+    it 'identifies itself as the completeness dimension' do
+      expect(result['group_by']).to eq('completeness')
+      expect(result['dimension']).to eq('completeness')
+    end
+
+    it 'counts per issue, not per joined row' do
+      scope = scope_with(1, 1, 1)
+      described_class.completeness(scope, fields: %w[cf_94 cf_99 assigned_to_id])
+      expect(scope.pluck_expressions).to all(start_with('COUNT(DISTINCT CASE WHEN '))
+    end
+
+    it 'uses ONE custom_values join for every custom field' do
+      scope = scope_with(1, 1)
+      described_class.completeness(scope, fields: %w[cf_94 cf_99])
+      joins = scope.joins_sql.grep(String).grep(/custom_values/)
+      expect(joins.length).to eq(1)
+      expect(joins.first).to include('custom_field_id IN (94,99)')
+    end
+
+    it 'joins projects too, because a visibility condition may read them' do
+      scope = scope_with(1)
+      described_class.completeness(scope, fields: %w[cf_94])
+      expect(scope.joins_sql).to include(:project)
+    end
+
+    it 'adds no join at all for core fields alone' do
+      scope = scope_with(1, 1)
+      described_class.completeness(scope, fields: %w[assigned_to_id due_date])
+      expect(scope.joins_sql).to be_empty
+    end
+
+    it 'carries each field own visibility condition in its own aggregate' do
+      restricted = CustomFieldStub.new(id: 94, name: 'Vessel', visibility: 'projects.id IN (7)')
+      stub_const('CustomField',
+                 CustomFieldRegistryStub.build({ 94 => restricted, 99 => sensor }))
+      scope = scope_with(1, 1)
+      described_class.completeness(scope, fields: %w[cf_94 cf_99])
+      expect(scope.pluck_expressions.first).to include('projects.id IN (7)')
+      expect(scope.pluck_expressions.last).to include('1=1')
+    end
+
+    it 'treats a NULL custom value and a blank one alike' do
+      scope = scope_with(1)
+      described_class.completeness(scope, fields: %w[cf_94])
+      expect(scope.pluck_expressions.first).to include("value IS NOT NULL AND rrd_cv_c.value <> ''")
+    end
+
+    it 'checks a core reference column for NULL only' do
+      scope = scope_with(1)
+      described_class.completeness(scope, fields: %w[assigned_to_id])
+      expect(scope.pluck_expressions.first).to include('issues.assigned_to_id IS NOT NULL')
+      expect(scope.pluck_expressions.first).not_to include("<> ''")
+    end
+
+    it 'treats a blank description as empty' do
+      scope = scope_with(1)
+      described_class.completeness(scope, fields: %w[description])
+      expect(scope.pluck_expressions.first).to include("issues.description <> ''")
+    end
+
+    it 'accepts the dimension-style aliases' do
+      r = described_class.completeness(scope_with(1, 1, 1), fields: %w[assignee version due])
+      expect(r['buckets'].map { |b| b['label'] }).to eq(['Assignee', 'Target version', 'Due date'])
+      expect(r['fields']).to eq(%w[assigned_to_id fixed_version_id due_date])
+    end
+
+    it 'describes the is-set and is-not-set filters per field' do
+      bucket = result['buckets'].first
+      expect(bucket['filter']).to eq('field' => 'cf_94', 'operator' => '*', 'values' => [''])
+      expect(bucket['empty_filter']).to eq('field' => 'cf_94', 'operator' => '!*', 'values' => [''])
+    end
+
+    it 'reports 0% rather than dividing by zero on an empty scope' do
+      r = described_class.completeness(ScopeStub.new(total: 0, pluck_rows: [0]),
+                                       fields: %w[assigned_to_id])
+      expect(r['buckets'].first['pct']).to eq(0)
+      expect(r['buckets'].first['empty']).to eq(0)
+    end
+
+    context 'refusals' do
+      it 'refuses an empty field list' do
+        expect(Rails.logger).to receive(:warn).with(/needs a fields: list/)
+        expect(described_class.completeness(scope_with, fields: [])).to be_nil
+      end
+
+      it 'refuses a nil field list' do
+        expect(described_class.completeness(scope_with, fields: nil)).to be_nil
+      end
+
+      it 'refuses more fields than the cap allows' do
+        many = (1..13).map { |i| "cf_#{i}" }
+        expect(Rails.logger).to receive(:warn).with(/at most 12 fields, 13 given/)
+        expect(described_class.completeness(scope_with, fields: many)).to be_nil
+      end
+
+      it 'skips a field it cannot resolve but keeps the rest' do
+        expect(Rails.logger).to receive(:warn).with(/"banana" is not a completeness field/)
+        r = described_class.completeness(scope_with(3, 4), fields: %w[banana cf_94 due_date])
+        expect(r['fields']).to eq(%w[cf_94 due_date])
+      end
+
+      it 'skips a custom field that is not an issue custom field' do
+        expect(Rails.logger).to receive(:warn).with(/custom field #77 does not exist/)
+        r = described_class.completeness(scope_with(3), fields: %w[cf_77 due_date])
+        expect(r['fields']).to eq(%w[due_date])
+      end
+
+      it 'refuses when nothing at all resolves' do
+        allow(Rails.logger).to receive(:warn)
+        expect(described_class.completeness(scope_with, fields: %w[banana])).to be_nil
+      end
+
+      it 'de-duplicates a repeated field' do
+        r = described_class.completeness(scope_with(3), fields: %w[due_date due_date])
+        expect(r['fields']).to eq(%w[due_date])
+      end
+
+      it 'never raises when the aggregate fails' do
+        scope = scope_with(1)
+        allow(scope).to receive(:pluck).and_raise(StandardError, 'no db')
+        expect(Rails.logger).to receive(:warn).with(/completeness failed/)
+        expect(described_class.completeness(scope, fields: %w[due_date])).to be_nil
+      end
+    end
+
+    it 'is refused as a dimension, like flags' do
+      expect(Rails.logger).to receive(:warn).with(/completeness is only valid as group_by/)
+      expect(described_class.dimension_breakdown(ScopeStub.new, group_by: 'completeness')).to be_nil
     end
   end
 
@@ -1908,8 +3076,8 @@ RSpec.describe SqlAggregation::QueryAggregator do
       ScopeStub.new(
         flag_counts: { [] => 49, [:closed] => 4, [:assigned] => 24, [:with_due] => 7,
                        [:no_estimate] => 49, [:open, :overdue] => 3 },
-        minimums: { created_on: (Date.today - 146).to_time },
-        maximums: { created_on: (Date.today - 23).to_time }
+        minimums: { created_on: (Time.zone.today - 146).to_time },
+        maximums: { created_on: (Time.zone.today - 23).to_time }
       )
     end
 
@@ -1970,6 +3138,142 @@ RSpec.describe SqlAggregation::QueryAggregator do
     it 'counts DISTINCT issues.id everywhere' do
       result
       expect(scope.count_columns.uniq).to eq(['DISTINCT issues.id'])
+    end
+
+    context 'median and p90 age' do
+      # `ages` is the population in the order the query returns it: newest first,
+      # which is ascending age, so the offset is an ordinary percentile index.
+      def scope_for(ages, open_count = ages.length)
+        ScopeStub.new(
+          flag_counts: { [] => open_count, [:closed] => 0 },
+          minimums: {}, maximums: {},
+          ordered_dates: ages.map { |days| (Time.zone.today - days).to_time }
+        )
+      end
+
+      before do
+        allow(IssueStatus).to receive(:where).and_return(IssueStatus)
+        allow(IssueStatus).to receive(:pluck).and_return([3, 4])
+      end
+
+      it 'reads the middle age for an odd population' do
+        r = described_class.flags(scope_for([10, 20, 30, 40, 50]))
+        expect(r['median_open_days']).to eq(30)
+      end
+
+      it 'reads the lower of the two middle ages for an even population' do
+        # (4 - 1) / 2 = 1 → the second of 10, 20, 30, 40: the YOUNGER middle age.
+        r = described_class.flags(scope_for([10, 20, 30, 40]))
+        expect(r['median_open_days']).to eq(20)
+      end
+
+      it 'reads the ninth decile for p90' do
+        r = described_class.flags(scope_for((1..10).map { |i| i * 10 }))
+        # ((10 - 1) * 9) / 10 = 8 → the ninth entry, age 90
+        expect(r['p90_open_days']).to eq(90)
+      end
+
+      it 'puts p90 at the OLD end, where a "90% are younger than this" number belongs' do
+        r = described_class.flags(scope_for((1..10).map { |i| i * 10 }))
+        expect(r['p90_open_days']).to be > r['median_open_days']
+      end
+
+      it 'lands on the same place as the median when there are too few to separate them' do
+        # ((3 - 1) * 9) / 10 is 1, exactly like (3 - 1) / 2: with three open issues a
+        # lower-percentile p90 cannot be anywhere else.
+        r = described_class.flags(scope_for([10, 50, 100]))
+        expect(r['p90_open_days']).to eq(r['median_open_days'])
+      end
+
+      it 'gives median == p90 == the age itself for a single open issue' do
+        r = described_class.flags(scope_for([71]))
+        expect(r['median_open_days']).to eq(71)
+        expect(r['p90_open_days']).to eq(71)
+      end
+
+      it 'reads one row per percentile, at the offset it computed' do
+        scope = scope_for([10, 20, 30, 40, 50])
+        described_class.flags(scope)
+        expect(scope.picked).to eq([[2, :created_on], [3, :created_on]])
+      end
+
+      it 'is nil for both when nothing is open' do
+        scope = ScopeStub.new(flag_counts: { [] => 4, [:closed] => 4 },
+                              minimums: {}, maximums: {}, ordered_dates: [])
+        r = described_class.flags(scope)
+        expect(r['median_open_days']).to be_nil
+        expect(r['p90_open_days']).to be_nil
+      end
+
+      it 'reads no row at all when nothing is open' do
+        scope = ScopeStub.new(flag_counts: { [] => 4, [:closed] => 4 },
+                              minimums: {}, maximums: {}, ordered_dates: [])
+        described_class.flags(scope)
+        expect(scope.picked).to be_empty
+      end
+
+      it 'never raises when the read fails' do
+        # any_instance: the open scope is a derived copy, not the object handed in.
+        allow_any_instance_of(ScopeStub).to receive(:reorder).and_raise(StandardError, 'no db')
+        expect(Rails.logger).to receive(:warn).with(/percentile age could not be read/).twice
+        r = described_class.flags(scope_for([30]))
+        expect(r['median_open_days']).to be_nil
+        expect(r['p90_open_days']).to be_nil
+      end
+
+      it 'is exposed under flags as well as at the top level' do
+        r = described_class.flags(scope_for([10, 20, 30, 40, 50]))
+        expect(r['flags']['median_open_days']).to eq(30)
+        expect(r['flags']['p90_open_days']).to eq(40)
+      end
+    end
+
+    context 'funnel stages' do
+      subject(:stages) { result['stages'] }
+
+      it 'projects four counters, in funnel order' do
+        expect(stages.map { |s| s['key'] }).to eq(%w[total assigned with_due_date closed])
+      end
+
+      it 'labels them for a funnel widget' do
+        expect(stages.map { |s| s['label'] })
+          .to eq(['Registered', 'Has assignee', 'Has due date', 'Closed'])
+      end
+
+      it 'carries the matching counts' do
+        expect(stages.map { |s| s['count'] }).to eq([49, 24, 7, 4])
+      end
+
+      it 'gives the total stage no filter — the report query unchanged IS that stage' do
+        expect(stages.first['filter']).to be_nil
+      end
+
+      it 'describes the assignee stage with the "is set" operator' do
+        expect(stages[1]['filter'])
+          .to eq('field' => 'assigned_to_id', 'operator' => '*', 'values' => [''])
+      end
+
+      it 'describes the due date stage with the "is set" operator' do
+        expect(stages[2]['filter'])
+          .to eq('field' => 'due_date', 'operator' => '*', 'values' => [''])
+      end
+
+      it 'describes the closed stage with the closed operator, not a status id list' do
+        expect(stages[3]['filter'])
+          .to eq('field' => 'status_id', 'operator' => 'c', 'values' => [''])
+      end
+
+      it 'builds a fresh stage list per call, so a template cannot mutate the next one' do
+        stages.first['label'] = 'mutated'
+        stages[1]['filter']['values'] << 'mutated'
+        fresh = described_class.flags(scope, closed_statuses: ['Closed', 'Rejected'])['stages']
+        expect(fresh.first['label']).to eq('Registered')
+        expect(fresh[1]['filter']['values']).to eq([''])
+      end
+
+      it 'adds no url keys — the tag adds those' do
+        expect(stages.first).not_to have_key('url')
+      end
     end
 
     context 'when nothing is open' do

@@ -18,7 +18,7 @@
 
 <% if editable %>
   <div id="<%= block %>-settings" style="display:none;">
-    <%= form_tag(project_reporter_page_path(project, tab: tab.id), remote: true) do %>
+    <%= form_tag(project_reporter_page_path(project, tab: tab.id), method: :patch, remote: true) do %>
       <div id="list-definition">
         <div class="box">
           <%= render_query_columns_selection(query, name: "settings[#{block}][columns]") %>
@@ -54,7 +54,7 @@
                query: query,
                query_options: {
                  sort_param: "settings[#{block}][sort]",
-                 sort_link_options: { method: :post, remote: true }
+                 sort_link_options: { method: :patch, remote: true }
                }
              } %>
 <% else %>

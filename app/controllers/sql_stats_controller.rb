@@ -32,7 +32,7 @@ class SqlStatsController < ApplicationController
       total:        result['total'],
       project:      project.identifier,
       months:       months,
-      generated_at: Time.now.iso8601
+      generated_at: Time.current.iso8601
     }
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Project not found' }, status: :not_found

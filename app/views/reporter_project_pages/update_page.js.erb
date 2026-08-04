@@ -1,3 +1,11 @@
-<% @updated_blocks.each do |block| %>
-  $("#reporter-block-<%= block %>").replaceWith("<%= escape_javascript render_reporter_project_block(block.to_s, @tab, @project) %>");
+<%# Redrawing the widgets from the in-memory tab after a failed save would show the
+    user their own unsaved change as if it had been stored. Reload instead: the page
+    comes back from the database, and flash[:error] (set in report_save_failure)
+    renders through Redmine's own flash area. %>
+<% if @save_failed %>
+  window.location.reload();
+<% else %>
+  <% @updated_blocks.each do |block| %>
+    $("#reporter-block-<%= block %>").replaceWith("<%= escape_javascript render_reporter_project_block(block.to_s, @tab, @project) %>");
+  <% end %>
 <% end %>

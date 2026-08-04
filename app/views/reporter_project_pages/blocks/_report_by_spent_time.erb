@@ -2,7 +2,10 @@
   block ||= 'report_by_spent_time'
   settings ||= tab.block_settings(block)
   query = TimeEntryQuery.visible.where(project_id: [nil, project.id]).find_by(id: settings[:query_id])
-  report_template = TimeEntriesReportTemplate.find_by(id: settings[:report_template_id])
+  # in_project_and_global(project), matching the picker below — see the note in
+  # blocks/_report_by_issues.erb.
+  report_template = TimeEntriesReportTemplate.in_project_and_global(project)
+                                             .find_by(id: settings[:report_template_id])
 %>
 
 <% if query && report_template %>

@@ -31,6 +31,22 @@ class ReporterProjectTabsControllerTest < ActionController::TestCase
     assert_redirected_to project_reporter_page_path(@project, tab: @tab.id, anchor: 'reporter-dashboard-settings')
   end
 
+  # The point of the change is serialization: the count and the delete have to happen
+  # in one locked section, or two people deleting the last two tabs at the same moment
+  # both see a count of 2 and both deletes go through. Two genuinely concurrent
+  # requests cannot be produced inside a transactional test, so this asserts the lock
+  # is taken — and still asserts the delete itself happened, so it is not a test of the
+  # mock alone.
+  def test_destroy_takes_a_lock_on_the_project
+    second_tab = ReporterProjectTab.create!(project: @project, title: 'Second')
+    Project.any_instance.expects(:lock!).at_least_once
+
+    assert_difference 'ReporterProjectTab.count', -1 do
+      delete :destroy, params: { project_id: @project.identifier, id: second_tab.id }
+    end
+    assert_response :redirect
+  end
+
   def test_create_redirects_without_anchor_on_success
     assert_difference 'ReporterProjectTab.count', 1 do
       post :create, params: { project_id: @project.identifier, reporter_project_tab: { title: 'New tab' } }
@@ -45,6 +61,32 @@ class ReporterProjectTabsControllerTest < ActionController::TestCase
     end
     assert_redirected_to project_reporter_page_path(@project, tab: @tab.id, anchor: 'reporter-dashboard-settings')
     assert_match(/cannot be blank/i, flash[:error])
+  end
+
+  def test_create_rejects_a_whitespace_only_title
+    assert_no_difference 'ReporterProjectTab.count' do
+      post :create, params: { project_id: @project.identifier,
+                              reporter_project_tab: { title: '    ' } }
+    end
+    assert_match(/cannot be blank/i, flash[:error])
+  end
+
+  def test_create_rejects_an_over_long_title
+    assert_no_difference 'ReporterProjectTab.count' do
+      post :create, params: { project_id: @project.identifier,
+                              reporter_project_tab: {
+                                title: 'x' * (ReporterProjectTab::MAX_TITLE_LENGTH + 1)
+                              } }
+    end
+    assert_redirected_to project_reporter_page_path(@project, tab: @tab.id,
+                                                              anchor: 'reporter-dashboard-settings')
+    assert flash[:error].present?
+  end
+
+  def test_create_strips_the_title
+    post :create, params: { project_id: @project.identifier,
+                            reporter_project_tab: { title: '  Spaced  ' } }
+    assert_equal 'Spaced', ReporterProjectTab.order(:id).last.title
   end
 
   def test_update_redirects_without_anchor_on_success

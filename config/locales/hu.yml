@@ -10,6 +10,8 @@ hu:
   label_reporter_report_template: Jelentéssablon
   label_reporter_export_report_pdf: Jelentés exportálása PDF-be
   error_reporter_pdf_generation_failed: A jelentés PDF-je nem készíthető el. Kérjük, próbálja újra, vagy forduljon egy rendszergazdához.
+  error_reporter_dashboard_save_failed: Az irányítópult nem menthető.
+  error_reporter_widget_render_failed: Ezt a widgetet nem lehetett megjeleníteni. A részleteket lásd az alkalmazás naplójában.
   label_move_left: Mozgatás balra
   label_move_right: Mozgatás jobbra
   label_move_up: Mozgatás felfelé

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/row_layout'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/pdf_polyfills'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'

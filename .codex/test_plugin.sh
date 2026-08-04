@@ -77,11 +77,33 @@ run_command() {
 
 ran_tests=false
 
+# spec/adapter runs the aggregator's SQL against a real PostgreSQL or MySQL/MariaDB
+# server. It loads the REAL ActiveRecord, while spec/sql_aggregation defines a stub
+# ActiveRecord::Base when none exists, so the two get their own processes: excluded
+# from the run below, then run on their own when a database URL is available.
+# test_setup.sh writes one to redmine/.rrd_adapter_url; RRD_ADAPTER_URL wins.
+if [ -z "${RRD_ADAPTER_URL:-}" ] && [ -f .rrd_adapter_url ]; then
+  RRD_ADAPTER_URL="$(sed -n 's/^RRD_ADAPTER_URL=//p' .rrd_adapter_url)"
+fi
+
 if [ -d "$SPEC_DIR" ]; then
   # The specs `require 'spec_helper'`, which resolves against the load path. rspec
   # runs from the Redmine root, so the plugin's spec/ must be put on it explicitly.
-  run_command bundle exec rspec -I "$SPEC_DIR" "$SPEC_DIR" --format progress
+  run_command bundle exec rspec -I "$SPEC_DIR" "$SPEC_DIR" --format progress \
+    --exclude-pattern 'adapter/**/*_spec.rb'
   ran_tests=true
+
+  if [ -d "$SPEC_DIR/adapter" ]; then
+    if [ -n "${RRD_ADAPTER_URL:-}" ]; then
+      echo "Running the adapter execution specs against $RRD_ADAPTER_URL" >&2
+      RRD_ADAPTER_URL="$RRD_ADAPTER_URL" \
+        run_command bundle exec rspec -I "$SPEC_DIR" "$SPEC_DIR/adapter" --format progress
+    else
+      echo "WARNING: skipping the adapter execution specs — no RRD_ADAPTER_URL." >&2
+      echo "         Run ./.codex/test_setup.sh (optionally with RRD_DB=mysql or mariadb)," >&2
+      echo "         or set RRD_ADAPTER_URL to a database whose name contains 'test'." >&2
+    fi
+  fi
 fi
 
 if [ -d "$TEST_DIR" ]; then

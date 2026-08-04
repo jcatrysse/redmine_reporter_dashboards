@@ -10,6 +10,8 @@ en:
   label_reporter_report_template: Report template
   label_reporter_export_report_pdf: Export report as PDF
   error_reporter_pdf_generation_failed: Could not generate the report PDF. Please try again or contact an administrator.
+  error_reporter_dashboard_save_failed: Could not save the dashboard.
+  error_reporter_widget_render_failed: This widget could not be displayed. See the application log for details.
   label_move_left: Move left
   label_move_right: Move right
   label_move_up: Move up

@@ -17,20 +17,39 @@ The `.codex/` scripts handle everything:
 ./.codex/test_plugin.sh                 # run RSpec + minitest
 ```
 
-Supported Redmine versions: `5.1-stable`, `6.0-stable`, `6.1-stable` — see the
-support matrix in the README. Redmine 7.0 (Rails 8.1) and MySQL/MariaDB are
-**not** covered by a workflow; `requires_redmine` is pinned to 5.1 so the
-plugin's claim matches what is tested. Widening either means adding the
-corresponding workflow first.
+Supported Redmine versions: `5.1-stable`, `6.0-stable`, `6.1-stable`,
+`7.0-stable` — see the support matrix in the README. `requires_redmine` is pinned
+to 5.1 so the plugin's claim matches what CI exercises; widening it means adding
+the branch to the matrix in `.github/workflows/ci.yml` first.
+
+`test_setup.sh` provisions PostgreSQL by default. Pass `RRD_DB=mysql` or
+`RRD_DB=mariadb` for the other supported engines — the Debian packages conflict,
+so only one of the two can be installed at a time.
 
 ## Test suites
 
 | Suite | Directory | Dependencies | What it covers |
 |-------|-----------|--------------|----------------|
 | **RSpec** | `spec/` | None | SQL aggregation code (standalone) |
-| **minitest** | `test/` | Redmine + reporter | Dashboard controllers, models, helpers |
+| **adapter execution** | `spec/adapter/` | A PostgreSQL or MySQL/MariaDB server | The aggregator's SQL actually run against a real engine |
+| **minitest** | `test/unit`, `test/functional`, `test/integration` | Redmine + reporter | Dashboard controllers, models, helpers, and the HTTP verb of every route |
 
 The RSpec specs run without `redmine_reporter` and without a database. The minitest suite boots the full Redmine app and requires reporter to be present.
+
+`spec/adapter/` is the exception to "no database". It loads the real ActiveRecord,
+recreates a small schema and runs the aggregator for real, so it always runs as its
+own `rspec` invocation — `test_plugin.sh` excludes it from the main run and then
+executes it separately when a URL is available. It skips with an explanatory message
+unless `RRD_ADAPTER_URL` is set (`test_setup.sh` writes one to
+`redmine/.rrd_adapter_url`), and it refuses any URL whose database name does not
+contain `test`, because it drops and recreates every table.
+
+### Ruby version floor
+
+Redmine 5.1 runs on Ruby 2.7, so the plugin's own code has to parse under 2.7 —
+including the specs. `./.codex/check_ruby_floor.sh` greps for the constructs that
+floor rules out (endless method definitions, `Hash#except`, hash value omission) and
+runs in CI.
 
 ## The `redmine_reporter` dependency
 
@@ -74,20 +93,23 @@ Prefer platform authentication, a deploy key, or a masked secret — avoid pasti
 
 ## GitHub Actions
 
-Three parallel workflows live in `.github/workflows/`:
+One workflow, `.github/workflows/ci.yml`, running on every push and pull request.
+It has four jobs, split by what each one actually needs:
 
-| File | Redmine version |
-|------|-----------------|
-| `rspec_minitest-51.yml` | 5.1-stable |
-| `rspec_minitest-60.yml` | 6.0-stable |
-| `rspec_minitest-61.yml` | 6.1-stable |
+| Job | Matrix | Needs a database? | Needs `redmine_reporter`? |
+|-----|--------|-------------------|---------------------------|
+| `rspec` | Redmine 5.1 / 6.0 / 6.1 / 7.0 | No | No |
+| `adapter` | PostgreSQL 16, MySQL 8.0, MariaDB 11 | Yes (service container) | No |
+| `minitest` | Redmine 5.1 / 6.0 / 6.1 / 7.0 | PostgreSQL 16 | **Yes** |
+| `ruby-floor` | — | No | No |
 
-Each workflow:
-1. Clones Redmine at the specified version
-2. Checks out `redmine_reporter` using the `REPORTER_REPO_TOKEN` secret
-3. Starts a PostgreSQL 16 service
-4. Installs gems and migrates the database
-5. Runs `spec/` (RSpec) and `test/` (minitest)
+That split is the point. The three workflows this replaced were
+`workflow_dispatch`-only because each of them checked out the private
+`redmine_reporter` plugin before running anything, and a fork pull request cannot
+read `secrets.REPORTER_REPO_TOKEN` — so `on: pull_request` would have made every
+outside contribution red. Only `minitest` needs that secret now, and a
+`reporter-secret` job checks whether it is readable so `minitest` is *skipped*
+rather than failed when it is not.
 
 ### Setting up `REPORTER_REPO_TOKEN`
 
@@ -95,14 +117,12 @@ Each workflow:
 2. Store it as the secret `REPORTER_REPO_TOKEN` on *this* repo (Settings → Secrets → Actions).
 3. The secret is encrypted and never exposed in logs.
 
-Adjust the `repository:` line in the workflow YAMLs if your reporter repo path differs.
+Adjust the `repository:` line in the `minitest` job if your reporter repo path differs.
 
-### Triggering workflows manually
-
-The workflows are set to `workflow_dispatch` — they only run when triggered manually via the GitHub Actions UI or the CLI:
+### Triggering the workflow manually
 
 ```bash
-gh workflow run rspec_minitest-51.yml
+gh workflow run ci.yml
 ```
 
 ## Architecture overview
@@ -120,7 +140,9 @@ lib/
     patches/          Overlays on Reporter without modifying the vendor plugin
     project_page.rb   Block registry
 spec/                 RSpec specs (standalone, no Redmine needed)
+  adapter/            The aggregator's SQL run against a real PostgreSQL / MySQL server
 test/                 minitest suite (Redmine + reporter needed)
-.github/workflows/    CI configuration
+  integration/        Route verbs — a controller test does not check them
+.github/workflows/    CI configuration (one workflow, ci.yml)
 .codex/               Local / cloud-agent setup and test scripts
 ```

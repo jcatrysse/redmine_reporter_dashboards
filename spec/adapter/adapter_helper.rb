@@ -1,0 +1,518 @@
+# frozen_string_literal: true
+#
+# Harness for the ADAPTER EXECUTION specs.
+#
+# Everything else under spec/ is a pure unit spec: it stubs ActiveRecord away and
+# asserts on the SQL *strings* the aggregator builds. That proves the intent, but it
+# cannot prove that PostgreSQL and MySQL/MariaDB actually accept those strings and
+# answer the same numbers — and the aggregator has real per-adapter branches:
+#
+#   date_format_sql   TO_CHAR(x, 'IYYY"-W"IW')  vs  DATE_FORMAT(x, '%x-W%v')
+#   numeric_cast      CAST(x AS numeric)        vs  CAST(x AS DECIMAL(20,4))
+#   count_case        COUNT(DISTINCT CASE WHEN ... THEN issues.id END)
+#   percentile_age    ORDER BY ... OFFSET n LIMIT 1   (no percentile_cont)
+#   the joins         LEFT OUTER JOIN custom_values / time_entries with a
+#                     visibility subquery in the ON clause, next to a GROUP BY
+#
+# So these specs create a small real schema — the columns of Redmine's tables that
+# the aggregator names, under the same table names, because the generated SQL says
+# `issues.`, `custom_values.`, `time_entries.` and `projects.` literally — seed a
+# deterministic fixture, and run the aggregator against it for real.
+#
+# NOT a substitute for the minitest functional tests: Redmine's own models,
+# visibility rules and permissions are stubbed here with the smallest thing that has
+# the same SQL SHAPE (a subquery over projects for a role-restricted custom field, a
+# projects-referencing condition for time entry visibility). What is under test is
+# the aggregator's SQL against a real database engine, not Redmine's authorization.
+#
+# --- Running them ---
+#
+#   RRD_ADAPTER_URL=postgres://redmine:redmine@localhost/redmine_adapter_test \
+#     bundle exec rspec -I plugins/redmine_reporter_dashboards/spec \
+#                          plugins/redmine_reporter_dashboards/spec/adapter
+#
+#   RRD_ADAPTER_URL=mysql2://root@localhost/redmine_adapter_test  bundle exec rspec ...
+#
+# Without RRD_ADAPTER_URL the specs skip with that message, so the DB-less suite
+# stays runnable anywhere. They are deliberately run as their OWN rspec invocation:
+# they load the real ActiveRecord, while spec/sql_aggregation/* define a stub
+# ActiveRecord::Base when none exists, and one process should not have to be
+# correct under both. .codex/test_plugin.sh and the CI workflow keep them apart.
+#
+# The target database is DROPPED AND RECREATED table by table, so the URL must name
+# a database whose name contains "test". That guard is the only thing between a
+# careless RRD_ADAPTER_URL and someone's development data.
+
+require 'logger' # concurrent-ruby >= 1.3.5 no longer requires this; ActiveSupport needs Logger defined
+require 'active_support'
+require 'active_support/time'
+require 'uri'
+require_relative '../spec_helper'
+
+Time.zone ||= 'UTC'
+
+unless defined?(Rails)
+  module Rails
+    def self.logger
+      @logger ||= Logger.new(File::NULL)
+    end
+  end
+end
+
+module RrdAdapterHarness
+  ENV_VAR = 'RRD_ADAPTER_URL'
+
+  # Status ids are referenced from the specs, so they are named rather than magic.
+  STATUS_NEW         = 1
+  STATUS_IN_PROGRESS = 2
+  STATUS_CLOSED      = 5
+  STATUS_REJECTED    = 6
+
+  PROJECT_MAIN     = 1 # active
+  PROJECT_ARCHIVED = 2 # status 9 — excluded by both stubbed visibility conditions
+  PROJECT_SWEEP    = 3 # active; holds the one-issue-per-day calendar sweep
+
+  CF_DEPARTMENT = 10 # list,  visible everywhere
+  CF_POINTS     = 11 # int,   visible everywhere
+  CF_COST       = 12 # float, restricted to PROJECT_MAIN
+  CF_HIDDEN     = 13 # list,  not in CustomField.visible -> refused outright
+  CF_CLIENT     = 14 # ProjectCustomField -> refused as a non-issue custom field
+
+  SWEEP_DAYS = 400
+
+  class << self
+    def url
+      ENV[ENV_VAR].to_s
+    end
+
+    def configured?
+      !url.empty?
+    end
+
+    def skip_reason
+      "set #{ENV_VAR} to a PostgreSQL or MySQL/MariaDB URL naming a *test* database " \
+        "(e.g. #{ENV_VAR}=postgres://redmine:redmine@localhost/redmine_adapter_test) " \
+        'to run the adapter execution specs'
+    end
+
+    def database_name
+      URI.parse(url).path.to_s.sub(%r{\A/}, '')
+    rescue URI::InvalidURIError
+      ''
+    end
+
+    # The whole schema is recreated with force: true, so refuse anything that does
+    # not announce itself as a test database.
+    def connect!
+      unless database_name.include?('test')
+        raise "#{ENV_VAR} names the database #{database_name.inspect}; refusing to recreate " \
+              'its tables. Point it at a database whose name contains "test".'
+      end
+
+      ActiveRecord::Base.establish_connection(url)
+      ActiveRecord::Base.connection.execute('SELECT 1')
+      adapter_name
+    end
+
+    def adapter_name
+      ActiveRecord::Base.connection.adapter_name.to_s
+    end
+
+    def postgresql?
+      adapter_name.match?(/postgres/i)
+    end
+
+    def mysql?
+      adapter_name.match?(/mysql|maria|trilogy/i)
+    end
+
+    # The mysql2 adapter reports "Mysql2" for MariaDB too, so the server version is
+    # the only way to tell them apart — and they differ in how strict
+    # ONLY_FULL_GROUP_BY is, which one example turns on.
+    def mariadb?
+      mysql? && ActiveRecord::Base.connection.select_value('SELECT VERSION()').to_s.match?(/mariadb/i)
+    end
+
+    # QueryAggregator memoises the adapter family on the class; a spec process that
+    # connects after something already asked would otherwise keep :unknown.
+    def reset_adapter_memo!
+      SqlAggregation::QueryAggregator.instance_variable_set(:@adapter_family, nil)
+    end
+
+    def load_schema!
+      c = ActiveRecord::Base.connection
+
+      c.create_table(:projects, force: true) do |t|
+        t.string  :name
+        t.integer :status, null: false, default: 1
+      end
+
+      c.create_table(:issue_statuses, force: true) do |t|
+        t.string  :name
+        t.boolean :is_closed, null: false, default: false
+      end
+
+      c.create_table(:trackers, force: true) { |t| t.string :name }
+      c.create_table(:issue_categories, force: true) do |t|
+        t.string  :name
+        t.integer :project_id
+      end
+
+      c.create_table(:enumerations, force: true) do |t|
+        t.string :name
+        t.string :type
+      end
+
+      c.create_table(:users, force: true) do |t|
+        t.string :login, :firstname, :lastname
+      end
+
+      c.create_table(:versions, force: true) do |t|
+        t.integer :project_id
+        t.string  :name
+        t.date    :effective_date
+      end
+
+      c.create_table(:issues, force: true) do |t|
+        t.integer  :project_id, :tracker_id, :status_id, :priority_id, :category_id,
+                   :fixed_version_id, :author_id, :assigned_to_id
+        t.integer  :parent_id, :done_ratio
+        t.string   :subject
+        t.text     :description
+        t.float    :estimated_hours
+        t.date     :start_date, :due_date
+        t.datetime :created_on, :updated_on, :closed_on
+      end
+
+      c.create_table(:custom_fields, force: true) do |t|
+        t.string  :type, :name, :field_format
+        t.integer :position
+        t.boolean :visible,  null: false, default: true
+        t.boolean :multiple, null: false, default: false
+        t.text    :possible_values
+        # Not a Redmine column. Stands in for the projects subquery that
+        # IssueCustomField#visibility_by_project_condition produces for a
+        # role-restricted field: nil means "everyone", an id means "only there".
+        t.integer :visibility_project_id
+      end
+
+      c.create_table(:custom_values, force: true) do |t|
+        t.string  :customized_type
+        t.integer :customized_id, :custom_field_id
+        t.text    :value
+      end
+
+      c.create_table(:time_entries, force: true) do |t|
+        t.integer :project_id, :issue_id, :user_id
+        t.float   :hours
+        t.date    :spent_on
+      end
+    end
+
+    MODEL_NAMES = %i[Project IssueStatus Tracker IssueCategory Version IssuePriority User
+                     TimeEntry CustomValue CustomField IssueCustomField ProjectCustomField
+                     Issue].freeze
+
+    # These are TOP-LEVEL constants, because that is how the aggregator names them.
+    # If one is already taken the specs must fail rather than silently redefine
+    # somebody else's class — a booted Redmine is the obvious case, and there these
+    # specs have no business running at all.
+    def define_models!
+      return if defined?(::Issue) && ::Issue.respond_to?(:rrd_adapter_harness_model?)
+
+      taken = MODEL_NAMES.select { |name| Object.const_defined?(name, false) }
+      unless taken.empty?
+        raise "#{taken.join(', ')} already defined — the adapter execution specs define their own " \
+              'models under those names and must run in their own process (bundle exec rspec ' \
+              'spec/adapter), not inside a booted Redmine.'
+      end
+
+      # rubocop:disable Lint/ConstantDefinitionInBlock
+      Object.const_set(:Project, Class.new(ActiveRecord::Base))
+      Object.const_set(:IssueStatus, Class.new(ActiveRecord::Base))
+      Object.const_set(:Tracker, Class.new(ActiveRecord::Base))
+      Object.const_set(:IssueCategory, Class.new(ActiveRecord::Base))
+      Object.const_set(:Version, Class.new(ActiveRecord::Base))
+
+      Object.const_set(:IssuePriority, Class.new(ActiveRecord::Base) do
+        self.table_name = 'enumerations'
+      end)
+
+      Object.const_set(:User, Class.new(ActiveRecord::Base) do
+        def name
+          "#{firstname} #{lastname}".strip
+        end
+
+        class << self
+          attr_writer :current
+
+          def current
+            @current ||= order(:id).first
+          end
+        end
+      end)
+
+      # Redmine applies TimeEntry.visible_condition to every sum of spent time; the
+      # stand-in has the same shape (it names `projects`, so the aggregator's
+      # joins(:project) is load-bearing) without reimplementing permissions.
+      Object.const_set(:TimeEntry, Class.new(ActiveRecord::Base) do
+        def self.visible_condition(_user)
+          'projects.status = 1'
+        end
+      end)
+
+      Object.const_set(:CustomValue, Class.new(ActiveRecord::Base))
+
+      Object.const_set(:CustomField, Class.new(ActiveRecord::Base) do
+        def self.visible(_user)
+          where(visible: true)
+        end
+
+        def visibility_by_project_condition
+          return '1=1' if visibility_project_id.nil?
+
+          "issues.project_id IN (SELECT rrd_vp.id FROM projects rrd_vp " \
+            "WHERE rrd_vp.id = #{visibility_project_id.to_i})"
+        end
+      end)
+
+      Object.const_set(:IssueCustomField, Class.new(::CustomField))
+      Object.const_set(:ProjectCustomField, Class.new(::CustomField))
+
+      Object.const_set(:Issue, Class.new(ActiveRecord::Base) do
+        belongs_to :project, optional: true
+        belongs_to :status, class_name: 'IssueStatus', optional: true
+        has_many :time_entries, dependent: nil
+
+        # The marker define_models! recognises, so a second call is a no-op rather
+        # than a "already defined" failure against its own classes.
+        def self.rrd_adapter_harness_model?
+          true
+        end
+      end)
+      # rubocop:enable Lint/ConstantDefinitionInBlock
+    end
+
+    # The scope every spec starts from: the shape IssueQuery#base_scope has, minus
+    # Issue.visible (whose SQL is Redmine's, not ours).
+    def base_scope
+      ::Issue.joins(:status, :project)
+    end
+
+    def today
+      Time.zone.today
+    end
+
+    # Midday UTC, so no fixture sits on a day boundary the database could round the
+    # other way from Ruby.
+    def at(days_ago)
+      Time.zone.local(today.year, today.month, today.day, 12, 0, 0) - (days_ago * 86_400)
+    end
+
+    def seed!
+      truncate_all!
+
+      ::Project.insert_all!([
+        { id: PROJECT_MAIN,     name: 'Main',     status: 1 },
+        { id: PROJECT_ARCHIVED, name: 'Archived', status: 9 },
+        { id: PROJECT_SWEEP,    name: 'Sweep',    status: 1 }
+      ])
+
+      ::IssueStatus.insert_all!([
+        { id: STATUS_NEW,         name: 'New',         is_closed: false },
+        { id: STATUS_IN_PROGRESS, name: 'In Progress', is_closed: false },
+        { id: STATUS_CLOSED,      name: 'Closed',      is_closed: true },
+        { id: STATUS_REJECTED,    name: 'Rejected',    is_closed: true }
+      ])
+
+      ::Tracker.insert_all!([{ id: 1, name: 'Bug' }, { id: 2, name: 'Feature' }])
+      ::IssueCategory.insert_all!([{ id: 1, name: 'Backend', project_id: PROJECT_MAIN }])
+      ::IssuePriority.insert_all!([
+        { id: 1, name: 'Low',    type: 'IssuePriority' },
+        { id: 2, name: 'Normal', type: 'IssuePriority' },
+        { id: 3, name: 'High',   type: 'IssuePriority' }
+      ])
+      ::User.insert_all!([
+        { id: 1, login: 'alice', firstname: 'Alice', lastname: 'Adams' },
+        { id: 2, login: 'bob',   firstname: 'Bob',   lastname: 'Brown' }
+      ])
+      ::Version.insert_all!([
+        { id: 1, project_id: PROJECT_MAIN, name: 'v1.0', effective_date: today + 30 },
+        { id: 2, project_id: PROJECT_MAIN, name: 'v2.0', effective_date: today + 90 }
+      ])
+
+      # insert_all! requires every row to carry the same keys, so the columns that
+      # only some fields use are spelled out as nil rather than left off.
+      ::CustomField.insert_all!([
+        { id: CF_DEPARTMENT, type: 'IssueCustomField', name: 'Department', field_format: 'list',
+          position: 1, visible: true, multiple: false, possible_values: "Sales\nOps",
+          visibility_project_id: nil },
+        { id: CF_POINTS, type: 'IssueCustomField', name: 'Points', field_format: 'int',
+          position: 2, visible: true, multiple: false, possible_values: nil,
+          visibility_project_id: nil },
+        { id: CF_COST, type: 'IssueCustomField', name: 'Cost', field_format: 'float',
+          position: 3, visible: true, multiple: false, possible_values: nil,
+          visibility_project_id: PROJECT_MAIN },
+        { id: CF_HIDDEN, type: 'IssueCustomField', name: 'Hidden', field_format: 'list',
+          position: 4, visible: false, multiple: false, possible_values: "Yes\nNo",
+          visibility_project_id: nil },
+        { id: CF_CLIENT, type: 'ProjectCustomField', name: 'Client', field_format: 'string',
+          position: 5, visible: true, multiple: false, possible_values: nil,
+          visibility_project_id: nil }
+      ])
+
+      seed_main_project!
+      seed_archived_project!
+      seed_sweep!
+    end
+
+    # Four issues with exactly known ages, closings and assignments — the fixture
+    # every scalar assertion is read off.
+    #
+    #   1  open,   created 100d ago, assignee alice, est 8.0,  due 10d ago (overdue)
+    #   2  closed, created 100d ago, closed 40d ago, assignee bob, est 4.0
+    #   3  open,   created 100d ago, closed_on 40d ago BUT status New — a REOPENED
+    #      issue, the case that makes open_at_end's status term load-bearing
+    #   4  open,   created 5d ago, no assignee, no estimate, no due date
+    #
+    # `description` covers the one completeness field with a text branch
+    # (IS NOT NULL *AND* <> ''): filled on 1 and 4, empty string on 2, NULL on 3.
+    def seed_main_project!
+      ::Issue.insert_all!([
+        { id: 1, project_id: PROJECT_MAIN, tracker_id: 1, status_id: STATUS_NEW, priority_id: 2,
+          category_id: 1, fixed_version_id: 1, author_id: 1, assigned_to_id: 1, parent_id: nil,
+          done_ratio: 30, subject: 'open old overdue', description: 'has text',
+          estimated_hours: 8.0, start_date: today - 100,
+          due_date: today - 10, created_on: at(100), updated_on: at(2), closed_on: nil },
+        { id: 2, project_id: PROJECT_MAIN, tracker_id: 1, status_id: STATUS_CLOSED, priority_id: 2,
+          category_id: 1, fixed_version_id: 1, author_id: 1, assigned_to_id: 2, parent_id: nil,
+          done_ratio: 100, subject: 'closed', description: '',
+          estimated_hours: 4.0, start_date: today - 100,
+          due_date: today - 20, created_on: at(100), updated_on: at(40), closed_on: at(40) },
+        { id: 3, project_id: PROJECT_MAIN, tracker_id: 2, status_id: STATUS_NEW, priority_id: 3,
+          category_id: nil, fixed_version_id: 2, author_id: 2, assigned_to_id: 1, parent_id: nil,
+          done_ratio: 10, subject: 'reopened', description: nil,
+          estimated_hours: 2.0, start_date: today - 100,
+          due_date: today + 30, created_on: at(100), updated_on: at(1), closed_on: at(40) },
+        { id: 4, project_id: PROJECT_MAIN, tracker_id: 2, status_id: STATUS_IN_PROGRESS,
+          priority_id: 1, category_id: nil, fixed_version_id: 2, author_id: 1,
+          assigned_to_id: nil, parent_id: 1, done_ratio: 0, subject: 'new',
+          description: 'also text', estimated_hours: nil,
+          start_date: today - 5, due_date: nil, created_on: at(5), updated_on: at(0),
+          closed_on: nil }
+      ])
+
+      ::CustomValue.insert_all!([
+        { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_DEPARTMENT, value: 'Sales' },
+        { customized_type: 'Issue', customized_id: 2, custom_field_id: CF_DEPARTMENT, value: 'Ops' },
+        { customized_type: 'Issue', customized_id: 3, custom_field_id: CF_DEPARTMENT, value: 'Sales' },
+        { customized_type: 'Issue', customized_id: 4, custom_field_id: CF_DEPARTMENT, value: '' },
+        { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_POINTS, value: '5' },
+        { customized_type: 'Issue', customized_id: 2, custom_field_id: CF_POINTS, value: '3' },
+        { customized_type: 'Issue', customized_id: 3, custom_field_id: CF_POINTS, value: '' },
+        { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_COST, value: '100.5' },
+        { customized_type: 'Issue', customized_id: 2, custom_field_id: CF_COST, value: '200.25' },
+        { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_HIDDEN, value: 'nope' }
+      ])
+
+      # 3.5 + 1.5 visible hours on issue 1, 2.0 on issue 2, none on 3 and 4.
+      ::TimeEntry.insert_all!([
+        { project_id: PROJECT_MAIN, issue_id: 1, user_id: 1, hours: 3.5, spent_on: today - 3 },
+        { project_id: PROJECT_MAIN, issue_id: 1, user_id: 2, hours: 1.5, spent_on: today - 2 },
+        { project_id: PROJECT_MAIN, issue_id: 2, user_id: 1, hours: 2.0, spent_on: today - 50 }
+      ])
+    end
+
+    # One open issue in the archived project, with a value for the restricted custom
+    # field and a time entry. Both must be invisible through the visibility
+    # conditions while the ISSUE itself still counts — the LEFT OUTER joins must not
+    # turn into filters.
+    def seed_archived_project!
+      ::Issue.insert_all!([
+        { id: 5, project_id: PROJECT_ARCHIVED, tracker_id: 1, status_id: STATUS_NEW,
+          priority_id: 2, category_id: nil, fixed_version_id: nil, author_id: 1,
+          assigned_to_id: 2, parent_id: nil, done_ratio: 0, subject: 'archived',
+          description: nil, estimated_hours: 16.0,
+          start_date: today - 50, due_date: nil, created_on: at(50), updated_on: at(50),
+          closed_on: nil }
+      ])
+
+      ::CustomValue.insert_all!([
+        { customized_type: 'Issue', customized_id: 5, custom_field_id: CF_COST, value: '999.99' },
+        { customized_type: 'Issue', customized_id: 5, custom_field_id: CF_DEPARTMENT, value: 'Ops' }
+      ])
+
+      ::TimeEntry.insert_all!([
+        { project_id: PROJECT_ARCHIVED, issue_id: 5, user_id: 1, hours: 40.0, spent_on: today - 10 }
+      ])
+    end
+
+    # One open issue per day for SWEEP_DAYS days. Its only job is to make the
+    # database's own day/week/month/year bucketing collide with Ruby's labels for
+    # whatever today happens to be — including the ISO-week turn of the year, which
+    # a fixed fixture date would only exercise on the days it was written for.
+    def seed_sweep!
+      rows = (0...SWEEP_DAYS).map do |i|
+        { id: 1_000 + i, project_id: PROJECT_SWEEP, tracker_id: 1, status_id: STATUS_NEW,
+          priority_id: 2, author_id: 1, done_ratio: 0, subject: "sweep #{i}",
+          start_date: today - i, created_on: at(i), updated_on: at(i) }
+      end
+      ::Issue.insert_all!(rows)
+    end
+
+    def truncate_all!
+      %w[issues custom_values time_entries projects issue_statuses trackers
+         issue_categories enumerations users versions custom_fields].each do |table|
+        ActiveRecord::Base.connection.delete("DELETE FROM #{table}")
+      end
+    end
+
+    def sweep_dates
+      (0...SWEEP_DAYS).map { |i| today - i }
+    end
+
+    # The Ruby side of the bucketing contract, written out here rather than borrowed
+    # from QueryAggregator: a spec that called the same helper the implementation
+    # calls would agree with it by construction.
+    def ruby_label(date, period)
+      case period
+      when 'day'   then date.strftime('%Y-%m-%d')
+      when 'week'  then "#{date.cwyear}-W#{date.cweek.to_s.rjust(2, '0')}"
+      when 'month' then date.strftime('%Y-%m')
+      when 'year'  then date.strftime('%Y')
+      end
+    end
+
+    # MySQL/MariaDB only. Runs the block with the strictest GROUP BY mode a
+    # production server can be configured with, which is what actually rejects a
+    # selected expression that is not in the GROUP BY.
+    def with_only_full_group_by
+      return yield unless mysql?
+
+      c = ActiveRecord::Base.connection
+      previous = c.select_value('SELECT @@SESSION.sql_mode').to_s
+      modes = previous.split(',').reject(&:empty?)
+      c.execute("SET SESSION sql_mode = '#{(modes | %w[ONLY_FULL_GROUP_BY]).join(',')}'")
+      begin
+        yield
+      ensure
+        c.execute("SET SESSION sql_mode = '#{previous}'")
+      end
+    end
+  end
+end
+
+if RrdAdapterHarness.configured?
+  require 'active_record'
+  require_relative '../../lib/sql_aggregation/query_aggregator'
+
+  RSpec.configure do |config|
+    config.before(:suite) do
+      RrdAdapterHarness.connect!
+      RrdAdapterHarness.reset_adapter_memo!
+      RrdAdapterHarness.define_models!
+      RrdAdapterHarness.load_schema!
+      RrdAdapterHarness.seed!
+    end
+  end
+end

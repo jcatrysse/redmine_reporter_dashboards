@@ -2,10 +2,14 @@
 
 # Project dashboard
 get 'projects/:project_id/reporter', to: 'reporter_project_pages#show', as: 'project_reporter_page'
-post 'projects/:project_id/reporter', to: 'reporter_project_pages#update_page'
+# Verbs match what each action does to the dashboard: update_page and move_block
+# change an existing tab, remove_block deletes from it, add_block creates a widget.
+# They were all POST, which meant a delete and two updates were indistinguishable
+# from a create to anything reading the access log or a proxy's method rules.
+patch 'projects/:project_id/reporter', to: 'reporter_project_pages#update_page'
 post 'projects/:project_id/reporter/add_block', to: 'reporter_project_pages#add_block', as: 'add_reporter_project_block'
-post 'projects/:project_id/reporter/remove_block', to: 'reporter_project_pages#remove_block', as: 'remove_reporter_project_block'
-post 'projects/:project_id/reporter/move_block', to: 'reporter_project_pages#move_block', as: 'move_reporter_project_block'
+delete 'projects/:project_id/reporter/remove_block', to: 'reporter_project_pages#remove_block', as: 'remove_reporter_project_block'
+patch 'projects/:project_id/reporter/move_block', to: 'reporter_project_pages#move_block', as: 'move_reporter_project_block'
 get 'projects/:project_id/reporter/report_pdf', to: 'reporter_project_pages#report_pdf', as: 'report_pdf_reporter_project_page'
 
 post 'projects/:project_id/reporter/tabs', to: 'reporter_project_tabs#create', as: 'create_reporter_project_tab'

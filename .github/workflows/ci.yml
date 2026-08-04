@@ -1,0 +1,325 @@
+# One workflow instead of the three near-identical per-version ones it replaces
+# (rspec_minitest-51/-60/-61.yml). Those were workflow_dispatch-only, because every
+# one of them checked out the PRIVATE redmine_reporter plugin with
+# secrets.REPORTER_REPO_TOKEN before running anything — a secret no fork PR can see,
+# so `on: pull_request` would have made every outside contribution red.
+#
+# The split below is what makes automatic runs possible:
+#
+#   rspec     — the plugin's own specs. They stub Redmine away and never boot Rails,
+#               so they need neither the private plugin nor a database. Runs on every
+#               push and pull request, across the supported Redmine branches.
+#   adapter   — spec/adapter, the specs that run the aggregator's SQL against a real
+#               server. One job per engine: PostgreSQL, MySQL and MariaDB.
+#   minitest  — the functional tests, which DO boot the full app and therefore DO
+#               need redmine_reporter. Gated on the secret actually being readable,
+#               so it is skipped rather than failed on a fork PR.
+#   ruby-floor — the plugin declares Redmine 5.1 support, and Redmine 5.1 runs on
+#               Ruby 2.7. Guards the syntax that floor rules out.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Plugin specs — no database, no redmine_reporter, every supported Redmine
+  # ------------------------------------------------------------------
+  rspec:
+    name: RSpec (Redmine ${{ matrix.redmine }}, Ruby ${{ matrix.ruby }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ruby picked inside each branch's own Gemfile range:
+          #   5.1-stable  >= 2.7.0, < 3.3.0
+          #   6.0-stable  >= 3.1.0, < 3.4.0
+          #   6.1-stable  >= 3.2.0, < 3.5.0
+          #   7.0-stable  >= 3.2.0, < 4.1.0
+          - { redmine: '5.1-stable', ruby: '3.2' }
+          - { redmine: '6.0-stable', ruby: '3.3' }
+          - { redmine: '6.1-stable', ruby: '3.4' }
+          - { redmine: '7.0-stable', ruby: '3.4' }
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Redmine ${{ matrix.redmine }}
+        run: |
+          git clone --depth 1 --branch ${{ matrix.redmine }} \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: false
+          working-directory: redmine
+
+      # No config/database.yml on purpose: Redmine's Gemfile only pulls in pg /
+      # mysql2 for the adapters it finds there, and these specs touch no database.
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      - name: Run plugin specs
+        run: |
+          bundle exec rspec \
+            -I plugins/redmine_reporter_dashboards/spec \
+               plugins/redmine_reporter_dashboards/spec \
+            --format progress
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # Adapter execution — the same specs, but against a real database engine
+  # ------------------------------------------------------------------
+  adapter:
+    name: Adapter execution (${{ matrix.db.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db:
+          - label: PostgreSQL 16
+            image: postgres:16
+            port: 5432
+            adapter: postgresql
+            url: postgres://redmine:redmine@127.0.0.1:5432/redmine_adapter_test
+            packages: libpq-dev
+            options: >-
+              --health-cmd pg_isready
+              --health-interval 10s --health-timeout 5s --health-retries 10
+          - label: MySQL 8.0
+            image: mysql:8.0
+            port: 3306
+            adapter: mysql2
+            url: mysql2://redmine:redmine@127.0.0.1:3306/redmine_adapter_test
+            packages: default-libmysqlclient-dev
+            options: >-
+              --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine"
+              --health-interval 10s --health-timeout 5s --health-retries 20
+          - label: MariaDB 11
+            image: mariadb:11
+            port: 3306
+            adapter: mysql2
+            url: mysql2://redmine:redmine@127.0.0.1:3306/redmine_adapter_test
+            packages: default-libmysqlclient-dev
+            options: >-
+              --health-cmd "healthcheck.sh --connect --innodb_initialized"
+              --health-interval 10s --health-timeout 5s --health-retries 20
+
+    services:
+      # One service definition for three engines: each image reads only the
+      # variables it knows and ignores the other's.
+      db:
+        image: ${{ matrix.db.image }}
+        ports:
+          - ${{ matrix.db.port }}:${{ matrix.db.port }}
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_adapter_test
+          MYSQL_ROOT_PASSWORD: redmine
+          MYSQL_DATABASE: redmine_adapter_test
+          MYSQL_USER: redmine
+          MYSQL_PASSWORD: redmine
+          MARIADB_ROOT_PASSWORD: redmine
+          MARIADB_DATABASE: redmine_adapter_test
+          MARIADB_USER: redmine
+          MARIADB_PASSWORD: redmine
+        options: ${{ matrix.db.options }}
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      # One Redmine branch is enough here: what is under test is the SQL against the
+      # engine, and the rspec job above already covers the Redmine/Ruby spread.
+      - name: Clone Redmine
+        run: |
+          git clone --depth 1 --branch 6.1-stable \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Install client libraries
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.db.packages }}
+
+      # Redmine's Gemfile picks its database gems from the adapters named in
+      # config/database.yml, so this has to exist before bundle install.
+      - name: Declare the adapter so bundler installs its gem
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: ${{ matrix.db.adapter }}
+            database: redmine_adapter_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+          EOF
+        working-directory: redmine
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+          working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      - name: Run the adapter execution specs
+        env:
+          RRD_ADAPTER_URL: ${{ matrix.db.url }}
+        run: |
+          bundle exec rspec \
+            -I plugins/redmine_reporter_dashboards/spec \
+               plugins/redmine_reporter_dashboards/spec/adapter \
+            --format documentation
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # Is the private redmine_reporter reachable from this run at all?
+  # ------------------------------------------------------------------
+  reporter-secret:
+    name: Check redmine_reporter access
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.check.outputs.available }}
+    steps:
+      - id: check
+        env:
+          TOKEN: ${{ secrets.REPORTER_REPO_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::REPORTER_REPO_TOKEN is not readable from this run ' \
+                 '(fork pull request, or the secret is unset), so the minitest job is skipped. ' \
+                 'The RSpec and adapter jobs do not need it.'
+          fi
+
+  # ------------------------------------------------------------------
+  # Functional tests — boot the full app, so redmine_reporter must be present
+  # ------------------------------------------------------------------
+  minitest:
+    name: Minitest (Redmine ${{ matrix.redmine }})
+    runs-on: ubuntu-latest
+    needs: reporter-secret
+    if: needs.reporter-secret.outputs.available == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { redmine: '5.1-stable', ruby: '3.2' }
+          - { redmine: '6.0-stable', ruby: '3.3' }
+          - { redmine: '6.1-stable', ruby: '3.4' }
+          - { redmine: '7.0-stable', ruby: '3.4' }
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+    env:
+      RAILS_ENV: test
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Redmine ${{ matrix.redmine }}
+        run: |
+          git clone --depth 1 --branch ${{ matrix.redmine }} \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      # redmine_reporter is a private hard dependency: init.rb raises without it and
+      # the functional tests boot the full app. Provide a read-only credential
+      # (fine-grained PAT or deploy key) as the REPORTER_REPO_TOKEN secret, and
+      # adjust `repository` if the reporter repo lives elsewhere.
+      - name: Checkout redmine_reporter dependency (private)
+        uses: actions/checkout@v4
+        with:
+          repository: jcatrysse/redmine_reporter
+          token: ${{ secrets.REPORTER_REPO_TOKEN }}
+          path: redmine/plugins/redmine_reporter
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: postgresql
+            database: redmine_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+            encoding: unicode
+          EOF
+        working-directory: redmine
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: false
+          working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      - name: Populate the test database
+        run: |
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+          bundle exec rake redmine:plugins:migrate
+        working-directory: redmine
+
+      - name: Run plugin functional tests
+        run: bundle exec rake redmine:plugins:test NAME=redmine_reporter_dashboards
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # Ruby 2.7 floor
+  # ------------------------------------------------------------------
+  ruby-floor:
+    name: Ruby 2.7 syntax floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for syntax newer than the declared floor
+        run: ./.codex/check_ruby_floor.sh

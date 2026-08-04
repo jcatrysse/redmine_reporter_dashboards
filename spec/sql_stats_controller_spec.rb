@@ -196,6 +196,14 @@ RSpec.describe SqlStatsController do
         expect(rendered[:json][:closed]).to all(eq(0))
       end
 
+      it 'stamps generated_at on the Rails clock, like the aggregation itself' do
+        # Time.current, not Time.now: the aggregated data is Time.zone-based, so the
+        # timestamp next to it must not follow the server's system timezone instead.
+        expect(Time).to receive(:current).and_return(Time.utc(2026, 5, 17, 9, 30))
+        controller.monthly_flow
+        expect(rendered[:json][:generated_at]).to eq('2026-05-17T09:30:00Z')
+      end
+
       it 'includes a generated_at ISO8601 timestamp' do
         controller.monthly_flow
         expect(rendered[:json][:generated_at]).to match(/\A\d{4}-\d{2}-\d{2}T/)

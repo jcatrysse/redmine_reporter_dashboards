@@ -28,18 +28,21 @@ module ReporterProjectPagesHelper
   # A single move control (link) rendered version-safely. Used both for widget
   # movement and for tab ordering, so the two stay visually consistent and both
   # work on Redmine 5 and 6.
-  def reporter_dashboard_move_link(direction, url)
+  #
+  # method: the two callers differ. Moving a widget PATCHes the tab it belongs to;
+  # reordering tabs POSTs to its own /order endpoint, which has not changed.
+  def reporter_dashboard_move_link(direction, url, method: :post)
     direction = direction.to_s
     label = l(REPORTER_MOVE_LABELS[direction])
 
     if reporter_dashboard_svg_icons?
       link_to sprite_icon(REPORTER_MOVE_ICONS[direction], label), url,
-              method: :post, class: 'icon-only reporter-move-control',
+              method: method, class: 'icon-only reporter-move-control',
               title: label, 'aria-label' => label
     else
       glyph = content_tag('span', REPORTER_MOVE_GLYPHS[direction], 'aria-hidden' => 'true')
       link_to glyph, url,
-              method: :post,
+              method: method,
               class: 'reporter-move-control reporter-move-control--glyph',
               title: label, 'aria-label' => label
     end
@@ -71,7 +74,7 @@ module ReporterProjectPagesHelper
         moves = reporter_project_block_move_controls(block, tab, project)
         close = link_to(sprite_icon('close', l(:button_delete)),
                         remove_reporter_project_block_path(project_id: project.id, block: block, tab: tab.id),
-                        method: :post,
+                        method: :delete,
                         class: 'icon-only icon-close', title: l(:button_delete))
         contextual = content_tag('div', moves + close, class: 'contextual')
       end
@@ -90,7 +93,8 @@ module ReporterProjectPagesHelper
 
       controls << reporter_dashboard_move_link(
         direction,
-        move_reporter_project_block_path(project_id: project.id, block: block, tab: tab.id, direction: direction)
+        move_reporter_project_block_path(project_id: project.id, block: block, tab: tab.id, direction: direction),
+        method: :patch
       )
     end
     # A widget alone on the page can't move in any direction; don't emit an empty
@@ -122,10 +126,44 @@ module ReporterProjectPagesHelper
       rescue ActionView::MissingTemplate
         Rails.logger.warn("Partial \"#{partial}\" missing for block \"#{block}\" in project #{project.identifier} (id=#{project.id})")
         return nil
+      rescue StandardError => e
+        reporter_project_block_error(block, project, e)
       end
     else
-      send :"render_reporter_project_#{block_definition[:name]}_block", block, settings, project
+      begin
+        send :"render_reporter_project_#{block_definition[:name]}_block", block, settings, project
+      rescue StandardError => e
+        reporter_project_block_error(block, project, e)
+      end
     end
+  end
+
+  # ONE widget failing must not take the dashboard page with it.
+  #
+  # Redmine core's my_helper rescues only ActionView::MissingTemplate here, and this
+  # method was written from it — but the two are not in the same position. Core's
+  # my-page blocks are all core's own code, whereas ProjectPage.additional_blocks
+  # discovers widgets by globbing OTHER plugins' view directories, so a partial this
+  # plugin has never seen raising an exception is a first-class scenario rather than an
+  # edge case. Without this, one such widget 500s the whole dashboard for every viewer.
+  #
+  # Redmine 7.0 is the concrete instance: redmine_reporter's ReportTemplate cannot be
+  # loaded under Rails 8.1, so both report widgets raise the moment they are rendered.
+  # That is the dependency's problem to fix, but taking the entire page down over it is
+  # ours.
+  #
+  # A visible placeholder, not nil: a widget that renders as nothing disappears from the
+  # page together with its contextual controls, so nobody can remove it from the layout
+  # any more. The placeholder keeps the box — and therefore the close button — so a
+  # broken widget can still be taken off the dashboard. The reason goes to the log, not
+  # to the page.
+  def reporter_project_block_error(block, project, error)
+    Rails.logger.error(
+      "[reporter_dashboards] widget #{block.inspect} in project #{project.identifier} " \
+      "(id=#{project.id}) could not be rendered: #{error.class}: #{error.message}\n" \
+      "#{Array(error.backtrace).first(5).join("\n")}"
+    )
+    content_tag('p', l(:error_reporter_widget_render_failed), class: 'nodata')
   end
 
   def reporter_project_block_select_tag(tab, project)

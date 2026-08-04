@@ -17,7 +17,8 @@
     <%= form_tag(create_reporter_project_tab_path(project), method: :post, class: 'box tabular') do %>
       <p>
         <label for="reporter_project_tab_title"><%= l(:field_title) %></label>
-        <%= text_field_tag 'reporter_project_tab[title]', '', size: 40 %>
+        <%= text_field_tag 'reporter_project_tab[title]', '', size: 40,
+                           maxlength: ReporterProjectTab::MAX_TITLE_LENGTH %>
       </p>
       <p>
         <label for="reporter_project_tab_description" class="bold"><%= l(:field_description) %></label>
@@ -35,7 +36,9 @@
     <%= form_tag(update_reporter_project_tab_path(project, tab), method: :patch, class: 'box tabular') do %>
       <p>
         <label for="reporter_project_tab_title_<%= tab.id %>"><%= l(:field_title) %></label>
-        <%= text_field_tag 'reporter_project_tab[title]', tab.title, id: "reporter_project_tab_title_#{tab.id}", size: 40 %>
+        <%= text_field_tag 'reporter_project_tab[title]', tab.title,
+                           id: "reporter_project_tab_title_#{tab.id}", size: 40,
+                           maxlength: ReporterProjectTab::MAX_TITLE_LENGTH %>
       </p>
       <p>
         <label for="reporter_project_tab_description_<%= tab.id %>" class="bold"><%= l(:field_description) %></label>

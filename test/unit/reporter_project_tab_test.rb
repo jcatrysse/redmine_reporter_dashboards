@@ -142,4 +142,105 @@ class ReporterProjectTabTest < ActiveSupport::TestCase
 
     assert_equal '10', tab.block_settings('news')[:limit]
   end
+
+  def test_title_is_stripped
+    tab = ReporterProjectTab.create!(project: @project, title: "  Overview \t ")
+    assert_equal 'Overview', tab.title
+  end
+
+  # Stripped before the presence check, so whitespace is not a title.
+  def test_title_of_only_whitespace_is_invalid
+    tab = ReporterProjectTab.new(project: @project, title: '   ')
+    assert_not tab.valid?
+    assert tab.errors[:title].any?
+  end
+
+  def test_title_longer_than_the_limit_is_invalid
+    tab = ReporterProjectTab.new(project: @project,
+                                 title: 'x' * (ReporterProjectTab::MAX_TITLE_LENGTH + 1))
+    assert_not tab.valid?
+    assert tab.errors[:title].any?
+  end
+
+  def test_title_at_the_limit_is_valid
+    tab = ReporterProjectTab.new(project: @project,
+                                 title: 'x' * ReporterProjectTab::MAX_TITLE_LENGTH)
+    assert tab.valid?
+  end
+
+  # An upgrade must not make an existing tab unsavable. The column allows 255
+  # characters, so a title of 61-255 may already be in a database; validating it
+  # unconditionally would have failed every later save of that tab — every add_block,
+  # move_block and settings change — leaving the dashboard read-only.
+  def test_an_existing_over_long_title_does_not_block_other_changes
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.update_column(:title, 'x' * (ReporterProjectTab::MAX_TITLE_LENGTH + 30))
+    tab.reload
+
+    tab.add_block('news')
+    assert tab.save, tab.errors.full_messages.join(', ')
+  end
+
+  # Same, for a stored title that also carries surrounding whitespace: stripping it
+  # would mark the attribute changed and switch the length check back on, so the strip
+  # is conditional too.
+  def test_an_existing_over_long_padded_title_does_not_block_other_changes
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.update_column(:title, "  #{'x' * (ReporterProjectTab::MAX_TITLE_LENGTH + 30)}  ")
+    tab.reload
+
+    tab.add_block('news')
+    assert tab.save, tab.errors.full_messages.join(', ')
+  end
+
+  # Grandfathered, not ignored: the moment anyone edits the title it has to be valid.
+  def test_editing_an_existing_over_long_title_still_requires_a_valid_one
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.update_column(:title, 'x' * (ReporterProjectTab::MAX_TITLE_LENGTH + 30))
+    tab.reload
+
+    tab.title = 'y' * (ReporterProjectTab::MAX_TITLE_LENGTH + 1)
+    assert_not tab.valid?
+    assert tab.errors[:title].any?
+
+    tab.title = 'Renamed'
+    assert tab.valid?
+  end
+
+  # The size check has to measure what will actually be written, and settings belonging
+  # to widgets that are no longer on the dashboard are dropped on the way there.
+  def test_settings_of_removed_widgets_do_not_count_towards_the_size_limit
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.add_block('news')
+    tab.save!
+    # 'activity' is not on the dashboard, so its settings are pruned before validation.
+    tab.update_column(:settings,
+                      { 'activity' => { 'note' => 'x' * (ReporterProjectTab::MAX_SETTINGS_BYTES + 1) } })
+    tab.reload
+
+    assert tab.valid?
+    assert tab.save
+    assert_equal({}, tab.reload.block_settings)
+  end
+
+  # The backstop behind the per-widget limits in BlockSettings: settings is a
+  # YAML column loaded and re-dumped on every render, so the total has a ceiling.
+  def test_settings_larger_than_the_limit_is_invalid
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.add_block('news')
+    tab.save!
+    tab.update_block_settings('news', { 'note' => 'x' * (ReporterProjectTab::MAX_SETTINGS_BYTES + 1) })
+
+    assert_not tab.valid?
+    assert tab.errors[:settings].any?
+  end
+
+  def test_settings_within_the_limit_is_valid
+    tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+    tab.add_block('news')
+    tab.save!
+    tab.update_block_settings('news', { 'note' => 'x' * 1_000 })
+
+    assert tab.valid?
+  end
 end
