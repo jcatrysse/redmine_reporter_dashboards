@@ -2,6 +2,49 @@
 
 All notable changes to this plugin are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **`redmine_reporter` is now optional.** The plugin used to `raise` at load time
+  without it, which made it uninstallable alongside a plain Redmine. Project
+  dashboards, the tab bar, `{% sql_aggregate %}`, `{% version_rollup %}`,
+  `{% geo_version_map %}` and the statistics endpoint never needed it. Installed or
+  not, one `info` line in the log says which mode you are running.
+
+  Only the two report widgets (*Report*, *Report by issues*), their **Export as PDF**
+  link, and the `issue.target_version` / `issue.custom_field_value` additions to
+  Reporter's own Liquid drop still require it.
+
+- Ordered-list behaviour for dashboard tabs is now owned by the plugin
+  (`RedmineReporterDashboards::Positioned`) instead of coming from the `redmineup`
+  gem's `up_acts_as_list`. That gem arrived only as a transitive dependency of
+  `redmine_reporter`, so without this the plugin would have booted without Reporter
+  and then failed on its own `ReporterProjectTab` model. Positions stay 1-based,
+  destroying a tab still closes the gap, and the reorder controls behave as before.
+  Two behaviour improvements fall out of it: a tab moved to another project is
+  re-numbered into its new project's list rather than keeping a position from the old
+  one, and two tabs that somehow share a position now have a stable order instead of
+  reshuffling between requests.
+
+### Fixed
+
+- With `redmine_reporter` absent, the two report widgets are no longer offered in the
+  widget picker, and a dashboard that already has one placed renders a short
+  "needs the redmine_reporter plugin" note in its place instead of failing. The
+  widget keeps its box and its delete control, so it can still be removed. Its
+  **Export as PDF** link answers `404` rather than a server error — the capability was
+  never installed, which is not the same as something being broken.
+
+- `.codex/test_setup.sh` / `.codex/test_plugin.sh` could not set up Redmine 7.0
+  locally: the Ruby version was derived from the Gemfile's upper bound, and
+  `ruby '>= 3.2.0', '< 4.1.0'` produced "Ruby 4.0". The two scripts now share
+  `.codex/ruby_version.sh`, which uses the Ruby already on `PATH` when it satisfies
+  Redmine's own requirement and otherwise picks the newest real version that does.
+
+- The full-application tests were skipped entirely when `redmine_reporter` was
+  absent. That is now the configuration most worth running, and both are exercised.
+
 ## [0.5.0]
 
 ### Security

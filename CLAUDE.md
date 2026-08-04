@@ -130,10 +130,12 @@ beautiful output**; one type scale shared by HTML and PDF.
   <https://github.com/jcatrysse/redmine/tree/6.1-stable> — and the corresponding `6.0-stable` /
   `7.0-stable` branches. `.codex/redmine_clone.sh` clones from **upstream**
   `redmine/redmine.git`; the fork links above are for reading, not for building against.
-- **`.codex/redmine_clone.sh` currently accepts `5.1-stable`, `6.0-stable`, `6.1-stable` and no
-  Redmine 7 branch.** The plan claims 7.0 support. Adding the 7.0 branch to that script (and to the
-  CI matrix) is therefore part of T-00's honesty, not a later nicety — a support claim whose tooling
-  cannot even fetch the branch is exactly the INV-7 failure this project exists to stop.
+- **This bullet's premise was checked on 2026-08-04 and was stale.** `.codex/redmine_clone.sh`
+  accepts *any* branch that exists on the remote, `7.0-stable` included, and `ci.yml:51`/`:236`
+  have carried `{ redmine: '7.0-stable', ruby: '3.4' }` all along. The real gap was elsewhere and
+  is now fixed: `detect_ruby_version` derived the Ruby version by decrementing the Gemfile's upper
+  bound, so Redmine 7.0's `ruby '>= 3.2.0', '< 4.1.0'` produced **Ruby 4.0** and local setup died.
+  See `.codex/ruby_version.sh`. Verify a premise like this before acting on it.
 - **Version divergence lives in `compat/`** — one module, one method per divergence, a comment naming
   the versions. Never a scattered `if Rails::VERSION`. There is a committed LOC budget on that
   directory and a gate that enforces it.
@@ -166,7 +168,7 @@ one — or leaving one in a file you touched — fails review.
 | `up_acts_as_list` or any `redmineup`/`Redmineup` reference | defined only in the vendor gem | the owned `Positioned` concern (T-04) |
 | a bare `skip` | hides an unsupported configuration behind a green run | `skip "reason"`, and the total must stay ≤ the committed inventory |
 | a fixture relative to `Time.now` / `Date.today` | the corpus changes daily, goes red for the wrong reason, and gets switched off within a week | a pinned reference date (T-01) |
-| `serialize :layout, coder: YAML` | Rails 7.1+ keyword form; **Rails 6.1 does not accept it** — see OQ-A, a candidate *existing* defect | the `compat/serialize.rb` shim |
+| `serialize :attr, coder: X` **relying on the keyword being read** | **MEASURED 2026-08-04, and the original reason was wrong: Rails 6.1 accepts this line and round-trips identically** (`docs/plan/reference/verification-oq-a-serialize-oq-b-liquid.md`). Its signature is `serialize(attr_name, class_name_or_coder = Object, **options)`, so `coder:` is **silently discarded** and the `Object` default happens to select YAML anyway. The trap is therefore any coder that is *not* YAML: `coder: JSON` stores YAML on 6.1 with no error | the `compat/serialize.rb` shim — for this reason, not the retracted one. `reporter_project_tab.rb:9-10` is **not** a defect and OQ-A does **not** falsify the 5.1 claim |
 | a swallowed `NameError` / `rescue nil` around a registration | this is precisely how the `up_acts_as_list` coupling stayed invisible | let it raise, or log and degrade *visibly* |
 
 Greps worth running before you open a PR:
@@ -276,11 +278,12 @@ Nine locales exist: `de en es hu it pl pt-BR ru zh`. Rules:
 
 Report and ask — do not decide — when you hit any of these:
 
-1. **An `[OQ]` item** from `technical-spec.md` §12. Two of them are candidate *existing defects*
-   worth checking early: **OQ-A** (`serialize :layout, coder: YAML` on Rails 6.1) and **OQ-B**
-   (whether `{{ issue.closed? }}` is parseable by Liquid's variable grammar at all — if not, five
-   delegated accessors have always been dead surface). Report what you found; let the human decide
-   what it means for the 5.1 support claim.
+1. **An `[OQ]` item** from `technical-spec.md` §12. **OQ-A and OQ-B are CLOSED** (2026-08-04) and
+   both original claims were refuted by measurement — evidence in
+   `docs/plan/reference/verification-oq-a-serialize-oq-b-liquid.md`. Do not re-open them; do read
+   OQ-B's consequence, because it inverts §3.2: `{{ issue.closed? }}` parses and resolves on Liquid
+   4.x and 5.x, so the five `?` accessors are **live surface** and keeping their aliases is a
+   compatibility requirement, not a courtesy. The remaining 11 `[OQ]` items are still open.
 2. **A claim in `claims.json` whose discriminator your work just ran.** That is *evidence*, and the
    register must be updated rather than the conclusion assumed. C-014 (the asset fetcher's internal
    reachability) and C-015 (whether the UX design actually closes R9) are the two most likely to be

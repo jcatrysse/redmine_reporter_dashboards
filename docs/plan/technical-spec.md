@@ -293,9 +293,13 @@ but **not `closed_on`** (`issues_drop.rb:22-28`), i.e. three date accessors in t
 three go through `RenderContext#actor`.
 
 **Rename + alias:** `visible? closed? overdue? is_private?` → `visible closed overdue private`,
-with the `?` names retained as aliases. `[OQ-B]` `{{ issue.closed? }}` is very likely not
+with the `?` names retained as aliases — **mandatory, not optional**. OQ-B was measured on
+2026-08-04 and the guess below is **wrong**: `{{ issue.closed? }}` parses and resolves on Liquid
+4.x and 5.x (the lexer permits a trailing `?` by design), so the `?` spellings are reachable and may
+be in real templates. Dropping them would be a breaking change. A linter rule that flags them as
+unparseable would be wrong. Retained for the record, struck through: ~~`[OQ-B]` `{{ issue.closed? }}` is very likely not
 parseable by Liquid's variable grammar, which would make these accessors **dead surface in the
-gem**; one 5-line spec against 4.x and 5.x settles it.
+gem**; one 5-line spec against 4.x and 5.x settles it.~~ It did.
 
 **Keep name, fix type** → `NamedRefDrop`: `tracker status priority category`; `version` →
 `VersionDrop`. Plus new `tracker_id status_id priority_id category_id fixed_version_id`.
@@ -1272,8 +1276,8 @@ sidebar. Neither is load-bearing for phases 0–2.
 
 | # | Question | Blocks |
 |---|---|---|
-| **OQ-A** | Does `serialize :layout, coder: YAML` already break on Redmine 5.1 / Rails 6.1? A possible **existing defect**, not a design question | §8; possibly the 5.1 support claim itself |
-| **OQ-B** | Is `{{ issue.closed? }}` parseable by Liquid's variable grammar (4.x, 5.x)? Decides whether five delegated accessors were ever reachable | §3.2 |
+| ~~**OQ-A**~~ | **CLOSED 2026-08-04 by measurement — claim REFUTED.** It does not break: Rails 6.1, 7.2 and 8.1 all round-trip it to byte-identical YAML. 6.1's signature is `serialize(attr_name, class_name_or_coder = Object, **options)`, so `coder:` is silently discarded and the `Object` default selects YAML anyway. `reporter_project_tab.rb:9-10` is **not** a defect and the 5.1 support claim stands. The shim is still wanted, for the inverse risk: a non-YAML coder would be silently ignored on 6.1. Evidence: `reference/verification-oq-a-serialize-oq-b-liquid.md` | §8 |
+| ~~**OQ-B**~~ | **CLOSED 2026-08-04 by measurement — claim REFUTED, and the consequence inverts.** It parses *and* resolves on Liquid 4.0.4 and 5.13.0, in all three error modes, bare, inside `{% if %}` and through a filter. The lexer allows a trailing `?` explicitly: `VariableParser = /…|#{VariableSegment}+\?\?/`. So the five `?` accessors were **always reachable** — live surface, not dead — and §3.2's aliases are a **backward-compatibility requirement**, not a courtesy. Evidence: `reference/verification-oq-a-serialize-oq-b-liquid.md` | §3.2 |
 | **OQ-C** | The exact `Liquid::StandardFilters` set in the pinned version — subtract before reimplementing | §3.6 |
 | **OQ-D** | Liquid floor `>= 5.5` or `>= 5.6` (`Liquid::Environment` for scoped **tag** registration) | §4 |
 | **OQ-E** | Redmine 7.0's asset pipeline | §6 (design does not depend on it) |
