@@ -1,0 +1,170 @@
+{% comment %}
+=====================================================================
+ Sample Reporter report template — redmine_reporter_dashboards
+ ---------------------------------------------------------------------
+ A small, self-contained example that exercises everything this plugin
+ adds to a Reporter "issues" report template:
+
+   * {% sql_aggregate %}     — fast SQL breakdown (alias: {% geo_aggregate %})
+   * {% geo_version_map %}    — version-name -> id/metadata lookup
+   * issue.target_version     — the VersionDrop, with ABSOLUTE urls
+   * a Chart.js chart that also renders in the wkhtmltopdf PDF export
+
+ Source query: an "issues" report. Paste this into a Reporter report
+ template (Administration -> Reporter -> Report templates) whose source
+ is issues, or point a dashboard "Report" widget at it.
+
+ PDF-SAFE RULES (why this template looks the way it does):
+   1. NO flexbox. The PDF export uses wkhtmltopdf's WebKit (~2011), which
+      has no flexbox; a flex layout collapses to one column. Use
+      inline-block / float / tables instead — they render identically in
+      the browser and the PDF.
+   2. Charts use responsive:false with an explicit width/height on the
+      <canvas>. wkhtmltopdf's WebKit fires no resize events, so Chart.js
+      responsive:true reads a container width of 0 and draws an empty
+      canvas; a fixed-size canvas renders reliably. (max-width:100% in CSS
+      keeps it inside its box on a narrower screen.)
+   3. animation:{ duration:0 } so wkhtmltopdf never snapshots a chart
+      mid-animation (which yields a blank/half-drawn canvas).
+   4. Chart.js 2.8 (not 3/4): the plugin injects the ES2015 shims that
+      2.8 needs on the old WebKit; 3/4 need far more modern JS. Keep 2.8.
+ The plugin auto-injects the polyfills and a wait-for-charts delay only
+ when a report contains a <canvas>, so no extra setup is required here.
+=====================================================================
+{% endcomment %}
+
+{% comment %} 1) One fast SQL breakdown by status (no per-issue Liquid loop). {% endcomment %}
+{% sql_aggregate from: issues, group_by: status, assign_to: by_status %}
+
+{% comment %} 2) Version lookup, so we can link even versions with no issue in scope. {% endcomment %}
+{% geo_version_map assign_to: geo_versions %}
+
+<style>
+html, body { background:#fff; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; }
+.rpt-head { padding:12px 16px 2px 16px; }
+.rpt-head h1 { font-size:18px; margin:0; }
+.rpt-head .sub { font-size:12px; color:#666; margin:2px 0 0 0; }
+
+/* inline-block, NOT flexbox — see the PDF-SAFE RULES comment above. */
+.panels { padding:8px 16px 4px 16px; font-size:0; }             /* font-size:0 removes inline-block whitespace */
+.panel { display:inline-block; vertical-align:top; width:49%; margin-right:2%; box-sizing:border-box; -webkit-box-sizing:border-box;
+         border:1px solid #e2e2e2; border-radius:10px; padding:10px 12px; }
+.panel:last-child { margin-right:0; }
+.panel h2 { font-size:13px; margin:0 0 8px 0; }
+
+/* Canvas keeps its explicit width/height (see rule 2). max-width:100% + height:auto
+   let it scale down proportionally on a narrow screen (e.g. a dashboard tile)
+   while staying at native, crisp resolution in the full-page PDF. */
+.panel canvas { max-width:100%; height:auto; }
+
+table.brk { width:100%; border-collapse:collapse; font-size:12px; }
+table.brk td { padding:4px 0; border-bottom:1px dotted #eee; }
+table.brk td:last-child { text-align:right; font-weight:700; }
+
+table.vers { width:100%; border-collapse:collapse; font-size:12px; margin:4px 16px 16px 16px; }
+table.vers th, table.vers td { text-align:left; padding:5px 8px; border-bottom:1px solid #eee; vertical-align:top; }
+table.vers th { font-size:11px; text-transform:uppercase; color:#777; }
+table.vers a { color:#2f4b7c; text-decoration:none; border-bottom:1px solid #cbd5e1; }
+</style>
+
+{% comment %} Load Chart.js and signal readiness to wkhtmltopdf via window.status. {% endcomment %}
+<script>
+(function(){
+  window.GEO_CHARTJS_SRC = window.GEO_CHARTJS_SRC || "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js";
+  if (window.Chart || window.__geoChartLoading) return;
+  window.__geoChartLoading = true;
+  window.status = "loading";
+  var s = document.createElement("script");
+  s.src = window.GEO_CHARTJS_SRC;
+  s.onload  = function(){ window.__geoChartReady = true; };
+  s.onerror = function(){ window.status = "done"; };
+  document.head.appendChild(s);
+})();
+</script>
+
+<div class="rpt-head">
+  <h1>Sample report</h1>
+  <p class="sub">Issues by status &middot; {{ by_status.total }} issues in scope</p>
+</div>
+
+<div class="panels">
+  <div class="panel">
+    <h2>Breakdown</h2>
+    <table class="brk">
+      {% for bucket in by_status.buckets %}
+      <tr><td>{{ bucket.label }}</td><td>{{ bucket.count }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="panel">
+    <h2>Breakdown (chart)</h2>
+    <canvas id="status_chart" width="380" height="260"></canvas>
+  </div>
+</div>
+
+{% comment %}
+ 3) issue.target_version drop: one row per version seen in the result set,
+    with ABSOLUTE links that survive PDF export. We de-duplicate by version
+    name using an appended string (Liquid has no set type).
+{% endcomment %}
+{% assign seen = '' %}
+<table class="vers">
+  <tr><th>Version</th><th>Status</th><th>Due</th><th>Links</th></tr>
+  {% for issue in issues %}
+    {% assign tv = issue.target_version %}
+    {% if tv %}
+      {% assign key = '|' | append: tv.id | append: '|' %}
+      {% unless seen contains key %}
+        {% assign seen = seen | append: key %}
+        <tr>
+          <td><a href="{{ tv.url }}" target="_blank" rel="noopener noreferrer">{{ tv.name }}</a></td>
+          <td>{{ tv.status }}</td>
+          <td>{% if tv.effective_date %}{{ tv.effective_date | date: '%d/%m/%Y' }}{% else %}&mdash;{% endif %}</td>
+          <td>
+            <a href="{{ tv.roadmap_url }}" target="_blank" rel="noopener noreferrer">Roadmap</a> &middot;
+            <a href="{{ tv.open_issues_url }}" target="_blank" rel="noopener noreferrer">Open</a> &middot;
+            <a href="{{ tv.closed_issues_url }}" target="_blank" rel="noopener noreferrer">Closed</a> &middot;
+            <a href="{{ tv.time_url }}" target="_blank" rel="noopener noreferrer">Time</a>
+          </td>
+        </tr>
+      {% endunless %}
+    {% endif %}
+  {% endfor %}
+</table>
+
+{% comment %} Build the chart arrays from the SQL breakdown (no per-issue loop). {% endcomment %}
+{% assign chart_labels = '' %}
+{% assign chart_values = '' %}
+{% for bucket in by_status.buckets %}
+  {% assign safe = bucket.label | replace: "'", '' | replace: '"', '' %}
+  {% assign chart_labels = chart_labels | append: "'" | append: safe | append: "'," %}
+  {% assign chart_values = chart_values | append: bucket.count | append: ',' %}
+{% endfor %}
+
+<script>
+(function(){
+  var labels = [{{ chart_labels }}];
+  var values = [{{ chart_values }}];
+  function draw(){
+    var el = document.getElementById('status_chart');
+    if (!el || !window.Chart || !labels.length) { return; }
+    new Chart(el, {
+      type: 'bar',
+      data: { labels: labels, datasets: [{ label: 'Issues', data: values, backgroundColor: '#2f4b7c' }] },
+      options: {
+        // responsive:false + the canvas width/height above. wkhtmltopdf's old
+        // WebKit fires no resize events, so responsive:true reads a container
+        // width of 0 and draws an empty canvas; a fixed-size canvas renders.
+        responsive: false, maintainAspectRatio: false,
+        legend: { display: false },
+        scales: { yAxes: [{ ticks: { beginAtZero: true, fontSize: 10 } }], xAxes: [{ ticks: { fontSize: 10 } }] },
+        animation: { duration: 0 }   /* static render for the PDF snapshot */
+      }
+    });
+    window.status = "done";          /* tell wkhtmltopdf the chart is ready */
+  }
+  /* Chart.js is loaded asynchronously; poll briefly until it is ready. */
+  if (window.Chart) { draw(); }
+  else { var n = 0, t = setInterval(function(){ if (window.Chart || n++ > 200) { clearInterval(t); draw(); } }, 25); }
+})();
+</script>
