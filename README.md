@@ -86,12 +86,18 @@ well work; they are simply not tested, so the plugin does not claim them.
 The plugin's own code stays inside Ruby 2.7 syntax, because that is the floor
 Redmine 5.1 allows. `.codex/check_ruby_floor.sh` guards it and runs in CI.
 
-#### Redmine 7.0: the report widgets need a fix in redmine_reporter first
+#### Redmine 7.0: everything except the two report widgets
 
-Everything in this plugin passes on Redmine 7.0, but the two **report widgets**
-(`report_by_issues`, `report_by_spent_time`) and the PDF export of a report cannot work
-there yet, because they depend on redmine_reporter's `ReportTemplate` — and merely
-referencing that class raises on Rails 8.1:
+**On Redmine 7.0 (Rails 8.1) the plugin runs standalone, in full.** Verified on
+`7.0-stable` with no `redmine_reporter` and no `redmineup` gem installed: 900 plugin
+specs, 86 adapter execution specs against PostgreSQL, and 114 full-application tests —
+0 failures. Since reporter is now optional, the Redmine 7 problem below no longer
+affects anything but the two widgets that actually need it.
+
+The two **report widgets** (`report_by_issues`, `report_by_spent_time`) and the PDF
+export of a report still cannot work on Redmine 7.0 with reporter installed, because
+they depend on redmine_reporter's `ReportTemplate` — and merely referencing that class
+raises on Rails 8.1:
 
 ```
 ArgumentError: wrong number of arguments (given 0, expected 1..2)
