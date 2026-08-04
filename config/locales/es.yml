@@ -12,6 +12,7 @@ es:
   error_reporter_pdf_generation_failed: No se pudo generar el PDF del informe. Inténtelo de nuevo o póngase en contacto con un administrador.
   error_reporter_dashboard_save_failed: No se pudo guardar el panel.
   error_reporter_widget_render_failed: No se pudo mostrar este widget. Consulte el registro de la aplicación para más detalles.
+  text_reporter_widget_requires_plugin: Este widget necesita el plugin %{plugin}, que no está instalado.
   label_move_left: Mover a la izquierda
   label_move_right: Mover a la derecha
   label_move_up: Mover hacia arriba

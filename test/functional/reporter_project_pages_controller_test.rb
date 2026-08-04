@@ -270,7 +270,12 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     assert_select '#reporter-block-news .icon-close', 1
   end
 
+  # Reporter INSTALLED but failing, which is a different situation from reporter
+  # absent: absent is a 404 (a correct statement about something uninstalled),
+  # broken is a 500 (an alert about something wrong). Stated explicitly, because
+  # otherwise this test asserts one or the other depending on which CI job runs it.
   def test_report_pdf_reports_a_dependency_failure_as_an_error_not_a_stack_trace
+    with_reporter
     @tab.update!(layout: [['report_by_issues']],
                  settings: { 'report_by_issues' => { report_template_id: 4242 } })
     ReporterProjectPagesController.any_instance
@@ -511,6 +516,133 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     assert_response :success
   end
 
+  # ---------------------------------------------------------------------------
+  # The two report widgets are the ONLY part of this plugin that needs the
+  # optional redmine_reporter plugin. Both branches are asserted by stubbing the
+  # detection flag, so these hold in the reporter-present CI job and the
+  # standalone one alike -- rather than silently testing only whichever
+  # configuration happens to be running.
+  # ---------------------------------------------------------------------------
+
+  REPORT_BLOCKS = %w[report_by_issues report_by_spent_time].freeze
+
+  def without_reporter
+    RedmineReporterDashboards.stubs(:reporter_present?).returns(false)
+  end
+
+  def with_reporter
+    RedmineReporterDashboards.stubs(:reporter_present?).returns(true)
+  end
+
+  def test_report_widgets_are_absent_from_the_picker_without_reporter
+    without_reporter
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    REPORT_BLOCKS.each do |block|
+      assert_select "#reporter-block-select option[value=?]", block, 0,
+                    "#{block} must not be offerable when redmine_reporter is absent"
+    end
+    # The picker is still there and still useful -- this is not "no widgets".
+    assert_select '#reporter-block-select option[value=?]', 'issuequery', 1
+  end
+
+  def test_report_widgets_are_offered_in_the_picker_with_reporter
+    with_reporter
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    REPORT_BLOCKS.each do |block|
+      assert_select '#reporter-block-select option[value=?]', block, 1
+    end
+  end
+
+  def test_adding_a_report_widget_is_refused_without_reporter
+    without_reporter
+
+    post :add_block, params: { project_id: @project.identifier, tab: @tab.id, block: 'report_by_issues' }
+
+    assert_empty @tab.reload.block_rows.flatten,
+                 'a widget that cannot render must not be placeable through the form either'
+  end
+
+  # The case that used to 500 the whole page for every viewer.
+  def test_already_placed_report_widget_degrades_to_200_without_reporter
+    without_reporter
+    @tab.update!(layout: [['report_by_issues']])
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    assert_select '#reporter-block-report_by_issues', 1
+    assert_select '#reporter-block-report_by_issues p.nodata', 1
+    assert_select '#reporter-block-report_by_issues', text: /redmine_reporter/
+  end
+
+  # A degraded widget that rendered as nothing would lose its own contextual
+  # controls, leaving a dashboard nobody can clean up.
+  def test_a_degraded_report_widget_can_still_be_removed
+    without_reporter
+    @tab.update!(layout: [['report_by_issues']])
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    assert_select "#reporter-block-report_by_issues a[href*='remove']", 1
+
+    delete :remove_block, params: { project_id: @project.identifier, tab: @tab.id, block: 'report_by_issues' }
+
+    assert_empty @tab.reload.block_rows.flatten
+  end
+
+  def test_report_pdf_returns_404_not_500_without_reporter
+    without_reporter
+    @tab.update!(layout: [['report_by_issues']])
+
+    get :report_pdf, params: { project_id: @project.identifier, tab: @tab.id, block: 'report_by_issues' }
+
+    assert_response :not_found
+  end
+
+  def test_report_pdf_for_spent_time_returns_404_not_500_without_reporter
+    without_reporter
+    Role.find(1).add_permission! :view_time_entries
+    @tab.update!(layout: [['report_by_spent_time']])
+
+    get :report_pdf, params: { project_id: @project.identifier, tab: @tab.id, block: 'report_by_spent_time' }
+
+    assert_response :not_found
+  end
+
+  # The other side of the branch: with reporter present the widget must NOT be
+  # treated as degraded, or the export would 404 for everyone who has it installed.
+  def test_report_widget_is_not_degraded_when_reporter_is_present
+    with_reporter
+
+    REPORT_BLOCKS.each do |block|
+      definition = RedmineReporterDashboards::ProjectPage.find_block(block)
+
+      refute_nil definition, "#{block} must still resolve"
+      refute definition[:degraded], "#{block} must not be degraded when reporter is installed"
+    end
+  end
+
+  # Uninstalling the optional plugin must not turn a placed widget into an unknown
+  # one: find_block resolving to nil is what makes a widget vanish unremovably.
+  def test_a_report_widget_still_resolves_when_reporter_is_absent
+    without_reporter
+
+    REPORT_BLOCKS.each do |block|
+      definition = RedmineReporterDashboards::ProjectPage.find_block(block)
+
+      refute_nil definition, "#{block} must still resolve so its box and delete control survive"
+      assert definition[:degraded]
+      assert_equal :redmine_reporter, definition[:requires_plugin]
+    end
+  end
+
   private
 
   # The "(n)" behind a widget title. Asserted on the extracted heading text so a
@@ -567,4 +699,5 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
   ensure
     mod.send(:define_method, name, original)
   end
+
 end

@@ -76,7 +76,19 @@ class ReporterProjectPagesController < ApplicationController
   def report_pdf
     tab   = @tabs.find_by(id: params[:tab])
     block = params[:block].to_s
-    return render_404 unless tab && RedmineReporterDashboards::ProjectPage.find_block(block)
+    definition = RedmineReporterDashboards::ProjectPage.find_block(block)
+    return render_404 unless tab && definition
+
+    # 404, not 500. A 500 in a monitored install is an alert about something broken;
+    # this is a correct statement about a capability that was never installed. The
+    # widget's PDF export exists only while redmine_reporter does.
+    if definition[:degraded]
+      Rails.logger.info(
+        "[reporter_dashboards] report_pdf for #{block.inspect} in project #{@project.id} " \
+        "declined: it needs the #{definition[:requires_plugin]} plugin, which is not installed"
+      )
+      return render_404
+    end
 
     # Resolving the widget means touching reporter's report template classes, which on
     # Redmine 7.0 (Rails 8.1) cannot be loaded at all — see the note in the README. A

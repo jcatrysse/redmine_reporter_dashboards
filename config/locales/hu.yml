@@ -12,6 +12,7 @@ hu:
   error_reporter_pdf_generation_failed: A jelentés PDF-je nem készíthető el. Kérjük, próbálja újra, vagy forduljon egy rendszergazdához.
   error_reporter_dashboard_save_failed: Az irányítópult nem menthető.
   error_reporter_widget_render_failed: Ezt a widgetet nem lehetett megjeleníteni. A részleteket lásd az alkalmazás naplójában.
+  text_reporter_widget_requires_plugin: Ehhez a modulhoz a %{plugin} plugin szükséges, amely nincs telepítve.
   label_move_left: Mozgatás balra
   label_move_right: Mozgatás jobbra
   label_move_up: Mozgatás felfelé

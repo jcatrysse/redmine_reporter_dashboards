@@ -111,6 +111,13 @@ module ReporterProjectPagesHelper
       return
     end
 
+    # Checked BEFORE the partial is rendered, not rescued afterwards. The widget is
+    # not broken and nothing failed: the plugin it needs is simply not installed, and
+    # saying so plainly is a different message from "could not be rendered — see the
+    # log". Rendering it first and catching the NameError would also make an ordinary,
+    # supported configuration produce an error-level log line on every page view.
+    return reporter_project_block_unavailable(block, project, block_definition) if block_definition[:degraded]
+
     settings = tab.block_settings(block)
     partial = block_definition[:partial]
     if partial
@@ -157,6 +164,22 @@ module ReporterProjectPagesHelper
   # any more. The placeholder keeps the box — and therefore the close button — so a
   # broken widget can still be taken off the dashboard. The reason goes to the log, not
   # to the page.
+  # A widget whose optional plugin is not installed.
+  #
+  # 200 with a labelled cell, never a 500, and never nothing: the box has to stay so
+  # its close button stays with it, or a dashboard could keep a widget it can no longer
+  # render AND no longer remove. Logged at INFO, once per render — this is a supported
+  # configuration, not an error, and warning about it would train operators to ignore
+  # the log.
+  def reporter_project_block_unavailable(block, project, block_definition)
+    required = block_definition[:requires_plugin]
+    Rails.logger.info(
+      "[reporter_dashboards] widget #{block.inspect} in project #{project.identifier} " \
+      "(id=#{project.id}) is unavailable: it needs the #{required} plugin, which is not installed"
+    )
+    content_tag('p', l(:text_reporter_widget_requires_plugin, plugin: required.to_s), class: 'nodata')
+  end
+
   def reporter_project_block_error(block, project, error)
     Rails.logger.error(
       "[reporter_dashboards] widget #{block.inspect} in project #{project.identifier} " \

@@ -19,8 +19,62 @@ module RedmineReporterDashboards
       'activity' => { label: :label_activity }
     }.freeze
 
+    # Widgets that need an OPTIONAL plugin to render.
+    #
+    # Their partials deliberately live in blocks/optional/ rather than blocks/, so
+    # `additional_blocks`'s glob cannot pick them up: on a Redmine without
+    # redmine_reporter they must not merely fail politely, they must never be
+    # offerable in the first place. A picker entry for a widget that can only ever
+    # render an apology is a worse experience than no entry at all.
+    OPTIONAL_BLOCKS = {
+      'report_by_issues' => {
+        label: :report_by_issues,
+        partial: 'reporter_project_pages/blocks/optional/report_by_issues',
+        requires_plugin: :redmine_reporter
+      },
+      'report_by_spent_time' => {
+        label: :report_by_spent_time,
+        partial: 'reporter_project_pages/blocks/optional/report_by_spent_time',
+        requires_plugin: :redmine_reporter
+      }
+    }.freeze
+
+    # What the picker may offer: unavailable optional widgets are absent.
     def self.blocks
-      CORE_BLOCKS.merge(additional_blocks).freeze
+      CORE_BLOCKS.merge(additional_blocks).merge(available_optional_blocks).freeze
+    end
+
+    # Everything this plugin knows how to name, available or not.
+    #
+    # find_block resolves against THIS, not `blocks`, so a widget already sitting on
+    # somebody's dashboard when its plugin is uninstalled is still recognised. Letting
+    # it resolve to nil instead would make it render as nothing — and a widget that
+    # renders as nothing loses its own contextual controls, so nobody could remove it
+    # from the layout again.
+    def self.all_known_blocks
+      CORE_BLOCKS.merge(additional_blocks).merge(OPTIONAL_BLOCKS).freeze
+    end
+
+    def self.available_optional_blocks
+      OPTIONAL_BLOCKS.select { |_name, definition| optional_block_available?(definition) }
+    end
+
+    def self.optional_block_available?(definition)
+      required = definition[:requires_plugin]
+      return true if required.nil?
+
+      case required
+      when :redmine_reporter then RedmineReporterDashboards.reporter_present?
+      else false
+      end
+    end
+
+    # True when the named block is known but its plugin is not installed.
+    def self.block_degraded?(name)
+      definition = OPTIONAL_BLOCKS[name]
+      return false if definition.nil?
+
+      !optional_block_available?(definition)
     end
 
     def self.block_options(blocks_in_use = [])
@@ -49,7 +103,10 @@ module RedmineReporterDashboards
     def self.find_block(block)
       block.to_s =~ /\A(.*?)(__\d+)?\z/
       name = Regexp.last_match(1)
-      blocks.key?(name) ? blocks[name].merge(name: name) : nil
+      known = all_known_blocks
+      return nil unless known.key?(name)
+
+      known[name].merge(name: name, degraded: block_degraded?(name))
     end
 
     def self.additional_blocks

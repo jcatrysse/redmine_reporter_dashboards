@@ -12,6 +12,7 @@ de:
   error_reporter_pdf_generation_failed: Der Bericht konnte nicht als PDF erstellt werden. Bitte versuchen Sie es erneut oder wenden Sie sich an einen Administrator.
   error_reporter_dashboard_save_failed: Das Dashboard konnte nicht gespeichert werden.
   error_reporter_widget_render_failed: Dieses Widget konnte nicht angezeigt werden. Details finden Sie im Anwendungsprotokoll.
+  text_reporter_widget_requires_plugin: Dieses Widget benötigt das Plugin %{plugin}, das nicht installiert ist.
   label_move_left: Nach links verschieben
   label_move_right: Nach rechts verschieben
   label_move_up: Nach oben verschieben

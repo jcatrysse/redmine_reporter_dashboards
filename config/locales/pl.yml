@@ -12,6 +12,7 @@ pl:
   error_reporter_pdf_generation_failed: Nie można wygenerować pliku PDF raportu. Spróbuj ponownie lub skontaktuj się z administratorem.
   error_reporter_dashboard_save_failed: Nie można zapisać panelu.
   error_reporter_widget_render_failed: Nie można wyświetlić tego widżetu. Szczegóły znajdują się w dzienniku aplikacji.
+  text_reporter_widget_requires_plugin: Ten widget wymaga wtyczki %{plugin}, która nie jest zainstalowana.
   label_move_left: Przenieś w lewo
   label_move_right: Przenieś w prawo
   label_move_up: Przenieś w górę
