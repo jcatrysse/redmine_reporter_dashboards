@@ -46,8 +46,10 @@
 require 'logger' # concurrent-ruby >= 1.3.5 no longer requires this; ActiveSupport needs Logger defined
 require 'active_support'
 require 'active_support/time'
+require 'active_support/testing/time_helpers'
 require 'uri'
 require_relative '../spec_helper'
+require_relative '../golden/reference_date'
 
 Time.zone ||= 'UTC'
 
@@ -299,8 +301,59 @@ module RrdAdapterHarness
       ::Issue.joins(:status, :project)
     end
 
+    # The whole fixture hangs off this one date, which is what makes it pinnable at
+    # all: set RRD_REFERENCE_DATE and every issue, time entry, version and sweep day
+    # moves with it coherently. Unset, the fixture stays relative to today, which is
+    # what the adapter execution specs want (see RrdGolden::ReferenceDate).
     def today
-      Time.zone.today
+      RrdGolden::ReferenceDate.date || Time.zone.today
+    end
+
+    def reference_date_pinned?
+      RrdGolden::ReferenceDate.pinned?
+    end
+
+    # Pinning the fixture is not enough on its own, and the first pinned run proved
+    # it: every period count came back 0. The aggregator derives its windows from the
+    # clock — query_aggregator.rb:1135 is the single clock read, and :2099 records
+    # that the SQL deliberately carries no CURRENT_DATE arithmetic — so moving the
+    # fixture into the past without moving the clock just empties every window. The
+    # pin therefore freezes time as well, and the two stay one fact rather than two
+    # that can drift apart.
+    #
+    # Because the aggregator's only clock read is Ruby-side, freezing Ruby is
+    # sufficient: there is no database clock to keep in step.
+    #
+    # Frozen at the LAST SECOND of the reference day, so `today` is the reference
+    # date while every midday-anchored at(n) row — at(0) included — is strictly in
+    # the past. Unpinned, at(0) sits at midday against a real `now` that may fall
+    # either side of it, so freezing removes a boundary ambiguity rather than adding
+    # one.
+    # UTC is SET here, not inherited. `Time.zone ||= 'UTC'` at the top of this file
+    # only wins when nothing set a zone first, so a corpus generated in a process
+    # whose zone came from somewhere else would be pinned to a different instant and
+    # bucket its own fixture differently — green locally, red in CI, for a reason
+    # nothing in the diff would show.
+    CORPUS_TIME_ZONE = 'UTC'
+
+    def freeze_to_reference_date!
+      date = RrdGolden::ReferenceDate.date
+      return false unless date
+
+      Time.zone = CORPUS_TIME_ZONE
+      time_travel.travel_to(Time.zone.local(date.year, date.month, date.day, 23, 59, 59))
+      true
+    end
+
+    def unfreeze_time!
+      time_travel.travel_back
+    end
+
+    # ActiveSupport's time helpers are written as a test-framework mixin, but the
+    # fixture is seeded in before(:suite), outside any example — so they are driven
+    # from one dedicated object instead of being mixed into every example group.
+    def time_travel
+      @time_travel ||= Object.new.extend(ActiveSupport::Testing::TimeHelpers)
     end
 
     # Midday UTC, so no fixture sits on a day boundary the database could round the
@@ -508,11 +561,16 @@ if RrdAdapterHarness.configured?
 
   RSpec.configure do |config|
     config.before(:suite) do
+      # Before seed!, so the fixture's timestamps and the aggregator's windows are
+      # read off the same clock. A no-op when RRD_REFERENCE_DATE is unset.
+      RrdAdapterHarness.freeze_to_reference_date!
       RrdAdapterHarness.connect!
       RrdAdapterHarness.reset_adapter_memo!
       RrdAdapterHarness.define_models!
       RrdAdapterHarness.load_schema!
       RrdAdapterHarness.seed!
     end
+
+    config.after(:suite) { RrdAdapterHarness.unfreeze_time! }
   end
 end
