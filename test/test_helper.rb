@@ -46,8 +46,17 @@ def skip_unless_reporter_report_templates_load
   error = reporter_report_template_load_error
   return if error.nil?
 
-  skip "redmine_reporter's report template classes do not load on Redmine " \
-       "#{Redmine::VERSION}: #{error.class}: #{error.message}. Reporter's " \
+  # Two different reasons land here, and conflating them made the message wrong the
+  # moment redmine_reporter became optional. Absence is now a NORMAL, supported
+  # configuration; a load failure while it IS installed is a defect in reporter.
+  unless RedmineReporterDashboards.reporter_present?
+    skip 'redmine_reporter is not installed — the two report widgets are the only ' \
+         'part of this plugin that needs it, so they are out of scope for this run. ' \
+         'This is the standalone configuration, not a failure.'
+  end
+
+  skip "redmine_reporter is installed but its report template classes do not load on " \
+       "Redmine #{Redmine::VERSION}: #{error.class}: #{error.message}. Reporter's " \
        'ReportTemplate uses the keyword form of `enum`, removed in Rails 8.0 — ' \
        'it needs `enum :name, values` instead. The report widgets are unavailable ' \
        'on this Redmine until that is fixed in reporter.'

@@ -4,7 +4,10 @@ class ReporterProjectTab < ApplicationRecord
   include Redmine::I18n
 
   belongs_to :project
-  up_acts_as_list scope: :project_id
+  # Ordered-list behaviour is owned by this plugin rather than inherited from the
+  # vendor gem that used to supply it transitively through the base plugin.
+  # See RedmineReporterDashboards::Positioned for what it replaces and why.
+  include RedmineReporterDashboards::Positioned
 
   serialize :layout, coder: YAML
   serialize :settings, coder: YAML

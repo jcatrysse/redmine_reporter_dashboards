@@ -36,9 +36,22 @@ A per-**target-version** rollup, computed entirely in SQL. A "one card per versi
 
 ## Requirements
 
-- `redmine_reporter` plugin version 2.0.5 or higher
 - PostgreSQL or MySQL/MariaDB. The SQL aggregation tags use adapter-specific date
   formatting and refuse to guess on any other database — SQLite is not supported.
+
+### `redmine_reporter` is optional
+
+It used to be required, and the plugin refused to load without it. It no longer is:
+project dashboards, the tab bar, the `{% sql_aggregate %}` / `{% version_rollup %}` /
+`{% geo_version_map %}` Liquid tags and the statistics endpoint all work on a plain
+Redmine. Installed or not, one line in the log says which mode you are in.
+
+What still needs `redmine_reporter` — and only this:
+
+- the two **report widgets** (*Report* and *Report by issues*), which render one of
+  Reporter's own report templates, and their **Export as PDF** link;
+- `issue.target_version` and `issue.custom_field_value` inside a Reporter report
+  template, which are additions to Reporter's own Liquid drop.
 
 ### Support matrix
 

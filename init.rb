@@ -3,17 +3,19 @@
 require 'redmine'
 
 # ---------------------------------------------------------------------------
-# Dependency check
+# redmine_reporter is OPTIONAL
 #
-# This plugin extends the third-party redmine_reporter (RedmineUP) plugin.
-# redmine_reporter loads first (alphabetical plugin load order), so by the time
-# this init.rb runs its registration is already available.
+# It used to be a hard dependency enforced here with a `raise`, which made this
+# plugin uninstallable without a paid third-party plugin. Project dashboards, the
+# SQL aggregation tags and the statistics endpoint need none of it.
+#
+# Detection is therefore deferred rather than done here: it belongs at
+# after_plugins_loaded, below, where every plugin's init.rb has run and the
+# registry is actually complete. Asking at this point would answer for whatever
+# subset of plugins happened to load first.
+#
+# See RedmineReporterDashboards.reporter_present?.
 # ---------------------------------------------------------------------------
-unless Redmine::Plugin.installed?(:redmine_reporter)
-  raise "\n\033[31mredmine_reporter_dashboards requires the redmine_reporter plugin.\n" \
-        "Please install redmine_reporter (version 2.0.5 or higher) before enabling " \
-        "redmine_reporter_dashboards.\033[0m"
-end
 
 if Rails.configuration.respond_to?(:autoloader) && Rails.configuration.autoloader == :zeitwerk
   Rails.autoloaders.each { |loader| loader.ignore(File.dirname(__FILE__) + '/lib') }
@@ -29,8 +31,9 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
   url 'https://github.com/jcatrysse/redmine_reporter_dashboards'
   author_url 'https://github.com/jcatrysse'
 
+  # No requires_redmine_plugin: reporter is optional, and declaring it here would
+  # make Redmine refuse to load this plugin without it.
   requires_redmine version_or_higher: '5.1'
-  requires_redmine_plugin :redmine_reporter, version_or_higher: '2.0.5'
 
   project_module :reporter_project_dashboards do
     permission :view_reporter_project_page, { reporter_project_pages: [:show, :report_pdf] }, read: true
@@ -68,15 +71,34 @@ end
 # ---------------------------------------------------------------------------
 class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
   def after_plugins_loaded(_context = {})
-    # Register the Liquid tags/drops FIRST and independently. Report templates
-    # depend on {% sql_aggregate %} / {% geo_aggregate %}, so their registration
-    # must never be skipped because an unrelated later step (patch loading)
-    # raised. Each register_* method rescues its own errors.
+    # Asked exactly once, here, and memoised from now on. This is the first moment
+    # the answer is trustworthy and the last moment it can still change.
+    reporter = RedmineReporterDashboards.reporter_present?
+
+    # Logged either way, at info. "Running standalone" is a normal state, not a
+    # degradation — but an operator who expected the report widgets to be there
+    # needs one line telling them why they are not, rather than an empty picker.
+    Rails.logger.info(
+      if reporter
+        '[reporter_dashboards] redmine_reporter detected — report widgets and drop patches enabled'
+      else
+        '[reporter_dashboards] redmine_reporter not installed — running standalone; ' \
+        'dashboards, SQL aggregation and statistics are unaffected'
+      end
+    )
+
+    # Register the Liquid tags FIRST and independently. Report templates depend on
+    # {% sql_aggregate %} / {% geo_aggregate %}, so their registration must never be
+    # skipped because an unrelated later step raised. Each register_* method rescues
+    # its own errors. None of the three needs reporter.
     RedmineReporterDashboards.register_sql_aggregate_tag
     RedmineReporterDashboards.register_version_rollup_tag
     RedmineReporterDashboards.register_geo_version_map_tag
-    RedmineReporterDashboards.register_issue_target_version_drop
     RedmineReporterDashboards.load_patches
+
+    return unless reporter
+
+    RedmineReporterDashboards.register_issue_target_version_drop
     RedmineReporterDashboards.apply_reporter_patches
   end
 end

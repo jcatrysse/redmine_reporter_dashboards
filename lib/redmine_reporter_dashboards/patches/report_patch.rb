@@ -91,6 +91,10 @@ begin
   unless report_class.ancestors.include?(RedmineReporterDashboards::Patches::ReportPatch)
     report_class.prepend(RedmineReporterDashboards::Patches::ReportPatch)
   end
-rescue NameError
-  Rails.logger.warn('[reporter_dashboards] Report class not found — PDF patch skipped')
+rescue NameError => e
+  # This file is only required when reporter_present? is true, so a missing Report is
+  # no longer "reporter is not installed" — it is reporter installed and not defining
+  # the class this patch exists for. Warned, and named, rather than shrugged at.
+  Rails.logger.warn("[reporter_dashboards] redmine_reporter is installed but its Report class " \
+                    "could not be resolved (#{e.class}: #{e.message}) — PDF patch skipped")
 end

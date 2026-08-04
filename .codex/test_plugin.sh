@@ -19,36 +19,11 @@ reporter_required() {
   [ "${CI:-}" = "true" ]
 }
 
-detect_ruby_version() {
-  local version=""
-
-  if [ -f ".ruby-version" ]; then
-    version="$(tr -d '\n' < .ruby-version)"
-  elif [ -f "Gemfile" ]; then
-    local ruby_line=""
-    ruby_line="$(grep -E "^[[:space:]]*ruby " Gemfile | head -n 1 || true)"
-
-    version="$(echo "$ruby_line" | sed -E -n "s/.*ruby[[:space:]]*['\\\"]([0-9]+\\.[0-9]+(\\.[0-9]+)?)[\"'].*$/\\1/p")"
-    if [ -z "$version" ]; then
-      version="$(echo "$ruby_line" | sed -E -n "s/.*~>[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-    fi
-    if [ -z "$version" ]; then
-      local upper=""
-      upper="$(echo "$ruby_line" | sed -E -n "s/.*<[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-      if [ -n "$upper" ]; then
-        local major="${upper%%.*}"
-        local minor="${upper#*.}"
-        minor="${minor%%.*}"
-        if [ "$minor" -gt 0 ]; then
-          minor=$((minor - 1))
-        fi
-        version="${major}.${minor}"
-      fi
-    fi
-  fi
-
-  echo "$version"
-}
+# detect_ruby_version and friends. Shared with the other .codex script rather than
+# duplicated: the version it derives has to agree with ci.yml, and two copies of
+# that reasoning drift.
+# shellcheck source=.codex/ruby_version.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_version.sh"
 
 cd "$REDMINE_DIR"
 mkdir -p tmp/test-results
@@ -107,17 +82,29 @@ if [ -d "$SPEC_DIR" ]; then
 fi
 
 if [ -d "$TEST_DIR" ]; then
-  if [ -d "plugins/$REPORTER_PLUGIN_NAME" ]; then
-    run_command bundle exec rake redmine:plugins:test NAME="$PLUGIN_NAME"
-    ran_tests=true
-  elif reporter_required; then
-    echo "ERROR: $REPORTER_PLUGIN_NAME dependency not found; full plugin tests cannot boot Redmine." >&2
-    echo "       Provide REPORTER_PLUGIN_PATH before redmine_clone.sh, or set REQUIRE_REPORTER_PLUGIN=0 to run standalone specs only." >&2
+  # The full-app tests used to be SKIPPED when redmine_reporter was absent, because
+  # the plugin could not boot without it. It can now, and the standalone
+  # configuration is the one most worth running: a suite that only ever runs WITH
+  # reporter present cannot notice the dependency coming back.
+  #
+  # So absence no longer skips anything. REQUIRE_REPORTER_PLUGIN now means only
+  # "fail if the reporter-present configuration was asked for and is not there",
+  # which is what CI uses to tell a missing checkout from a deliberate standalone run.
+  if [ ! -d "plugins/$REPORTER_PLUGIN_NAME" ] && reporter_required; then
+    echo "ERROR: REQUIRE_REPORTER_PLUGIN asks for the reporter-present configuration, but" >&2
+    echo "       plugins/$REPORTER_PLUGIN_NAME is not installed. Provide REPORTER_PLUGIN_PATH" >&2
+    echo "       before redmine_clone.sh, or set REQUIRE_REPORTER_PLUGIN=0 to run standalone." >&2
     exit 1
-  else
-    echo "WARNING: skipping minitest plugin tests because $REPORTER_PLUGIN_NAME is not installed." >&2
-    echo "         Standalone RSpec specs were run; set REQUIRE_REPORTER_PLUGIN=1 to enforce full tests." >&2
   fi
+
+  if [ -d "plugins/$REPORTER_PLUGIN_NAME" ]; then
+    echo "Running the full-app tests WITH $REPORTER_PLUGIN_NAME present." >&2
+  else
+    echo "Running the full-app tests STANDALONE — no $REPORTER_PLUGIN_NAME, no redmineup gem." >&2
+  fi
+
+  run_command bundle exec rake redmine:plugins:test NAME="$PLUGIN_NAME"
+  ran_tests=true
 fi
 
 if [ "$ran_tests" = false ]; then

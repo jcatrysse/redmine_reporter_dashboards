@@ -15,36 +15,11 @@ reporter_required() {
   [ "${CI:-}" = "true" ]
 }
 
-detect_ruby_version() {
-  local version=""
-
-  if [ -f ".ruby-version" ]; then
-    version="$(tr -d '\n' < .ruby-version)"
-  elif [ -f "Gemfile" ]; then
-    local ruby_line=""
-    ruby_line="$(grep -E "^[[:space:]]*ruby " Gemfile | head -n 1 || true)"
-
-    version="$(echo "$ruby_line" | sed -E -n "s/.*ruby[[:space:]]*['\\\"]([0-9]+\\.[0-9]+(\\.[0-9]+)?)[\"'].*$/\\1/p")"
-    if [ -z "$version" ]; then
-      version="$(echo "$ruby_line" | sed -E -n "s/.*~>[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-    fi
-    if [ -z "$version" ]; then
-      local upper=""
-      upper="$(echo "$ruby_line" | sed -E -n "s/.*<[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-      if [ -n "$upper" ]; then
-        local major="${upper%%.*}"
-        local minor="${upper#*.}"
-        minor="${minor%%.*}"
-        if [ "$minor" -gt 0 ]; then
-          minor=$((minor - 1))
-        fi
-        version="${major}.${minor}"
-      fi
-    fi
-  fi
-
-  echo "$version"
-}
+# detect_ruby_version and friends. Shared with the other .codex script rather than
+# duplicated: the version it derives has to agree with ci.yml, and two copies of
+# that reasoning drift.
+# shellcheck source=.codex/ruby_version.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_version.sh"
 
 # Which engine to set up. The plugin supports PostgreSQL and MySQL/MariaDB, and the
 # aggregator has real per-adapter SQL branches, so both sides are worth having

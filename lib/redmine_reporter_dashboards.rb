@@ -1,15 +1,24 @@
 # frozen_string_literal: true
 
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/row_layout'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/pdf_polyfills'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards
-  # Patches that include/prepend into core (Project, ProjectsHelper, Report).
+  # Patches that include/prepend into Redmine core (Project, ProjectsHelper).
   # Loaded from after_plugins_loaded so the target classes are present.
   PATCH_FILES = %w[
     redmine_reporter_dashboards/patches/project_patch
+  ].freeze
+
+  # Patches that touch redmine_reporter's own classes. Split out from PATCH_FILES
+  # because they are loaded only when reporter is actually installed: loading
+  # report_patch standalone would warn on every boot about a Report class that is
+  # not missing so much as irrelevant.
+  REPORTER_PATCH_FILES = %w[
     redmine_reporter_dashboards/patches/report_patch
   ].freeze
 
@@ -19,8 +28,20 @@ module RedmineReporterDashboards
     File.dirname(__FILE__)
   end
 
+  # Whether the optional redmine_reporter plugin is installed. One memo, owned by
+  # ReporterPresence; see that file for why detection is a positive question asked
+  # once at after_plugins_loaded rather than a rescued NameError.
+  def reporter_present?
+    ReporterPresence.present?
+  end
+
+  def reset_reporter_presence!
+    ReporterPresence.reset!
+  end
+
   def load_patches
-    PATCH_FILES.each { |file| require File.join(lib_root, file) }
+    files = PATCH_FILES + (reporter_present? ? REPORTER_PATCH_FILES : [])
+    files.each { |file| require File.join(lib_root, file) }
   rescue LoadError, StandardError => e
     # A patch failing to load must never abort the after_plugins_loaded chain
     # (which would take the Liquid tag registration down with it).
@@ -107,34 +128,42 @@ module RedmineReporterDashboards
       klass.remove_instance_variable(:@invokable_methods)
     end
     Rails.logger.info('[reporter_dashboards] issue.target_version exposed on Reporter issue drop')
-  rescue NameError => e
-    # Reporter (or its drop class) not present — hard dependency should prevent
-    # this, but degrade gracefully rather than break boot.
-    Rails.logger.warn("[reporter_dashboards] target_version not registered: #{e.message}")
   rescue LoadError, StandardError => e
-    # LoadError is not a StandardError, so catch it explicitly — a require
-    # failure here must not propagate and abort after_plugins_loaded.
-    Rails.logger.warn("[reporter_dashboards] target_version registration failed: #{e.message}")
+    # One branch, and it WARNS. This is only reached when reporter_present? already
+    # said yes, so a NameError here does not mean "reporter is not installed" — it
+    # means reporter is installed and its drop class is not where we expect, which is
+    # a real defect and must not be logged as if it were an absent optional feature.
+    # (LoadError is not a StandardError, hence naming both: a require failure here
+    # must not propagate and abort after_plugins_loaded.)
+    Rails.logger.warn("[reporter_dashboards] target_version registration failed: #{e.class}: #{e.message}")
   end
 
-  # Apply the performance patches to reporter classes when they are present.
-  # Object.const_get triggers Zeitwerk autoload in development; in production the
-  # classes are already loaded. NameError simply means reporter is not installed
-  # (should not happen given the hard dependency, but we stay defensive).
+  # Apply the performance patches to reporter's classes. Only called when
+  # reporter_present? is true, so absence is not a case handled here.
   def apply_reporter_patches
     apply_patch('IssueListReportTemplate', 'reporter_list_patch', 'ReporterListPatch')
     apply_patch('ReportTemplatesController', 'reporter_report_content_patch', 'ReporterReportContentPatch')
   end
 
   def apply_patch(class_name, require_path, module_name)
+    # Asked, not inferred from a rescued NameError. const_defined? sees a constant
+    # Zeitwerk has registered for autoload without forcing it; the const_get below
+    # then triggers the load, in development as before.
+    unless Object.const_defined?(class_name)
+      Rails.logger.info("[reporter_dashboards] #{class_name} is not defined — #{module_name} not applied")
+      return false
+    end
+
     klass = Object.const_get(class_name)
     require File.join(lib_root, require_path)
     patch = Object.const_get(module_name)
     klass.prepend(patch) unless klass.ancestors.include?(patch)
     Rails.logger.info("[reporter_dashboards] #{module_name} applied to #{class_name}")
-  rescue NameError
-    nil
-  rescue => e
-    Rails.logger.warn("[reporter_dashboards] #{class_name} patch failed: #{e.message}")
+    true
+  rescue LoadError, StandardError => e
+    # Warn, never swallow. Past this point the constant existed, so a failure is a
+    # defect in loading it — not the absence of an optional plugin.
+    Rails.logger.warn("[reporter_dashboards] #{class_name} patch failed: #{e.class}: #{e.message}")
+    false
   end
 end
