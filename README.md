@@ -1,6 +1,8 @@
 # Redmine Reporter Dashboards
 
-A dashboard extension for the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter) plugin. Adds configurable project dashboards and replaces slow Liquid loops in report templates with fast SQL aggregations.
+Configurable project dashboards for Redmine, plus Liquid tags that replace slow per-issue loops with fast SQL aggregations.
+
+It installs on a plain Redmine and needs no other plugin. Two of its widgets integrate with the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter) plugin when that is installed — see [`redmine_reporter` is optional](#redmine_reporter-is-optional).
 
 ## What does it do?
 
