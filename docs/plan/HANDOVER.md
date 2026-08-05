@@ -312,7 +312,8 @@ of a CI that runs on fork pull requests.
    positionally instead of through ActiveRecord's alias-keyed grouped `.count`; gate G7
    grew a declared-exception mechanism to express "the blob plus exactly this one argued
    hunk" (`spec/golden/kernel_exception.rb`); the per-adapter overlay is empty again with
-   `RATCHET = 0`, and the `corpus (MariaDB 11)` CI cell is green with it empty. What is
+   `RATCHET = 0` — proved green on MariaDB by the FIRST attempt's run (31034989145); the
+   landed fix's own MariaDB cells had not reported when this was written. What is
    still exposed, on purpose: a MEASURED age axis (README, database section). Read the
    §Findings entry before touching it — the first attempt is written up there and the
    reason it was replaced is a performance fact, not a correctness one.

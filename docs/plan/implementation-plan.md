@@ -57,7 +57,7 @@ fact that CI has not yet run on this work at all.
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
 | T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
-| T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**, and the `corpus (MariaDB 11)` CI cell is green with it empty |
+| T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on PostgreSQL; on MariaDB the empty overlay was proved green by the FIRST attempt's CI run (31034989145) — the landed fix's own MariaDB cells were still running when this was written** |
 | T-09 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
