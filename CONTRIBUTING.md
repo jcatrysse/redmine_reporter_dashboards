@@ -32,9 +32,13 @@ so only one of the two can be installed at a time.
 |-------|-----------|--------------|----------------|
 | **RSpec** | `spec/` | None | SQL aggregation code (standalone) |
 | **adapter execution** | `spec/adapter/` | A PostgreSQL or MySQL/MariaDB server | The aggregator's SQL actually run against a real engine |
-| **minitest** | `test/unit`, `test/functional`, `test/integration` | Redmine + reporter | Dashboard controllers, models, helpers, and the HTTP verb of every route |
+| **minitest** | `test/unit`, `test/functional`, `test/integration` | Redmine (reporter optional) | Dashboard controllers, models, helpers, the HTTP verb of every route, and the golden scope fixture |
+| **golden corpus** | `spec/golden/`, verified by `spec/adapter/aggregation_corpus_spec.rb` | A database **and** `RRD_REFERENCE_DATE` | That the aggregation numbers have not moved — gate G7's differential |
 
-The RSpec specs run without `redmine_reporter` and without a database. The minitest suite boots the full Redmine app and requires reporter to be present.
+The RSpec specs run without `redmine_reporter` and without a database. The minitest
+suite boots the full Redmine app; since reporter became optional it runs **standalone**,
+which is the configuration CI proves, and four report-widget tests skip with a reason
+when reporter is absent.
 
 `spec/adapter/` is the exception to "no database". It loads the real ActiveRecord,
 recreates a small schema and runs the aggregator for real, so it always runs as its
@@ -43,6 +47,18 @@ executes it separately when a URL is available. It skips with an explanatory mes
 unless `RRD_ADAPTER_URL` is set (`test_setup.sh` writes one to
 `redmine/.rrd_adapter_url`), and it refuses any URL whose database name does not
 contain `test`, because it drops and recreates every table.
+
+### The golden oracle
+
+`spec/golden/README.md` is the page to read before touching anything in that directory.
+In short: the aggregation numbers and the resolved scopes are frozen there so the
+decoupling sequence can prove it changed neither, the corpus **refuses to run without a
+pinned reference date**, and the scope fixture is the one artefact that cannot be
+regenerated once `scope_resolution.rb` is deleted.
+
+The corpus is verified, not generated, by `test_plugin.sh` and by CI. It is generated
+only deliberately, with `RRD_CORPUS_WRITE=1` — and a difference is a finding to explain,
+never a file to bring into line.
 
 ### Ruby version floor
 
@@ -135,6 +151,13 @@ A green test suite says nothing about these, which is why they are separate jobs
   than the mirrored copy inside the Redmine clone, because the mirror has no git
   history and the checks would skip there. The job **fails if they skip**: a guard that
   quietly checks nothing is worse than no guard.
+- **`corpus`** — gate G7's differential: the declared case matrix re-run against
+  PostgreSQL, MySQL and MariaDB and compared with the committed corpus, twice per
+  engine, with the reference date pinned. It repeats the baseline checks from the
+  checkout on purpose — a green corpus job must not be able to mean "the reference was
+  never checked" — and it fails if the examples were pending, if the numbers differ
+  anywhere the per-adapter overlay does not name, or if the run modified the corpus it
+  was supposed to be verifying.
 
 ### Triggering the workflow manually
 

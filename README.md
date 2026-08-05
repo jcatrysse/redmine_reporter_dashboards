@@ -128,6 +128,40 @@ explanation above rather than failing anonymously.
 So on Redmine 7.0 today: every dashboard widget except the two report widgets works
 normally, and a dashboard that contains one of those stays usable.
 
+#### Known defect: `group_by: age` reports everything as `(none)` on MySQL and MariaDB
+
+**This affects a default installation, silently, and it is not fixed yet.** Found on
+2026-08-05 by the golden aggregation corpus, on MariaDB 10.11; it reproduces on any
+MySQL-family server and PostgreSQL is unaffected.
+
+The `age` dimension groups on a generated `CASE` expression. ActiveRecord reads the
+group key back out of the result row *by the expression's own text*, and the MySQL
+family truncates a returned column label at 256 characters. Past that limit the lookup
+misses, every group key comes back `NULL`, and the whole chart collapses into the
+`(none)` bucket — with a total taken from whichever group the server happened to
+return last, so an issue can vanish from the count as well.
+
+**Four age boundaries are enough to cross the limit, and the default is four**
+(`30, 60, 90, 180`). So on MySQL and MariaDB:
+
+| `age_buckets:` | Result |
+|---|---|
+| up to three boundaries (e.g. `30;60;90`) | correct |
+| four or more, the default included | every issue in `(none)`, and the total may be short |
+
+Until it is fixed, on MySQL or MariaDB pass **three boundaries or fewer** to any
+`group_by: age` block. PostgreSQL needs no workaround. Nothing 500s and no other
+dimension is affected — `period`, the core fields and `cf_<id>` all group on a bare
+column or a short function.
+
+The fix is a one-line change in the aggregation kernel, and it is deliberately not in
+this release: the kernel is frozen byte-for-byte against the `v0.5.0` baseline while
+the golden corpus is being established (gate G7), so it belongs to the task that
+re-seams the dimension layer. Both engines are asserted in
+`spec/adapter/query_aggregator_execution_spec.rb`, and the two corpus cases carry
+per-engine entries in `spec/golden/adapter_overlay.rb` — so the day it is fixed, the
+suite says so.
+
 #### One known database limitation: `group_by: age` on MariaDB with `ONLY_FULL_GROUP_BY`
 
 Every dimension groups on a bare column or a plain function — except `age`, whose

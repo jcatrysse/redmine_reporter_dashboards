@@ -153,6 +153,10 @@
         {
           "ref": "04-risks.md",
           "note": "RED TEAM: the risk work is done by the GOLDEN CORPUS, not by the verbatim port. A golden-guided rewrite is equally protected against silent drift — so the strong form ('rewriting is the highest-risk decision available') is true of an UNGUIDED rewrite and much weaker of a guided one. bias_watch live"
+        },
+        {
+          "ref": "spec/golden/adapter_overlay.rb",
+          "note": "MEASURED 2026-08-05 by the T-01 corpus, BEFORE any port: a SECOND architectural defect in the same dimension. group_by:age collapses into the (none) bucket on the whole MySQL family once the generated CASE passes the 256-character column-label limit — four boundaries, i.e. the DEFAULT. So the frozen corpus is already not green on all three engines without a per-adapter overlay entry, and the cause is structural (an inline CASE read back by its own text), not a value drift a verbatim port could carry across. This is evidence on the discriminator's 'without structural change' clause; the discriminator ITSELF has not been run — the port is T-07/T-08 — so status and confidence are left for the curator"
         }
       ],
       "discriminator": "Attempt the port behind the frozen 0.5.0 golden corpus. If the ported aggregator cannot be made green against the goldens on all three engines without structural change, 'verbatim port' was never on the table and the decision is subset-vs-rewrite instead.",
@@ -170,7 +174,7 @@
         "supports": []
       },
       "source": "02-analysis.md — Cross-cutting tension 3",
-      "updated": "2026-08-04",
+      "updated": "2026-08-05",
       "bias_watch": "The author wrote this code. 'Port it verbatim' may be protecting sunk effort rather than managing risk. The counter-check is that the tests, not the code, are the asset — and tests can outlive a rewrite."
     },
     {

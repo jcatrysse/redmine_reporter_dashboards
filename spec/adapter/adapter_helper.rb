@@ -21,9 +21,19 @@
 #
 # NOT a substitute for the minitest functional tests: Redmine's own models,
 # visibility rules and permissions are stubbed here with the smallest thing that has
-# the same SQL SHAPE (a subquery over projects for a role-restricted custom field, a
-# projects-referencing condition for time entry visibility). What is under test is
-# the aggregator's SQL against a real database engine, not Redmine's authorization.
+# the same SQL SHAPE (a subquery over members/member_roles for a role-restricted
+# custom field, a projects-referencing condition for time entry visibility). What is
+# under test is the aggregator's SQL against a real database engine, not Redmine's
+# authorization.
+#
+# --- Actors ---
+#
+# The fixture has FOUR actors holding three roles (see ACTORS), and both entitlement
+# checks read the actor rather than ignoring it. That is what makes INV-1 and INV-2
+# testable at VALUE level: the same call with a different actor returns different
+# numbers, or is refused. What is deliberately NOT here is Issue.visible — the
+# viewer's issue scope is Redmine's own SQL, so it is frozen by the scope fixture in
+# test/unit/golden_scope_fixture_test.rb, where a real IssueQuery exists.
 #
 # --- Running them ---
 #
@@ -73,14 +83,63 @@ module RrdAdapterHarness
   PROJECT_MAIN     = 1 # active
   PROJECT_ARCHIVED = 2 # status 9 — excluded by both stubbed visibility conditions
   PROJECT_SWEEP    = 3 # active; holds the one-issue-per-day calendar sweep
+  PROJECT_WIDE     = 4 # active; holds the cap-boundary fixture (see seed_wide!)
 
   CF_DEPARTMENT = 10 # list,  visible everywhere
   CF_POINTS     = 11 # int,   visible everywhere
   CF_COST       = 12 # float, restricted to PROJECT_MAIN
   CF_HIDDEN     = 13 # list,  not in CustomField.visible -> refused outright
   CF_CLIENT     = 14 # ProjectCustomField -> refused as a non-issue custom field
+  CF_SALARY     = 15 # float, restricted to ROLE_MANAGER — the ROLE-restricted field
+  CF_WIDE       = 16 # list,  visible everywhere; one distinct value per wide issue
+
+  # Roles. Which permissions each carries is expressed by the two lists below rather
+  # than by a permissions column: the stubs need the SQL shape of an entitlement
+  # check, not Redmine's permission model.
+  ROLE_MANAGER   = 1
+  ROLE_DEVELOPER = 2
+  ROLE_REPORTER  = 3
+
+  # The roles that may see time entries, i.e. Redmine's :view_time_entries.
+  TIME_ENTRY_ROLE_IDS = [ROLE_MANAGER, ROLE_DEVELOPER].freeze
+
+  # Actors, by the name the corpus refers to them by. Four, with three distinct
+  # roles, because three actors are only enough to tell "entitled" from "not
+  # entitled" — and the interesting case is two actors holding the SAME role in
+  # DIFFERENT projects, which is what separates "the field is refused" from "the
+  # field resolves but its values are hidden here".
+  #
+  #   manager    ROLE_MANAGER   in MAIN, SWEEP, WIDE — sees everything
+  #   developer  ROLE_DEVELOPER in MAIN, WIDE        — time entries yes, CF_SALARY no
+  #   reporter   ROLE_REPORTER  in WIDE              — neither
+  #   auditor    ROLE_MANAGER   in WIDE              — CF_SALARY resolves, but its
+  #                                                    values are hidden on MAIN
+  ACTORS = { manager: 1, developer: 2, reporter: 3, auditor: 4 }.freeze
 
   SWEEP_DAYS = 400
+
+  # The zone the fixture and the corpus are pinned in. See #freeze_to_reference_date!
+  # for why it is set rather than inherited.
+  CORPUS_TIME_ZONE = 'UTC'
+
+  # The cap-boundary fixture. 250 > MAX_DIMENSION_KEYS (200) so the 200-key cap is
+  # crossed, and 250 = 10 × 25 so the created_on spread divides evenly over
+  # WIDE_SPREAD_DAYS — no bucket is short, which would make a cap case's numbers
+  # depend on an arithmetic accident.
+  #
+  # 25 days, not 26, so a `period: day, periods: 25` split covers the whole fixture:
+  # that is the crosstab the 5 000-cell case is built from, and a 26th day outside the
+  # window would silently drop ten rows out of the grid.
+  WIDE_ISSUES      = 250
+  WIDE_ID_BASE     = 2_000
+  WIDE_SPREAD_DAYS = 25
+
+  WIDE_STATUS_CYCLE   = [STATUS_NEW, STATUS_IN_PROGRESS, STATUS_CLOSED, STATUS_REJECTED].freeze
+  WIDE_ASSIGNEE_CYCLE = [ACTORS[:manager], ACTORS[:developer], nil].freeze
+
+  # Exactly MAX_DIMENSION_KEYS distinct CF_WIDE values, with no blank bucket — the
+  # scope that lands an axis ON the cap rather than one past it.
+  WIDE_AT_CAP = 200
 
   class << self
     def url
@@ -169,6 +228,20 @@ module RrdAdapterHarness
         t.string :login, :firstname, :lastname
       end
 
+      # Roles and memberships. Redmine's own tables and columns, because both
+      # stubbed entitlement checks below produce a subquery over them — the same
+      # shape IssueCustomField#visibility_by_project_condition and
+      # TimeEntry.visible_condition produce in the real application.
+      c.create_table(:roles, force: true) { |t| t.string :name }
+
+      c.create_table(:members, force: true) do |t|
+        t.integer :user_id, :project_id
+      end
+
+      c.create_table(:member_roles, force: true) do |t|
+        t.integer :member_id, :role_id
+      end
+
       c.create_table(:versions, force: true) do |t|
         t.integer :project_id
         t.string  :name
@@ -194,8 +267,14 @@ module RrdAdapterHarness
         t.text    :possible_values
         # Not a Redmine column. Stands in for the projects subquery that
         # IssueCustomField#visibility_by_project_condition produces for a
-        # role-restricted field: nil means "everyone", an id means "only there".
+        # PROJECT-restricted field: nil means "everyone", an id means "only there".
+        # Independent of the actor, so it is the wrong tool for INV-1.
         t.integer :visibility_project_id
+        # Also not a Redmine column, and this one IS actor-dependent: the role a
+        # viewer must hold — in the project the issue belongs to — for the field's
+        # values to be visible at all. Redmine spells this as `visible: false` plus
+        # rows in custom_fields_roles; one column carries the same fact here.
+        t.integer :visibility_role_id
       end
 
       c.create_table(:custom_values, force: true) do |t|
@@ -212,6 +291,7 @@ module RrdAdapterHarness
     end
 
     MODEL_NAMES = %i[Project IssueStatus Tracker IssueCategory Version IssuePriority User
+                     Role Member MemberRole
                      TimeEntry CustomValue CustomField IssueCustomField ProjectCustomField
                      Issue].freeze
 
@@ -254,23 +334,53 @@ module RrdAdapterHarness
         end
       end)
 
+      Object.const_set(:Role, Class.new(ActiveRecord::Base))
+      Object.const_set(:Member, Class.new(ActiveRecord::Base))
+      Object.const_set(:MemberRole, Class.new(ActiveRecord::Base))
+
       # Redmine applies TimeEntry.visible_condition to every sum of spent time; the
       # stand-in has the same shape (it names `projects`, so the aggregator's
       # joins(:project) is load-bearing) without reimplementing permissions.
+      #
+      # It is ACTOR-DEPENDENT, which the earlier flat `projects.status = 1` was not:
+      # spent time is visible in the projects where the viewer holds a role that may
+      # see it, and nowhere else. Without that, every "same call, different actor"
+      # case in the corpus would return the same numbers and INV-1 would be frozen
+      # as untested rather than as held. nil user → 1=0, fail closed.
       Object.const_set(:TimeEntry, Class.new(ActiveRecord::Base) do
-        def self.visible_condition(_user)
-          'projects.status = 1'
+        def self.visible_condition(user)
+          return '1=0' if user.nil?
+
+          "projects.status = 1 AND #{RrdAdapterHarness.entitled_projects_sql(
+            user, RrdAdapterHarness::TIME_ENTRY_ROLE_IDS, 'projects.id'
+          )}"
         end
       end)
 
       Object.const_set(:CustomValue, Class.new(ActiveRecord::Base))
 
       Object.const_set(:CustomField, Class.new(ActiveRecord::Base) do
-        def self.visible(_user)
-          where(visible: true)
+        # Redmine: a field with `visible: true` is offered to everyone; one with
+        # `visible: false` is offered only to viewers holding one of its roles,
+        # anywhere. A field that is neither is offered to nobody — which is what
+        # CF_HIDDEN is, and it must stay refused for every actor.
+        def self.visible(user)
+          role_ids = RrdAdapterHarness.role_ids_for(user)
+          return where(visible: true) if role_ids.empty?
+
+          where(visible: true).or(where(visibility_role_id: role_ids))
         end
 
-        def visibility_by_project_condition
+        # Defaults to User.current exactly as Redmine's does, because the aggregator
+        # calls it with no argument (query_aggregator.rb#visibility_condition).
+        def visibility_by_project_condition(user = ::User.current)
+          return '1=0' if user.nil?
+
+          if visibility_role_id
+            return RrdAdapterHarness.entitled_projects_sql(user, [visibility_role_id.to_i],
+                                                           'issues.project_id')
+          end
+
           return '1=1' if visibility_project_id.nil?
 
           "issues.project_id IN (SELECT rrd_vp.id FROM projects rrd_vp " \
@@ -293,6 +403,50 @@ module RrdAdapterHarness
         end
       end)
       # rubocop:enable Lint/ConstantDefinitionInBlock
+    end
+
+    # ------------------------------------------------------------------
+    # Actors
+    # ------------------------------------------------------------------
+
+    # "the projects where this viewer holds one of these roles", as a SQL fragment
+    # over Redmine's own membership tables. One place, because both stubbed
+    # entitlement checks must have the same shape — two spellings of it would drift
+    # and the drift would look like a value regression.
+    def entitled_projects_sql(user, role_ids, column)
+      ids = Array(role_ids).map(&:to_i).reject(&:zero?)
+      return '1=0' if user.nil? || ids.empty?
+
+      "#{column} IN (SELECT rrd_m.project_id FROM members rrd_m " \
+        "INNER JOIN member_roles rrd_mr ON rrd_mr.member_id = rrd_m.id " \
+        "WHERE rrd_m.user_id = #{user.id.to_i} AND rrd_mr.role_id IN (#{ids.join(',')}))"
+    end
+
+    # Every role the user holds anywhere, sorted so the generated SQL of a scope
+    # built from it does not depend on row order.
+    def role_ids_for(user)
+      return [] if user.nil?
+
+      ::MemberRole.where(member_id: ::Member.where(user_id: user.id).select(:id))
+                  .distinct.pluck(:role_id).compact.sort
+    end
+
+    def actor(name)
+      id = ACTORS.fetch(name.to_sym) do
+        raise ArgumentError, "unknown actor #{name.inspect} — known: #{ACTORS.keys.join(', ')}"
+      end
+      ::User.find(id)
+    end
+
+    # INV-1 says the actor is explicit, and the aggregator reads User.current. Every
+    # corpus case therefore names its actor and runs inside this, which restores what
+    # it found: a leaked User.current would silently change the next case's numbers.
+    def as_actor(name)
+      previous = ::User.current
+      ::User.current = actor(name)
+      yield
+    ensure
+      ::User.current = previous
     end
 
     # The scope every spec starts from: the shape IssueQuery#base_scope has, minus
@@ -333,9 +487,10 @@ module RrdAdapterHarness
     # only wins when nothing set a zone first, so a corpus generated in a process
     # whose zone came from somewhere else would be pinned to a different instant and
     # bucket its own fixture differently — green locally, red in CI, for a reason
-    # nothing in the diff would show.
-    CORPUS_TIME_ZONE = 'UTC'
-
+    # nothing in the diff would show. The constant is on the MODULE (see the top of
+    # this file) rather than here: inside `class << self` it would land on the
+    # singleton class, where RrdAdapterHarness::CORPUS_TIME_ZONE cannot reach it —
+    # and the corpus's provenance check compares against it by name.
     def freeze_to_reference_date!
       date = RrdGolden::ReferenceDate.date
       return false unless date
@@ -368,7 +523,8 @@ module RrdAdapterHarness
       ::Project.insert_all!([
         { id: PROJECT_MAIN,     name: 'Main',     status: 1 },
         { id: PROJECT_ARCHIVED, name: 'Archived', status: 9 },
-        { id: PROJECT_SWEEP,    name: 'Sweep',    status: 1 }
+        { id: PROJECT_SWEEP,    name: 'Sweep',    status: 1 },
+        { id: PROJECT_WIDE,     name: 'Wide',     status: 1 }
       ])
 
       ::IssueStatus.insert_all!([
@@ -386,9 +542,12 @@ module RrdAdapterHarness
         { id: 3, name: 'High',   type: 'IssuePriority' }
       ])
       ::User.insert_all!([
-        { id: 1, login: 'alice', firstname: 'Alice', lastname: 'Adams' },
-        { id: 2, login: 'bob',   firstname: 'Bob',   lastname: 'Brown' }
+        { id: ACTORS[:manager],   login: 'alice', firstname: 'Alice', lastname: 'Adams' },
+        { id: ACTORS[:developer], login: 'bob',   firstname: 'Bob',   lastname: 'Brown' },
+        { id: ACTORS[:reporter],  login: 'carol', firstname: 'Carol', lastname: 'Clark' },
+        { id: ACTORS[:auditor],   login: 'dave',  firstname: 'Dave',  lastname: 'Doyle' }
       ])
+      seed_memberships!
       ::Version.insert_all!([
         { id: 1, project_id: PROJECT_MAIN, name: 'v1.0', effective_date: today + 30 },
         { id: 2, project_id: PROJECT_MAIN, name: 'v2.0', effective_date: today + 90 }
@@ -399,24 +558,60 @@ module RrdAdapterHarness
       ::CustomField.insert_all!([
         { id: CF_DEPARTMENT, type: 'IssueCustomField', name: 'Department', field_format: 'list',
           position: 1, visible: true, multiple: false, possible_values: "Sales\nOps",
-          visibility_project_id: nil },
+          visibility_project_id: nil, visibility_role_id: nil },
         { id: CF_POINTS, type: 'IssueCustomField', name: 'Points', field_format: 'int',
           position: 2, visible: true, multiple: false, possible_values: nil,
-          visibility_project_id: nil },
+          visibility_project_id: nil, visibility_role_id: nil },
         { id: CF_COST, type: 'IssueCustomField', name: 'Cost', field_format: 'float',
           position: 3, visible: true, multiple: false, possible_values: nil,
-          visibility_project_id: PROJECT_MAIN },
+          visibility_project_id: PROJECT_MAIN, visibility_role_id: nil },
         { id: CF_HIDDEN, type: 'IssueCustomField', name: 'Hidden', field_format: 'list',
           position: 4, visible: false, multiple: false, possible_values: "Yes\nNo",
-          visibility_project_id: nil },
+          visibility_project_id: nil, visibility_role_id: nil },
         { id: CF_CLIENT, type: 'ProjectCustomField', name: 'Client', field_format: 'string',
           position: 5, visible: true, multiple: false, possible_values: nil,
-          visibility_project_id: nil }
+          visibility_project_id: nil, visibility_role_id: nil },
+        { id: CF_SALARY, type: 'IssueCustomField', name: 'Salary', field_format: 'float',
+          position: 6, visible: false, multiple: false, possible_values: nil,
+          visibility_project_id: nil, visibility_role_id: ROLE_MANAGER },
+        { id: CF_WIDE, type: 'IssueCustomField', name: 'Work package', field_format: 'list',
+          position: 7, visible: true, multiple: false, possible_values: nil,
+          visibility_project_id: nil, visibility_role_id: nil }
       ])
 
       seed_main_project!
       seed_archived_project!
       seed_sweep!
+      seed_wide!
+    end
+
+    # Three roles, four actors, six memberships. Written out one row at a time
+    # instead of generated: which actor is entitled where is the whole point of the
+    # fixture, and a loop would make it something the reader has to execute in their
+    # head.
+    def seed_memberships!
+      ::Role.insert_all!([
+        { id: ROLE_MANAGER,   name: 'Manager' },
+        { id: ROLE_DEVELOPER, name: 'Developer' },
+        { id: ROLE_REPORTER,  name: 'Reporter' }
+      ])
+
+      memberships = [
+        [1, ACTORS[:manager],   PROJECT_MAIN,  ROLE_MANAGER],
+        [2, ACTORS[:manager],   PROJECT_SWEEP, ROLE_MANAGER],
+        [3, ACTORS[:manager],   PROJECT_WIDE,  ROLE_MANAGER],
+        [4, ACTORS[:developer], PROJECT_MAIN,  ROLE_DEVELOPER],
+        [5, ACTORS[:developer], PROJECT_WIDE,  ROLE_DEVELOPER],
+        [6, ACTORS[:reporter],  PROJECT_WIDE,  ROLE_REPORTER],
+        # The same role as the manager, held somewhere else: CF_SALARY resolves for
+        # this actor, and its values are still hidden on every MAIN issue.
+        [7, ACTORS[:auditor],   PROJECT_WIDE,  ROLE_MANAGER]
+      ]
+
+      ::Member.insert_all!(memberships.map { |id, uid, pid, _rid| { id: id, user_id: uid, project_id: pid } })
+      ::MemberRole.insert_all!(memberships.map.with_index(1) do |(mid, _uid, _pid, rid), id|
+        { id: id, member_id: mid, role_id: rid }
+      end)
     end
 
     # Four issues with exactly known ages, closings and assignments — the fixture
@@ -465,7 +660,14 @@ module RrdAdapterHarness
         { customized_type: 'Issue', customized_id: 3, custom_field_id: CF_POINTS, value: '' },
         { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_COST, value: '100.5' },
         { customized_type: 'Issue', customized_id: 2, custom_field_id: CF_COST, value: '200.25' },
-        { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_HIDDEN, value: 'nope' }
+        { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_HIDDEN, value: 'nope' },
+        # The role-restricted field. Visible to the manager (ROLE_MANAGER in MAIN),
+        # hidden from the auditor (ROLE_MANAGER, but only in WIDE), and refused
+        # outright to the developer and the reporter, who hold no entitled role at
+        # all. Issue 3's empty string stays out of the join either way.
+        { customized_type: 'Issue', customized_id: 1, custom_field_id: CF_SALARY, value: '1000.5' },
+        { customized_type: 'Issue', customized_id: 2, custom_field_id: CF_SALARY, value: '2000.25' },
+        { customized_type: 'Issue', customized_id: 3, custom_field_id: CF_SALARY, value: '' }
       ])
 
       # 3.5 + 1.5 visible hours on issue 1, 2.0 on issue 2, none on 3 and 4.
@@ -513,9 +715,52 @@ module RrdAdapterHarness
       ::Issue.insert_all!(rows)
     end
 
+    # The cap-boundary fixture: WIDE_ISSUES issues carrying one DISTINCT custom field
+    # value each, so MAX_DIMENSION_KEYS (200) is genuinely crossed rather than
+    # approached, and spread over WIDE_SPREAD_DAYS days so a period or age split has
+    # something in every bucket.
+    #
+    # In its own project, deliberately. Every existing assertion is read off the four
+    # hand-built MAIN issues, and 260 more issues in that scope would rewrite all of
+    # them — which is how a fixture extension turns into a spec rewrite.
+    #
+    # Everything varies by index arithmetic, never by rand: two runs must produce the
+    # same bytes (CLAUDE.md §6).
+    def seed_wide!
+      issues = (0...WIDE_ISSUES).map do |i|
+        day = i % WIDE_SPREAD_DAYS
+        { id: WIDE_ID_BASE + i, project_id: PROJECT_WIDE, tracker_id: (i % 2) + 1,
+          status_id: WIDE_STATUS_CYCLE[i % WIDE_STATUS_CYCLE.length],
+          priority_id: (i % 3) + 1, category_id: nil, fixed_version_id: nil,
+          author_id: ACTORS[:manager], assigned_to_id: WIDE_ASSIGNEE_CYCLE[i % 3],
+          parent_id: nil, done_ratio: (i % 5) * 25, subject: "wide #{i}",
+          description: i.even? ? "described #{i}" : nil,
+          estimated_hours: (i % 4).zero? ? nil : ((i % 4) * 1.5),
+          start_date: today - day, due_date: i.even? ? today - (i % 13) : nil,
+          created_on: at(day), updated_on: at(day), closed_on: nil }
+      end
+      ::Issue.insert_all!(issues)
+
+      # One distinct value per issue — 260 of them, zero-padded so `sort: label` has a
+      # total order that does not depend on natural-sort tie-breaking.
+      values = (0...WIDE_ISSUES).map do |i|
+        { customized_type: 'Issue', customized_id: WIDE_ID_BASE + i,
+          custom_field_id: CF_WIDE, value: format('w%03d', i) }
+      end
+      # A handful of role-restricted values here too: WIDE is where the auditor holds
+      # ROLE_MANAGER, so this is the same field being VISIBLE to the actor it is
+      # hidden from on MAIN.
+      values += (0...4).map do |i|
+        { customized_type: 'Issue', customized_id: WIDE_ID_BASE + i,
+          custom_field_id: CF_SALARY, value: format('%d.25', (i + 1) * 10) }
+      end
+      ::CustomValue.insert_all!(values)
+    end
+
     def truncate_all!
       %w[issues custom_values time_entries projects issue_statuses trackers
-         issue_categories enumerations users versions custom_fields].each do |table|
+         issue_categories enumerations users versions custom_fields
+         roles members member_roles].each do |table|
         ActiveRecord::Base.connection.delete("DELETE FROM #{table}")
       end
     end

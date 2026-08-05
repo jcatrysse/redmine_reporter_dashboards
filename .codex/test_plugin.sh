@@ -73,6 +73,18 @@ if [ -d "$SPEC_DIR" ]; then
       echo "Running the adapter execution specs against $RRD_ADAPTER_URL" >&2
       RRD_ADAPTER_URL="$RRD_ADAPTER_URL" \
         run_command bundle exec rspec -I "$SPEC_DIR" "$SPEC_DIR/adapter" --format progress
+
+      # The golden corpus, in its OWN process and with the reference date pinned. Both
+      # matter: the pin freezes the fixture and the clock together (spec/golden/
+      # reference_date.rb), and the run above deliberately leaves it unset so the
+      # execution specs keep their relative-to-today fixture. Unpinned the corpus
+      # examples skip, which is why they are run again here rather than left to the
+      # invocation above.
+      echo "Verifying the golden aggregation corpus (pinned to ${RRD_REFERENCE_DATE:-2025-12-29})" >&2
+      RRD_ADAPTER_URL="$RRD_ADAPTER_URL" \
+      RRD_REFERENCE_DATE="${RRD_REFERENCE_DATE:-2025-12-29}" \
+        run_command bundle exec rspec -I "$SPEC_DIR" \
+                    "$SPEC_DIR/adapter/aggregation_corpus_spec.rb" --format progress
     else
       echo "WARNING: skipping the adapter execution specs — no RRD_ADAPTER_URL." >&2
       echo "         Run ./.codex/test_setup.sh (optionally with RRD_DB=mysql or mariadb)," >&2

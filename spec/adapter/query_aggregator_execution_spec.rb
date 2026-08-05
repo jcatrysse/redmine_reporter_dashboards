@@ -235,6 +235,134 @@ else
     end
 
     # ----------------------------------------------------------------
+    # DEFECT D-1 — the age dimension past the MySQL column-label limit
+    #
+    # Found on 2026-08-05 by the golden corpus (T-01), on MariaDB 10.11.
+    #
+    # The age dimension groups on a generated CASE. ActiveRecord reads the group key
+    # back out of the result row BY THE EXPRESSION'S OWN TEXT, and the MySQL family
+    # truncates a returned column label at 256 characters: measured with this shape,
+    # 261 characters still works and 262 does not. Past it the lookup misses, every
+    # group key comes back nil, and the entire result collapses into the "(none)"
+    # bucket with a total taken from whichever group the server returned last.
+    #
+    # FOUR boundaries cross the limit, and DEFAULT_AGE_BUCKETS is [30, 60, 90, 180].
+    # So the DEFAULT age dimension is broken on MySQL and MariaDB, in production,
+    # today. Every existing example above uses three boundaries or fewer, which is the
+    # only reason CI has been green.
+    #
+    # Asserted on BOTH engines rather than skipped on one: the MySQL branch pins the
+    # defect so that fixing it fails here — which is the notification the fixer wants.
+    # The fix belongs to whichever task may touch the kernel; gate G7 freezes it byte
+    # for byte until then.
+    # ----------------------------------------------------------------
+
+    describe 'the age dimension with the DEFAULT boundaries (defect D-1)' do
+      subject(:buckets) { described_class.dimension_breakdown(main, group_by: 'age')['buckets'] }
+
+      it 'buckets by age on PostgreSQL and collapses into (none) on the MySQL family' do
+        labelled = buckets.map { |bucket| [bucket['label'], bucket['count']] }
+
+        if H.mysql?
+          # And note the total: 3, not 4. The collapse does not merely mislabel the
+          # buckets — the count it keeps is whichever group the server returned last,
+          # so an issue disappears from the chart altogether.
+          expect(labelled).to eq([['0-30', 0], ['31-60', 0], ['61-90', 0], ['91-180', 0],
+                                  ['>180', 0], ['(none)', 3]]),
+                              "DEFECT D-1 has changed shape (got #{labelled.inspect}) — re-measure " \
+                              'before editing this expectation'
+          expect(described_class.dimension_breakdown(main, group_by: 'age')['total']).to eq(3)
+        else
+          expect(labelled).to eq([['0-30', 1], ['31-60', 0], ['61-90', 0], ['91-180', 3],
+                                  ['>180', 0]])
+          expect(described_class.dimension_breakdown(main, group_by: 'age')['total']).to eq(4)
+        end
+      end
+
+      # The boundary of the defect, so its cause is a measured fact and not a comment:
+      # three boundaries stay under the limit and are correct everywhere.
+      it 'is correct at three boundaries on every engine' do
+        result = described_class.dimension_breakdown(main, group_by: 'age',
+                                                           age_buckets: [30, 60, 90])
+
+        expect(result['buckets'].map { |b| [b['label'], b['count']] })
+          .to eq([['0-30', 1], ['31-60', 0], ['61-90', 0], ['>90', 3]])
+      end
+    end
+
+    # ----------------------------------------------------------------
+    # Per-actor visibility — the harness's four actors, at value level
+    #
+    # INV-1 says the actor is explicit; INV-2 says a value the actor may not see is
+    # hidden without losing the issue. Both are asserted here at the level the
+    # aggregator actually decides them, and frozen for every entry point by the
+    # golden corpus.
+    # ----------------------------------------------------------------
+
+    describe 'the role-restricted custom field' do
+      def salary_dimension(actor)
+        H.as_actor(actor) do
+          described_class.dimension_breakdown(main, group_by: "cf_#{H::CF_SALARY}")
+        end
+      end
+
+      it 'answers with its values for an actor entitled in the issues\' project' do
+        expect(salary_dimension(:manager)['buckets'].map { |b| [b['label'], b['count']] })
+          .to eq([['1000.5', 1], ['2000.25', 1], ['(none)', 2]])
+      end
+
+      it 'is refused outright to actors holding no entitled role anywhere' do
+        expect(salary_dimension(:developer)).to be_nil
+        expect(salary_dimension(:reporter)).to be_nil
+      end
+
+      # The INV-2 case: the field resolves, the values do not, and the issues stay.
+      it 'hides the values but keeps the issues for an actor entitled elsewhere' do
+        expect(salary_dimension(:auditor)['buckets'].map { |b| [b['label'], b['count']] })
+          .to eq([['(none)', 4]])
+      end
+
+      it 'shows that same actor the values in the project where the role is held' do
+        result = H.as_actor(:auditor) do
+          described_class.dimension_breakdown(H.base_scope.where(project_id: H::PROJECT_WIDE),
+                                              group_by: "cf_#{H::CF_SALARY}", sort: 'label')
+        end
+
+        expect(result['buckets'].map { |b| b['label'] }).to eq(['10.25', '20.25', '30.25',
+                                                                '40.25', '(none)'])
+      end
+
+      it 'restores User.current afterwards, so one case cannot move the next one' do
+        before_actor = ::User.current
+        H.as_actor(:reporter) { described_class.flags(main) }
+
+        expect(::User.current).to eq(before_actor)
+      end
+    end
+
+    describe 'visible spent time' do
+      def spent_total(actor)
+        H.as_actor(actor) do
+          described_class.dimension_breakdown(reported, group_by: 'status',
+                                                        measure: 'sum', of: 'spent_hours')['total']
+        end
+      end
+
+      it 'is summed where the actor holds an entitled role' do
+        expect(spent_total(:manager)).to eq(7.0)
+        expect(spent_total(:developer)).to eq(7.0)
+      end
+
+      it 'is zero where no entitled role is held at all' do
+        expect(spent_total(:reporter)).to eq(0.0)
+      end
+
+      it 'is zero where the entitled role is held in another project' do
+        expect(spent_total(:auditor)).to eq(0.0)
+      end
+    end
+
+    # ----------------------------------------------------------------
     # Measures — the numeric CAST and the two visibility-aware joins
     # ----------------------------------------------------------------
 

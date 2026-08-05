@@ -23,7 +23,12 @@
 #   baseline   — the corpus reference checks, run from the PLUGIN CHECKOUT rather than
 #                the mirror. They need git history, and redmine_clone.sh / the rsync
 #                below deliberately exclude .git, so run there they would skip — and a
-#                skipped guard is indistinguishable from a passing one.
+#                skipped guard is indistinguishable from a passing one. Fast, no
+#                services: the first thing to go red when the reference moves.
+#   corpus     — gate G7's differential. The declared case matrix re-run against a real
+#                server and compared with the committed corpus, on all three engines,
+#                twice. It repeats the baseline checks from the checkout on purpose, so
+#                that a green corpus job cannot mean the reference went unchecked.
 #   gates      — the non-test checks. A green suite says nothing about these.
 #   ruby-floor — the plugin declares Redmine 5.1 support, and Redmine 5.1 runs on
 #                Ruby 2.7. Guards the syntax that floor rules out.
@@ -347,6 +352,183 @@ jobs:
             echo "They need git history — see spec/golden/baseline_spec.rb." >&2
             exit 1
           fi
+
+  # ------------------------------------------------------------------
+  # The golden aggregation corpus — gate G7's differential, on every engine.
+  #
+  # Two halves, and they run in ONE job on purpose:
+  #
+  #   1. the baseline reference checks, FROM THE PLUGIN CHECKOUT. They need git
+  #      history, and the rsync below excludes .git, so run from inside the Redmine
+  #      clone they would report pending — and a skipped guard is indistinguishable
+  #      from a passing one. This is the same reason the `baseline` job exists; it runs
+  #      here as well so that a green `corpus` job cannot mean "the reference was never
+  #      checked".
+  #   2. the corpus itself: the declared case matrix re-run against a real server and
+  #      compared with spec/golden/aggregation/values.jsonl, with the pinned reference
+  #      date, on PostgreSQL, MySQL and MariaDB.
+  #
+  # It must stay green through every later task. That is the single most important
+  # assertion in the decoupling sequence (technical-spec.md §2.3).
+  # ------------------------------------------------------------------
+  corpus:
+    name: Golden corpus (${{ matrix.db.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db:
+          - label: PostgreSQL 16
+            image: postgres:16
+            port: 5432
+            adapter: postgresql
+            url: postgres://redmine:redmine@127.0.0.1:5432/redmine_adapter_test
+            packages: libpq-dev
+            options: >-
+              --health-cmd pg_isready
+              --health-interval 10s --health-timeout 5s --health-retries 10
+          - label: MySQL 8.0
+            image: mysql:8.0
+            port: 3306
+            adapter: mysql2
+            url: mysql2://redmine:redmine@127.0.0.1:3306/redmine_adapter_test
+            packages: default-libmysqlclient-dev
+            options: >-
+              --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine"
+              --health-interval 10s --health-timeout 5s --health-retries 20
+          - label: MariaDB 11
+            image: mariadb:11
+            port: 3306
+            adapter: mysql2
+            url: mysql2://redmine:redmine@127.0.0.1:3306/redmine_adapter_test
+            packages: default-libmysqlclient-dev
+            options: >-
+              --health-cmd "healthcheck.sh --connect --innodb_initialized"
+              --health-interval 10s --health-timeout 5s --health-retries 20
+
+    services:
+      db:
+        image: ${{ matrix.db.image }}
+        ports:
+          - ${{ matrix.db.port }}:${{ matrix.db.port }}
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_adapter_test
+          MYSQL_ROOT_PASSWORD: redmine
+          MYSQL_DATABASE: redmine_adapter_test
+          MYSQL_USER: redmine
+          MYSQL_PASSWORD: redmine
+          MARIADB_ROOT_PASSWORD: redmine
+          MARIADB_DATABASE: redmine_adapter_test
+          MARIADB_USER: redmine
+          MARIADB_PASSWORD: redmine
+        options: ${{ matrix.db.options }}
+
+    env:
+      # The date the committed corpus was generated with. Unpinned, the verifier skips
+      # rather than comparing against a fixture that moves daily — see
+      # spec/golden/reference_date.rb.
+      RRD_REFERENCE_DATE: '2025-12-29'
+
+    steps:
+      # Full history: the baseline is a commit, and a shallow clone cannot resolve it.
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      # HALF 1 — from the plugin checkout, where .git exists.
+      - name: Install rspec for the reference checks
+        run: gem install rspec --no-document
+
+      - name: Verify the baseline commit, the case matrix and the overlay ratchet
+        run: rspec -I spec spec/golden --format documentation
+        working-directory: plugin
+
+      # If these skip, the job is green and has checked nothing. Say so out loud.
+      - name: Refuse a run in which the reference checks skipped
+        run: |
+          out="$(rspec -I spec spec/golden 2>&1)"
+          echo "$out"
+          if echo "$out" | grep -qE '[1-9][0-9]* pending'; then
+            echo "The corpus reference checks were PENDING, so nothing was verified." >&2
+            echo "They need git history — see spec/golden/baseline_spec.rb." >&2
+            exit 1
+          fi
+
+      # HALF 2 — the corpus against a real engine. One Redmine branch is enough: what
+      # is under test is the kernel's SQL against the server, and the rspec job covers
+      # the Redmine/Ruby spread.
+      - name: Clone Redmine
+        run: |
+          git clone --depth 1 --branch 6.1-stable \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Install client libraries
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.db.packages }}
+
+      - name: Declare the adapter so bundler installs its gem
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: ${{ matrix.db.adapter }}
+            database: redmine_adapter_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+          EOF
+        working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      # RRD_CORPUS_WRITE is deliberately absent. The step after this one proves it.
+      - name: Verify the corpus
+        env:
+          RRD_ADAPTER_URL: ${{ matrix.db.url }}
+        run: |
+          bundle exec rspec \
+            -I plugins/redmine_reporter_dashboards/spec \
+               plugins/redmine_reporter_dashboards/spec/adapter/aggregation_corpus_spec.rb \
+            --format documentation | tee /tmp/corpus.log
+          if grep -qE '[1-9][0-9]* pending' /tmp/corpus.log; then
+            echo "The corpus examples were PENDING, so no numbers were compared." >&2
+            echo "That means RRD_REFERENCE_DATE did not reach the run." >&2
+            exit 1
+          fi
+        working-directory: redmine
+
+      # A verification that quietly regenerated what it was verifying would pass for
+      # ever. The corpus is committed; after a verifying run it is unchanged.
+      - name: Refuse a run that rewrote the corpus it was checking
+        run: |
+          if ! git diff --exit-code -- spec/golden; then
+            echo "The corpus job modified spec/golden. It verifies, it does not generate." >&2
+            exit 1
+          fi
+        working-directory: plugin
+
+      # Bit-reproducible across two independent runs (T-01's acceptance list). The
+      # second run is a fresh process with a fresh seed and a re-seeded database.
+      - name: Verify it a second time, independently
+        env:
+          RRD_ADAPTER_URL: ${{ matrix.db.url }}
+        run: |
+          bundle exec rspec \
+            -I plugins/redmine_reporter_dashboards/spec \
+               plugins/redmine_reporter_dashboards/spec/adapter/aggregation_corpus_spec.rb \
+            --format progress
+        working-directory: redmine
 
   # ------------------------------------------------------------------
   # Non-test gates. A green suite says nothing about any of these.

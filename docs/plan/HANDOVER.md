@@ -46,6 +46,32 @@ arithmetic, so freezing Ruby is sufficient — there is no database clock to kee
 `File.read` applies an encoding. Compared directly, one em-dash reads as a three-byte
 difference that is not a difference. Use `File.binread` against raw git output.
 
+**`File.read` on a UTF-8 source file fails where `LANG` is unset.** Ruby's default
+external encoding follows the locale, and a bare container has none — so reading any
+file in this repo that contains an em-dash raises `invalid byte sequence in US-ASCII`.
+It passes on a developer machine and fails in a minimal container. Name the encoding:
+`File.read(path, encoding: 'UTF-8')`.
+
+**Rails inserts every fixture set ANY test class in the process declares.** A class
+that declares no `:issues` still finds Redmine's fixture issues in the database,
+because another plugin test class declared them — and whether it does depends on the
+order the classes ran in. Two of the scope-fixture tests were order-dependent on their
+first run for exactly this reason, one passing and one failing in the same run. Do not
+build a fixture on the ABSENCE of rows; restrict every query and every scope to the
+records the test created, and assert that nothing resolved reaches outside them.
+
+**A generating run writes into the MIRROR.** `RRD_CORPUS_WRITE=1` and
+`RRD_SCOPE_WRITE=1` are executed from inside `redmine/`, so the files land in
+`redmine/plugins/<name>/spec/golden/` and the next `redmine_clone.sh` deletes them.
+Copy them back out before committing — `spec/golden/README.md` has the command.
+
+**MySQL and MariaDB truncate a returned column label at 256 characters, and
+ActiveRecord reads grouped results back BY THE GROUP EXPRESSION'S TEXT.** Group on
+anything longer and every key comes back nil, the result collapses into one bucket and
+the count is silently wrong. This is defect D-1 (`implementation-plan.md` §Findings)
+and it is live in `group_by: age` with the default four boundaries. It is also a trap
+for any FUTURE grouping expression: keep them short, or alias them.
+
 ---
 
 ## 2. Known and deliberately untouched
@@ -59,6 +85,12 @@ condition. Flagged here so it is not mistaken for a new violation.
 **`.codex/check_ruby_floor.sh` still exists and runs in CI.** `technical-spec.md` §8's
 floor decision deletes it. Removing it changes a documented support claim, so it is a
 curator decision (G9: the matrix changes in the same PR), not a cleanup.
+
+**The registers-relation path in `scope_resolution.rb` does not enforce visibility.**
+Finding F-2. It is FROZEN THAT WAY by a triple in the scope fixture, deliberately, so
+that T-07 closing it is a visible decision rather than a diff nobody reads. Do not
+"fix" it here: the file is the one T-07 demotes, and changing it now would move the
+oracle it is measured against.
 
 **`ZERO_REPORTER_MODE=strict` fails today, by design.** 13 files still name the base
 plugin or the vendor gem, each listed with its reason in
@@ -94,12 +126,26 @@ record as of the last local run.
 
 | Configuration | Executed? | Result |
 |---|---|---|
-| Redmine 7.0-stable, standalone, PostgreSQL | **yes, locally** | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
-| Redmine 6.1-stable, with reporter, PostgreSQL | **yes, locally** | 906 + 86 + 114, 0 failures, 0 skips |
-| Redmine 6.1-stable, standalone, PostgreSQL | **yes, locally** | 906 + 86 + 114, 0 failures, 4 skips |
+| Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 951 rspec + 97 adapter + 215 corpus + 129 minitest, 0 failures |
+| Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally (2026-08-05)** | 97 adapter + 215 corpus, 0 failures. **This is the run that found defect D-1** |
+| Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
+| Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no** | Ruby floor; CI only |
-| MySQL 8.0 / MariaDB 11 | **no** | CI only. 7 adapter examples are MySQL-family-only and pend elsewhere |
+| MySQL 8.0 proper, MariaDB 11 | **no** | CI only. MariaDB 10.11 was run locally and takes the same kernel branch |
 | **CI, any job, on this work** | **NO — never run** | the workflow was rewritten and has not executed once |
+
+The counts moved because T-01 added tests, not because anything changed: 906 → 951 rspec
+(the corpus's DB-less coverage, ratchet and canonicaliser specs), 86 → 97 adapter (defect
+D-1 and the four actors), 114 → 129 minitest (the scope fixture), plus the 215-example
+corpus verification, which is a new invocation and only runs with the reference date
+pinned. MariaDB 10.11 rather than 11 because that is what the container's apt repository
+carries; both are the `mysql2` adapter and the same kernel branch, and CI runs 11.
+
+**MySQL 8.0 itself is still unverified locally.** The Debian packages for MySQL and
+MariaDB conflict, so only one of the two can be installed at a time. D-1's mechanism is
+MySQL-family-wide (a server-side label limit, not a MariaDB quirk), so the expectation is
+that 8.0 behaves identically — but that is an expectation, and the `corpus` job on MySQL
+8.0 is what will settle it.
 
 That last row is the important one. The CI rewrite (secret removal, standalone
 minitest, the `gates` and `baseline` jobs) is verified only by local simulation of each
@@ -117,11 +163,15 @@ of a CI that runs on fork pull requests.
 `implementation-plan.md` §Status is authoritative; verify it against `git log` per
 `CLAUDE.md` §1. In short:
 
-1. **Finish T-01** — the value corpus, the per-adapter overlay, ≥3 actors with a
-   role-restricted custom field, the scope fixture, and the `corpus` job. This is the
-   critical path: T-07 and T-08 are both blocked on it.
+1. **T-01 is done.** The oracle exists: read `spec/golden/README.md` before touching
+   anything in that directory, and treat a corpus difference as a finding to explain
+   rather than a file to regenerate. Two things it produced that are somebody's work
+   now: defect **D-1** (T-08 owns the fix) and finding **F-2** (T-07 owns the decision)
+   — both in `implementation-plan.md` §Findings.
 2. **T-02** needs production data and therefore needs the curator. Three claims in
    `claims.json` discriminate on that one measurement.
 3. **T-03** (performance baseline) must precede T-10.
+4. **The first real CI run** is still owed, and now has two more jobs in it. A red
+   `corpus` job on MySQL 8.0 would be information, not a regression — see §4.
 
 Use `TASK-PROMPT.md`; fill in the STATE block from §4 above rather than from memory.

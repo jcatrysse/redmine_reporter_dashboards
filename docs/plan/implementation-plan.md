@@ -50,7 +50,7 @@ fact that CI has not yet run on this work at all.
 | Task | State |
 |---|---|
 | T-00 | **VOID** — the fork is out of scope (curator, 2026-08-05). See below. |
-| T-01 | **partial** — the two §2-Step-0 prerequisites done; corpus, scope fixture, overlay and CI job still owed |
+| T-01 | **done** — reference date, canonicaliser, baseline commit, the 174-case value corpus, the per-adapter overlay, the 46-triple scope fixture and the `corpus` CI job. **It found defect D-1 on the way in** — see §Findings |
 | T-02 | not started |
 | T-03 | not started |
 | T-04 | **done** — `RedmineReporterDashboards::Positioned` replaces `up_acts_as_list` |
@@ -66,6 +66,39 @@ reporter, and on 7.0-stable standalone, against real PostgreSQL. Not yet verifie
 **The one thing still owed before 0.6.0 can honestly ship** is T-09's CI change: the workflow still
 checks out the private reporter plugin with a secret, so the standalone claim is not yet proved by
 CI on every pull request. Until it is, INV-7 says the claim is weaker than it looks.
+
+## Findings — what the work has turned up, and who owns the fix
+
+**D-1 · `group_by: age` reports everything as `(none)` on MySQL and MariaDB.** Found 2026-08-05 by
+T-01's corpus, on MariaDB 10.11; PostgreSQL 16 is unaffected. The age dimension groups on a
+generated `CASE`; ActiveRecord reads the group key back out of the row **by the expression's own
+text**, and the MySQL family truncates a returned column label at 256 characters (measured: 261
+works, 262 does not). Past it every key comes back `NULL`, the chart collapses into the empty
+bucket, and the total is taken from whichever group the server returned last — so an issue can
+vanish from the count as well. **Four boundaries cross the limit and `DEFAULT_AGE_BUCKETS` is four**,
+so this is the DEFAULT behaviour on two of the three supported engines, in production, today. Every
+existing adapter example used three boundaries or fewer, which is the only reason CI has been green.
+
+*Not fixed in T-01, and the reason is the task itself:* gate G7 diffs the kernel byte-for-byte
+against the baseline, and §1's ordering guard makes touching `lib/sql_aggregation/**` before T-01 is
+complete a refusal. **The fix belongs to T-08**, which is where the kernel legitimately moves — the
+one-line change is to give the group expression an alias, or to group on a short expression, either
+of which is a byte change and therefore that task's decision to argue for. It is asserted on both
+engines in `spec/adapter/query_aggregator_execution_spec.rb`, documented in the README's database
+section, and carried as the overlay's only two entries, so the day it is fixed the suite says so and
+the ratchet goes down. **It is also evidence on C-003** (`claims.json`, updated): the corpus is
+already not green on all three engines before any port, and the cause is structural. Status and
+confidence left for the curator.
+
+**F-2 · the registers relation path is not visibility-scoped.** `resolve_scope` returns
+`registers[:container]` as-is when it is an AR relation, intersecting only the DROP path with
+`Issue.visible`. The documented grounds are that every registers path is `IssueQuery#base_scope` and
+therefore already visible — true of what reporter passes today, not true of the type. Not reachable
+from a template (only the host plugin writes registers), so it is a finding rather than an
+emergency, and the scope fixture **freezes the leak explicitly** (a triple in which every actor
+resolves an issue from a project they are not a member of). **T-07 owns the decision**; when
+`ScopeBinding` closes it, that triple changes and the change has to be argued for rather than
+noticed later.
 
 ## 1. Work breakdown
 
@@ -132,14 +165,44 @@ reporter's enum, and standalone it does not need reporter at all.
   reproducible is not an oracle.
 - New CI job `corpus`, green, and **it stays green through every later task**.
 
-*Progress (2026-08-05):* the two prerequisites `technical-spec.md` §2 Step 0 names are **done** —
-the pinned reference date (`spec/golden/reference_date.rb`, default `2025-12-29`, verifier refuses
-to run unpinned) and the canonicaliser (`spec/golden/corpus_canonicaliser.rb`). The baseline
-reference is **`spec/golden/baseline.rb`**: commit `eddb8fa`, not a tag, because this repository has
-no tags — see that file. Two findings from doing it: pinning the fixture is not enough on its own,
-the **clock must be frozen to the same date** or every period window comes back empty; and the
-aggregator's only clock read is Ruby-side, so freezing Ruby is sufficient. **Still owed:** the
-scope fixture, the value corpus itself, the per-adapter overlay, and the `corpus` job.
+*Done (2026-08-05).* What landed, and where to read it: `spec/golden/README.md` is the page for
+anyone touching these artefacts.
+
+- **Reference date** — `spec/golden/reference_date.rb`, default `2025-12-29`; the verifier refuses
+  to run unpinned. Pinning the fixture is not enough on its own: the **clock must be frozen to the
+  same date** or every period window comes back empty. The aggregator's only clock read is
+  Ruby-side, so freezing Ruby is sufficient.
+- **Canonicaliser** — `spec/golden/corpus_canonicaliser.rb`, per §2 Step 0.
+- **Baseline** — `spec/golden/baseline.rb`: commit `eddb8fa`, not a tag, because this repository has
+  none. See that file for the one way the reference can still be lost (a squash merge).
+- **The value corpus** — `spec/golden/corpus_cases.rb` declares **174 cases** over the six entry
+  points; `spec/golden/aggregation/values.jsonl` holds the answers with a manifest carrying the
+  baseline commit, the pin, the zone and two digests (the file's, and the CASE LIST's, so a matrix
+  that has moved on from its answers fails rather than passes). Caps covered **at** the boundary and
+  **one past** it: 200 dimension keys, 24 age buckets, 24 periods, 12 completeness fields, 5 000
+  crosstab cells. **Four actors, three roles, one role-restricted custom field** — the value-level
+  INV-1/INV-2 evidence: the same call is refused for two actors, answers with values for a third,
+  and hides the values while keeping the issues for the fourth.
+- **The per-adapter overlay** — `spec/golden/adapter_overlay.rb`, file-backed, ratcheted, and
+  **exhaustive by assertion**: the cases that differ on an engine must be exactly the cases it
+  names. Two entries, both defect D-1 below.
+- **The scope fixture** — `test/unit/golden_scope_fixture_test.rb` + `spec/golden/scope/scope.jsonl`,
+  **46 (template, query, actor) triples** over all eleven documented resolution paths, four actors
+  with three `issues_visibility` rules, private issues, an archived project and a project with no
+  membership. `resolve_query`'s answer is recorded beside `resolve_scope`'s: the drill-through half
+  is lost with the same file. SQL in the sibling tree `spec/golden/sql/`.
+- **The `corpus` CI job** — all three engines, twice each, with the pinned date, and it runs the
+  baseline checks **from the plugin checkout** (the mirror has no `.git`, so there they would skip
+  and report green). It also fails if a run modified the corpus it was verifying.
+
+*Two deviations from the wording above, both deliberate and both to serve it:* the scope fixture
+records the issue set **by a stable per-issue key as well as by id**, because a fixture created
+inside a rolled-back transaction has no stable ids and Redmine's own fixture sets differ between
+5.1 and 7.0 — recording keys is what lets the fixture be verified on all four branches instead of
+one pinned branch (ids are recorded too; the test assigns them explicitly from a reserved range).
+And the 5 000-cell boundary is built from a `period` split rather than an `age` split, because a
+24-boundary age CASE is exactly the shape defect D-1 breaks, and a cell-count boundary built on a
+broken dimension would measure the defect instead of the cap.
 
 *One constraint on that job, found the hard way:* `redmine_clone.sh` rsyncs the plugin into
 `redmine/plugins/<name>/` with `--exclude .git/`, so the copy the suite normally runs from has no
@@ -199,7 +262,9 @@ broken thing; a 404 is a correct statement about an uninstalled capability.*
 *Touches:* new `liquid/scope_binding.rb` (~60 lines) + `liquid/render_context.rb`;
 `liquid_aggregate_tag.rb:106` **and `liquid_version_rollup_tag.rb:38`** — **there are two, not
 one**; `scope_resolution.rb` demoted to `glue/legacy/`.
-*Deps:* T-05. **T-01 must be complete.**
+*Deps:* T-05. **T-01 is complete** — the scope fixture in `test/unit/golden_scope_fixture_test.rb`
+is the oracle this task is measured against, and finding **F-2** (§Findings) is the decision it has
+to take deliberately rather than by accident.
 *Accept:* two resolution sources only (`IssueQuery.visible(actor).find_by(id:)` → `base_scope`;
 `RenderContext#scope`); the `drop.instance_variables` walk, the `:container`/`:controller` ivar
 archaeology, the `Issue.where(id: ids)` reconstruction, the thread-local **and the fail-open
@@ -211,7 +276,9 @@ have reporter (via `glue/legacy/`).
 **T-08 · Port the aggregation kernel, byte-identically**
 *Touches:* `aggregation/query_aggregator.rb`, `aggregation/drill_through.rb`, plus a 4-line
 namespace assignment.
-*Deps:* T-01.
+*Deps:* T-01 (complete). **This task owns the fix for defect D-1** (§Findings) — the only place the
+kernel may legitimately change a byte. Fixing it deletes the overlay's two entries and lowers its
+ratchet in the same commit.
 *Accept:* both files are **byte-identical** to their `v0.5.0` blobs — `git diff --no-index` output
 **empty**, not "ignoring whitespace"; they still open `module SqlAggregation`; namespacing is a
 separate assignment file; the `corpus` job enforces this on every PR. *Re-indentation is a separate
