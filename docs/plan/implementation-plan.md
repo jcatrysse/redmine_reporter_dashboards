@@ -122,13 +122,17 @@ installed (MySQL and MariaDB conflict; switching costs an apt purge and a datadi
 therefore need a curator decision before it is written, and neither is a judgement the specs leave to
 the implementer:
 
-- **G7.** Fixing the kernel means it is no longer byte-identical to `eddb8fa`, so the gate as written
-  can never pass again. The honest mechanism is a *declared exception with its own ratchet*, mirroring
-  `AdapterOverlay`: the diff against v0.5.0 must equal exactly the recorded hunk, with its reason. That
-  is a change to a hard gate's reference, which `CLAUDE.md` §7 and §11.4 put outside an implementer's
-  authority — the gate exists to answer a red-team finding, and the argument belongs with the finding.
-- **Where it lands.** T-08 is where the kernel legitimately moves and where the corpus differential is
-  the point. Absorbing it into another task's branch is exactly the R-02 stall risk §11.5 names.
+- **G7 — and this half is already decided, in T-08's own `Accept:` line.** Fixing the kernel means it
+  is no longer byte-identical to `eddb8fa`. T-08 states that it "owns the fix for defect D-1 … **the
+  only place the kernel may legitimately change a byte**", so the exception is granted *there* and
+  nowhere else. It was written up here on 2026-08-05 as needing a fresh curator decision; re-reading
+  T-08 shows the plan had already taken it, which is worth recording so a later session does not ask
+  again. What T-08 still has to *build* is the mechanism: a declared exception with its own ratchet,
+  mirroring `AdapterOverlay` — the diff against v0.5.0 must equal exactly the recorded hunk, with its
+  reason — because "byte-identical except one argued hunk" is not something the current check can
+  express.
+- **Where it lands.** T-08, for the reason above. Absorbing it into another task's branch is exactly
+  the R-02 stall risk §11.5 names.
 
 *Not fixed in T-01, and for two independent reasons in the operating rules rather than one:* gate G7
 diffs the kernel byte-for-byte against the baseline, and **§1's ordering guard refuses a change to
@@ -273,6 +277,14 @@ What is **not** decided here: whether the 1.0 target becomes "empty except the i
 ships at all past the migration era. Each of those is a change to a documented gate or to the release
 goal, which §11.4 and G9 put with the curator. The gate is unchanged and still green in warn mode; it
 is the *goal statement above it* that now has an exception.
+
+**F-2's decision is taken, 2026-08-05: close it by construction in the owned path, and leave the
+legacy module alone.** T-07 owns this decision and the argument is in `HANDOVER.md` §6, with the
+design. In short: the owned path has no registers source at all — both of `ScopeBinding`'s two
+sources start from `Issue.visible` — so the leak is closed by design rather than by a patch, and the
+legacy module keeps its behaviour, which means **the frozen scope-fixture triple does not move.**
+That last point is the reason to prefer this over patching the legacy path: the scope fixture is the
+one artefact in this repository that cannot be regenerated.
 
 **F-2 · the registers relation path is not visibility-scoped.** `resolve_scope` returns
 `registers[:container]` as-is when it is an AR relation, intersecting only the DROP path with

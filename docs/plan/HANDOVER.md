@@ -258,6 +258,74 @@ of a CI that runs on fork pull requests.
    which is the curator's. What is still owed by a later task: `rake
    reporter_dashboards:lint_templates`, which the spec names in §6 — today it would be a
    duplicate of `import:plan`'s section 5, so it was deliberately not written twice.
-5. **T-07 / T-08**: the re-seam. Both are now unblocked, and T-08 carries D-1.
+5. **T-07 / T-08**: the re-seam. Both are unblocked, and T-08 carries D-1. T-07's design
+   is worked out in §6 below — start there rather than re-deriving it.
+
+---
+
+## 6. T-07's design, and the F-2 decision it turns on
+
+Worked out on 2026-08-05 and **not implemented**: the seam is small but its verification
+surface is the two things this plan says must never move — the 46-triple scope fixture and
+the 176-case corpus — and a half-finished refactor of the *visibility* path is the one
+thing `CLAUDE.md` §6 refuses outright. Written down so the next session implements instead
+of re-deriving.
+
+**The seam is five call sites, not a rewrite.** `rg -n 'resolve_scope|resolve_query|ScopeResolution|Thread.current' lib app`:
+
+| Site | What it does |
+|---|---|
+| `liquid_aggregate_tag.rb:106`, `liquid_version_rollup_tag.rb:38` | `include SqlAggregation::ScopeResolution` |
+| `liquid_aggregate_tag.rb:135`, `liquid_version_rollup_tag.rb:51` | `resolve_scope(context)` |
+| `liquid_aggregate_tag.rb:354` | `resolve_query(context)` (drill-through only) |
+| `reporter_list_patch.rb:82-87` | owns the `Thread.current` the Accept list deletes |
+
+**The shape.** All six of today's resolution sources are archaeology performed *at read
+time*, inside the tag. Invert it: perform the archaeology **once, in the glue**, and have
+it produce one explicit object the owned path reads.
+
+```
+lib/redmine_reporter_dashboards/liquid/render_context.rb   actor, scope, query — explicit (INV-1)
+lib/redmine_reporter_dashboards/liquid/scope_binding.rb    exactly two sources, ~60 lines
+lib/glue/legacy/scope_resolution.rb                        today's module, MOVED, unchanged
+lib/glue/legacy/reporter_list_patch.rb                     MOVED — it is the thread-local's owner
+```
+
+`ScopeBinding`'s two sources, and nothing else: `query_id:` →
+`IssueQuery.visible(actor).find_by(id:)#base_scope`, else `RenderContext#scope`. Both are
+visibility-scoped by construction, so `enforce_visibility` — and its fail-open rescue —
+has nothing left to defend and is not ported.
+
+**Who fills a `RenderContext` today: nobody, and that is correct.** These tags only ever
+run inside reporter's renderer (standalone, T-06 makes the widgets degrade and `report_pdf`
+404). So T-07 installs the seam and T-10 plugs the owned render path into it. Until then a
+reporter install takes the legacy path, which is exactly what "drill-through still works
+for installs that still have reporter (via `glue/legacy/`)" asks for. **Do not** invent a
+producer to make the owned path look exercised — an untested path that looks tested is
+worse than an empty one.
+
+**F-2's decision, and its argument.** F-2 is the registers-relation path handing back
+`registers[:container]` unscoped. The decision is: **close it by construction in the owned
+path, and leave the legacy module's behaviour exactly as it is.**
+
+- The owned path *cannot* have the leak: it has no registers source. Both of its two
+  sources start from `Issue.visible`. So F-2 is closed by design rather than by a patch,
+  which is the stronger form.
+- The legacy module keeps its current behaviour, and therefore **the frozen scope-fixture
+  triple does not change.** That matters more than it looks: the fixture is the one
+  artefact in this repository that cannot be regenerated, and "T-07 went green without
+  moving the oracle" is a far better result than an argued change to it.
+- What the legacy module gets is a comment naming F-2 and pointing at the owned path, so
+  nobody reads its silence as approval.
+
+**What will break on the first run, and is not a defect:**
+`test/unit/golden_scope_fixture_test.rb` names `SqlAggregation::ScopeResolution` directly.
+Moving the module renames the constant, so the test must follow it. The JSONL under
+`spec/golden/scope/` must stay **byte-identical** — that is the assertion, and if it moves,
+the move is the finding.
+
+**The gate the Accept list asks for**: `Thread.current` absent from `lib/` and `app/`
+outside `glue/legacy/`. Model it on `script/gates/zero_reporter.sh` — same allowlist idiom,
+same warn/strict split — and wire it into the `gates` CI job next to the other two.
 
 Use `TASK-PROMPT.md`; fill in the STATE block from §4 above rather than from memory.
