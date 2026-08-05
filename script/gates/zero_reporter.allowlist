@@ -2,9 +2,12 @@
 # reason for each. Gate: script/gates/zero_reporter.sh.
 #
 # This list may only SHRINK. Adding an entry is a decision to take in review, with a
-# reason written here, not a way to make the gate green. At 1.0 it should be empty:
-# the goal is a plugin that names neither upstream anywhere in app/, lib/, db/,
-# config/ or init.rb.
+# reason written here, not a way to make the gate green.
+#
+# THE 1.0 TARGET, decided by the curator 2026-08-05: **empty except the importer.** The
+# importer ships permanently, and reading the base plugin's data by name is what it is
+# for — so this list cannot reach zero, and pretending otherwise would make the gate's
+# own goal unreachable. Everything above the importer section must still go.
 #
 # Note the negative lookahead in the gate: `redmine_reporter(?!_dashboards)`. A plain
 # grep for "redmine_reporter" matches this plugin's own name several hundred times.

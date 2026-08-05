@@ -248,9 +248,12 @@ it was measured, not a property of the kernel. This is the concrete argument for
 `functional-spec.md` §R7 being real: a relative p95 gate with any tolerance under ~30% would be red on
 a quiet machine's bad minute. So the drift report is labelled **ADVISORY — non-deterministic — not a
 correctness guarantee** (`CLAUDE.md` §7), and what carries the weight is the three *absolute* criteria,
-which are exact integers and cannot be noisy. If a curator does set a tolerance, it needs to be set
-against a dedicated runner, and the artefact records the CPU model, core count and image digest so
-that comparison is possible rather than implied.
+which are exact integers and cannot be noisy. **DECIDED by the curator, 2026-08-05: no timing ever fails the build.** The drift report stays
+informational. What carries the weight is the three *absolute* criteria, which are exact integers,
+cannot be noisy, and already fail on a real regression. A tolerance would need a dedicated runner to
+mean anything; the artefact records the CPU model, core count and image digest so that remains
+possible if performance ever becomes a real problem, but it is not being set now. **Do not add a
+timing assertion without re-opening this.**
 
 *One deliberate widening, labelled as such:* the two reference templates between them reach exactly
 two of the kernel's six entry points (`.breakdown` and `.version_rollup`). T-07 and T-08 re-seam all
@@ -366,11 +369,11 @@ say that six of the accessors come from *paid* RedmineUP plugins — which is pr
 operator needs in order to decide what can be dropped. So the four files are on the allowlist, in
 their own section, with that reason.
 
-What is **not** decided here: whether the 1.0 target becomes "empty except the importer", whether
-`lib/redmine_reporter_dashboards/import/**` leaves the gate's search paths, or whether the importer
-ships at all past the migration era. Each of those is a change to a documented gate or to the release
-goal, which §11.4 and G9 put with the curator. The gate is unchanged and still green in warn mode; it
-is the *goal statement above it* that now has an exception.
+**DECIDED by the curator, 2026-08-05: the importer ships permanently, and G8's 1.0 target becomes
+"empty except the importer."** The reasoning was that a migration path is worth having for anyone who
+installs this plugin next to the base one, not only for the curator's own one-time migration. So the
+four importer files stay on the allowlist for good and the allowlist header now says so; every other
+entry must still reach zero. The gate itself is unchanged.
 
 **F-2's decision is taken, 2026-08-05: close it by construction in the owned path, and leave the
 legacy module alone.** T-07 owns this decision and the argument is in `HANDOVER.md` §6, with the
