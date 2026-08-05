@@ -58,16 +58,24 @@ fact that CI has not yet run on this work at all.
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
 | T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
 | T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on all three engines by CI run 31036305443 — 17/17 green**, `adapter (MariaDB 11)` included |
-| T-09 onward | not started |
+| T-09 | **done** — the secret, the probe job and the private checkout were removed earlier (which is what let 5.1 run at all and exposed D-2/D-3); this session added the two gates its `Accept:` list still named, `layer_purity.sh` (E3) and `compat_size.sh` (E4), and moved the one scattered version check into `Compat`. **One item is a human artefact and is NOT done: the dated fork-PR run per release** — see §Findings F-5 |
+| T-10 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
 reporter, and on 7.0-stable standalone, against real PostgreSQL. Not yet verified anywhere: Redmine
 5.1 and 6.0, and MySQL/MariaDB — CI covers those, a local run has not.
 
-**The one thing still owed before 0.6.0 can honestly ship** is T-09's CI change: the workflow still
-checks out the private reporter plugin with a secret, so the standalone claim is not yet proved by
-CI on every pull request. Until it is, INV-7 says the claim is weaker than it looks.
+**This paragraph used to say the workflow still checked out the private reporter plugin with a
+secret. It has not since T-09** — `no_secrets.sh` runs on every PR and fails on any `secrets.`
+reference but `GITHUB_TOKEN`, and the full-app suite runs standalone on all four Redmine branches.
+The plan contradicted itself on this: §Findings D-2 already described T-09 in the past tense. Both
+now agree, and the correction is recorded rather than quietly applied, because a status line that
+was wrong for a whole phase is the kind of thing that gets believed twice.
+
+**What is genuinely still owed for INV-7** is smaller and is F-5: one dated fork-PR run per release.
+A workflow cannot fork itself without reintroducing the very credential G1 removes, so that proof is
+a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
@@ -289,6 +297,37 @@ defensive behaviour rather than a mechanical edit. It was reverted rather than p
 examples because they sit in the *frozen kernel's* unit suite, and rewriting 11 assertions in a
 2 800-line file at the end of a session is how a suite starts lying — see §1b: local red is fixed or
 reverted, only an engine that cannot be run here is left to CI.
+
+**F-4 · `CLAUDE.md` and `technical-spec.md` disagree about the `compat/` budget, and the number is
+a curator decision.** CLAUDE.md §4 says "There is a committed LOC budget on that directory and a gate
+that enforces it." There is not, and there never was: **no number is committed anywhere in
+`docs/plan/`**, and technical-spec E4 — the specification, which is the contract — says the job
+**prints** the LOC, not that it caps it. T-09's `Accept:` line agrees with the spec.
+
+So `compat_size.sh` implements the spec: it PRINTS the number on every PR, and it hard-fails on the
+half E4 does specify as a rule — `Rails::VERSION` / `Redmine::VERSION` may appear only under compat.
+It reads `COMPAT_LOC_BUDGET` and becomes a ratchet the moment one is set, so adopting a cap is a
+one-line change once someone has argued for the number.
+
+**Why the number was not invented here.** Picking it IS the decision: too high and it is decoration,
+too low and the next legitimate divergence is refused by a threshold nobody argued for. Today compat
+is **10 code lines** in one file (`base_record`, `svg_icons?`). Two divergences the plan already
+anticipates — `compat/serialize.rb` and `compat/enum.rb` — are not written yet. A recommendation, for
+whatever it is worth: set it after those land, not before, and set it at what they actually cost plus
+one method's headroom. Either way, CLAUDE.md §4's sentence should be corrected to match whichever
+answer is taken, because it currently describes a gate that did not exist.
+
+**F-5 · INV-7's last unproved claim is a human artefact: the dated fork-PR run.** T-09's `Accept:`
+list ends with "**G1**, plus one dated fork-PR run recorded per release — *a workflow cannot fork
+itself without reintroducing the very credential G1 removes, so that end-to-end proof is a human
+artefact and the grep is what keeps it true between artefacts.*" Everything mechanical is in place:
+`no_secrets.sh` fails on any `secrets.` but `GITHUB_TOKEN` and runs on every PR, and the full-app
+suite runs standalone on 5.1 / 6.0 / 6.1 / 7.0. What no job can do is prove that an **outside
+contributor's** fork PR gets the same run, because arranging one requires a second account.
+
+It is recorded as owed rather than quietly counted as done. Concretely: before tagging 0.6.0, open a
+pull request from a fork of this repository, let CI run, and record the date and the run id here. If
+it goes red for want of a credential, that is G1 failing and the release does not ship.
 
 **F-3 · gate G8's "empty allowlist at 1.0" target cannot survive shipping an importer, and that
 is a curator question.** `script/gates/zero_reporter.allowlist` opens with "At 1.0 it should be
@@ -531,6 +570,20 @@ no secret**; a `lint` check fails on any `secrets.` reference other than `GITHUB
 run recorded per release — *a workflow cannot fork itself without reintroducing the very credential
 G1 removes, so that end-to-end proof is a human artefact and the grep is what keeps it true
 between artefacts.*
+
+*As built.* The secret, probe job and private checkout went in the earlier CI rewrite — which is what
+let 5.1 run at all, and immediately exposed D-2 and D-3. `no_secrets.sh`, `zero_reporter.sh` (warn,
+shrinking allowlist) and the standalone `minitest` matrix on all four branches followed. **The two
+gates this line names by filename were still missing and landed 2026-08-05:** `layer_purity.sh` (E3)
+and `compat_size.sh` (E4). `layer_purity` runs in **warn** mode and reports `render/` as ABSENT on its
+own line, because T-10 creates that directory — **T-10 should switch it to
+`LAYER_PURITY_MODE=strict` in the same PR**, at which point an absent layer means the layout moved.
+`compat_size` hard-fails on a version constant outside compat, and PRINTS the LOC rather than capping
+it, which is what E4 specifies; the disagreement with CLAUDE.md §4 about a "committed budget" is
+**F-4** and the number is the curator's. Building it found one real violation — a bare
+`Redmine::VERSION::MAJOR >= 6` in `ReporterProjectPagesHelper`, from D-3's fix — now
+`Compat.svg_icons?`, with the helper predicate kept as the name both icon branches are stubbed
+through. **The fork-PR artefact is NOT done and is F-5.**
 
 ### Phase 3 — own the render path *(ships 0.7.0; runs in parallel with Phase 2)*
 

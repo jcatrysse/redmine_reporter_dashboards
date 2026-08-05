@@ -43,5 +43,23 @@ module RedmineReporterDashboards
     def self.base_record
       Object.const_defined?(:ApplicationRecord) ? ::ApplicationRecord : ::ActiveRecord::Base
     end
+
+    # Whether the running Redmine paints icons through the SVG sprite system.
+    #
+    #   Redmine 6.0+  IconsHelper#sprite_icon exists and the core sprite carries the
+    #                 angle-* set the move controls use.
+    #   Redmine 5.1   HAS NEITHER. IconsHelper arrived in 6.0, so `sprite_icon` does
+    #                 not merely render nothing there — it raises NoMethodError. That
+    #                 was 27 of the 92 errors the first 5.1 CI run reported (D-3).
+    #
+    # Asked of Redmine's VERSION rather than of the helper, because the caller is a
+    # helper module that HAS IconsHelper mixed in on 6+ and needs the answer before it
+    # calls anything. Lives here rather than in the helper because E4 (technical-spec
+    # §1.2) and CLAUDE.md §4 both say version divergence has exactly one home: a
+    # scattered `Redmine::VERSION::MAJOR >= 6` is the shape that ossifies, and
+    # `compat_size.sh` is what now stops the next one being written in a view.
+    def self.svg_icons?
+      ::Redmine::VERSION::MAJOR >= 6
+    end
   end
 end

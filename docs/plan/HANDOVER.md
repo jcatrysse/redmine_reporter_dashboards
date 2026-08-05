@@ -92,6 +92,24 @@ same CI job: `completeness.seven` (seven `COUNT(DISTINCT CASE …)` in one state
 Query COUNT is identical either way, which is the only thing R7 measures — so **no gate in
 this project can catch it**. Read the CI cell's wall clock.
 
+**`|| true` on a search inside a gate cannot tell "clean" from "did not run", and one
+of them is a lie.** Written fresh on 2026-08-05 while building `layer_purity.sh`: the
+first version used `rg -nE "$pattern" "$path" || true`. **In ripgrep `-E` is
+`--encoding`, not "extended regex"** — rg is always a regex matcher — so it exited 2
+with `unknown encoding: Rails\.|ActiveRecord|...`, `|| true` swallowed the crash, and
+the gate reported every layer clean. A deliberately planted `Issue.visible` in
+`render/` went undetected. It was caught only because the gate was negative-tested
+before it was wired up; nothing else would have found it, because the gate's normal
+output looked perfect.
+
+Two rules follow. **Negative-test a gate before trusting it** — plant the violation it
+exists to catch and watch it fail. And in a gate, treat a search's exit status as
+three-valued: 0 = matches, 1 = no matches, **anything else = the tool failed and the
+gate knows nothing**, which must be loud. `layer_purity.sh`'s `search()` does this.
+`no_thread_local.sh` and `zero_reporter.sh` still use `|| true`; their rg invocations
+are valid so they do not fail today, but the hazard is the same shape and is worth
+closing the next time either is touched.
+
 **MySQL 8 evaluates `projects.<col> IN (SELECT …)` inside a LEFT JOIN's ON clause as
 TRUE.** Measured on 8.0.46 (E-1 in §Findings). An entitlement check written that way
 passes for everyone, silently, on that engine only. `issues.project_id IN (SELECT …)` and
@@ -331,7 +349,18 @@ of a CI that runs on fork pull requests.
    path => v0.5.0 blob path) so gate G7 compares the ported file with its baseline instead of
    comparing a path with itself. G7 now reconstructs the expected file as *blob + declared
    hunks* rather than diffing: `drill_through.rb` declares none and is held to plain
-   byte-identity; `query_aggregator.rb` declares ONE, D-1's. **There is no writer for
+   byte-identity; `query_aggregator.rb` declares ONE, D-1's.
+7. **T-09 is done, and the status table used to say the opposite in both directions.**
+   The secret, the probe job and the private checkout went earlier; this session added
+   the two gates its `Accept:` list still named — `layer_purity.sh` (E3, internal
+   layering) and `compat_size.sh` (E4, version divergence) — and moved the one scattered
+   `Redmine::VERSION` out of a helper into `Compat`. **`layer_purity` runs in warn mode
+   because `render/` does not exist until T-10, and it reports an absent layer on its own
+   line rather than passing over it: T-10 should flip it to
+   `LAYER_PURITY_MODE=strict` in the same PR that creates `render/`.** Two things stay
+   open and are findings, not work: **F-4** (nobody has committed a `compat/` LOC number,
+   and CLAUDE.md claims one exists) and **F-5** (the dated fork-PR run, which no job can
+   produce). **Next: T-10**, which also owes T-03's blocked HTML|PDF baseline (P-2). **There is no writer for
    those recorded fragments, deliberately** — an overlay entry records a MEASUREMENT and can
    be regenerated, an exception records an ARGUMENT and must be written by hand with its
    reason, or the gate becomes a formality. Next: **T-09 onward**.

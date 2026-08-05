@@ -21,8 +21,14 @@ module ReporterProjectPagesHelper
 
   # True when the running Redmine renders icons through the SVG sprite system
   # introduced in Redmine 6.0 (IconsHelper#sprite_icon).
+  #
+  # The version test itself lives in Compat, not here: E4 and CLAUDE.md §4 give
+  # version divergence exactly one home, and this method used to be the counter-example
+  # — a bare `Redmine::VERSION::MAJOR >= 6` in a helper. The NAME stays because it is
+  # the seam both icon branches are tested through (`stub(:reporter_dashboard_svg_icons?,
+  # false)`), which is how the 5.1 path is asserted on a machine that cannot run 5.1.
   def reporter_dashboard_svg_icons?
-    Redmine::VERSION::MAJOR >= 6
+    RedmineReporterDashboards::Compat.svg_icons?
   end
 
   # ONE icon call for both icon systems, and the reason it exists is a correction:

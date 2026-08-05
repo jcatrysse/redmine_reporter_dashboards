@@ -540,7 +540,7 @@ jobs:
   # Non-test gates. A green suite says nothing about any of these.
   # ------------------------------------------------------------------
   gates:
-    name: Gates (no_secrets, zero_reporter, no_thread_local)
+    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -569,6 +569,19 @@ jobs:
       - name: no_thread_local
         run: ./script/gates/no_thread_local.sh
 
+      # E3 — the plugin's INTERNAL layering, which is a different question from
+      # zero_reporter above: that one asks whether we still name the base plugin, this
+      # one whether our own layers reach into each other. Warn mode because render/
+      # does not exist until T-10; the job reports an absent layer on its own line
+      # rather than passing quietly over it, and T-10 flips this to strict.
+      - name: layer_purity
+        run: ./script/gates/layer_purity.sh
+
+      # E4 — version divergence has exactly one home. Fails on a `Rails::VERSION` or
+      # `Redmine::VERSION` outside compat, and prints the compat LOC.
+      - name: compat_size
+        run: ./script/gates/compat_size.sh
+
       # Not a gate, and deliberately not failing the build: the number that has to
       # reach zero by 1.0, printed where a reviewer sees it move.
       - name: Report the remaining reporter surface
@@ -576,6 +589,16 @@ jobs:
         run: |
           n="$(./script/gates/zero_reporter.sh | sed -nE 's/.*referencing files=([0-9]+).*/\1/p')"
           echo "::notice::${n} file(s) still reference redmine_reporter or redmineup. Target at 1.0: 0."
+
+      # E4's other half, in the words the spec uses: "the job PRINTS compat/ LOC as a
+      # PR comment — compatibility debt as a visible number is the only real defence
+      # against the 'temporary adapter ossifies' fate ADR-004 names." No budget is
+      # committed yet; see §Findings F-4, which is the curator's.
+      - name: Report the compatibility debt
+        if: always()
+        run: |
+          n="$(./script/gates/compat_size.sh | sed -nE 's/.*code lines=([0-9]+).*/\1/p')"
+          echo "::notice::compat is ${n} code line(s). Every one is a Redmine version this plugin still bends around."
 
   # ------------------------------------------------------------------
   # Ruby 2.7 floor
