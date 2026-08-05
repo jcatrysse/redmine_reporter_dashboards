@@ -253,7 +253,7 @@ record as of the last local run.
 | Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 956 rspec + 96 adapter + 217 corpus + 133 minitest, 0 failures |
 | **Redmine 6.1-stable, standalone, PostgreSQL 16 — after D-1's fix** | **yes, locally (2026-08-05)** | 1127 rspec + 156 adapter + 217 corpus + 139 minitest, **0 failures**. Plus `spec/golden` from the PLUGIN CHECKOUT (where gate G7 has its git history): 0 pending. The corpus is byte-identical to before the fix — all 176 recorded values unchanged |
 | **D-1's FIRST attempt, on MariaDB (CI run 31034989145)** | **YES, and it is why that attempt was replaced** | `corpus (MariaDB 11)` **green** — the fix was correct, and the overlay was rightly emptied. `adapter (MariaDB 11)` ran **over 35 minutes without finishing** against 5 m 39 s before it: the conditional-aggregate shape is pathologically slow on MariaDB at 10 000 issues. Correctness confirmed, performance refuted, in the same run |
-| **D-1's fix on MariaDB** | **not locally, and cannot be** | MariaDB is not installable beside MySQL in this container. The `adapter (MariaDB 11)` and `corpus (MariaDB 11)` CI cells are the measurement, per §1b — **and for this change, the cell's WALL CLOCK is part of the measurement, not just its colour** |
+| **D-1's fix on MariaDB (CI run 31036305443)** | **YES — 17 of 17 jobs green** | `adapter (MariaDB 11)` green in **4 m 16 s** of specs against **5 m 39 s** before the fix, and `corpus (MariaDB 11)` green with the overlay EMPTY and its exhaustiveness assertion live. Correctness AND performance confirmed on the engine the defect lives on. **The wall clock is half the measurement here** — the first attempt was green on the corpus too |
 | Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally** | 313 adapter+corpus, 0 failures. **The run that found defect D-1** |
 | Redmine 6.1-stable, standalone, **MySQL 8.0.46** | **yes, locally** | 97 adapter + 214 corpus, 0 failures (before the last two cases were added). **The run that refuted D-1's scope** and exposed E-1 |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
@@ -312,8 +312,9 @@ of a CI that runs on fork pull requests.
    positionally instead of through ActiveRecord's alias-keyed grouped `.count`; gate G7
    grew a declared-exception mechanism to express "the blob plus exactly this one argued
    hunk" (`spec/golden/kernel_exception.rb`); the per-adapter overlay is empty again with
-   `RATCHET = 0` — proved green on MariaDB by the FIRST attempt's run (31034989145); the
-   landed fix's own MariaDB cells had not reported when this was written. What is
+   `RATCHET = 0`. **CI run 31036305443 is 17/17 green**, `adapter (MariaDB 11)` included and
+   in 4 m 16 s against 5 m 39 s before the fix — so D-1 is measured fixed on the engine it
+   lives on, not merely argued. What is
    still exposed, on purpose: a MEASURED age axis (README, database section). Read the
    §Findings entry before touching it — the first attempt is written up there and the
    reason it was replaced is a performance fact, not a correctness one.

@@ -57,7 +57,7 @@ fact that CI has not yet run on this work at all.
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
 | T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
-| T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on PostgreSQL; on MariaDB the empty overlay was proved green by the FIRST attempt's CI run (31034989145) — the landed fix's own MariaDB cells were still running when this was written** |
+| T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on all three engines by CI run 31036305443 — 17/17 green**, `adapter (MariaDB 11)` included |
 | T-09 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -138,12 +138,18 @@ production template reaches a measured age axis (every real template is count mo
 age cases use three boundaries). Covering it means reimplementing three more grouped calculations —
 a bigger change than the defect justifies today.
 
-**Verification, and the honest limit of it.** All 176 recorded corpus values are byte-identical on
-PostgreSQL with the fix in place (217 corpus examples, 0 failures), the DB-less kernel suite is green
-(404 examples), and `spec/golden` run from the plugin checkout — where gate G7 has its git history —
-is 166 examples, 0 failures, **0 pending**. What none of that can do is exercise MariaDB: it is not
-installed in this container, and per §1b the `adapter (MariaDB 11)` and `corpus (MariaDB 11)` CI
-cells are the measurement. **A red MariaDB cell after this lands is information, not a regression.**
+**Verification — and D-1 is now measured fixed on the engine it lives on.** All 176 recorded corpus
+values are byte-identical on PostgreSQL with the fix in place (217 corpus examples, 0 failures), the
+DB-less kernel suite is green (1 127 examples), and `spec/golden` run from the plugin checkout — where
+gate G7 has its git history — is 166 examples, 0 failures, **0 pending**. MariaDB cannot be run in this
+container, so **CI run 31036305443 is the measurement: 17 of 17 jobs green**, including
+`adapter (MariaDB 11)` and `corpus (MariaDB 11)` with the overlay EMPTY and its exhaustiveness
+assertion live.
+
+**The wall clock is part of that measurement, and it is the half a green tick does not show.** The
+MariaDB adapter specs ran in **4 m 16 s**, against **5 m 39 s** before the fix — no regression, a small
+improvement. That is the number the first attempt failed: the same cell ran over 35 minutes without
+finishing. Read it, not just the colour, on any change to how the kernel reads a grouped result.
 
 **Two things a later session should not have to rediscover.** `measure.nil?` alone is the WRONG guard
 and it fails SILENTLY — `resolve_measure(nil, nil)` returns `Measure.new(kind: :count)`, not nil, so a
