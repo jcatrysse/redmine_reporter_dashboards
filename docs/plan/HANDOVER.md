@@ -241,17 +241,19 @@ of a CI that runs on fork pull requests.
    rather than a file to regenerate. Two things it produced that are somebody's work
    now: defect **D-1** (T-08 owns the fix) and finding **F-2** (T-07 owns the decision)
    — both in `implementation-plan.md` §Findings.
-2. **T-02** needs production data and therefore needs the curator. Three claims in
-   `claims.json` discriminate on that one measurement.
-3. **T-03's aggregation half is done and the ordering guard it held is now released.**
-   `CLAUDE.md` §1 refused a change to the aggregator "while T-03 has not landed"; the
-   baseline is measured and committed, so **defect D-1 is now unblocked** — the fix is one
-   line (alias the `age` group expression or group on a short one), and it must delete the
-   two `mariadb` overlay entries and lower `AdapterOverlay::RATCHET` in the same commit.
-   Gate G7 still freezes the kernel byte-for-byte against `eddb8fa`, so the fix *breaks G7
-   deliberately* and the PR has to move the baseline commit or argue the exception —
-   that is the decision, and it belongs in the same PR as the fix.
-   **T-03's HTML|PDF half stays owed by T-10** (P-2), recorded in the artefact as blocked.
-4. **T-10 onward**: the render path. T-03 no longer blocks it.
+2. **T-03's aggregation half is done**, so `CLAUDE.md` §1's "no aggregator change before
+   T-03" guard has expired. **T-03's HTML|PDF half stays owed by T-10** (P-2), recorded in
+   the artefact as blocked.
+3. **D-1 is DECIDED and closed for now: it waits for T-08.** The curator chose this on
+   2026-08-05 after the measurement showed it is not the one-line change the plan claimed and
+   that fixing it today would mean weakening gate G7. Their production is PostgreSQL, which is
+   unaffected. **Do not pick this up as low-hanging fruit** — see §Findings D-1 in
+   `implementation-plan.md` for the mechanism, the two candidate fixes, and the G7 question
+   that has to be re-opened with the curator if anyone wants to move it earlier.
+4. **T-02** needs nothing from the curator any more — the production export has been supplied
+   (26 templates, PostgreSQL, no mail schedules yet). Its survey has already been done
+   informally and found the corpus gap noted in §Findings; the task itself (the reporting
+   script) is unwritten.
+5. **T-07 / T-08**: the re-seam. Both are now unblocked, and T-08 carries D-1.
 
 Use `TASK-PROMPT.md`; fill in the STATE block from §4 above rather than from memory.

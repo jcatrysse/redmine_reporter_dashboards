@@ -135,9 +135,17 @@ diffs the kernel byte-for-byte against the baseline, and **§1's ordering guard 
 the aggregator while T-03 has not landed** — the performance baseline cannot be measured after the
 aggregator moves, and there is no way back to it. So the earliest honest slot is **after T-03**, and
 the natural home is **T-08**, which is where the kernel legitimately moves; the one-line change is to
-alias the group expression or group on a short one. Curator asked on 2026-08-05 for it to be fixed
-and left the timing to this judgement — this is the judgement, and it is the ordering guard's, not a
-preference. Meanwhile every engine is asserted in
+alias the group expression or group on a short one.
+
+**DECIDED by the curator, 2026-08-05: wait for T-08.** They first asked for D-1 to be fixed and left
+the timing open; when the measurement above showed it is not a one-line change and that fixing it now
+would mean weakening gate G7's byte-identity reference, they chose to leave the kernel frozen and let
+the fix land in T-08, where that file is rewritten anyway. **Their own production runs PostgreSQL,
+which is measured unaffected**, so the wait carries no exposure for them — it is other installations,
+on MariaDB, that stay broken until T-08. Do not "helpfully" fix this earlier: the decision is
+recorded, and re-opening it means re-opening the G7 question with the curator.
+
+Meanwhile every engine is asserted in
 `spec/adapter/query_aggregator_execution_spec.rb` (MariaDB's branch pins the defect, the others pin
 the correct answer), it is documented in the README's database section, and the two affected corpus
 cases carry MariaDB overlay entries — so the day it is fixed the suite says so and the ratchet goes
