@@ -35,6 +35,7 @@ so only one of the two can be installed at a time.
 | **minitest** | `test/unit`, `test/functional`, `test/integration` | Redmine (reporter optional) | Dashboard controllers, models, helpers, the HTTP verb of every route, and the golden scope fixture |
 | **golden corpus** | `spec/golden/`, verified by `spec/adapter/aggregation_corpus_spec.rb` | A database **and** `RRD_REFERENCE_DATE` | That the aggregation numbers have not moved — gate G7's differential |
 | **R7 invariants** | `spec/adapter/performance_invariants_spec.rb` | A database | Query count independent of issue count, zero issue instantiation, bounded output — asserted hard, every run |
+| **the importer survey** | `spec/template_linter_spec.rb`, `spec/import/`, `spec/adapter/import_survey_spec.rb` | The last one needs a database | The template linter's rules, the report's copy and bounds, and that `import:plan` issues nothing but `SELECT` |
 | **performance baseline** | `spec/golden/performance/`, measured by `spec/adapter/performance_baseline_spec.rb` | A database, `RRD_REFERENCE_DATE` **and** `RRD_BENCH=1` | The timings the re-seam will be compared against. Opt-in, ~3 minutes, and it asserts no timing |
 
 The RSpec specs run without `redmine_reporter` and without a database. The minitest
@@ -61,6 +62,28 @@ regenerated once `scope_resolution.rb` is deleted.
 The corpus is verified, not generated, by `test_plugin.sh` and by CI. It is generated
 only deliberately, with `RRD_CORPUS_WRITE=1` — and a difference is a finding to explain,
 never a file to bring into line.
+
+### The template linter
+
+`RedmineReporterDashboards::TemplateLinter` is one rule table with two outputs, and the
+split is the design: **findings** are things that will break (each with a line number,
+because FR-71 puts this same linter behind the editor's lint panel) and **usage** is
+what a template depends on (the evidence for which vendor accessors the owned drop layer
+has to reproduce). A dependency reported as a defect is how a linter loses its readers.
+
+Two conventions to keep when adding a rule:
+
+- **Declare its scope.** A JS rule searches `<script>` bodies, a usage marker searches
+  Liquid expressions. `legend:` in a stylesheet is not a Chart.js option and `color:` in
+  CSS is not `issue.color`; scope removes those false positives outright.
+- **Cite the evidence.** Every rule names the spec line or verification document that
+  established it. The Chart.js list is the six migrations `technical-spec.md` §6
+  enumerated *from the shipped examples* — it grows on evidence, not on intuition,
+  because one false positive costs more credibility than one miss costs work.
+
+Where a pattern genuinely cannot decide, the rule is a `:warning` and its **message says
+so**. Two Chart.js keys are in that position; `suppressed_by` is how one of them asks a
+question about the surrounding script instead of guessing.
 
 ### The performance baseline
 

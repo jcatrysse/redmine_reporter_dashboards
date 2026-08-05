@@ -201,6 +201,7 @@ record as of the last local run.
 | **CI, third run 31000622798** | **YES** | **17 of 17 green** — the first fully green CI run on this branch |
 | **T-03: the R7 invariants, PostgreSQL 16** | **yes, locally (2026-08-05)** | 34 examples, 0 failures. Every workload's query count identical at 100 and 10 000 issues; **zero** `Issue` instantiations everywhere; the capped axes bounded and their collapsed totals intact |
 | **T-03: the benchmark, PostgreSQL 16** | **yes, locally, twice (2026-08-05)** | 27 cells, 20 warm runs after 3 discarded, 4-core Xeon @2.80GHz. **The two runs disagree by up to ×1.26 on p95**, and `version_rollup.costs@100000` was *invalid* in the first (dispersion 0.417) and valid in the second (0.090) — finding P-3, and the reason no timing is a gate. The HTML\|PDF axis is **not measured and recorded as blocked** (P-2) |
+| **T-02: the survey, PostgreSQL 16** | **yes, locally (2026-08-05)** | 22 adapter examples + 53 linter + 25 formatter, 0 failures. The rake task was also **run end to end** on both paths — reporter absent, and against temporary reporter-shaped tables seeded into `redmine_test` and dropped again — because reading the real output is what found the duplicate-finding noise and the unwrapped messages |
 | **T-03 on MySQL / MariaDB** | **no** | The invariants spec runs in the existing `adapter` CI job on all three engines, so CI answers it; the *benchmark* is deliberately not in CI — a timing on a shared runner is noise, which is what the dispersion rule and the advisory label are about |
 
 **MySQL and MariaDB cannot be installed at the same time** — the Debian packages
@@ -250,10 +251,13 @@ of a CI that runs on fork pull requests.
    unaffected. **Do not pick this up as low-hanging fruit** — see §Findings D-1 in
    `implementation-plan.md` for the mechanism, the two candidate fixes, and the G7 question
    that has to be re-opened with the curator if anyone wants to move it earlier.
-4. **T-02** needs nothing from the curator any more — the production export has been supplied
-   (26 templates, PostgreSQL, no mail schedules yet). Its survey has already been done
-   informally and found the corpus gap noted in §Findings; the task itself (the reporting
-   script) is unwritten.
+4. **T-02 is done.** `rake reporter_dashboards:import:plan` is the repeatable form of the
+   R-15 measurement, and `RedmineReporterDashboards::TemplateLinter` is the linter FR-71
+   later puts behind the editor's lint panel — so extend that one rule table rather than
+   writing a second checker. It raised **F-3** (a question about gate G8's 1.0 target)
+   which is the curator's. What is still owed by a later task: `rake
+   reporter_dashboards:lint_templates`, which the spec names in §6 — today it would be a
+   duplicate of `import:plan`'s section 5, so it was deliberately not written twice.
 5. **T-07 / T-08**: the re-seam. Both are now unblocked, and T-08 carries D-1.
 
 Use `TASK-PROMPT.md`; fill in the STATE block from §4 above rather than from memory.

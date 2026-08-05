@@ -4,6 +4,27 @@ All notable changes to this plugin are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`rake reporter_dashboards:import:plan`** — a read-only survey of the
+  `redmine_reporter` data this plugin will eventually import. It writes nothing, and
+  that is enforced by a test rather than promised: the suite subscribes to
+  `sql.active_record` and fails on any statement that is not a `SELECT`.
+
+  It answers four things an operator needs before anything is migrated: how many
+  templates there are by type, how many schedules exist and how many are enabled, what
+  the stored template bodies actually **use** (which vendor-gem accessors, which
+  filters, which of this plugin's own tags), and which templates will need rework —
+  with the rule, the line number and the line itself for each finding. Findings cover
+  Chart.js 2 idioms, the hand-rolled readiness handshake, `setLineDash`, wkhtmltopdf's
+  `[page]` footer tokens, CDN-loaded libraries, and Liquid interpolation inside
+  `<script>` that is not passed through `json`/`js`.
+
+  It runs against a database from which `redmine_reporter` has already been removed —
+  it reads tables, never Reporter's classes — and it says out loud what it could not
+  answer, including the one question that lives in the request log rather than the
+  database.
+
 ### Changed
 
 - **`redmine_reporter` is now optional.** The plugin used to `raise` at load time

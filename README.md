@@ -221,6 +221,32 @@ bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 
 Restart Redmine after installation.
 
+## Surveying your existing Reporter templates
+
+```bash
+bundle exec rake reporter_dashboards:import:plan RAILS_ENV=production
+```
+
+**This task writes nothing.** It reads `redmine_reporter`'s tables and prints what it
+finds: how many report templates you have by type, how many schedules exist and how
+many are enabled, which Liquid accessors and filters your template bodies actually use,
+and which templates contain something that will need changing — with the line number
+and the line for each one.
+
+It is useful in two situations:
+
+- **before you upgrade**, to see the blast radius: templates using Chart.js 2 idioms,
+  the old `window.status`/`geoChartBegin` handshake, `setLineDash`, wkhtmltopdf's
+  `[page]` footer tokens, a library loaded from a CDN, or `{{ … }}` inside a `<script>`
+  that is not passed through a `json` filter (that last one silently kills the whole
+  script block — the chart just disappears);
+- **to decide what matters to you**, because the usage counts tell you which parts of
+  the old Liquid vocabulary your templates depend on and which they never touch.
+
+It also says what it could **not** answer. If `redmine_reporter` is not installed in
+the database you run it against, it says so plainly rather than reporting an empty
+result as a clean bill of health.
+
 ## Enabling the dashboard for a project
 
 1. Open **Project → Settings → Modules** and enable **Project dashboard**.

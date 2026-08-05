@@ -51,7 +51,7 @@ fact that CI has not yet run on this work at all.
 |---|---|
 | T-00 | **VOID** — the fork is out of scope (curator, 2026-08-05). See below. |
 | T-01 | **done** — reference date, canonicaliser, baseline commit, the 176-case value corpus, the per-adapter overlay, the 46-triple scope fixture and the `corpus` CI job. **It found defect D-1 on the way in** — see §Findings |
-| T-02 | not started |
+| T-02 | **done** — `rake reporter_dashboards:import:plan`, read-only (proven by a no-writes assertion, not by a comment), plus the template linter's first 13 rules. Three of R-15's four queries answered; the fourth is a log grep and is reported as unanswerable **with the command**. It found the G8 tension in §Findings F-3 |
 | T-03 | **partly done** — the aggregation baseline is measured and committed (9 workloads × 3 issue counts, 20 warm runs, provenance-stamped) and R7's three *absolute* criteria are now hard assertions on every engine. **The HTML\|PDF half is blocked and recorded as blocked** — see §Findings P-2 |
 | T-04 | **done** — `RedmineReporterDashboards::Positioned` replaces `up_acts_as_list` |
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
@@ -253,6 +253,26 @@ with no way back to it, which is the reason this task precedes them. So a third 
 `production-shapes`, carries seven more workloads drawn from **T-02's survey of the 26 real
 templates**, each naming the survey line it comes from. It measures more than the Accept list's axis,
 never less.
+
+**F-3 · gate G8's "empty allowlist at 1.0" target cannot survive shipping an importer, and that
+is a curator question.** `script/gates/zero_reporter.allowlist` opens with "At 1.0 it should be
+empty: the goal is a plugin that names neither upstream anywhere in `app/`, `lib/`, `db/`, `config/`
+or `init.rb`." T-02 adds four files that name `redmine_reporter` **because reading reporter's data is
+what they are for** — and that is the opposite of coupling: the survey reads *tables*, never
+reporter's classes, and `spec/adapter/import_survey_spec.rb` runs it against bare tables with no
+reporter code loaded at all. So the gate is matching a string here, not a dependency.
+
+Removing the mentions would make the tool worse rather than purer: `rake -T` has to say whose data
+`import:plan` surveys, the report has to name the tables it looked for, and the usage groups have to
+say that six of the accessors come from *paid* RedmineUP plugins — which is precisely the fact an
+operator needs in order to decide what can be dropped. So the four files are on the allowlist, in
+their own section, with that reason.
+
+What is **not** decided here: whether the 1.0 target becomes "empty except the importer", whether
+`lib/redmine_reporter_dashboards/import/**` leaves the gate's search paths, or whether the importer
+ships at all past the migration era. Each of those is a change to a documented gate or to the release
+goal, which §11.4 and G9 put with the curator. The gate is unchanged and still green in warn mode; it
+is the *goal statement above it* that now has an exception.
 
 **F-2 · the registers relation path is not visibility-scoped.** `resolve_scope` returns
 `registers[:container]` as-is when it is an AR relation, intersecting only the DROP path with

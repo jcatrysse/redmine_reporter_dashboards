@@ -31,3 +31,29 @@ app/views/my/blocks/_report_by_issues.erb                       renders a report
 # --- Historical record. Comments only; no executable reference.
 lib/redmine_reporter_dashboards/positioned.rb          comments naming the vendor gem method it replaced
 db/migrate/001_create_reporter_dashboards_tables.rb    migration comment referring to the original coupling
+
+# --- THE IMPORTER (T-02 onward). A different category from everything above, and the
+# --- one entry in this file that this gate's own "empty at 1.0" goal cannot absorb.
+#
+# These files name reporter because reading reporter's data is what they are FOR. That
+# is the opposite of coupling: the survey reads TABLES, never reporter's classes, and
+# it is designed to work on a database from which the plugin has already been removed
+# (that is the migration case). Nothing here loads, patches, or depends on reporter
+# code — spec/adapter/import_survey_spec.rb proves it runs against bare tables.
+#
+# So the gate is matching a STRING here, not a dependency. Two consequences, and the
+# second is a question for the curator rather than a decision taken here:
+#
+#   1. Removing these mentions would make the tool worse, not purer: `rake -T` has to
+#      say which plugin's data it reads, the report has to name the tables it looked
+#      for, and the usage groups have to say that six accessors come from paid
+#      RedmineUP plugins — an operator deciding what to drop needs that.
+#   2. The header above says "At 1.0 it should be empty." With an importer that ships,
+#      it cannot be. The honest 1.0 target is "empty except the importer", and whether
+#      to restate it that way, exclude lib/.../import/** from the gate's search paths,
+#      or drop the importer before 1.0, is a curator call. Recorded in
+#      implementation-plan.md §Findings rather than resolved by widening this list.
+lib/redmine_reporter_dashboards/import/survey.rb         reads reporter's tables by name; that is the task
+lib/redmine_reporter_dashboards/import/plan_report.rb    tells the operator which plugin's data was surveyed
+lib/redmine_reporter_dashboards/template_linter.rb       usage groups name the gem the accessors come from
+lib/tasks/reporter_dashboards.rake                       `rake -T` must say what import:plan surveys
