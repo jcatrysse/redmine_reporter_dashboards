@@ -69,26 +69,65 @@ CI on every pull request. Until it is, INV-7 says the claim is weaker than it lo
 
 ## Findings — what the work has turned up, and who owns the fix
 
-**D-1 · `group_by: age` reports everything as `(none)` on MySQL and MariaDB.** Found 2026-08-05 by
-T-01's corpus, on MariaDB 10.11; PostgreSQL 16 is unaffected. The age dimension groups on a
-generated `CASE`; ActiveRecord reads the group key back out of the row **by the expression's own
-text**, and the MySQL family truncates a returned column label at 256 characters (measured: 261
-works, 262 does not). Past it every key comes back `NULL`, the chart collapses into the empty
-bucket, and the total is taken from whichever group the server returned last — so an issue can
-vanish from the count as well. **Four boundaries cross the limit and `DEFAULT_AGE_BUCKETS` is four**,
-so this is the DEFAULT behaviour on two of the three supported engines, in production, today. Every
-existing adapter example used three boundaries or fewer, which is the only reason CI has been green.
+**D-1 · `group_by: age` reports everything as `(none)` on MariaDB.** Found 2026-08-05 by T-01's
+corpus on MariaDB 10.11, confirmed by the first CI run on MariaDB 11, and **measured absent on
+MySQL 8.0.46 and PostgreSQL 16**. The age dimension groups on a generated `CASE`; ActiveRecord reads
+the group key back out of the row **by the expression's own text**, and MariaDB truncates a returned
+column label at 256 characters (measured: 261 works, 262 does not). Past it every key comes back
+`NULL`, the chart collapses into the empty bucket, and the total is taken from whichever group the
+server returned last — so an issue can vanish from the count as well. **Four boundaries cross the
+limit and `DEFAULT_AGE_BUCKETS` is four**, so this is the DEFAULT behaviour on MariaDB, in
+production, today. Every existing adapter example used three boundaries or fewer, which is the only
+reason CI had been green.
 
-*Not fixed in T-01, and the reason is the task itself:* gate G7 diffs the kernel byte-for-byte
-against the baseline, and §1's ordering guard makes touching `lib/sql_aggregation/**` before T-01 is
-complete a refusal. **The fix belongs to T-08**, which is where the kernel legitimately moves — the
-one-line change is to give the group expression an alias, or to group on a short expression, either
-of which is a byte change and therefore that task's decision to argue for. It is asserted on both
-engines in `spec/adapter/query_aggregator_execution_spec.rb`, documented in the README's database
-section, and carried as the overlay's only two entries, so the day it is fixed the suite says so and
-the ratchet goes down. **It is also evidence on C-003** (`claims.json`, updated): the corpus is
-already not green on all three engines before any port, and the cause is structural. Status and
-confidence left for the curator.
+*First written up as affecting "the whole MySQL family" — an inference from one engine, and the
+first CI run refuted it.* MySQL 8.0 answers correctly, so the overlay now has a **`mariadb` family
+of its own**, separate from `mysql`; the adapter name cannot tell them apart (mysql2 reports
+"Mysql2" for both), so the family is asked of the server version.
+
+*Not fixed in T-01, and for two independent reasons in the operating rules rather than one:* gate G7
+diffs the kernel byte-for-byte against the baseline, and **§1's ordering guard refuses a change to
+the aggregator while T-03 has not landed** — the performance baseline cannot be measured after the
+aggregator moves, and there is no way back to it. So the earliest honest slot is **after T-03**, and
+the natural home is **T-08**, which is where the kernel legitimately moves; the one-line change is to
+alias the group expression or group on a short one. Curator asked on 2026-08-05 for it to be fixed
+and left the timing to this judgement — this is the judgement, and it is the ordering guard's, not a
+preference. Meanwhile every engine is asserted in
+`spec/adapter/query_aggregator_execution_spec.rb` (MariaDB's branch pins the defect, the others pin
+the correct answer), it is documented in the README's database section, and the two affected corpus
+cases carry MariaDB overlay entries — so the day it is fixed the suite says so and the ratchet goes
+down. **It is also evidence on C-003** (`claims.json`, updated): the corpus is already not green on
+all three engines before any port, and the cause is structural. Status and confidence left for the
+curator.
+
+**D-2 · the plugin could not run on Redmine 5.1 at all — FIXED 2026-08-05.**
+`app/models/reporter_project_tab.rb:3` read `class ReporterProjectTab < ApplicationRecord`, and
+Redmine 5.1 has no `ApplicationRecord`: that class arrived in 6.0. Every dashboard page and every
+plugin test on 5.1 raised `NameError: uninitialized constant ApplicationRecord`. The line shipped in
+v0.5.0; the README listed 5.1 as tested. Nothing caught it because the full-application suite could
+not run in CI until T-09 removed the private-plugin secret — **its first 5.1 run reported 92 errors,
+all this one line.** That is INV-7's failure mode exactly, and the sharpest possible argument for
+T-09 having been worth doing.
+
+Fixed here rather than deferred: `app/models` is not the frozen kernel and no ordering guard covers
+it. `RedmineReporterDashboards::Compat.base_record` returns `ApplicationRecord` where it exists and
+`ActiveRecord::Base` where it does not — the two are behaviourally equivalent for a plugin model,
+verified against 5.1-stable's `config/initializers/10-patches.rb`, which monkey-patches the identical
+`human_attribute_name` body onto `ActiveRecord::Base` that 6.x moved into `ApplicationRecord`. This
+is the **first entry in `compat/`**, and it lives in `lib/redmine_reporter_dashboards/compat.rb`
+rather than `compat/base_record.rb` because Redmine puts a plugin's `lib/` on the autoload paths and
+Zeitwerk requires the path to match the constant.
+
+**E-1 · an environment fact worth not rediscovering: MySQL 8 ignores a `projects`-keyed subquery in a
+LEFT JOIN's ON clause.** Measured on 8.0.46 while fixing the above: `projects.id IN (SELECT …)`
+inside a `LEFT OUTER JOIN … ON` is evaluated as TRUE — an entitlement check written that way passes
+for everyone. `issues.project_id IN (SELECT …)` and a literal `projects.id IN (1,2,3)` are both
+correct, and PostgreSQL and MariaDB get all three right. **No production path is affected**, and that
+is checked rather than assumed: `TimeEntry.visible_condition` reaches `projects` but emits literal id
+lists (`Project.allowed_to_condition`), and `IssueCustomField#visibility_by_project_condition` does
+emit a subquery but keys it on `issues.project_id` (`custom_field.rb:262`). The adapter harness had
+invented the one shape Redmine never produces, so MySQL made the *harness* lie about visibility —
+caught by the first CI run, and now the stub emits what Redmine emits.
 
 **F-2 · the registers relation path is not visibility-scoped.** `resolve_scope` returns
 `registers[:container]` as-is when it is an AR relation, intersecting only the DROP path with

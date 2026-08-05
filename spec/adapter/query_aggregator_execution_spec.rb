@@ -235,21 +235,26 @@ else
     end
 
     # ----------------------------------------------------------------
-    # DEFECT D-1 — the age dimension past the MySQL column-label limit
+    # DEFECT D-1 — the age dimension past MariaDB's column-label limit
     #
-    # Found on 2026-08-05 by the golden corpus (T-01), on MariaDB 10.11.
+    # Found on 2026-08-05 by the golden corpus (T-01) on MariaDB 10.11, confirmed by
+    # the first CI run on MariaDB 11, and MEASURED ABSENT on MySQL 8.0.46.
     #
     # The age dimension groups on a generated CASE. ActiveRecord reads the group key
-    # back out of the result row BY THE EXPRESSION'S OWN TEXT, and the MySQL family
-    # truncates a returned column label at 256 characters: measured with this shape,
-    # 261 characters still works and 262 does not. Past it the lookup misses, every
-    # group key comes back nil, and the entire result collapses into the "(none)"
-    # bucket with a total taken from whichever group the server returned last.
+    # back out of the result row BY THE EXPRESSION'S OWN TEXT, and MariaDB truncates a
+    # returned column label at 256 characters: measured with this shape, 261 characters
+    # still works and 262 does not. Past it the lookup misses, every group key comes
+    # back nil, and the entire result collapses into the "(none)" bucket with a total
+    # taken from whichever group the server returned last.
     #
     # FOUR boundaries cross the limit, and DEFAULT_AGE_BUCKETS is [30, 60, 90, 180].
-    # So the DEFAULT age dimension is broken on MySQL and MariaDB, in production,
-    # today. Every existing example above uses three boundaries or fewer, which is the
-    # only reason CI has been green.
+    # So the DEFAULT age dimension is broken on MariaDB, in production, today. Every
+    # existing example above uses three boundaries or fewer, which is the only reason
+    # CI has been green.
+    #
+    # It was first written up here as affecting "the MySQL family". That was an
+    # inference from one engine and CI refuted it: MySQL 8.0 answers correctly. The
+    # branch below now asserts the correct answer everywhere EXCEPT MariaDB.
     #
     # Asserted on BOTH engines rather than skipped on one: the MySQL branch pins the
     # defect so that fixing it fails here — which is the notification the fixer wants.
@@ -260,10 +265,10 @@ else
     describe 'the age dimension with the DEFAULT boundaries (defect D-1)' do
       subject(:buckets) { described_class.dimension_breakdown(main, group_by: 'age')['buckets'] }
 
-      it 'buckets by age on PostgreSQL and collapses into (none) on the MySQL family' do
+      it 'buckets by age everywhere except MariaDB, where it collapses into (none)' do
         labelled = buckets.map { |bucket| [bucket['label'], bucket['count']] }
 
-        if H.mysql?
+        if H.mariadb?
           # And note the total: 3, not 4. The collapse does not merely mislabel the
           # buckets — the count it keeps is whichever group the server returned last,
           # so an issue disappears from the chart altogether.

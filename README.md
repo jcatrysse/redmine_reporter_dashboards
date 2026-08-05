@@ -70,7 +70,7 @@ request. Two suites run there, and they prove different things:
 
 | Redmine | Rails | Ruby (upstream range) | CI Ruby | Status |
 |---------|-------|------------------------|---------|--------|
-| 5.1 | 6.1 | >= 2.7, < 3.3 | 3.2 | tested |
+| 5.1 | 6.1 | >= 2.7, < 3.3 | 3.2 | tested — **but see the note below: the plugin could not run here at all until 2026-08-05** |
 | 6.0 | 7.1 | >= 3.1, < 3.4 | 3.3 | tested |
 | 6.1 | 7.2 | >= 3.2, < 3.5 | 3.4 | tested |
 | 7.0 | 8.1 | >= 3.2, < 4.1 | 3.4 | tested, with one caveat — see below |
@@ -79,11 +79,22 @@ request. Two suites run there, and they prove different things:
 |----------|--------|
 | PostgreSQL 16 | tested — `spec/adapter` runs against it |
 | MySQL 8.0 | tested — `spec/adapter` runs against it |
-| MariaDB 11 | tested — `spec/adapter` runs against it |
+| MariaDB 11 | tested — `spec/adapter` runs against it. **One known defect: `group_by: age` with four or more boundaries — see below** |
 | anything else | not supported. The aggregation tags refuse to guess at date formatting and log one clear line instead — SQLite included |
 
 `requires_redmine` is set to 5.1 to match this table. Earlier 5.x releases may
 well work; they are simply not tested, so the plugin does not claim them.
+
+**Redmine 5.1, stated plainly.** Until 2026-08-05 the plugin raised
+`NameError: uninitialized constant ApplicationRecord` on Redmine 5.1 the moment any
+dashboard page or plugin test touched `ReporterProjectTab` — 5.1 has no
+`ApplicationRecord` class, that arrived in Redmine 6.0. The line had been there since
+v0.5.0 and nothing caught it, because the full-application test suite could not run in
+CI at all until the private-plugin secret was removed; its first 5.1 run reported 92
+errors, every one of them that constant. It is fixed
+(`RedmineReporterDashboards::Compat.base_record`) and 5.1 now runs the full suite in CI
+like every other branch. The row above says "tested" on that basis and not on an older
+belief.
 
 The plugin's own code stays inside Ruby 2.7 syntax, because that is the floor
 Redmine 5.1 allows. `.codex/check_ruby_floor.sh` guards it and runs in CI.
@@ -128,39 +139,40 @@ explanation above rather than failing anonymously.
 So on Redmine 7.0 today: every dashboard widget except the two report widgets works
 normally, and a dashboard that contains one of those stays usable.
 
-#### Known defect: `group_by: age` reports everything as `(none)` on MySQL and MariaDB
+#### Known defect: `group_by: age` reports everything as `(none)` on MariaDB
 
-**This affects a default installation, silently, and it is not fixed yet.** Found on
-2026-08-05 by the golden aggregation corpus, on MariaDB 10.11; it reproduces on any
-MySQL-family server and PostgreSQL is unaffected.
+**This affects a default MariaDB installation, silently, and it is not fixed yet.**
+Found on 2026-08-05 by the golden aggregation corpus on MariaDB 10.11 and confirmed on
+MariaDB 11. **PostgreSQL 16 and MySQL 8.0 are unaffected** — measured, on both.
 
 The `age` dimension groups on a generated `CASE` expression. ActiveRecord reads the
-group key back out of the result row *by the expression's own text*, and the MySQL
-family truncates a returned column label at 256 characters. Past that limit the lookup
-misses, every group key comes back `NULL`, and the whole chart collapses into the
-`(none)` bucket — with a total taken from whichever group the server happened to
-return last, so an issue can vanish from the count as well.
+group key back out of the result row *by the expression's own text*, and MariaDB
+truncates a returned column label at 256 characters. Past that limit the lookup misses,
+every group key comes back `NULL`, and the whole chart collapses into the `(none)`
+bucket — with a total taken from whichever group the server happened to return last, so
+an issue can vanish from the count as well.
 
 **Four age boundaries are enough to cross the limit, and the default is four**
-(`30, 60, 90, 180`). So on MySQL and MariaDB:
+(`30, 60, 90, 180`). So on MariaDB:
 
-| `age_buckets:` | Result |
+| `age_buckets:` | Result on MariaDB |
 |---|---|
 | up to three boundaries (e.g. `30;60;90`) | correct |
 | four or more, the default included | every issue in `(none)`, and the total may be short |
 
-Until it is fixed, on MySQL or MariaDB pass **three boundaries or fewer** to any
-`group_by: age` block. PostgreSQL needs no workaround. Nothing 500s and no other
-dimension is affected — `period`, the core fields and `cf_<id>` all group on a bare
-column or a short function.
+Until it is fixed, **on MariaDB pass three boundaries or fewer** to any `group_by: age`
+block. PostgreSQL and MySQL need no workaround. Nothing 500s and no other dimension is
+affected — `period`, the core fields and `cf_<id>` all group on a bare column or a short
+function.
 
 The fix is a one-line change in the aggregation kernel, and it is deliberately not in
 this release: the kernel is frozen byte-for-byte against the `v0.5.0` baseline while
-the golden corpus is being established (gate G7), so it belongs to the task that
-re-seams the dimension layer. Both engines are asserted in
-`spec/adapter/query_aggregator_execution_spec.rb`, and the two corpus cases carry
-per-engine entries in `spec/golden/adapter_overlay.rb` — so the day it is fixed, the
-suite says so.
+the golden corpus is being established (gate G7), and the performance baseline has to be
+measured against the unmodified aggregator before it moves. Every engine is asserted in
+`spec/adapter/query_aggregator_execution_spec.rb` — MariaDB's branch pins the defect,
+the others pin the correct answer — and the two affected corpus cases carry MariaDB
+entries in `spec/golden/adapter_overlay.rb`, so the day it is fixed the suite says so
+and those entries go away.
 
 #### One known database limitation: `group_by: age` on MariaDB with `ONLY_FULL_GROUP_BY`
 

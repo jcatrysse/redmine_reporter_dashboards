@@ -69,8 +69,10 @@ else
         end
       end
 
+      # Asked of the SERVER, not of the adapter name: mysql2 reports "Mysql2" for
+      # MariaDB too, and D-1 is MariaDB's alone.
       def family
-        @family ||= RrdGolden::AdapterOverlay.family_for(RrdAdapterHarness.adapter_name)
+        @family ||= RrdAdapterHarness.overlay_family
       end
 
       # The result the engine actually produced, canonicalised — the same form the
@@ -293,11 +295,11 @@ else
       it 'produces one bucket per bound plus the open-ended one' do
         buckets = result('cap/age.at')['buckets']
 
-        if RrdAdapterHarness.mysql?
+        if RrdAdapterHarness.mariadb?
           expect(buckets.length).to eq(RrdGolden::CorpusCases::CAP_AGE_BUCKETS + 2)
           expect(buckets.last['label']).to eq('(none)'),
-                                           'DEFECT D-1 has changed shape: the MySQL family used ' \
-                                           'to collapse a >256-character age CASE into the empty ' \
+                                           'DEFECT D-1 has changed shape: MariaDB used to ' \
+                                           'collapse a >256-character age CASE into the empty ' \
                                            'bucket. Re-read the overlay entry before touching it.'
           expect(buckets[0..-2].map { |b| b['count'] }.uniq).to eq([0])
         else

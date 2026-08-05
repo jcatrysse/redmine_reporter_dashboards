@@ -65,12 +65,34 @@ records the test created, and assert that nothing resolved reaches outside them.
 `redmine/plugins/<name>/spec/golden/` and the next `redmine_clone.sh` deletes them.
 Copy them back out before committing — `spec/golden/README.md` has the command.
 
-**MySQL and MariaDB truncate a returned column label at 256 characters, and
-ActiveRecord reads grouped results back BY THE GROUP EXPRESSION'S TEXT.** Group on
-anything longer and every key comes back nil, the result collapses into one bucket and
-the count is silently wrong. This is defect D-1 (`implementation-plan.md` §Findings)
-and it is live in `group_by: age` with the default four boundaries. It is also a trap
-for any FUTURE grouping expression: keep them short, or alias them.
+**MariaDB truncates a returned column label at 256 characters, and ActiveRecord reads
+grouped results back BY THE GROUP EXPRESSION'S TEXT.** Group on anything longer and
+every key comes back nil, the result collapses into one bucket and the count is silently
+wrong. This is defect D-1 (`implementation-plan.md` §Findings), live in `group_by: age`
+with the default four boundaries. A trap for any FUTURE grouping expression too: keep
+them short, or alias them. **MySQL 8.0 does NOT do this** — it was written up as a
+MySQL-family defect and the first CI run refuted that, which is why the overlay has a
+`mariadb` family separate from `mysql`.
+
+**MySQL 8 evaluates `projects.<col> IN (SELECT …)` inside a LEFT JOIN's ON clause as
+TRUE.** Measured on 8.0.46 (E-1 in §Findings). An entitlement check written that way
+passes for everyone, silently, on that engine only. `issues.project_id IN (SELECT …)` and
+a literal `projects.id IN (1,2,3)` are both correct everywhere — and both are what
+Redmine actually emits, so no production path is affected. If you are writing a stubbed
+visibility condition, copy Redmine's shape rather than inventing an equivalent one; the
+harness did, and MySQL then made the harness lie about visibility.
+
+**A plugin's `lib/` is on Rails' autoload paths, so Zeitwerk demands path-to-constant
+agreement there.** `lib/redmine_reporter_dashboards/compat/base_record.rb` that defines a
+method on `Compat` instead of a `Compat::BaseRecord` class raises `Zeitwerk::NameError`
+at boot — not at require time, which is why it survives a green rspec run and dies in the
+full-application suite. The plan's future `compat/enum.rb` and `compat/serialize.rb` have
+to define `Compat::Enum` and `Compat::Serialize`, or live as methods in `compat.rb`.
+
+**A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
+`corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
+three engines for the one reason that step must never fail for — having found nothing to
+check. `working-directory` is per step, not per job.
 
 ---
 
@@ -126,26 +148,30 @@ record as of the last local run.
 
 | Configuration | Executed? | Result |
 |---|---|---|
-| Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 951 rspec + 97 adapter + 215 corpus + 129 minitest, 0 failures |
-| Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally (2026-08-05)** | 97 adapter + 215 corpus, 0 failures. **This is the run that found defect D-1** |
+| Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 953 rspec + 97 adapter + 214 corpus + 130 minitest, 0 failures |
+| Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally** | 97 adapter + 214 corpus, 0 failures. **The run that found defect D-1** |
+| Redmine 6.1-stable, standalone, **MySQL 8.0.46** | **yes, locally** | 97 adapter + 214 corpus, 0 failures. **The run that refuted D-1's scope** and exposed E-1 |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
-| Redmine 5.1-stable / 6.0-stable | **no** | Ruby floor; CI only |
-| MySQL 8.0 proper, MariaDB 11 | **no** | CI only. MariaDB 10.11 was run locally and takes the same kernel branch |
-| **CI, any job, on this work** | **NO — never run** | the workflow was rewritten and has not executed once |
+| Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
+| **CI** | **YES — first run 2026-08-05, run 30992686636** | 17 jobs, **5 red**: `corpus` ×3 (a missing `working-directory`), `adapter` MySQL 8 (D-1's scope + E-1), `minitest` 5.1 (**92 errors — D-2**). Everything else green |
 
-The counts moved because T-01 added tests, not because anything changed: 906 → 951 rspec
-(the corpus's DB-less coverage, ratchet and canonicaliser specs), 86 → 97 adapter (defect
-D-1 and the four actors), 114 → 129 minitest (the scope fixture), plus the 215-example
-corpus verification, which is a new invocation and only runs with the reference date
-pinned. MariaDB 10.11 rather than 11 because that is what the container's apt repository
-carries; both are the `mysql2` adapter and the same kernel branch, and CI runs 11.
+**MySQL and MariaDB cannot be installed at the same time** — the Debian packages
+conflict, and switching costs an apt purge plus a datadir re-init each way. Both have now
+been run locally, one after the other; if you need to switch, `rm -rf /etc/mysql` will
+break the *next* server's `!includedir` (the package config has to be reinstalled with
+`--force-confmiss`), and a leftover `mysqld` keeps the socket until it is killed by pid.
 
-**MySQL 8.0 itself is still unverified locally.** The Debian packages for MySQL and
-MariaDB conflict, so only one of the two can be installed at a time. D-1's mechanism is
-MySQL-family-wide (a server-side label limit, not a MariaDB quirk), so the expectation is
-that 8.0 behaves identically — but that is an expectation, and the `corpus` job on MySQL
-8.0 is what will settle it.
+That first CI run is the most useful thing that has happened to this branch: three of
+the five failures were invisible to every local configuration, and one of them (D-2) had
+been shipping since v0.5.0.
+
+The counts moved because T-01 added tests, not because anything changed: 906 → 953 rspec
+(the corpus's DB-less coverage, the ratchet, the canonicaliser and the compat shim),
+86 → 97 adapter (D-1 and the four actors), 114 → 130 minitest (the scope fixture), plus
+the 214-example corpus verification, which is a new invocation and only runs with the
+reference date pinned. MariaDB 10.11 rather than 11 because that is what the container's
+apt repository carries; CI runs 11 and agrees with it.
 
 That last row is the important one. The CI rewrite (secret removal, standalone
 minitest, the `gates` and `baseline` jobs) is verified only by local simulation of each

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/compat'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'

@@ -43,11 +43,19 @@ module RrdGolden
   # EXACTLY the cases listed here — an overlay cannot cover for a divergence nobody
   # declared.
   module AdapterOverlay
-    # The families the corpus is verified against. `mysql` covers MariaDB: the mysql2
-    # adapter reports "Mysql2" for both, and both take the DATE_FORMAT /
-    # DECIMAL(20,4) branch of every divergence in the kernel. An entry true of one and
-    # not the other must say so in its reason.
-    FAMILIES = %w[postgresql mysql].freeze
+    # The families the corpus is verified against.
+    #
+    # MariaDB is its OWN family, not a flavour of mysql, and that was learned the hard
+    # way: the first real CI run measured defect D-1 on both MariaDB 10.11 and 11 and
+    # NOT on MySQL 8.0.46, which answers correctly. Folding the two together — as this
+    # file did until that run — declares an exception on an engine that does not need
+    # one, and the exhaustiveness assertion then fails on MySQL for the opposite
+    # reason to the one it was written for.
+    #
+    # They still share every branch INSIDE the kernel (DATE_FORMAT, DECIMAL(20,4)),
+    # and the mysql2 adapter reports "Mysql2" for both — which is why the family
+    # cannot be derived from the adapter name alone. See .family_for.
+    FAMILIES = %w[postgresql mysql mariadb].freeze
 
     # The family the committed corpus itself is generated on. One family has to be
     # canonical or the overlay has no direction; PostgreSQL is this project's default
@@ -60,34 +68,39 @@ module RrdGolden
     # THE ENTRIES
     # ------------------------------------------------------------------
     #
-    # DEFECT D-1 (found 2026-08-05 by this corpus, on MariaDB 10.11, reproducible on
-    # any MySQL-family server; PostgreSQL 16 is unaffected):
+    # DEFECT D-1 (found 2026-08-05 by this corpus on MariaDB 10.11; confirmed by the
+    # first CI run on MariaDB 11; MEASURED ABSENT on MySQL 8.0.46 and on
+    # PostgreSQL 16):
     #
     #   The `age` dimension groups on a generated CASE expression. ActiveRecord reads
-    #   the group key back out of the result row by the expression's own text, and the
-    #   MySQL family truncates a returned column label at 256 characters. Measured
-    #   with this expression shape: 261 characters still works, 262 does not. Past the
-    #   limit the lookup misses, EVERY group key comes back nil, and the whole result
-    #   collapses into the "(none)" bucket — with a total taken from whichever group
-    #   the server happened to return last.
+    #   the group key back out of the result row by the expression's own text, and
+    #   MariaDB truncates a returned column label at 256 characters. Measured with this
+    #   expression shape: 261 characters still works, 262 does not. Past the limit the
+    #   lookup misses, EVERY group key comes back nil, and the whole result collapses
+    #   into the "(none)" bucket — with a total taken from whichever group the server
+    #   happened to return last.
+    #
+    #   MySQL 8.0.46 does NOT truncate it and answers correctly. That is why this is a
+    #   MariaDB entry and not a MySQL-family one: the original write-up here said
+    #   "reproducible on any MySQL-family server", which was an inference from one
+    #   engine, and the first CI run refuted it.
     #
     #   FOUR age boundaries are enough to cross it, and DEFAULT_AGE_BUCKETS is
-    #   [30, 60, 90, 180] — four. So on MySQL and MariaDB the DEFAULT age dimension
-    #   reports every issue as having no age, today, in production. The existing
-    #   adapter execution specs missed it because each of them happens to use three
-    #   boundaries or fewer.
+    #   [30, 60, 90, 180] — four. So on MariaDB the DEFAULT age dimension reports every
+    #   issue as having no age, today, in production. The existing adapter execution
+    #   specs missed it because each of them happens to use three boundaries or fewer.
     #
     #   Not fixed here, and not because it is small: T-01 freezes the kernel and gate
     #   G7 diffs it byte for byte against the baseline commit, so the fix belongs to
     #   the task that may touch it (T-08 re-seams the dimension layer; see the plan's
     #   §Findings note). These two entries are what keeps that fact visible instead of
-    #   letting a green MySQL run imply the numbers agree.
+    #   letting a green MariaDB run imply the numbers agree.
     ENTRIES = [
-      { case: 'cap/age.at', family: 'mysql',
-        reason: 'DEFECT D-1: a 24-boundary age CASE is 1 506 characters, past the ' \
-                "MySQL family's 256-character column-label limit, so every row lands " \
-                'in (none). Delete this entry when D-1 is fixed.' },
-      { case: 'cap/age.past', family: 'mysql',
+      { case: 'cap/age.at', family: 'mariadb',
+        reason: 'DEFECT D-1: a 24-boundary age CASE is 1 506 characters, past ' \
+                "MariaDB's 256-character column-label limit, so every row lands in " \
+                '(none). MySQL 8.0 is unaffected. Delete this entry when D-1 is fixed.' },
+      { case: 'cap/age.past', family: 'mariadb',
         reason: 'DEFECT D-1, same CASE: the 25th boundary is dropped by MAX_AGE_BUCKETS, ' \
                 'so this case generates the identical statement and fails identically.' }
     ].freeze
@@ -131,7 +144,7 @@ module RrdGolden
       end
 
       # nil means "no overlay for this case on this engine", which is the answer for
-      # every case on PostgreSQL and for all but D-1's two on MySQL.
+      # every case on PostgreSQL and MySQL, and for all but D-1's two on MariaDB.
       def expected_for(case_id, family)
         return nil unless case_ids_for(family).include?(case_id.to_s)
 
@@ -153,14 +166,21 @@ module RrdGolden
         wanted
       end
 
-      # PostgreSQL / MySQL / MariaDB -> the family the overlay is keyed by. Raises
-      # rather than guessing: an unrecognised engine must not be treated as "no
+      # PostgreSQL / MySQL / MariaDB -> the family the overlay is keyed by.
+      #
+      # `mariadb:` is a separate argument on purpose: the mysql2 adapter reports
+      # "Mysql2" for MariaDB as well, so the name alone CANNOT tell them apart, and
+      # the two now behave differently (D-1). The caller answers the question from the
+      # server version — RrdAdapterHarness#mariadb? — and this method stays a pure
+      # mapping that the DB-less spec can exercise in both directions.
+      #
+      # Raises rather than guessing: an unrecognised engine must not be treated as "no
       # overlay applies", which would report a divergence as a corpus failure on an
       # engine nobody has verified at all.
-      def family_for(adapter_name)
+      def family_for(adapter_name, mariadb: false)
         name = adapter_name.to_s
         return 'postgresql' if name.match?(/postgres/i)
-        return 'mysql'      if name.match?(/mysql|maria|trilogy/i)
+        return mariadb ? 'mariadb' : 'mysql' if name.match?(/mysql|maria|trilogy/i)
 
         raise ArgumentError,
               "#{adapter_name.inspect} is neither the PostgreSQL nor the MySQL family. The " \

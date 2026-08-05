@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
-class ReporterProjectTab < ApplicationRecord
+# ApplicationRecord does not exist on Redmine 5.1 — see
+# RedmineReporterDashboards::Compat.base_record for what that broke and how long for.
+class ReporterProjectTab < RedmineReporterDashboards::Compat.base_record
   include Redmine::I18n
 
   belongs_to :project

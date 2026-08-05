@@ -453,7 +453,13 @@ jobs:
         working-directory: plugin
 
       # If these skip, the job is green and has checked nothing. Say so out loud.
+      #
+      # working-directory, like the step above it: this job checks the plugin out into
+      # plugin/, so without it rspec runs where there is no spec/ at all — and the
+      # step then fails for the one reason it must never fail for, having found
+      # nothing to check. It did, on the first real CI run, in all three engines.
       - name: Refuse a run in which the reference checks skipped
+        working-directory: plugin
         run: |
           out="$(rspec -I spec spec/golden 2>&1)"
           echo "$out"

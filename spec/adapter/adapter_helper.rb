@@ -60,6 +60,7 @@ require 'active_support/testing/time_helpers'
 require 'uri'
 require_relative '../spec_helper'
 require_relative '../golden/reference_date'
+require_relative '../golden/adapter_overlay'
 
 Time.zone ||= 'UTC'
 
@@ -377,8 +378,7 @@ module RrdAdapterHarness
           return '1=0' if user.nil?
 
           if visibility_role_id
-            return RrdAdapterHarness.entitled_projects_sql(user, [visibility_role_id.to_i],
-                                                           'issues.project_id')
+            return RrdAdapterHarness.entitled_projects_subquery_sql(user, [visibility_role_id.to_i])
           end
 
           return '1=1' if visibility_project_id.nil?
@@ -410,16 +410,76 @@ module RrdAdapterHarness
     # ------------------------------------------------------------------
 
     # "the projects where this viewer holds one of these roles", as a SQL fragment
-    # over Redmine's own membership tables. One place, because both stubbed
-    # entitlement checks must have the same shape — two spellings of it would drift
-    # and the drift would look like a value regression.
+    # over Redmine's own membership tables.
+    #
+    # A LITERAL ID LIST, because that is what Redmine emits: Project.allowed_to_condition
+    # resolves the projects in Ruby and interpolates
+    # `projects.id IN (1,2,3)` — see app/models/project.rb, the statement_by_role loop.
+    # It is also the only form that is CORRECT on MySQL 8.
+    #
+    # This method used to emit `#{column} IN (SELECT … FROM members …)` instead, and the
+    # first real CI run caught it: on MySQL 8.0.46 a subquery inside a LEFT OUTER JOIN's
+    # ON clause that references a SEPARATELY JOINED table (`projects`) is silently
+    # evaluated as TRUE, so an actor with no entitled role summed 7.0 visible hours
+    # instead of 0.0. Measured, bisected:
+    #
+    #   projects.id       IN (subquery)  in a LEFT JOIN ON clause  -> ignored on MySQL 8
+    #   issues.project_id IN (subquery)  in a LEFT JOIN ON clause  -> correct
+    #   projects.id       IN (1,2,3)     in a LEFT JOIN ON clause  -> correct
+    #   all three                                                  -> correct on PostgreSQL
+    #                                                                 and on MariaDB
+    #
+    # THE PRODUCTION PATHS ARE NOT AFFECTED, and that is worth stating precisely rather
+    # than assuming: `TimeEntry.visible_condition` reaches `projects` but emits literal
+    # id lists, and `IssueCustomField#visibility_by_project_condition` does emit a
+    # subquery but keys it on `#{customized_class.table_name}.project_id`, i.e.
+    # `issues.project_id` — the shape MySQL gets right. Verified against 6.1-stable's
+    # custom_field.rb:262 and issue_custom_field.rb:35. So this was a fidelity defect in
+    # the harness: it invented a shape Redmine never produces, and MySQL then made the
+    # harness lie about visibility.
+    #
+    # No separate "MySQL mis-evaluates this" assertion is needed to keep the shape out:
+    # the per-actor spent-time examples below fail on MySQL the moment it comes back,
+    # which is the mechanical control rather than a comment asking politely.
     def entitled_projects_sql(user, role_ids, column)
       ids = Array(role_ids).map(&:to_i).reject(&:zero?)
       return '1=0' if user.nil? || ids.empty?
 
-      "#{column} IN (SELECT rrd_m.project_id FROM members rrd_m " \
+      project_ids = ::Member.where(user_id: user.id)
+                            .where(id: ::MemberRole.where(role_id: ids).select(:member_id))
+                            .distinct.pluck(:project_id).compact.sort
+      return '1=0' if project_ids.empty?
+
+      "#{column} IN (#{project_ids.join(',')})"
+    end
+
+    # The custom-field half, and it is deliberately a DIFFERENT shape from the one
+    # above: a SUBQUERY keyed on `issues.project_id`, because that is what
+    # CustomField#visibility_by_project_condition emits
+    # (`project_key ||= "#{customized_class.table_name}.project_id"`, custom_field.rb:262
+    # on 6.1-stable). The two stubs are not two spellings of one fact — they mirror two
+    # different conditions Redmine really produces, and the difference is load-bearing:
+    # this shape is evaluated correctly by every supported engine, the `projects`-keyed
+    # subquery is not (see above).
+    def entitled_projects_subquery_sql(user, role_ids)
+      ids = Array(role_ids).map(&:to_i).reject(&:zero?)
+      return '1=0' if user.nil? || ids.empty?
+
+      "issues.project_id IN (SELECT DISTINCT rrd_m.project_id FROM members rrd_m " \
         "INNER JOIN member_roles rrd_mr ON rrd_mr.member_id = rrd_m.id " \
         "WHERE rrd_m.user_id = #{user.id.to_i} AND rrd_mr.role_id IN (#{ids.join(',')}))"
+    end
+
+    # PostgreSQL / MySQL / MariaDB, as the overlay keys its exceptions.
+    #
+    # MariaDB is its own family and the adapter NAME cannot tell you so — mysql2 reports
+    # "Mysql2" for both — so the question is asked of the server version, once, here.
+    # Defect D-1 is MariaDB's and not MySQL's, which is exactly why this exists.
+    # ONE mapper, not two: AdapterOverlay.family_for owns the name -> family rule and
+    # is exercised in the DB-less spec; all this adds is the answer to the question the
+    # name cannot carry, read from the live server.
+    def overlay_family
+      RrdGolden::AdapterOverlay.family_for(adapter_name, mariadb: mysql? && mariadb?)
     end
 
     # Every role the user holds anywhere, sorted so the generated SQL of a scope

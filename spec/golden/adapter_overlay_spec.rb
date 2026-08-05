@@ -81,9 +81,22 @@ RSpec.describe RrdGolden::AdapterOverlay do
       expect(described_class.family_for('PostgreSQL')).to eq('postgresql')
     end
 
-    it 'maps MySQL and MariaDB to one family, because the kernel branches once' do
+    it 'maps the MySQL family by name' do
       expect(described_class.family_for('Mysql2')).to eq('mysql')
       expect(described_class.family_for('Trilogy')).to eq('mysql')
+    end
+
+    # The adapter reports "Mysql2" for MariaDB as well, so the NAME cannot separate
+    # them and the caller has to answer from the server version. It matters because
+    # defect D-1 is MariaDB's and MySQL 8.0 is unaffected — one family would declare an
+    # exception on an engine that does not need it.
+    it 'separates MariaDB from MySQL, which the adapter name cannot do' do
+      expect(described_class.family_for('Mysql2', mariadb: true)).to eq('mariadb')
+      expect(described_class.family_for('Mysql2', mariadb: false)).to eq('mysql')
+    end
+
+    it 'ignores the flag for PostgreSQL, which cannot be MariaDB' do
+      expect(described_class.family_for('PostgreSQL', mariadb: true)).to eq('postgresql')
     end
 
     # Fails closed. Treating an unknown engine as "no overlay applies" would report a

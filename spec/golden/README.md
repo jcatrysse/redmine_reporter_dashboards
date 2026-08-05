@@ -81,12 +81,19 @@ cp -r redmine/plugins/redmine_reporter_dashboards/spec/golden/{aggregation,scope
 
 ## What the corpus has already found
 
-**Defect D-1** — `group_by: age` collapses into the `(none)` bucket on MySQL and MariaDB
+**Defect D-1** — `group_by: age` collapses into the `(none)` bucket on **MariaDB**
 whenever the generated `CASE` passes 256 characters, which four age boundaries do, which
-is the default. Documented in the README's database section, asserted on both engines in
-`spec/adapter/query_aggregator_execution_spec.rb`, and carried as the overlay's only two
-entries. Not fixed here: gate G7 freezes the kernel byte-for-byte while the corpus is
-being established, so the fix belongs to the task that may touch it.
+is the default. Documented in the README's database section, asserted on every engine in
+`spec/adapter/query_aggregator_execution_spec.rb` (MariaDB's branch pins the defect, the
+others pin the correct answer), and carried as the overlay's only two entries. Not fixed
+here: gate G7 freezes the kernel byte-for-byte, and §1's ordering guard refuses a change
+to the aggregator until T-03 has measured the performance baseline against it.
 
-That is the corpus earning its keep on the day it was written, on an engine CI has been
-reporting green for months.
+**And the corpus corrected itself.** D-1 was first written up as affecting the whole
+MySQL family, on the evidence of one engine. The first CI run measured MySQL 8.0.46
+answering correctly and refuted it — which is why `mysql` and `mariadb` are now separate
+overlay families, and why the exhaustiveness assertion matters: it failed on MySQL for
+declaring an exception that engine did not need.
+
+That is the oracle earning its keep twice in one day: once on an engine CI had been
+reporting green for months, and once on the write-up of its own finding.
