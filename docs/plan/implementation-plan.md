@@ -260,7 +260,54 @@ with no way back to it, which is the reason this task precedes them. So a third 
 templates**, each naming the survey line it comes from. It measures more than the Accept list's axis,
 never less.
 
-**D-1 is still owed after T-08's port, and the blocker is measurement, not design.** The port
+**D-1's fix is now fully specified, and it is smaller than the mechanism note suggested.** Written
+2026-08-05 after checking which cases the overlay actually covers — the one fact that sizes the work:
+
+**Both overlay entries are `cap/age.at` and `cap/age.past`, and both are plain
+`dimension_breakdown(group_by: 'age')` in COUNT mode.** Neither is a measure and neither is a
+crosstab. So a fix that covers count mode alone empties the overlay, and `RATCHET` goes to **0** in
+the same commit — not to 1.
+
+*The fix, in count mode only:* the age axis has `fixed_keys`, so it does not need a `GROUP BY` at
+all. Use the shape `completeness` already uses in this same file — `aggregate_row(base,
+conditions.map { |c| count_case(c) })`, ONE query, one `COUNT(DISTINCT CASE WHEN … THEN issues.id
+END)` per bucket, read back **positionally**. No group alias exists, so there is nothing for either
+end to truncate and the defect is unrepresentable rather than patched. Query count stays 1, so the
+T-03 budget for `dimension.age.string_bounds` (2) is unaffected.
+
+    # age_dimension gains: bucket_conditions: [sql, ...]  (same bounds it already has)
+    # single_result / crosstab_result:
+    totals = if dim.bucket_conditions && measure.nil?
+               row = aggregate_row(base, dim.bucket_conditions.map { |c| count_case(c) })
+               dim.fixed_keys.each_with_index.to_h { |label, i| [label, row[i].to_i] }
+             else
+               measure_groups(base.group(dim.sql), measure)   # unchanged
+             end
+
+*Deliberately NOT covered:* age as a measure axis and age inside a crosstab stay on the `GROUP BY`
+path and stay broken on MariaDB past ~4 boundaries. That is acceptable and must be **documented in
+the README**, not silently left: no corpus case and no production template hits it (every real
+template is count mode, and the non-cap age cases use three boundaries, under the limit). Widening
+the fix to those means generalising `count_case` to arbitrary measures, which is a bigger change
+than the defect justifies today.
+
+*The four things that must land in the SAME commit:* the kernel edit; a **G7 declared-exception
+mechanism** — the diff against the v0.5.0 blob must equal exactly this recorded hunk, mirroring
+`AdapterOverlay`'s ratchet, because "byte-identical except one argued hunk" is not something
+`baseline_spec.rb` can express today; the MariaDB branch of
+`spec/adapter/query_aggregator_execution_spec.rb` flipped from pinning the defect to pinning the
+correct answer; and the two overlay entries deleted with `RATCHET` lowered to 0.
+
+*Verification, decided by the curator on 2026-08-05:* push it and let the `adapter (MariaDB 11)` and
+`corpus (MariaDB 11)` CI cells judge. MariaDB is not installed in the session container. A red
+MariaDB cell after this lands is the measurement, not a regression.
+
+**Why it is still owed: session budget, stated plainly.** The design above is complete; what is not
+done is writing it. It is a change to the byte-frozen kernel plus a new gate mechanism, and starting
+that with too little room left to review and re-run it is the one thing `CLAUDE.md` §6 refuses. The
+next session should be able to go straight to code from this entry.
+
+**The original blocker, for the record.** The port
 half of T-08 is done and verified; the fix is not, and it must not be written blind. D-1 manifests
 only on **MariaDB**, and MariaDB is not installed in the session container (its Debian packages
 conflict with MySQL; switching costs an apt purge and a datadir re-init). Writing a structural change
