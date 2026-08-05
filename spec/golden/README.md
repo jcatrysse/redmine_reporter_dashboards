@@ -17,7 +17,7 @@ see [§The baseline is not an oracle](#the-baseline-is-not-an-oracle).
 
 | Artefact | What it freezes | Regenerable? |
 |---|---|---|
-| `baseline.rb` | the commit the kernel is diffed against for gate G7 | it is a SHA |
+| `baseline.rb` | the commit the kernel is diffed against for gate G7, and the map from each ported file to its v0.5.0 blob | it is a SHA |
 | `reference_date.rb` | the pinned date the corpus is generated with, and the refusal to run unpinned | n/a |
 | `corpus_canonicaliser.rb` | one result → one byte sequence (`technical-spec.md` §2 Step 0) | n/a |
 | `corpus_cases.rb` | **the questions**: 176 (entry point, scope, actor, arguments) tuples | n/a |

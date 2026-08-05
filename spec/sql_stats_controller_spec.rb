@@ -46,7 +46,7 @@ unless defined?(ApplicationController)
   end
 end
 
-require_relative '../lib/sql_aggregation/query_aggregator'
+require_relative '../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 require_relative '../app/controllers/sql_stats_controller'
 
 # Plain struct for project — avoids RSpec double scoping issues inside class defs

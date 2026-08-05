@@ -35,7 +35,7 @@ the plugin checkout**. The `baseline` CI job does this and fails if they report 
 the plugin repo and re-run the script.
 
 **The aggregator reads the clock, so a pinned fixture is not enough.**
-`lib/sql_aggregation/query_aggregator.rb:1135` is its single clock read. Pin the corpus
+`lib/redmine_reporter_dashboards/aggregation/query_aggregator.rb:1135` is its single clock read. Pin the corpus
 reference date without freezing time and every period window comes back **0** — which
 looks like a broken aggregator and is not. `RrdAdapterHarness.freeze_to_reference_date!`
 does both, and must run before `seed!`. Good news for the corpus: that one read is
@@ -82,12 +82,27 @@ Redmine actually emits, so no production path is affected. If you are writing a 
 visibility condition, copy Redmine's shape rather than inventing an equivalent one; the
 harness did, and MySQL then made the harness lie about visibility.
 
-**A plugin's `lib/` is on Rails' autoload paths, so Zeitwerk demands path-to-constant
-agreement there.** `lib/redmine_reporter_dashboards/compat/base_record.rb` that defines a
-method on `Compat` instead of a `Compat::BaseRecord` class raises `Zeitwerk::NameError`
-at boot — not at require time, which is why it survives a green rspec run and dies in the
-full-application suite. The plan's future `compat/enum.rb` and `compat/serialize.rb` have
-to define `Compat::Enum` and `Compat::Serialize`, or live as methods in `compat.rb`.
+**CORRECTED 2026-08-05 — a plugin's `lib/` is NOT autoloaded, so path-to-constant
+agreement is not required there.** This entry used to say the opposite, and T-08's kernel
+move measured it: the two kernel files now live at
+`lib/redmine_reporter_dashboards/aggregation/` while still declaring
+`module SqlAggregation`, and the full application boots (139 minitest runs, 0 errors).
+Measured inside the booted app:
+
+    Rails.configuration.respond_to?(:autoloader)                -> false  (Rails 7.2)
+    plugin lib/ in ActiveSupport::Dependencies.autoload_paths    -> false
+    plugin lib/ in Rails.application.config.eager_load_paths     -> false
+
+Two things follow. `init.rb:20-21`, which tells Zeitwerk to `ignore` this plugin's `lib/`,
+is **dead code on Rails 7+** — the `respond_to?` guard is false, so the ignore never runs
+— and it does not matter, because Redmine does not put a plugin's `lib/` on either path in
+the first place. Only `app/` is autoloaded, and THERE the constraint is real.
+
+An earlier session did record a genuine `Zeitwerk::NameError` from
+`lib/redmine_reporter_dashboards/compat/base_record.rb`. This correction does not explain
+that observation — it only shows the stated mechanism cannot be it. `compat.rb` was kept as
+one file anyway and works, so nothing is blocked; if you hit a NameError from `lib/`, treat
+the cause as **unknown** rather than as this entry, and measure before concluding.
 
 **Redmine 6.0 is where BOTH `ApplicationRecord` and `IconsHelper#sprite_icon` arrived.**
 Neither exists on 5.1, and calling either raises rather than degrading. Both were in this
@@ -258,9 +273,13 @@ of a CI that runs on fork pull requests.
    which is the curator's. What is still owed by a later task: `rake
    reporter_dashboards:lint_templates`, which the spec names in §6 — today it would be a
    duplicate of `import:plan`'s section 5, so it was deliberately not written twice.
-5. **T-07 is done** — §6 records what is exercised and what deliberately is not. **T-08**
-   is next: port the kernel byte-identically, and it carries D-1's fix, which is the only
-   place the kernel may legitimately change a byte.
+5. **T-07 is done** — §6 records what is exercised and what deliberately is not.
+6. **T-08's PORT is done; its D-1 fix is not, and is blocked on MariaDB.** The two kernel
+   files are at `lib/redmine_reporter_dashboards/aggregation/`, byte-identical, and
+   `KERNEL_FILES` is now a map (working-tree path => v0.5.0 blob path) so gate G7 compares
+   the ported file with its baseline instead of comparing a path with itself. Do **not**
+   write the D-1 fix and lower the overlay ratchet from a PostgreSQL-only run — see
+   §Findings. Next after that: **T-09 onward**.
 
 ---
 

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
-require_relative 'drill_through'
+require_relative '../redmine_reporter_dashboards/aggregation/drill_through'
 
 module SqlAggregation
   # Liquid tag: {% sql_aggregate ... %}   (legacy alias: {% geo_aggregate ... %})

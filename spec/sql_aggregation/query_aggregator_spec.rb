@@ -53,7 +53,7 @@ unless defined?(Rails)
   end
 end
 
-require_relative '../../lib/sql_aggregation/query_aggregator'
+require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 
 # Chainable AR scope stub.
 #

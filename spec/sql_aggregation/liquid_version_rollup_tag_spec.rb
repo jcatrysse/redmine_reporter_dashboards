@@ -27,7 +27,7 @@ unless defined?(Setting)
   end
 end
 
-require_relative '../../lib/sql_aggregation/query_aggregator'
+require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 require_relative '../../lib/sql_aggregation/liquid_version_rollup_tag'
 # T-07: these examples exercise the LEGACY resolution path — a tag renders with no
 # RenderContext in its registers, so Liquid::ScopeBinding falls back to

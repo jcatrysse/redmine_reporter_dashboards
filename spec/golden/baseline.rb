@@ -34,12 +34,22 @@ module RrdGolden
     # rather than asserted.
     VERSION = '0.5.0'
 
-    # The two files ported byte-identically (technical-spec.md §1.3, gate G7). Their
-    # blobs at COMMIT are the reference `git diff --no-index` compares against.
-    KERNEL_FILES = %w[
-      lib/sql_aggregation/query_aggregator.rb
-      lib/sql_aggregation/drill_through.rb
-    ].freeze
+    # The two files ported byte-identically (technical-spec.md §1.3, gate G7).
+    #
+    # A MAP, not a list, because T-08 moved them: the key is where the file lives in the
+    # working tree now, the value is where its blob lives at COMMIT. Before the move the
+    # two were the same string and this check passed trivially; after it, the same
+    # assertion is the real thing — "we moved the aggregator without changing a byte".
+    #
+    # Keep both sides. Collapsing to one path is how the reference gets lost: `git show
+    # COMMIT:<new path>` does not resolve, and a check that cannot read its reference is
+    # one bad `rescue` away from reporting success.
+    KERNEL_FILES = {
+      'lib/redmine_reporter_dashboards/aggregation/query_aggregator.rb' =>
+        'lib/sql_aggregation/query_aggregator.rb',
+      'lib/redmine_reporter_dashboards/aggregation/drill_through.rb' =>
+        'lib/sql_aggregation/drill_through.rb'
+    }.freeze
 
     class << self
       def repo_root

@@ -57,7 +57,8 @@ fact that CI has not yet run on this work at all.
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
 | T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
-| T-08 onward | not started |
+| T-08 | **port done, D-1 NOT done** — both kernel files moved to `aggregation/`, **byte-identical to their v0.5.0 blobs** (G7 now asserts that against `git show` at the ported location instead of comparing a path with itself), plus the 4-line namespace assignment. **D-1's fix is still owed and blocked** — see §Findings |
+| T-09 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -258,6 +259,17 @@ with no way back to it, which is the reason this task precedes them. So a third 
 `production-shapes`, carries seven more workloads drawn from **T-02's survey of the 26 real
 templates**, each naming the survey line it comes from. It measures more than the Accept list's axis,
 never less.
+
+**D-1 is still owed after T-08's port, and the blocker is measurement, not design.** The port
+half of T-08 is done and verified; the fix is not, and it must not be written blind. D-1 manifests
+only on **MariaDB**, and MariaDB is not installed in the session container (its Debian packages
+conflict with MySQL; switching costs an apt purge and a datadir re-init). Writing a structural change
+to the age dimension — the `aggregate_row`/`count_case` shape, threaded through `single_result`,
+`crosstab_result`, `fold_values` and `bucket_filter` — and then **deleting the two overlay entries and
+lowering the ratchet** on the strength of a PostgreSQL run would be asserting a fix on the one engine
+where the defect does not exist. Either of two things unblocks it: install MariaDB locally, or push
+the fix and let the `adapter (MariaDB 11)` CI cell judge it. The second is slower and is the
+configuration that actually answers the question.
 
 **F-3 · gate G8's "empty allowlist at 1.0" target cannot survive shipping an importer, and that
 is a curator question.** `script/gates/zero_reporter.allowlist` opens with "At 1.0 it should be

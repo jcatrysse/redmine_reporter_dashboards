@@ -1089,7 +1089,7 @@ end
 
 if RrdAdapterHarness.configured?
   require 'active_record'
-  require_relative '../../lib/sql_aggregation/query_aggregator'
+  require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 
   RSpec.configure do |config|
     config.before(:suite) do

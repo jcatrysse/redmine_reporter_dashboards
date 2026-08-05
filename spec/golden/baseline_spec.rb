@@ -54,33 +54,38 @@ RSpec.describe RrdGolden::Baseline do
 
   describe 'the byte-identity reference for gate G7' do
     it 'can read every kernel file at the baseline' do
-      described_class::KERNEL_FILES.each do |path|
-        content = described_class.file_at_baseline(path)
+      described_class::KERNEL_FILES.each_value do |baseline_path|
+        content = described_class.file_at_baseline(baseline_path)
 
-        expect(content).not_to be_nil, "#{path} does not exist at the baseline commit"
-        expect(content).not_to be_empty, "#{path} is empty at the baseline commit"
+        expect(content).not_to be_nil, "#{baseline_path} does not exist at the baseline commit"
+        expect(content).not_to be_empty, "#{baseline_path} is empty at the baseline commit"
       end
     end
 
     it 'names the two files the spec says are ported byte-identically, and only those' do
-      expect(described_class::KERNEL_FILES).to contain_exactly(
-        'lib/sql_aggregation/query_aggregator.rb',
-        'lib/sql_aggregation/drill_through.rb'
+      expect(described_class::KERNEL_FILES).to eq(
+        'lib/redmine_reporter_dashboards/aggregation/query_aggregator.rb' =>
+          'lib/sql_aggregation/query_aggregator.rb',
+        'lib/redmine_reporter_dashboards/aggregation/drill_through.rb' =>
+          'lib/sql_aggregation/drill_through.rb'
       )
     end
 
-    # Today the working tree still holds the originals, so this passes trivially. It
-    # is here for after the port: it is the assertion that turns "we moved the
-    # aggregator" into "we moved the aggregator without changing a byte".
-    it 'matches the working tree while the kernel has not yet been moved' do
-      described_class::KERNEL_FILES.each do |path|
-        working = File.join(described_class.repo_root, path)
-        next unless File.exist?(working)
+    # THE G7 ASSERTION. Before T-08 moved the files this compared a path with itself and
+    # passed trivially; now it compares the ported file with the v0.5.0 blob, which is
+    # what "byte-identical" was always supposed to mean.
+    it 'is byte-identical to the baseline blob at the ported location' do
+      described_class::KERNEL_FILES.each do |current_path, baseline_path|
+        working = File.join(described_class.repo_root, current_path)
 
-        expect(File.binread(working)).to eq(described_class.file_at_baseline(path)),
-                                                        "#{path} differs from the baseline. If the kernel has been " \
-                                                        'ported, this belongs in the corpus job against the new ' \
-                                                        'location; if it has not, the kernel was edited and G7 is broken.'
+        expect(File.exist?(working)).to be(true),
+                                       "#{current_path} is missing. KERNEL_FILES names where the ported " \
+                                       'kernel lives; if it moved again, this map moves with it.'
+        expect(File.binread(working)).to eq(described_class.file_at_baseline(baseline_path)),
+                                        "#{current_path} differs from its v0.5.0 blob " \
+                                        "(#{baseline_path}). Gate G7 is byte-identity: the only change " \
+                                        'the kernel may carry is the one T-08 argues for, and it has to be ' \
+                                        'declared rather than discovered here.'
       end
     end
   end

@@ -73,7 +73,7 @@ module RedmineReporterDashboards
   # (it always is under Redmine, but we stay defensive so a missing dependency
   # degrades gracefully).
   def register_sql_aggregate_tag
-    require File.join(lib_root, 'sql_aggregation/query_aggregator')
+    require File.join(lib_root, 'redmine_reporter_dashboards/aggregation')
 
     # NOTE: use the top-level ::Liquid explicitly. This plugin also defines a
     # RedmineReporterDashboards::Liquid namespace (VersionDrop), which would
@@ -95,7 +95,7 @@ module RedmineReporterDashboards
   # Register the version_rollup Liquid tag. Mirrors register_sql_aggregate_tag:
   # only registers when Liquid is available and degrades gracefully otherwise.
   def register_version_rollup_tag
-    require File.join(lib_root, 'sql_aggregation/query_aggregator')
+    require File.join(lib_root, 'redmine_reporter_dashboards/aggregation')
 
     return unless defined?(::Liquid::Tag)
 
