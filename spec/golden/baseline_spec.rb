@@ -9,12 +9,23 @@ require_relative 'baseline'
 # finds no differences. So the reference is checked, against real git output, rather
 # than trusted.
 RSpec.describe RrdGolden::Baseline do
-  # Skipped rather than failed outside a git checkout (a packaged gem, an exported
-  # tarball): there is nothing wrong in that case, there is just nothing to check.
+  # These examples need git history, and they will NOT get it in the mirrored run.
+  #
+  # redmine_clone.sh rsyncs the plugin into redmine/plugins/<name>/ with `--exclude
+  # .git/`, so the copy the suite normally executes from has no history at all. That
+  # is not a defect to work around: history is a property of the repository, not of
+  # the code under test, and there is genuinely nothing to check in a copy.
+  #
+  # The consequence has to be stated, though, because a skipped guard looks exactly
+  # like a passing one: **the `corpus` job must run this from the plugin checkout**,
+  # not from inside the Redmine clone. If it runs only in the mirror, gate G7 has no
+  # reference check at all and will report green forever.
   before do
-    skip 'not a git checkout — nothing to verify the baseline against' unless File.directory?(
-      File.join(described_class.repo_root, '.git')
-    )
+    next if File.directory?(File.join(described_class.repo_root, '.git'))
+
+    skip 'no git history here — this is the rsynced copy inside the Redmine clone ' \
+         '(redmine_clone.sh excludes .git). The corpus job must run these from the ' \
+         'plugin checkout, or gate G7 loses its reference check silently.'
   end
 
   it 'resolves to a real commit' do

@@ -136,6 +136,12 @@ the **clock must be frozen to the same date** or every period window comes back 
 aggregator's only clock read is Ruby-side, so freezing Ruby is sufficient. **Still owed:** the
 scope fixture, the value corpus itself, the per-adapter overlay, and the `corpus` job.
 
+*One constraint on that job, found the hard way:* `redmine_clone.sh` rsyncs the plugin into
+`redmine/plugins/<name>/` with `--exclude .git/`, so the copy the suite normally runs from has no
+history. `spec/golden/baseline_spec.rb` therefore **skips** there — correctly, but a skipped guard
+reads exactly like a passing one. The `corpus` job must run the baseline checks **from the plugin
+checkout**, not from inside the Redmine clone, or G7 has no reference check and stays green forever.
+
 **T-02 · `import:plan` — the read-only survey**
 *Goal:* make DoR-1 repeatable, and give the operator the blast radius before anything lands.
 *Touches:* new rake task; the template linter's first rules.
