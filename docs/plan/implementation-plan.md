@@ -50,7 +50,7 @@ fact that CI has not yet run on this work at all.
 | Task | State |
 |---|---|
 | T-00 | **VOID** — the fork is out of scope (curator, 2026-08-05). See below. |
-| T-01 | **done** — reference date, canonicaliser, baseline commit, the 174-case value corpus, the per-adapter overlay, the 46-triple scope fixture and the `corpus` CI job. **It found defect D-1 on the way in** — see §Findings |
+| T-01 | **done** — reference date, canonicaliser, baseline commit, the 176-case value corpus, the per-adapter overlay, the 46-triple scope fixture and the `corpus` CI job. **It found defect D-1 on the way in** — see §Findings |
 | T-02 | not started |
 | T-03 | not started |
 | T-04 | **done** — `RedmineReporterDashboards::Positioned` replaces `up_acts_as_list` |
@@ -117,6 +117,26 @@ verified against 5.1-stable's `config/initializers/10-patches.rb`, which monkey-
 is the **first entry in `compat/`**, and it lives in `lib/redmine_reporter_dashboards/compat.rb`
 rather than `compat/base_record.rb` because Redmine puts a plugin's `lib/` on the autoload paths and
 Zeitwerk requires the path to match the constant.
+
+**D-3 · `sprite_icon` does not exist on Redmine 5.1 either — FIXED 2026-08-05.** With D-2 fixed, the
+same 5.1 job went from 92 errors to 27, all of them
+`ActionView::Template::Error: undefined method 'sprite_icon'`. `IconsHelper` arrived in Redmine 6.0;
+13 call sites in 9 files called it unguarded. The interesting part is that the *design* was already
+right — every one of those links already carries Redmine 5's CSS icon classes
+(`class: 'icon icon-settings'`) and `_report.html.erb` even documents "on Redmine 5 it renders no
+`<svg>`, so the label gives the link a body". Only the belief underneath was wrong: on 5.1 the method
+does not render nothing, it does not exist. So the fix is one helper —
+`ReporterProjectPagesHelper#reporter_dashboard_icon`, branching on the `reporter_dashboard_svg_icons?`
+predicate that was already there for the move controls — and no icon-name mapping at all, because the
+class on each link already IS the 5.1 icon. Both branches are asserted by stubbing the predicate, so
+the 5.1 path is testable on a machine that cannot run 5.1.
+
+**The corpus had a gap, and T-02's data found it.** The production survey showed every template
+writes `age_buckets: "30;60;90;180"` — the STRING form. `normalize_age_buckets` accepts a string or an
+Array, and the corpus only ever asked for the Array, so the branch every real caller goes through was
+unfrozen. Two cases added (`;` and `,` separated), plus an assertion that the string and Array
+spellings answer identically. Three boundaries, not production's four: four is defect D-1's trigger
+and belongs in `cap/age.*`, not in a parser case.
 
 **E-1 · an environment fact worth not rediscovering: MySQL 8 ignores a `projects`-keyed subquery in a
 LEFT JOIN's ON clause.** Measured on 8.0.46 while fixing the above: `projects.id IN (SELECT …)`
@@ -214,7 +234,7 @@ anyone touching these artefacts.
 - **Canonicaliser** — `spec/golden/corpus_canonicaliser.rb`, per §2 Step 0.
 - **Baseline** — `spec/golden/baseline.rb`: commit `eddb8fa`, not a tag, because this repository has
   none. See that file for the one way the reference can still be lost (a squash merge).
-- **The value corpus** — `spec/golden/corpus_cases.rb` declares **174 cases** over the six entry
+- **The value corpus** — `spec/golden/corpus_cases.rb` declares **176 cases** over the six entry
   points; `spec/golden/aggregation/values.jsonl` holds the answers with a manifest carrying the
   baseline commit, the pin, the zone and two digests (the file's, and the CASE LIST's, so a matrix
   that has moved on from its answers fails rather than passes). Caps covered **at** the boundary and

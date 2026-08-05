@@ -15,7 +15,7 @@ not moved.
 | `baseline.rb` | the commit the kernel is diffed against for gate G7 | it is a SHA |
 | `reference_date.rb` | the pinned date the corpus is generated with, and the refusal to run unpinned | n/a |
 | `corpus_canonicaliser.rb` | one result → one byte sequence (`technical-spec.md` §2 Step 0) | n/a |
-| `corpus_cases.rb` | **the questions**: 174 (entry point, scope, actor, arguments) tuples | n/a |
+| `corpus_cases.rb` | **the questions**: 176 (entry point, scope, actor, arguments) tuples | n/a |
 | `aggregation/values.jsonl` | **the answers**, one canonical JSON record per case | yes, from the baseline commit |
 | `aggregation/manifest.json` | provenance: baseline commit, reference date, zone, engine, digests | yes |
 | `aggregation/overlay/*.jsonl` | the per-engine exceptions the overlay declares | yes |
@@ -95,5 +95,12 @@ answering correctly and refuted it — which is why `mysql` and `mariadb` are no
 overlay families, and why the exhaustiveness assertion matters: it failed on MySQL for
 declaring an exception that engine did not need.
 
-That is the oracle earning its keep twice in one day: once on an engine CI had been
-reporting green for months, and once on the write-up of its own finding.
+**And T-02's production survey found a gap in it.** Every real template writes
+`age_buckets: "30;60;90;180"` — the string form — and the corpus only ever asked for the
+Array form, leaving the parsing branch every caller goes through unfrozen. Two cases were
+added, with an assertion that the two spellings answer identically. An oracle is only as
+good as its question list, and the question list is worth checking against what the
+templates actually do.
+
+That is the oracle earning its keep three times in one day: on an engine CI had been
+reporting green for months, on the write-up of its own finding, and on its own coverage.

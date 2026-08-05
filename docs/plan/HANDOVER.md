@@ -89,6 +89,12 @@ at boot — not at require time, which is why it survives a green rspec run and 
 full-application suite. The plan's future `compat/enum.rb` and `compat/serialize.rb` have
 to define `Compat::Enum` and `Compat::Serialize`, or live as methods in `compat.rb`.
 
+**Redmine 6.0 is where BOTH `ApplicationRecord` and `IconsHelper#sprite_icon` arrived.**
+Neither exists on 5.1, and calling either raises rather than degrading. Both were in this
+plugin from v0.5.0 (D-2, D-3). If you add anything that touches a Redmine core class or
+helper, check when it appeared — `git -C redmine ls-tree origin/5.1-stable <path>` answers
+it in one line, and the 5.1 minitest job answers it for real.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
@@ -148,13 +154,14 @@ record as of the last local run.
 
 | Configuration | Executed? | Result |
 |---|---|---|
-| Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 953 rspec + 97 adapter + 214 corpus + 130 minitest, 0 failures |
-| Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally** | 97 adapter + 214 corpus, 0 failures. **The run that found defect D-1** |
-| Redmine 6.1-stable, standalone, **MySQL 8.0.46** | **yes, locally** | 97 adapter + 214 corpus, 0 failures. **The run that refuted D-1's scope** and exposed E-1 |
+| Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 956 rspec + 96 adapter + 217 corpus + 133 minitest, 0 failures |
+| Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally** | 313 adapter+corpus, 0 failures. **The run that found defect D-1** |
+| Redmine 6.1-stable, standalone, **MySQL 8.0.46** | **yes, locally** | 97 adapter + 214 corpus, 0 failures (before the last two cases were added). **The run that refuted D-1's scope** and exposed E-1 |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
 | **CI** | **YES — first run 2026-08-05, run 30992686636** | 17 jobs, **5 red**: `corpus` ×3 (a missing `working-directory`), `adapter` MySQL 8 (D-1's scope + E-1), `minitest` 5.1 (**92 errors — D-2**). Everything else green |
+| **CI, second run 30998558913** | **YES** | **16 of 17 green**, including all three `corpus` jobs — the first real proof of gate G7's differential on PostgreSQL, MySQL 8 and MariaDB 11. The one red was `minitest` 5.1 again, 92 → **27 errors**, all D-3 (`sprite_icon`) |
 
 **MySQL and MariaDB cannot be installed at the same time** — the Debian packages
 conflict, and switching costs an apt purge plus a datadir re-init each way. Both have now

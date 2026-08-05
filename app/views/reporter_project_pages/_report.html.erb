@@ -17,7 +17,7 @@
       href as the visible link text. The label gives the link a body (and the
       accessible name); the `icon-only` class hides that text while `icon icon-pdf`
       shows the glyph (background image on R5, SVG sprite on R6). %>
-  <%= link_to sprite_icon('application-pdf', l(:label_reporter_export_report_pdf)),
+  <%= link_to reporter_dashboard_icon('application-pdf', l(:label_reporter_export_report_pdf)),
               report_pdf_reporter_project_page_path(project, tab: tab.id, block: block),
               class: 'icon icon-pdf icon-only reporter-report-pdf',
               target: '_blank', rel: 'noopener',

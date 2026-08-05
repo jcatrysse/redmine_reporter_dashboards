@@ -314,6 +314,15 @@ else
         expect(result('cap/age.past')).to eq(result('cap/age.at'))
       end
 
+      # The two spellings must be the SAME answer: a template writes
+      # `age_buckets: "30;60;90"` and a caller in Ruby writes [30, 60, 90]. Production
+      # uses the string form exclusively (T-02's survey), and it was the form this
+      # corpus did not cover until that survey said so.
+      it 'answers the string and Array spellings of age_buckets identically' do
+        expect(result('dimension/main.age.string_bounds')).to eq(result('dimension/main.age.created'))
+        expect(result('dimension/main.age.comma_bounds')).to eq(result('dimension/main.age.created'))
+      end
+
       # The boundary of the defect itself, so the 256-character limit is a measured
       # fact in the suite and not only a sentence in a comment.
       it 'is unaffected at three bounds, on either engine' do

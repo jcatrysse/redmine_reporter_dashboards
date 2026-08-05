@@ -25,6 +25,34 @@ module ReporterProjectPagesHelper
     Redmine::VERSION::MAJOR >= 6
   end
 
+  # ONE icon call for both icon systems, and the reason it exists is a correction:
+  # every view here already carries Redmine 5's CSS icon classes on the link
+  # (`class: 'icon icon-settings'`) and documents that "on Redmine 5 it renders no
+  # <svg>, so the label gives the link a body". That design was right. The belief
+  # underneath it was not — `sprite_icon` does not merely render nothing on Redmine
+  # 5.1, it DOES NOT EXIST there: IconsHelper arrived in 6.0. So every one of those
+  # views raised
+  #
+  #   ActionView::Template::Error: undefined method `sprite_icon'
+  #
+  # on 5.1, which is 27 of the 92 errors the first 5.1 CI run reported (the other 65
+  # were D-2, RedmineReporterDashboards::Compat.base_record). Nobody saw it because the
+  # full-application suite could not run in CI until T-09 removed the private-plugin
+  # secret.
+  #
+  # The label alone is exactly what the views already expect on 5.1: `icon-only` hides
+  # the text and `icon icon-<name>` paints the glyph from the CSS sprite. So no icon
+  # NAME mapping is needed — the class already on each link is the 5.1 icon.
+  #
+  # Not in `compat.rb` with base_record, deliberately: this one needs view context
+  # (`sprite_icon` itself), and the version predicate it branches on already lived
+  # here. One method, one divergence, one place — CLAUDE.md §4.
+  def reporter_dashboard_icon(name, label)
+    return sprite_icon(name, label) if reporter_dashboard_svg_icons?
+
+    label.to_s
+  end
+
   # A single move control (link) rendered version-safely. Used both for widget
   # movement and for tab ordering, so the two stay visually consistent and both
   # work on Redmine 5 and 6.
@@ -36,7 +64,7 @@ module ReporterProjectPagesHelper
     label = l(REPORTER_MOVE_LABELS[direction])
 
     if reporter_dashboard_svg_icons?
-      link_to sprite_icon(REPORTER_MOVE_ICONS[direction], label), url,
+      link_to reporter_dashboard_icon(REPORTER_MOVE_ICONS[direction], label), url,
               method: method, class: 'icon-only reporter-move-control',
               title: label, 'aria-label' => label
     else
@@ -72,7 +100,7 @@ module ReporterProjectPagesHelper
       contextual = ''.html_safe
       if manage_reporter_project_page?(project)
         moves = reporter_project_block_move_controls(block, tab, project)
-        close = link_to(sprite_icon('close', l(:button_delete)),
+        close = link_to(reporter_dashboard_icon('close', l(:button_delete)),
                         remove_reporter_project_block_path(project_id: project.id, block: block, tab: tab.id),
                         method: :delete,
                         class: 'icon-only icon-close', title: l(:button_delete))

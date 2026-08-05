@@ -310,10 +310,27 @@ module RrdGolden
                   'date_field' => 'sideways' })
         ]
 
-        cases + %w[created updated due].map do |field|
+        cases += %w[created updated due].map do |field|
           build("dimension/main.age.#{field}", 'dimension_breakdown', 'main', 'manager',
                 { 'group_by' => 'age', 'age_field' => field, 'age_buckets' => [30, 60, 90] })
         end
+
+        # THE STRING FORM, which is how a template actually writes it:
+        # `age_buckets: "30;60;90"`. normalize_age_buckets accepts both an Array and a
+        # `;`/`,`-separated string, and until the production templates were surveyed
+        # (T-02's DoR-1 data, 2026-08-05) this corpus only ever asked for the Array —
+        # so the parsing branch every real caller goes through was unfrozen.
+        #
+        # Three boundaries, not production's four: four crosses MariaDB's
+        # column-label limit and the answer would then be defect D-1's rather than the
+        # parser's. The four-boundary behaviour is already frozen by cap/age.at and
+        # cap/age.past, which is where that divergence belongs.
+        cases + [
+          build('dimension/main.age.string_bounds', 'dimension_breakdown', 'main', 'manager',
+                { 'group_by' => 'age', 'age_buckets' => '30;60;90' }),
+          build('dimension/main.age.comma_bounds', 'dimension_breakdown', 'main', 'manager',
+                { 'group_by' => 'age', 'age_buckets' => '30,60,90' })
+        ]
       end
 
       def crosstab_cases

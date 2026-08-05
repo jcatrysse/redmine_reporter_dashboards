@@ -85,15 +85,21 @@ request. Two suites run there, and they prove different things:
 `requires_redmine` is set to 5.1 to match this table. Earlier 5.x releases may
 well work; they are simply not tested, so the plugin does not claim them.
 
-**Redmine 5.1, stated plainly.** Until 2026-08-05 the plugin raised
-`NameError: uninitialized constant ApplicationRecord` on Redmine 5.1 the moment any
-dashboard page or plugin test touched `ReporterProjectTab` — 5.1 has no
-`ApplicationRecord` class, that arrived in Redmine 6.0. The line had been there since
-v0.5.0 and nothing caught it, because the full-application test suite could not run in
-CI at all until the private-plugin secret was removed; its first 5.1 run reported 92
-errors, every one of them that constant. It is fixed
-(`RedmineReporterDashboards::Compat.base_record`) and 5.1 now runs the full suite in CI
-like every other branch. The row above says "tested" on that basis and not on an older
+**Redmine 5.1, stated plainly.** Until 2026-08-05 the plugin did not work on Redmine 5.1
+at all, in two independent ways:
+
+1. `NameError: uninitialized constant ApplicationRecord` the moment any dashboard page or
+   plugin test touched `ReporterProjectTab`. Redmine 5.1 has no `ApplicationRecord`; that
+   class arrived in 6.0.
+2. `undefined method 'sprite_icon'` from every dashboard view. `IconsHelper` also arrived
+   in Redmine 6.0.
+
+Both lines had been there since v0.5.0, and nothing caught them because the
+full-application test suite could not run in CI at all until the private-plugin secret was
+removed. Its first 5.1 run reported 92 errors — 65 of the first kind, 27 of the second.
+Both are fixed (`RedmineReporterDashboards::Compat.base_record` and
+`ReporterProjectPagesHelper#reporter_dashboard_icon`), and 5.1 now runs the full suite in
+CI like every other branch. The row above says "tested" on that basis and not on an older
 belief.
 
 The plugin's own code stays inside Ruby 2.7 syntax, because that is the floor
