@@ -302,7 +302,41 @@ correct answer; and the two overlay entries deleted with `RATCHET` lowered to 0.
 `corpus (MariaDB 11)` CI cells judge. MariaDB is not installed in the session container. A red
 MariaDB cell after this lands is the measurement, not a regression.
 
-**Why it is still owed: session budget, stated plainly.** The design above is complete; what is not
+**ATTEMPTED AND REVERTED 2026-08-05, with three measurements worth more than the attempt.** The fix
+above was written in full, run, and then backed out. Nothing of it is in the tree; all three findings
+are, and they change what the next attempt has to do.
+
+1. **It is behaviour-preserving on PostgreSQL. All 217 corpus examples passed** with the fix in place,
+   which is the strongest evidence available without MariaDB: every one of the 176 recorded values —
+   every age case among them — was unchanged. The fix does what it claims on the engine that was
+   already correct.
+2. **`measure.nil?` is the wrong guard, and it fails SILENTLY.** `resolve_measure(nil, nil)` returns
+   `Measure.new(kind: :count)`, not nil — `raw_measure` answers `nil` and `:count` identically, which
+   is why nobody notices. So the dispatch never fired and the GROUP BY was still emitted. Guard on
+   `measure.nil? || measure.kind == :count`. This was caught by two assertions added *about the
+   mechanism* — "issues no GROUP BY for a counted age axis" and "counts every bucket in a single
+   query" — rather than by any assertion about the numbers, which all passed while the fix was inert.
+   **Write those two first.**
+3. **The real remaining work is 11 unit examples, and one of them is a DECISION.** In
+   `spec/sql_aggregation/query_aggregator_spec.rb`: nine in `group_by: age` (lines ~2035-2111) and two
+   in `drill-through descriptors the age dimension` (~2812-2826). Nine are stub-shape — that suite
+   stubs a relation that records `group(...).count`, and the fix calls `pluck`, so the double simply
+   does not answer. Mechanical.
+
+   The eleventh is not: **"keeps counts for a value outside the expected bucket list rather than
+   dropping them"** pins the kernel's *defensive* handling of a group value that is not one of its
+   labels. With bucket keys supplied by Ruby that state is unreachable by construction — which is
+   good, and is precisely what closes D-1, since "every key came back nil" IS that state. But it
+   means deleting an assertion that documents defensive behaviour, and that has to be argued in the
+   pull request rather than quietly rewritten to match.
+
+**Why it was reverted rather than pushed with 11 red examples:** they are in the *frozen kernel's*
+unit suite, and rewriting 11 assertions in a 2 800-line file at the end of a session — one of them a
+judgement about defensive behaviour — is how a suite starts lying. The tree is back at the last fully
+green commit. The next attempt starts from the three findings above and should take well under an
+hour.
+
+**Why it was still owed before that attempt: session budget, stated plainly.** The design above is complete; what is not
 done is writing it. It is a change to the byte-frozen kernel plus a new gate mechanism, and starting
 that with too little room left to review and re-run it is the one thing `CLAUDE.md` §6 refuses. The
 next session should be able to go straight to code from this entry.

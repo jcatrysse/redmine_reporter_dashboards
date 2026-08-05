@@ -279,9 +279,11 @@ of a CI that runs on fork pull requests.
    `KERNEL_FILES` is now a map (working-tree path => v0.5.0 blob path) so gate G7 compares
    the ported file with its baseline instead of comparing a path with itself. Do **not**
    write the D-1 fix and lower the overlay ratchet from a PostgreSQL-only run — see
-   §Findings — where the fix is now **fully specified**, including the fact that sizes
-   it: both overlay entries are count-mode cap cases, so a count-mode-only fix empties
-   the overlay and `RATCHET` goes to 0. Go straight to code from there.
+   §Findings — where the fix is fully specified AND where an **attempt that was reverted**
+   is written up. Read those three findings before writing a line: the fix is
+   corpus-clean on PostgreSQL, the obvious guard (`measure.nil?`) silently never fires,
+   and the remaining work is 11 named unit examples of which one is a decision about
+   defensive behaviour rather than a mechanical edit.
    Next after that: **T-09 onward**.
 
 ---
