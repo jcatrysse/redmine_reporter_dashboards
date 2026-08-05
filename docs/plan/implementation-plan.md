@@ -57,7 +57,7 @@ fact that CI has not yet run on this work at all.
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
 | T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
-| T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly three declared hunks**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 3`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on PostgreSQL only — MariaDB is CI's to judge** |
+| T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**, and the `corpus (MariaDB 11)` CI cell is green with it empty |
 | T-09 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -110,28 +110,33 @@ stack rather than read off the source:
    `PG::UndefinedColumn: column "rrd_short" does not exist`, because the SELECT that defined the alias
    was discarded.
 
-**So the fix is structural, and it is the one that makes the state unrepresentable rather than
-smaller.** The age axis has `fixed_keys`, so it does not need a `GROUP BY` at all: `dimension_totals`
-counts a dimension that declares `bucket_conditions` with the shape `completeness` already uses in
-the same file — `aggregate_row(base, conditions.map { |c| count_case(c) })`, ONE query, one
-`COUNT(DISTINCT CASE WHEN … THEN issues.id END)` per bucket, read back **positionally**. No group
-alias exists, so there is nothing for either end to truncate. Query count is unchanged, so T-03's
-budget for `dimension.age.string_bounds` (2) is unaffected — asserted, not assumed.
+**So the fix does not change the SQL at all — it changes how the result is READ.**
+`SELECT <group expression>, COUNT(DISTINCT issues.id) … GROUP BY <same expression>`, taken back
+**by position** with `pluck`, carries no alias for the two ends to disagree about. Same statement,
+same GROUP BY, same query count; one method, `measure_groups`, dispatches to `grouped_counts` for
+the counting measures. It covers every dimension and crosstabs too, not just `age` — any long
+group expression was exposed to the same truncation.
 
-**What landed, in one commit.** The three-hunk kernel edit; the **G7 declared-exception mechanism**
-(`spec/golden/kernel_exception.rb` + its spec — recorded baseline/current byte fragments, a reason
-each, `RATCHET = 3`, and the working file must equal the v0.5.0 blob with exactly those hunks
-applied); the MariaDB branch of `spec/adapter/query_aggregator_execution_spec.rb` deleted in favour
-of one expectation that holds on every engine; and both overlay entries deleted with
-`AdapterOverlay::RATCHET` lowered to **0** and `aggregation/overlay/mariadb.jsonl` removed.
+**The first attempt was different, was pushed, and was MEASURED WORSE — this is the finding that
+matters most here.** It gave the age dimension `bucket_conditions` and dropped the GROUP BY
+entirely, counting each bucket with its own `COUNT(DISTINCT CASE WHEN … THEN issues.id END)` —
+the shape `completeness` uses. That is correct, and it is *the plan's own prescription above*.
+It is also **dramatically slower on MariaDB, the engine the defect is on**: in the same CI job,
+`completeness.seven` (seven conditional aggregates) costs **25-50 s per call** at 10 000 issues
+where the grouped age read costs **0.02 s** — and the `adapter (MariaDB 11)` cell went from 5 m 39 s
+to over 35 minutes without finishing. The plan checked query COUNT, which is unchanged either way,
+and R7 sets no timing gate, so **nothing in the acceptance criteria could have caught this**. It was
+found by reading the CI cell rather than by a red test. Recorded here because the same trap is
+waiting for anyone who reaches for conditional aggregates to avoid a GROUP BY.
 
-*Deliberately NOT covered, and documented in the README rather than left silent:* age as a **measure**
-axis and age inside a **crosstab** stay on the `GROUP BY` path and stay exposed on MariaDB past ~4
-boundaries. No corpus case and no surveyed production template reaches either (every real template is
-count mode, and the non-cap age cases use three boundaries). Widening the fix means generalising
-`count_case` to arbitrary measures — a bigger change than the defect justifies today. Both paths are
-now *asserted* rather than merely described: `spec/adapter/query_aggregator_execution_spec.rb` has an
-example that pins the measure path still grouping.
+*Deliberately NOT covered, and documented in the README rather than left silent:* an age axis with
+a **measure** (`sum`, `avg`, `distinct`) still goes through `.sum` / `.average` / `.count`, each of
+which keys its result by the same alias, so it stays exposed on MariaDB past ~4 boundaries. A
+**crosstab in count mode IS covered** — it groups on two expressions and is read positionally like
+any other counted axis, which the first attempt did not manage. No corpus case and no surveyed
+production template reaches a measured age axis (every real template is count mode, and the non-cap
+age cases use three boundaries). Covering it means reimplementing three more grouped calculations —
+a bigger change than the defect justifies today.
 
 **Verification, and the honest limit of it.** All 176 recorded corpus values are byte-identical on
 PostgreSQL with the fix in place (217 corpus examples, 0 failures), the DB-less kernel suite is green
@@ -140,17 +145,17 @@ is 166 examples, 0 failures, **0 pending**. What none of that can do is exercise
 installed in this container, and per §1b the `adapter (MariaDB 11)` and `corpus (MariaDB 11)` CI
 cells are the measurement. **A red MariaDB cell after this lands is information, not a regression.**
 
-**Two things a later session should not have to rediscover.** `measure.nil?` is the WRONG guard and it
-fails SILENTLY — `resolve_measure(nil, nil)` returns `Measure.new(kind: :count)`, not nil, so the
-dispatch never fires while every number still agrees. The guard is `measure.nil? || measure.kind ==
-:count`, and it is held by two assertions *about the mechanism* — "issues no GROUP BY for a counted
-age axis" and "counts every bucket in a single query" — which are the only things that can see an
-inert fix. And the assertion **"keeps counts for a value outside the expected bucket list rather than
-dropping them"** was DELETED, not rewritten: it pinned defensive handling of a group key the DATABASE
-invented, and D-1 *is* that case, so the fix makes it unreachable by construction. Its replacement is
-the invariant that now holds — an axis with declared buckets cannot report a bucket it did not
-declare — and the same argument retired its sibling in the drill-through block. Both are argued in the
-pull request body rather than quietly matched to the new behaviour.
+**Two things a later session should not have to rediscover.** `measure.nil?` alone is the WRONG guard
+and it fails SILENTLY — `resolve_measure(nil, nil)` returns `Measure.new(kind: :count)`, not nil, so a
+dispatch written that way never fires while every number still agrees. The guard is `measure.nil? ||
+measure.kind == :count`. And **no assertion about the numbers can see this fix at all**: on a stub, and
+on PostgreSQL, the alias-keyed read answers correctly too. Only assertions about HOW the answer is
+fetched can — "reads its groups positionally, never through a column alias", "still groups, in a single
+query", and at the adapter level "selects the group expression with no alias, and still groups".
+**Write those first.** Note also what did NOT have to change: the kernel still folds whatever keys the
+database returned, so the defensive example *"keeps counts for a value outside the expected bucket list
+rather than dropping them"* survives untouched. The first attempt had to delete it, which was a signal
+about that attempt rather than about the assertion.
 
 **It is also evidence on C-003** (`claims.json`, updated 2026-08-05): the defect was fixed *inside the
 ported kernel* under a declared exception, not by the rewrite that claim's `evidence_against`

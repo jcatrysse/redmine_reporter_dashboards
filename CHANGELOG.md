@@ -12,24 +12,24 @@ All notable changes to this plugin are documented in this file.
   so an issue could disappear from the count as well as from its bucket. PostgreSQL and
   MySQL 8.0 were unaffected, measured on both.
 
-  The age dimension grouped on a generated `CASE`. ActiveRecord reads a grouped result
-  back out of the row *by the group expression's own text*, and MariaDB truncates a
-  returned column label at 256 characters — so past four age boundaries the two ends
-  were asking and answering with different names, and every key came back `NULL`. Four
-  boundaries is the default (`30, 60, 90, 180`).
+  The age dimension groups on a generated `CASE`. ActiveRecord's grouped `.count`
+  derives a result-column *alias* from that expression's own text and then looks each
+  key up by it, and MariaDB truncates a returned column label at 256 characters — so
+  past four age boundaries the two ends were asking and answering with different names,
+  and every key came back `NULL`. Four boundaries is the default (`30, 60, 90, 180`).
 
-  A counted age axis no longer groups at all. Its buckets are fixed and known before the
-  query runs, so they are counted with one conditional aggregate each in a single
-  statement and read back **by position**. There is no column label left for either end
-  to truncate. The workaround this project previously documented — pass three boundaries
-  or fewer on MariaDB — is no longer needed for a counted axis at any boundary count.
+  A counted axis is now read back **by position** rather than by that alias, so there is
+  nothing left for the two ends to disagree about. It is the same statement, the same
+  `GROUP BY` and the same number of queries; only the way the result is read changed.
+  The workaround previously documented — pass three boundaries or fewer on MariaDB — is
+  no longer needed at any boundary count. This covers every dimension and crosstabs too,
+  not only `age`: any long group expression was exposed to the same truncation.
 
   **Still outstanding, deliberately:** an age axis with `measure:` (`sum`, `avg`,
-  `distinct`) or inside a crosstab keeps its `GROUP BY` and is still affected on MariaDB
-  past ~4 boundaries. Covering those means generalising the per-bucket aggregate to
-  arbitrary measures, which is a larger change than this defect justifies; see the
-  README's database section for what to do in the meantime. No behaviour changed on
-  PostgreSQL or MySQL: the 176-value golden aggregation corpus is byte-identical.
+  `distinct`) goes through `.sum` / `.average` / `.count`, which key their results by
+  the same alias, and is still affected on MariaDB past ~4 boundaries. See the README's
+  database section. No behaviour changed on PostgreSQL or MySQL: the 176-value golden
+  aggregation corpus is byte-identical.
 
 ### Added
 

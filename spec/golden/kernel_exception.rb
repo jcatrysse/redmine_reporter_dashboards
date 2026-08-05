@@ -62,41 +62,42 @@ module RrdGolden
     # "(none)" bucket, and the total was taken from whichever group the server
     # returned last — so an issue could vanish from the count as well.
     #
-    # The three hunks below are one change: the counted age axis stops grouping. It is
-    # split into three entries rather than one because they are three separate places
-    # in a 2 300-line file, and a single hunk spanning them would license every line
-    # between — which is most of the kernel.
+    # ONE hunk, in ONE method, and the smallness is the argument: `measure_groups`
+    # stops asking ActiveRecord for a grouped `.count` and reads the same GROUP BY
+    # positionally instead. Nothing about the dimensions, the axis or the SQL changes —
+    # only how the result rows are taken off the wire.
     #
-    # Shortening the expression was the plan's original prescription and it does not
+    # Shortening the expression was the plan's original prescription and does not
     # survive measurement: the alias is ALREADY truncated on PostgreSQL (limit 63) and
     # PostgreSQL answers correctly, because ActiveRecord asks for the same truncated
     # name it sent. The defect is the two ends DISAGREEING, so a shorter CASE only
     # moves the cliff — and MAX_AGE_BUCKETS is 24, which cannot fit in 256 characters
     # at ~60 characters a branch. Introducing a select alias is not available either:
     # `execute_grouped_calculation` overwrites the relation's select list unless there
-    # is a HAVING clause, so `.select("… AS x").group("x")` raises. Removing the alias
-    # is what is left, and it makes the defect unrepresentable rather than smaller.
+    # is a HAVING clause, so `.select("… AS x").group("x")` raises.
+    #
+    # Counting each bucket with its own conditional aggregate and dropping the GROUP BY
+    # was written, pushed, and MEASURED WORSE: that shape costs ~25-50s per call on
+    # MariaDB at 10 000 issues (the `completeness.seven` cells in the same CI job say
+    # so) against ~0.02s for the grouped read. It removed the alias and re-broke the
+    # engine it was fixing. Reading the same GROUP BY positionally removes the alias
+    # and keeps the plan.
     ENTRIES = [
-      { id: 'dimension-struct', file: KERNEL,
-        reason: 'DEFECT D-1: Dimension gains `bucket_conditions` — the per-bucket SQL a ' \
-                'dimension supplies when it can be counted without a GROUP BY. Documented ' \
-                'in the same comment block as every other member.' },
-      { id: 'dimension-totals', file: KERNEL,
-        reason: 'DEFECT D-1, the fix itself: `single_result` reads its groups through ' \
-                '`dimension_totals`, which counts a bucket-condition dimension with one ' \
-                'conditional aggregate per bucket in a single query, read back ' \
-                'POSITIONALLY. No group alias exists, so neither end can truncate one.' },
-      { id: 'age-bucket-conditions', file: KERNEL,
-        reason: 'DEFECT D-1: the age dimension supplies those conditions. The boundary ' \
-                'VALUES are computed once and shared with the CASE, which is unchanged — ' \
-                'the measure and crosstab paths still group on it, and are still exposed ' \
-                'on MariaDB past four boundaries (README, database section).' }
+      { id: 'grouped-counts', file: KERNEL,
+        reason: 'DEFECT D-1: a counted axis is read through `grouped_counts` — SELECT ' \
+                '<group expression>, COUNT(DISTINCT issues.id) ... GROUP BY <same>, taken ' \
+                'back BY POSITION — instead of ActiveRecord\'s grouped `.count`, which ' \
+                'looks each key up by a column alias derived from the expression\'s text ' \
+                'and that MariaDB truncates at 256 characters. Same statement, same ' \
+                'query count; only the read changes. Measures (sum/avg/distinct) still ' \
+                'go through `.count`/`.sum`/`.average` and are still exposed — README, ' \
+                'database section.' }
     ].freeze
 
     # The ratchet. Like AdapterOverlay's, it is the COMMITTED SIZE of ENTRIES and not a
     # budget: the spec fails when ENTRIES is longer AND when RATCHET is larger, so
     # neither a smuggled hunk nor a ratchet left high after one is removed can pass.
-    RATCHET = 3
+    RATCHET = 1
 
     class << self
       def entries_for(current_path)

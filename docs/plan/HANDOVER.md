@@ -68,20 +68,29 @@ Copy them back out before committing — `spec/golden/README.md` has the command
 **MariaDB truncates a returned column label at 256 characters, and ActiveRecord reads
 grouped results back BY THE GROUP EXPRESSION'S TEXT.** Group on anything longer and
 every key comes back nil, the result collapses into one bucket and the count is silently
-wrong. This was defect D-1 (`implementation-plan.md` §Findings), and it is **fixed** —
-the counted age axis no longer groups at all. **The trap is not.** It applies to any
-FUTURE grouping expression: keep them short, or do what the age axis now does and count
-the buckets with conditional aggregates read back positionally. Note that aliasing does
-NOT save you — the alias is derived from the expression's text and is already truncated
-on PostgreSQL, which answers correctly; the defect is the two ends *disagreeing* about
-the truncation, not the length itself. **MySQL 8.0 does NOT do this** — it was written up
-as a MySQL-family defect and the first CI run refuted that, which is why the overlay has
-a `mariadb` family separate from `mysql`. That family survives the fix; the reason it
-exists is a property of the engines, not of the defect.
+wrong. This was defect D-1 (`implementation-plan.md` §Findings), and the COUNTING path is
+**fixed** — `measure_groups` reads a counted axis positionally (`SELECT <expr>, COUNT(...)
+... GROUP BY <expr>` through `pluck`) instead of through ActiveRecord's alias-keyed
+`.count`. **The trap is not fixed for anything that still uses `.count`/`.sum`/`.average`
+on a grouped relation**, which is every `measure:` — those key their results by the same
+alias, and are still exposed past ~4 age boundaries. Deliberate, and in the README's
+database section.
 
-**A measured or crosstabbed `group_by: age` still groups on the CASE**, so it is still
-exposed on MariaDB past ~4 boundaries. That is deliberate and documented in the README's
-database section — not an oversight, and not something to "finish" without reading why.
+Note that shortening or aliasing the expression does NOT save you: the alias is derived
+from the expression's text and is ALREADY truncated on PostgreSQL, which answers
+correctly. The defect is the two ends *disagreeing* about the truncation, not the length.
+**MySQL 8.0 does NOT do this** — it was written up as a MySQL-family defect and the first
+CI run refuted that, which is why the overlay has a `mariadb` family separate from
+`mysql`. That family survives the fix; the reason it exists is a property of the engines.
+
+**Do NOT "fix" a long group expression by replacing the GROUP BY with one conditional
+aggregate per bucket.** That was D-1's first attempt: it is correct, it removes the alias,
+and it is dramatically SLOWER on MariaDB — the engine the defect is on. Measured in the
+same CI job: `completeness.seven` (seven `COUNT(DISTINCT CASE …)` in one statement) costs
+**25-50 s per call** at 10 000 issues where the grouped read costs **0.02 s**, and the
+`adapter (MariaDB 11)` cell went from 5 m 39 s to over 35 minutes without finishing.
+Query COUNT is identical either way, which is the only thing R7 measures — so **no gate in
+this project can catch it**. Read the CI cell's wall clock.
 
 **MySQL 8 evaluates `projects.<col> IN (SELECT …)` inside a LEFT JOIN's ON clause as
 TRUE.** Measured on 8.0.46 (E-1 in §Findings). An entitlement check written that way
@@ -170,11 +179,12 @@ be held back or pushed, the answer was push. So:
 - **Do not weaken an assertion to make the local suite green.** If an assertion has to
   change because the implementation legitimately made its subject unreachable, that is an
   argument for the pull request body, not an edit that quietly matches the new behaviour.
-  D-1's fix hit this twice — *"keeps counts for a value outside the expected bucket list"*
-  and its drill-through sibling, both pinning defensive handling of a group key the
-  DATABASE invented, which is precisely what the fix makes unreachable. Both were
-  **deleted and replaced by the invariant that took their place**, and argued in the pull
-  request. That is the shape to copy: delete and state the inverse, never soften in place.
+  D-1's first attempt hit this: it made *"keeps counts for a value outside the expected
+  bucket list"* unreachable and needed 11 unit examples rewritten. **The fix that actually
+  landed needed none of that** — it still folds whatever keys the database returned, so
+  that example survives untouched. Worth remembering as a design smell: when a change
+  forces you to delete assertions about defensive behaviour, ask whether a smaller change
+  gets the same correctness. Here one did.
 
 ---
 
@@ -241,8 +251,9 @@ record as of the last local run.
 | Configuration | Executed? | Result |
 |---|---|---|
 | Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 956 rspec + 96 adapter + 217 corpus + 133 minitest, 0 failures |
-| **Redmine 6.1-stable, standalone, PostgreSQL 16 — after D-1's fix** | **yes, locally (2026-08-05)** | 1128 rspec + 157 adapter + 217 corpus + 139 minitest, **0 failures**. Plus `spec/golden` from the PLUGIN CHECKOUT (where gate G7 has its git history): 166 examples, 0 failures, **0 pending**. The corpus is byte-identical to before the fix — all 176 recorded values unchanged |
-| **D-1's fix on MariaDB** | **no, and cannot be here** | MariaDB is not installable beside MySQL in this container. The `adapter (MariaDB 11)` and `corpus (MariaDB 11)` CI cells are the measurement, per §1b. **A red MariaDB cell after this lands is information, not a regression** |
+| **Redmine 6.1-stable, standalone, PostgreSQL 16 — after D-1's fix** | **yes, locally (2026-08-05)** | 1127 rspec + 156 adapter + 217 corpus + 139 minitest, **0 failures**. Plus `spec/golden` from the PLUGIN CHECKOUT (where gate G7 has its git history): 0 pending. The corpus is byte-identical to before the fix — all 176 recorded values unchanged |
+| **D-1's FIRST attempt, on MariaDB (CI run 31034989145)** | **YES, and it is why that attempt was replaced** | `corpus (MariaDB 11)` **green** — the fix was correct, and the overlay was rightly emptied. `adapter (MariaDB 11)` ran **over 35 minutes without finishing** against 5 m 39 s before it: the conditional-aggregate shape is pathologically slow on MariaDB at 10 000 issues. Correctness confirmed, performance refuted, in the same run |
+| **D-1's fix on MariaDB** | **not locally, and cannot be** | MariaDB is not installable beside MySQL in this container. The `adapter (MariaDB 11)` and `corpus (MariaDB 11)` CI cells are the measurement, per §1b — **and for this change, the cell's WALL CLOCK is part of the measurement, not just its colour** |
 | Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally** | 313 adapter+corpus, 0 failures. **The run that found defect D-1** |
 | Redmine 6.1-stable, standalone, **MySQL 8.0.46** | **yes, locally** | 97 adapter + 214 corpus, 0 failures (before the last two cases were added). **The run that refuted D-1's scope** and exposed E-1 |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
@@ -297,13 +308,14 @@ of a CI that runs on fork pull requests.
 2. **T-03's aggregation half is done**, so `CLAUDE.md` §1's "no aggregator change before
    T-03" guard has expired. **T-03's HTML|PDF half stays owed by T-10** (P-2), recorded in
    the artefact as blocked.
-3. **D-1 is FIXED**, in T-08, where the plan said it had to land. The counted age axis no
-   longer groups; gate G7 grew a declared-exception mechanism to express "the blob plus
-   exactly these three argued hunks" (`spec/golden/kernel_exception.rb`); the per-adapter
-   overlay is empty again with `RATCHET = 0`. **Verified on PostgreSQL only** — MariaDB is
-   not installable beside MySQL in this container, so the `adapter (MariaDB 11)` and
-   `corpus (MariaDB 11)` CI cells are the measurement, per §1b. What is still exposed, on
-   purpose: a MEASURED or crosstabbed age axis (README, database section).
+3. **D-1 is FIXED**, in T-08, where the plan said it had to land. A counted axis is read
+   positionally instead of through ActiveRecord's alias-keyed grouped `.count`; gate G7
+   grew a declared-exception mechanism to express "the blob plus exactly this one argued
+   hunk" (`spec/golden/kernel_exception.rb`); the per-adapter overlay is empty again with
+   `RATCHET = 0`, and the `corpus (MariaDB 11)` CI cell is green with it empty. What is
+   still exposed, on purpose: a MEASURED age axis (README, database section). Read the
+   §Findings entry before touching it — the first attempt is written up there and the
+   reason it was replaced is a performance fact, not a correctness one.
 4. **T-02 is done.** `rake reporter_dashboards:import:plan` is the repeatable form of the
    R-15 measurement, and `RedmineReporterDashboards::TemplateLinter` is the linter FR-71
    later puts behind the editor's lint panel — so extend that one rule table rather than
@@ -317,7 +329,7 @@ of a CI that runs on fork pull requests.
    path => v0.5.0 blob path) so gate G7 compares the ported file with its baseline instead of
    comparing a path with itself. G7 now reconstructs the expected file as *blob + declared
    hunks* rather than diffing: `drill_through.rb` declares none and is held to plain
-   byte-identity; `query_aggregator.rb` declares three, all D-1's. **There is no writer for
+   byte-identity; `query_aggregator.rb` declares ONE, D-1's. **There is no writer for
    those recorded fragments, deliberately** — an overlay entry records a MEASUREMENT and can
    be regenerated, an exception records an ARGUMENT and must be written by hand with its
    reason, or the gate becomes a formality. Next: **T-09 onward**.

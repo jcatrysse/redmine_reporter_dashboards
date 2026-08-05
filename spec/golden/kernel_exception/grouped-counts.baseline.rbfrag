@@ -1,0 +1,10 @@
+    # {group value => measure}, the grouped counterpart.
+    def self.measure_groups(relation, measure)
+      raw = raw_measure(relation, measure)
+      return {} unless raw.is_a?(Hash)
+
+      raw.each_with_object({}) { |(key, value), out| out[key] = measure_number(value, measure) }
+    end
+    private_class_method :measure_groups
+
+    def self.raw_measure(relation, measure)

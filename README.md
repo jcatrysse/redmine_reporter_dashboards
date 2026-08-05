@@ -79,7 +79,7 @@ request. Two suites run there, and they prove different things:
 |----------|--------|
 | PostgreSQL 16 | tested — `spec/adapter` runs against it |
 | MySQL 8.0 | tested — `spec/adapter` runs against it |
-| MariaDB 11 | tested — `spec/adapter` runs against it |
+| MariaDB 11 | tested — `spec/adapter` runs against it. **One remaining limitation: a MEASURED `group_by: age` with four or more boundaries — see below** |
 | anything else | not supported. The aggregation tags refuse to guess at date formatting and log one clear line instead — SQLite included |
 
 `requires_redmine` is set to 5.1 to match this table. Earlier 5.x releases may
@@ -147,42 +147,42 @@ normally, and a dashboard that contains one of those stays usable.
 
 #### Fixed: `group_by: age` used to report everything as `(none)` on MariaDB
 
-**If you run MariaDB and used `group_by: age`, your aging charts were wrong before this
-release.** Found on 2026-08-05 by the golden aggregation corpus on MariaDB 10.11 and
-confirmed on MariaDB 11. **PostgreSQL 16 and MySQL 8.0 were unaffected** — measured, on
-both — so nothing changes for those engines.
+**If you run MariaDB and have an aging chart, it was wrong before this release** — and
+worse than wrong: the total was taken from whichever group the server returned last, so
+an issue could disappear from the count as well as from its bucket. Found on 2026-08-05
+by the golden aggregation corpus on MariaDB 10.11 and confirmed on MariaDB 11.
+**PostgreSQL 16 and MySQL 8.0 were unaffected** — measured, on both — so nothing changes
+for those engines.
 
-The `age` dimension grouped on a generated `CASE` expression. ActiveRecord reads the
-group key back out of the result row *by the expression's own text*, and MariaDB
-truncates a returned column label at 256 characters. Past that limit the lookup missed,
-every group key came back `NULL`, and the whole chart collapsed into the `(none)`
-bucket — with a total taken from whichever group the server happened to return last, so
-an issue could vanish from the count as well. **Four age boundaries are enough to cross
-the limit, and the default is four** (`30, 60, 90, 180`), so this was the default
-behaviour on MariaDB.
+The `age` dimension groups on a generated `CASE`. ActiveRecord's grouped `.count`
+derives a result-column *alias* from that expression's own text and then looks each key
+up by it, and MariaDB truncates a returned column label at 256 characters. Past that
+limit the two ends were asking and answering with different names: every key came back
+`NULL` and the whole chart collapsed into the `(none)` bucket. **Four age boundaries are
+enough to cross it, and the default is four** (`30, 60, 90, 180`).
 
-A counted age axis no longer groups at all. Its buckets are fixed and known in Ruby, so
-they are read from one conditional aggregate per bucket in a single query, *by
-position*. There is no column label for either end to truncate, and the workaround this
-section used to recommend — pass three boundaries or fewer — is no longer needed at any
-boundary count, up to the 24 the plugin allows.
+A counted axis is now read back **by position** — `SELECT <expression>, COUNT(DISTINCT
+issues.id) … GROUP BY <expression>` — so there is no alias for either end to disagree
+about. It is the same statement and the same amount of work for the server; only the way
+the result is read changed. The workaround this section used to recommend, pass three
+boundaries or fewer on MariaDB, is no longer needed for a counted axis at any boundary
+count, up to the 24 the plugin allows. This applies to every dimension, not just `age`:
+any long group expression was exposed to the same truncation.
 
 **One case is deliberately not covered**, because it needs a different change and no
 template surveyed in this project reaches it:
 
 | `group_by: age` block | MariaDB |
 |---|---|
-| a plain count, at any boundary count | correct |
-| with `measure: sum \| avg \| distinct` | still grouped, so still wrong past ~four boundaries |
-| as `split_by:`, or with a `split_by:` of its own (a crosstab) | still grouped, same |
+| a plain count, at any boundary count — including inside a crosstab | correct |
+| with `measure: sum \| avg \| distinct` | still read through the alias, so still wrong past ~four boundaries |
 
-Those paths keep the `GROUP BY` because reading them positionally means generalising
-the per-bucket aggregate to arbitrary measures, which is a larger change than the
-defect justifies. **On MariaDB, a measured or crosstabbed age axis should stay at three
-boundaries or fewer.** Nothing 500s in any case, and no other dimension is affected —
-`period`, the core fields and `cf_<id>` all group on a bare column or a short function.
+Those measures go through ActiveRecord's `.sum` / `.average` / `.count`, each of which
+keys its result by the same alias. Covering them means reimplementing three more grouped
+calculations, which is a larger change than this defect justifies today. **On MariaDB, a
+*measured* age axis should stay at three boundaries or fewer.** Nothing 500s in any case.
 
-#### One known database limitation: a MEASURED `group_by: age` on MariaDB with `ONLY_FULL_GROUP_BY`
+#### One known database limitation: `group_by: age` on MariaDB with `ONLY_FULL_GROUP_BY`
 
 Every dimension groups on a bare column or a plain function — except `age`, whose
 group expression is unavoidably a `CASE` over date boundaries. MariaDB's
@@ -191,10 +191,6 @@ the same expression as the `CASE` in the `GROUP BY`, so it rejects the statement
 `'created_on' isn't in GROUP BY`. PostgreSQL and MySQL 8 both accept it (MySQL has
 had expression matching since 5.7.5, and `ONLY_FULL_GROUP_BY` is in its default
 `sql_mode`).
-
-This now applies **only to the same paths as the section above** — `measure:` on an age
-axis, and age in a crosstab. A plain counted age axis issues no `GROUP BY`, so there is
-nothing for the check to reject.
 
 `ONLY_FULL_GROUP_BY` is **not** in MariaDB's default `sql_mode`, so this only bites
 where a DBA has turned it on — and note that Rails appends to the server's mode

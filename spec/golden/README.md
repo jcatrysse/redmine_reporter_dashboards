@@ -108,8 +108,9 @@ cp -r redmine/plugins/redmine_reporter_dashboards/spec/golden/{aggregation,scope
 
 **Defect D-1** — `group_by: age` collapsed into the `(none)` bucket on **MariaDB**
 whenever the generated `CASE` passed 256 characters, which four age boundaries do, which
-is the default. **Fixed in T-08**, where the plan said it had to land: the counted age
-axis no longer groups, so there is no returned column label for MariaDB to truncate. The
+is the default. **Fixed in T-08**, where the plan said it had to land: a counted axis is
+read back BY POSITION rather than through ActiveRecord's alias-keyed grouped `.count`,
+so there is no returned column label for either end to disagree about. The
 overlay's only two entries are gone and `RATCHET` is back to **0** — which is the
 mechanism working as designed rather than the entries having been wrong. "A named
 pre-existing defect is a TEMPORARY entry; the commit that fixes it deletes the entry and

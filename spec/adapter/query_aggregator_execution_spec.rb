@@ -240,29 +240,27 @@ else
     # Found on 2026-08-05 by the golden corpus (T-01) on MariaDB 10.11, confirmed by
     # the first CI run on MariaDB 11, and MEASURED ABSENT on MySQL 8.0.46.
     #
-    # The age dimension grouped on a generated CASE. ActiveRecord reads a grouped
-    # result back BY THE EXPRESSION'S OWN TEXT, and MariaDB truncates a returned column
-    # label at 256 characters: measured with that shape, 261 characters still worked
-    # and 262 did not. Past it the lookup missed, every group key came back nil, and
-    # the entire result collapsed into the "(none)" bucket with a total taken from
-    # whichever group the server returned last — so an issue vanished from the count.
+    # The age dimension groups on a generated CASE. ActiveRecord's grouped `.count`
+    # derived a result-column ALIAS from the expression's own text and looked each key
+    # up by it, and MariaDB truncates a returned column label at 256 characters:
+    # measured with this shape, 261 characters still works and 262 does not. Past it
+    # the lookup missed, every group key came back nil, and the entire result collapsed
+    # into the "(none)" bucket with a total taken from whichever group the server
+    # returned last — so an issue vanished from the count as well.
     #
-    # FOUR boundaries cross the limit and DEFAULT_AGE_BUCKETS is [30, 60, 90, 180], so
-    # this was the DEFAULT behaviour on MariaDB, in production. Every example above
-    # uses three boundaries or fewer, which is the only reason CI had been green.
+    # FOUR boundaries cross the limit, and DEFAULT_AGE_BUCKETS is [30, 60, 90, 180], so
+    # this was the DEFAULT on MariaDB, in production. Every example above uses three
+    # boundaries or fewer, which is the only reason CI had been green.
     #
-    # The fix is in `dimension_totals`: a counted axis with declared buckets is read
-    # from one conditional aggregate per bucket, POSITIONALLY, and issues no GROUP BY.
-    # No column label exists, so neither end can truncate one — the defect is
-    # unrepresentable rather than patched. Shortening the CASE was the plan's original
-    # prescription and would only have moved the cliff; the alias is already truncated
-    # on PostgreSQL, which answers correctly, so the length was never the defect.
+    # The fix keeps the GROUP BY and changes how it is READ: `SELECT <expr>,
+    # COUNT(DISTINCT issues.id) ... GROUP BY <expr>`, taken back BY POSITION, so no
+    # alias exists for the two ends to disagree about. Shortening the CASE would only
+    # have moved the cliff — on PostgreSQL the alias is already truncated (limit 63)
+    # and the answer is correct, because AR asks for the same truncated name it sent.
     #
-    # The branch that used to live here — MariaDB pinning the defect, every other
-    # engine pinning the intent — is gone, and its disappearance is the point: ONE
-    # expectation now holds on all three engines. What it CANNOT do is prove that on
-    # MariaDB from this container, which has no MariaDB installed; the `adapter
-    # (MariaDB 11)` CI cell is the measurement.
+    # The MariaDB branch that used to live here is gone, and its absence is the point:
+    # ONE expectation now holds on all three engines. What this container cannot do is
+    # run MariaDB, so the `adapter (MariaDB 11)` CI cell is the measurement.
     # ----------------------------------------------------------------
 
     describe 'the age dimension with the DEFAULT boundaries (defect D-1)' do
@@ -280,8 +278,7 @@ else
 
       # Was "the boundary of the defect": three boundaries stayed under the limit and
       # were correct everywhere, which is what made the cause a measured fact rather
-      # than a comment. Kept because the fix must not have moved the cliff either —
-      # under and over the old limit now answer alike.
+      # than a comment. Kept, because the fix must not have moved the cliff either.
       it 'is correct at three boundaries on every engine' do
         result = described_class.dimension_breakdown(main, group_by: 'age',
                                                            age_buckets: [30, 60, 90])
@@ -290,10 +287,10 @@ else
           .to eq([['0-30', 1], ['31-60', 0], ['61-90', 0], ['>90', 3]])
       end
 
-      # AT the cap, where the old expression was 1 506 characters — nearly six times
-      # the limit that broke it. Nothing about the fix scales with the boundary count,
-      # and this is what says so on the engine that could not survive it before.
-      it 'is correct at the 24-boundary cap, where the CASE was 1 506 characters' do
+      # AT the cap, where the CASE is 1 506 characters — nearly six times the limit
+      # that broke it. Nothing about the fix scales with the boundary count, and this
+      # is what says so on the engine that could not survive it before.
+      it 'is correct at the 24-boundary cap, where the CASE is 1 506 characters' do
         bounds = (1..described_class::MAX_AGE_BUCKETS).map { |n| n * 30 }
         result = described_class.dimension_breakdown(main, group_by: 'age', age_buckets: bounds)
 
@@ -302,10 +299,13 @@ else
         expect(result['total']).to eq(4)
       end
 
-      # The other half of the fix, stated as a query fact rather than inferred from the
-      # numbers: no GROUP BY is issued at all. On a stub this is assertable directly;
-      # here it is asserted against a real adapter, which is where it matters.
-      it 'issues no GROUP BY for the counted age axis' do
+      # The fix itself, as a property of the STATEMENT rather than of the numbers —
+      # the numbers were already right on this engine before it. Two halves: the
+      # SELECT carries no alias for the group expression (so nothing can truncate
+      # one), and the GROUP BY is still there (so the server does the same work it
+      # always did — one conditional aggregate per bucket would also have removed the
+      # alias, and is dramatically slower on MariaDB).
+      it 'selects the group expression with no alias, and still groups' do
         sql = []
         subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
           sql << payload[:sql]
@@ -316,8 +316,12 @@ else
           ActiveSupport::Notifications.unsubscribe(subscriber)
         end
 
-        expect(sql).not_to be_empty
-        expect(sql.select { |statement| statement.match?(/GROUP BY/i) }).to be_empty
+        grouped = sql.select { |statement| statement.match?(/GROUP BY/i) }
+        expect(grouped.length).to eq(1)
+        expect(grouped.first).to match(/COUNT\(DISTINCT issues\.id\)/i)
+        expect(grouped.first).not_to match(/END AS /i),
+                                     'the group expression carries an alias again — that alias is ' \
+                                     'what MariaDB truncates, and defect D-1 is back'
       end
     end
 
@@ -635,41 +639,20 @@ else
         end
       end
 
-      # The age dimension was the one whose group expression is unavoidably a CASE, and
-      # this example used to skip on MariaDB: MySQL 8 matches an identical select-list
-      # expression against the GROUP BY and accepts it, while MariaDB's matcher does not
-      # recognise CASE-family items and rejected the statement outright.
-      #
-      # D-1's fix removed the GROUP BY from this path, so there is no CASE for either
-      # matcher to judge and the skip has no subject left. Un-skipped rather than
-      # re-worded: a skip whose stated reason has stopped being true is worse than no
-      # coverage, because it reads as a known limitation that is still there.
-      #
-      # The measure and crosstab paths DO still group on the CASE, and the limitation
-      # is still theirs — see the README's database section, and the example below.
-      it 'counts the age axis under ONLY_FULL_GROUP_BY on every engine' do
-        H.with_only_full_group_by do
-          result = described_class.dimension_breakdown(main, group_by: 'age',
-                                                             age_buckets: [30, 60])
-          expect(result['buckets'].map { |b| [b['label'], b['count']] })
-            .to eq([['0-30', 1], ['31-60', 0], ['>60', 3]])
-        end
-      end
-
-      # The half the fix deliberately did NOT cover, asserted so that "still exposed"
-      # is a tested statement rather than a README sentence. A MEASURE on the age axis
-      # keeps its GROUP BY on the CASE, so MariaDB with ONLY_FULL_GROUP_BY still
-      # rejects it — and every aggregator entry point logs and degrades rather than
-      # raising, so what a caller sees there is a smaller answer, not an exception.
-      it 'still groups on the age CASE for a MEASURE, which MariaDB refuses' do
+      # The age dimension is the one whose group expression is unavoidably a CASE.
+      # MySQL 8 matches an identical select-list expression against the GROUP BY and
+      # accepts it; MariaDB's matcher does not recognise CASE-family items and rejects
+      # the statement. Asserted where it holds, skipped with the reason where it does
+      # not, rather than pinned to whichever engine happens to run.
+      it 'groups on the age CASE — on MySQL, but not on MariaDB' do
         skip 'MariaDB with ONLY_FULL_GROUP_BY rejects a CASE in the GROUP BY — see the ' \
              'database support section in the README' if H.mariadb?
 
         H.with_only_full_group_by do
           result = described_class.dimension_breakdown(main, group_by: 'age',
-                                                             age_buckets: [30, 60],
-                                                             measure: 'sum', of: 'spent_hours')
-          expect(result['buckets'].map { |b| b['label'] }).to eq(['0-30', '31-60', '>60'])
+                                                             age_buckets: [30, 60])
+          expect(result['buckets'].map { |b| [b['label'], b['count']] })
+            .to eq([['0-30', 1], ['31-60', 0], ['>60', 3]])
         end
       end
     end
