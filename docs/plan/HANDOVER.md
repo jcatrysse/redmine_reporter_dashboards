@@ -95,6 +95,32 @@ plugin from v0.5.0 (D-2, D-3). If you add anything that touches a Redmine core c
 helper, check when it appeared — `git -C redmine ls-tree origin/5.1-stable <path>` answers
 it in one line, and the 5.1 minitest job answers it for real.
 
+**Every aggregator entry point LOGS AND DEGRADES on an argument it cannot use.** An unknown
+completeness field, a custom field the viewer may not see, a `group_by` that does not resolve — all
+produce `Rails.logger.warn` and a smaller answer, never an exception. That is right for a template
+author and silent for anything that measures. T-03's `completeness.seven` asked for two field names
+the kernel does not accept and measured a five-field panel under a seven-field name for a whole
+generation of the baseline artefact. **If you write anything that runs the kernel and reads a number
+off it, pin the SIZE of the answer as well as the number** — `PerformanceCases::EXPECTED_RESULT_SIZE`
+is that control, and the reason it exists.
+
+**`.flags` returns `'buckets' => []` on purpose.** Its shape is `stages`; the empty array is there so
+a template looping over buckets renders nothing rather than raising. Anything that measures "how big
+was the answer" off `result['buckets'].length` therefore reports the flag funnel as **zero** and the
+period series (which has no buckets at all) as its hash key count. `Performance.result_size` is
+shape-aware for this reason; copy it rather than re-deriving it.
+
+**Timings are measured with `CLOCK_MONOTONIC`, and they have to be.** The bench runs under the
+corpus's frozen clock (`travel_to`), which stubs `Time.now` — a wall-clock timing there measures
+**zero** for everything. The same applies to the artefact's `measured_at`, which reads
+`CLOCK_REALTIME`: `Time.now` under the pin would stamp it with the reference date, a plausible-looking
+lie about when the measurement happened.
+
+**`rails` is `null` in the performance artefact's provenance, and that is correct.** The adapter
+harness boots ActiveRecord *without* Rails and defines a stub `Rails` module carrying only `.logger`,
+so `Rails::VERSION::STRING` genuinely does not exist in that process. `active_record` is the
+load-bearing figure there.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
@@ -131,6 +157,16 @@ plugin or the vendor gem, each listed with its reason in
 
 - **`rsync` may be absent.** `redmine_clone.sh` fails with exit 127 at the mirror step.
   `sudo apt-get install -y rsync`.
+- **Never run two things that load `spec/adapter/adapter_helper.rb` at the same time.** They
+  share one database; `load_schema!` recreates every table with `force: true` and `seed!`
+  deletes every row, so the second process pulls the ground out from under the first. It cost
+  a session two false diagnoses in one afternoon — first
+  `PG::UndefinedTable: relation "users" does not exist` halfway through a working run, then a
+  bench example reporting an **empty** substrate that was demonstrably there minutes earlier,
+  both of which read as ordering bugs in the specs. It is not only `rspec`: a throwaway
+  `bundle exec ruby` probe that requires the harness does exactly the same damage. Check with
+  `pgrep -af rspec` (the `-f` matters — the process name is not "rspec") before starting
+  anything, and when a long benchmark is in flight, wait.
 - **PostgreSQL does not survive idle time.** `sudo service postgresql start`, then
   `pg_isready`. A stopped server surfaces as `ActiveRecord::ConnectionNotEstablished`
   in a `before(:suite)` hook, which reads like a spec bug.
@@ -162,6 +198,10 @@ record as of the last local run.
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
 | **CI** | **YES — first run 2026-08-05, run 30992686636** | 17 jobs, **5 red**: `corpus` ×3 (a missing `working-directory`), `adapter` MySQL 8 (D-1's scope + E-1), `minitest` 5.1 (**92 errors — D-2**). Everything else green |
 | **CI, second run 30998558913** | **YES** | **16 of 17 green**, including all three `corpus` jobs — the first real proof of gate G7's differential on PostgreSQL, MySQL 8 and MariaDB 11. The one red was `minitest` 5.1 again, 92 → **27 errors**, all D-3 (`sprite_icon`) |
+| **CI, third run 31000622798** | **YES** | **17 of 17 green** — the first fully green CI run on this branch |
+| **T-03: the R7 invariants, PostgreSQL 16** | **yes, locally (2026-08-05)** | 34 examples, 0 failures. Every workload's query count identical at 100 and 10 000 issues; **zero** `Issue` instantiations everywhere; the capped axes bounded and their collapsed totals intact |
+| **T-03: the benchmark, PostgreSQL 16** | **yes, locally, twice (2026-08-05)** | 27 cells, 20 warm runs after 3 discarded, 4-core Xeon @2.80GHz. **The two runs disagree by up to ×1.26 on p95**, and `version_rollup.costs@100000` was *invalid* in the first (dispersion 0.417) and valid in the second (0.090) — finding P-3, and the reason no timing is a gate. The HTML\|PDF axis is **not measured and recorded as blocked** (P-2) |
+| **T-03 on MySQL / MariaDB** | **no** | The invariants spec runs in the existing `adapter` CI job on all three engines, so CI answers it; the *benchmark* is deliberately not in CI — a timing on a shared runner is noise, which is what the dispersion rule and the advisory label are about |
 
 **MySQL and MariaDB cannot be installed at the same time** — the Debian packages
 conflict, and switching costs an apt purge plus a datadir re-init each way. Both have now
@@ -203,8 +243,15 @@ of a CI that runs on fork pull requests.
    — both in `implementation-plan.md` §Findings.
 2. **T-02** needs production data and therefore needs the curator. Three claims in
    `claims.json` discriminate on that one measurement.
-3. **T-03** (performance baseline) must precede T-10.
-4. **The first real CI run** is still owed, and now has two more jobs in it. A red
-   `corpus` job on MySQL 8.0 would be information, not a regression — see §4.
+3. **T-03's aggregation half is done and the ordering guard it held is now released.**
+   `CLAUDE.md` §1 refused a change to the aggregator "while T-03 has not landed"; the
+   baseline is measured and committed, so **defect D-1 is now unblocked** — the fix is one
+   line (alias the `age` group expression or group on a short one), and it must delete the
+   two `mariadb` overlay entries and lower `AdapterOverlay::RATCHET` in the same commit.
+   Gate G7 still freezes the kernel byte-for-byte against `eddb8fa`, so the fix *breaks G7
+   deliberately* and the PR has to move the baseline commit or argue the exception —
+   that is the decision, and it belongs in the same PR as the fix.
+   **T-03's HTML|PDF half stays owed by T-10** (P-2), recorded in the artefact as blocked.
+4. **T-10 onward**: the render path. T-03 no longer blocks it.
 
 Use `TASK-PROMPT.md`; fill in the STATE block from §4 above rather than from memory.

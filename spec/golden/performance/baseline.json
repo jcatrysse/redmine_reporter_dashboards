@@ -1,0 +1,862 @@
+{
+  "provenance": {
+    "baseline_commit": "eddb8fa17c9c47e28044b41345c6533ec7898f5d",
+    "reference_date": "2025-12-29",
+    "time_zone": "UTC",
+    "measured_at": "2026-08-05T12:48:07Z",
+    "seed": 20251229,
+    "runs": 20,
+    "discarded_runs": 3,
+    "percentile_method": "nearest-rank (no interpolation)",
+    "stddev_method": "sample (n-1)",
+    "clock": "Process::CLOCK_MONOTONIC, float_millisecond",
+    "invalid_dispersion_above": 0.35,
+    "adapter": "PostgreSQL",
+    "server_version": "16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)",
+    "ruby": "3.3.6",
+    "rails": null,
+    "active_record": "7.2.3.2",
+    "cpu_model": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+    "cpu_count": 4,
+    "runner_image_digest": null,
+    "workloads": "8ec446aedd017dc05d0e3c185f41ef06eb7fede9df9a79e16fc5e483b11bf686"
+  },
+  "cells": [
+    {
+      "cell": "aggregation/breakdown.status@1000",
+      "medium": "aggregation",
+      "template": "sample-report",
+      "workload": "breakdown.status",
+      "entry": "breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "status"
+      },
+      "issues": 1000,
+      "result_size": 4,
+      "queries": 3,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 2.73,
+      "p50_ms": 2.854,
+      "p95_ms": 3.183,
+      "max_ms": 3.225,
+      "mean_ms": 2.909,
+      "stddev_ms": 0.148,
+      "dispersion": 0.052,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/breakdown.status@10000",
+      "medium": "aggregation",
+      "template": "sample-report",
+      "workload": "breakdown.status",
+      "entry": "breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "status"
+      },
+      "issues": 10000,
+      "result_size": 4,
+      "queries": 3,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 9.803,
+      "p50_ms": 10.462,
+      "p95_ms": 10.942,
+      "max_ms": 11.338,
+      "mean_ms": 10.475,
+      "stddev_ms": 0.373,
+      "dispersion": 0.036,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/breakdown.status@100000",
+      "medium": "aggregation",
+      "template": "sample-report",
+      "workload": "breakdown.status",
+      "entry": "breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "status"
+      },
+      "issues": 100000,
+      "result_size": 4,
+      "queries": 3,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 93.914,
+      "p50_ms": 97.886,
+      "p95_ms": 105.872,
+      "max_ms": 106.952,
+      "mean_ms": 98.484,
+      "stddev_ms": 4.031,
+      "dispersion": 0.041,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/version_rollup.costs@1000",
+      "medium": "aggregation",
+      "template": "version-status",
+      "workload": "version_rollup.costs",
+      "entry": "version_rollup",
+      "actor": "manager",
+      "args": {
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ],
+        "cost_field_ids": [
+          11
+        ]
+      },
+      "issues": 1000,
+      "result_size": 9,
+      "queries": 18,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 85.828,
+      "p50_ms": 91.582,
+      "p95_ms": 103.074,
+      "max_ms": 105.239,
+      "mean_ms": 93.34,
+      "stddev_ms": 5.75,
+      "dispersion": 0.063,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/version_rollup.costs@10000",
+      "medium": "aggregation",
+      "template": "version-status",
+      "workload": "version_rollup.costs",
+      "entry": "version_rollup",
+      "actor": "manager",
+      "args": {
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ],
+        "cost_field_ids": [
+          11
+        ]
+      },
+      "issues": 10000,
+      "result_size": 9,
+      "queries": 18,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 159.314,
+      "p50_ms": 167.155,
+      "p95_ms": 174.443,
+      "max_ms": 183.815,
+      "mean_ms": 167.71,
+      "stddev_ms": 5.947,
+      "dispersion": 0.036,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/version_rollup.costs@100000",
+      "medium": "aggregation",
+      "template": "version-status",
+      "workload": "version_rollup.costs",
+      "entry": "version_rollup",
+      "actor": "manager",
+      "args": {
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ],
+        "cost_field_ids": [
+          11
+        ]
+      },
+      "issues": 100000,
+      "result_size": 9,
+      "queries": 18,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 465.979,
+      "p50_ms": 481.395,
+      "p95_ms": 585.03,
+      "max_ms": 617.24,
+      "mean_ms": 500.91,
+      "stddev_ms": 43.284,
+      "dispersion": 0.09,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/aggregate.month.12@1000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "aggregate.month.12",
+      "entry": "aggregate",
+      "actor": "manager",
+      "args": {
+        "period": "month",
+        "periods": 12,
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ]
+      },
+      "issues": 1000,
+      "result_size": 12,
+      "queries": 7,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 12.831,
+      "p50_ms": 14.68,
+      "p95_ms": 24.35,
+      "max_ms": 25.203,
+      "mean_ms": 16.856,
+      "stddev_ms": 4.002,
+      "dispersion": 0.273,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/aggregate.month.12@10000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "aggregate.month.12",
+      "entry": "aggregate",
+      "actor": "manager",
+      "args": {
+        "period": "month",
+        "periods": 12,
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ]
+      },
+      "issues": 10000,
+      "result_size": 12,
+      "queries": 7,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 63.83,
+      "p50_ms": 76.721,
+      "p95_ms": 85.957,
+      "max_ms": 88.464,
+      "mean_ms": 75.761,
+      "stddev_ms": 6.339,
+      "dispersion": 0.083,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/aggregate.month.12@100000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "aggregate.month.12",
+      "entry": "aggregate",
+      "actor": "manager",
+      "args": {
+        "period": "month",
+        "periods": 12,
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ]
+      },
+      "issues": 100000,
+      "result_size": 12,
+      "queries": 7,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 498.342,
+      "p50_ms": 524.516,
+      "p95_ms": 571.713,
+      "max_ms": 592.404,
+      "mean_ms": 532.815,
+      "stddev_ms": 25.882,
+      "dispersion": 0.049,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/flags.funnel@1000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "flags.funnel",
+      "entry": "flags",
+      "actor": "manager",
+      "args": {
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ]
+      },
+      "issues": 1000,
+      "result_size": 4,
+      "queries": 12,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 16.898,
+      "p50_ms": 18.08,
+      "p95_ms": 20.673,
+      "max_ms": 20.914,
+      "mean_ms": 18.459,
+      "stddev_ms": 1.3,
+      "dispersion": 0.072,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/flags.funnel@10000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "flags.funnel",
+      "entry": "flags",
+      "actor": "manager",
+      "args": {
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ]
+      },
+      "issues": 10000,
+      "result_size": 4,
+      "queries": 12,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 49.512,
+      "p50_ms": 53.291,
+      "p95_ms": 62.348,
+      "max_ms": 76.677,
+      "mean_ms": 55.931,
+      "stddev_ms": 6.204,
+      "dispersion": 0.116,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/flags.funnel@100000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "flags.funnel",
+      "entry": "flags",
+      "actor": "manager",
+      "args": {
+        "closed_statuses": [
+          "Closed",
+          "Rejected"
+        ]
+      },
+      "issues": 100000,
+      "result_size": 4,
+      "queries": 12,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 361.39,
+      "p50_ms": 381.928,
+      "p95_ms": 415.78,
+      "max_ms": 420.664,
+      "mean_ms": 387.815,
+      "stddev_ms": 18.361,
+      "dispersion": 0.048,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/completeness.seven@1000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "completeness.seven",
+      "entry": "completeness",
+      "actor": "manager",
+      "args": {
+        "fields": [
+          "assignee",
+          "due_date",
+          "start_date",
+          "estimated_hours",
+          "description",
+          "parent",
+          "cf_10"
+        ]
+      },
+      "issues": 1000,
+      "result_size": 7,
+      "queries": 6,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 80.138,
+      "p50_ms": 83.134,
+      "p95_ms": 98.583,
+      "max_ms": 98.831,
+      "mean_ms": 85.605,
+      "stddev_ms": 5.666,
+      "dispersion": 0.068,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/completeness.seven@10000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "completeness.seven",
+      "entry": "completeness",
+      "actor": "manager",
+      "args": {
+        "fields": [
+          "assignee",
+          "due_date",
+          "start_date",
+          "estimated_hours",
+          "description",
+          "parent",
+          "cf_10"
+        ]
+      },
+      "issues": 10000,
+      "result_size": 7,
+      "queries": 6,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 110.736,
+      "p50_ms": 115.022,
+      "p95_ms": 121.262,
+      "max_ms": 121.457,
+      "mean_ms": 115.562,
+      "stddev_ms": 3.009,
+      "dispersion": 0.026,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/completeness.seven@100000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "completeness.seven",
+      "entry": "completeness",
+      "actor": "manager",
+      "args": {
+        "fields": [
+          "assignee",
+          "due_date",
+          "start_date",
+          "estimated_hours",
+          "description",
+          "parent",
+          "cf_10"
+        ]
+      },
+      "issues": 100000,
+      "result_size": 7,
+      "queries": 6,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 378.653,
+      "p50_ms": 406.367,
+      "p95_ms": 443.493,
+      "max_ms": 455.973,
+      "mean_ms": 410.992,
+      "stddev_ms": 21.819,
+      "dispersion": 0.054,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.cf_pareto.top12@1000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.cf_pareto.top12",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "cf_16",
+        "sort": "count",
+        "limit": 12
+      },
+      "issues": 1000,
+      "result_size": 13,
+      "queries": 5,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 61.296,
+      "p50_ms": 68.048,
+      "p95_ms": 76.023,
+      "max_ms": 78.136,
+      "mean_ms": 68.771,
+      "stddev_ms": 4.308,
+      "dispersion": 0.063,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.cf_pareto.top12@10000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.cf_pareto.top12",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "cf_16",
+        "sort": "count",
+        "limit": 12
+      },
+      "issues": 10000,
+      "result_size": 13,
+      "queries": 5,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 253.325,
+      "p50_ms": 265.485,
+      "p95_ms": 302.745,
+      "max_ms": 318.396,
+      "mean_ms": 273.511,
+      "stddev_ms": 18.636,
+      "dispersion": 0.07,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.cf_pareto.top12@100000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.cf_pareto.top12",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "cf_16",
+        "sort": "count",
+        "limit": 12
+      },
+      "issues": 100000,
+      "result_size": 13,
+      "queries": 5,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 2583.74,
+      "p50_ms": 2862.289,
+      "p95_ms": 3233.623,
+      "max_ms": 3271.261,
+      "mean_ms": 2920.871,
+      "stddev_ms": 187.741,
+      "dispersion": 0.066,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.age.string_bounds@1000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.age.string_bounds",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "age",
+        "age_buckets": "30;60;90;180"
+      },
+      "issues": 1000,
+      "result_size": 5,
+      "queries": 2,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 3.231,
+      "p50_ms": 3.571,
+      "p95_ms": 3.72,
+      "max_ms": 3.954,
+      "mean_ms": 3.554,
+      "stddev_ms": 0.172,
+      "dispersion": 0.048,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.age.string_bounds@10000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.age.string_bounds",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "age",
+        "age_buckets": "30;60;90;180"
+      },
+      "issues": 10000,
+      "result_size": 5,
+      "queries": 2,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 16.309,
+      "p50_ms": 17.15,
+      "p95_ms": 18.777,
+      "max_ms": 19.449,
+      "mean_ms": 17.429,
+      "stddev_ms": 0.844,
+      "dispersion": 0.049,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.age.string_bounds@100000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.age.string_bounds",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "age",
+        "age_buckets": "30;60;90;180"
+      },
+      "issues": 100000,
+      "result_size": 5,
+      "queries": 2,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 151.555,
+      "p50_ms": 154.057,
+      "p95_ms": 161.301,
+      "max_ms": 210.981,
+      "mean_ms": 157.709,
+      "stddev_ms": 12.805,
+      "dispersion": 0.083,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.status_x_period@1000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.status_x_period",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "status",
+        "split_by": "period",
+        "period": "month",
+        "periods": 12
+      },
+      "issues": 1000,
+      "result_size": 4,
+      "queries": 3,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 4.302,
+      "p50_ms": 4.822,
+      "p95_ms": 5.827,
+      "max_ms": 6.713,
+      "mean_ms": 4.943,
+      "stddev_ms": 0.58,
+      "dispersion": 0.12,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.status_x_period@10000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.status_x_period",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "status",
+        "split_by": "period",
+        "period": "month",
+        "periods": 12
+      },
+      "issues": 10000,
+      "result_size": 4,
+      "queries": 3,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 19.421,
+      "p50_ms": 20.53,
+      "p95_ms": 30.242,
+      "max_ms": 34.952,
+      "mean_ms": 21.999,
+      "stddev_ms": 3.852,
+      "dispersion": 0.188,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/dimension.status_x_period@100000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "dimension.status_x_period",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "status",
+        "split_by": "period",
+        "period": "month",
+        "periods": 12
+      },
+      "issues": 100000,
+      "result_size": 4,
+      "queries": 3,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 181.988,
+      "p50_ms": 189.471,
+      "p95_ms": 226.351,
+      "max_ms": 265.756,
+      "mean_ms": 196.231,
+      "stddev_ms": 19.139,
+      "dispersion": 0.101,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/measure.assignee.spent_hours@1000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "measure.assignee.spent_hours",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "assignee",
+        "measure": "sum",
+        "of": "spent_hours"
+      },
+      "issues": 1000,
+      "result_size": 3,
+      "queries": 5,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 11.301,
+      "p50_ms": 12.576,
+      "p95_ms": 14.986,
+      "max_ms": 15.972,
+      "mean_ms": 13.133,
+      "stddev_ms": 1.331,
+      "dispersion": 0.106,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/measure.assignee.spent_hours@10000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "measure.assignee.spent_hours",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "assignee",
+        "measure": "sum",
+        "of": "spent_hours"
+      },
+      "issues": 10000,
+      "result_size": 3,
+      "queries": 5,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 25.007,
+      "p50_ms": 26.044,
+      "p95_ms": 32.101,
+      "max_ms": 32.437,
+      "mean_ms": 26.943,
+      "stddev_ms": 2.096,
+      "dispersion": 0.08,
+      "valid": true
+    },
+    {
+      "cell": "aggregation/measure.assignee.spent_hours@100000",
+      "medium": "aggregation",
+      "template": "production-shapes",
+      "workload": "measure.assignee.spent_hours",
+      "entry": "dimension_breakdown",
+      "actor": "manager",
+      "args": {
+        "group_by": "assignee",
+        "measure": "sum",
+        "of": "spent_hours"
+      },
+      "issues": 100000,
+      "result_size": 3,
+      "queries": 5,
+      "discarded": 3,
+      "runs": 20,
+      "min_ms": 116.425,
+      "p50_ms": 133.691,
+      "p95_ms": 141.63,
+      "max_ms": 141.978,
+      "mean_ms": 132.504,
+      "stddev_ms": 7.894,
+      "dispersion": 0.059,
+      "valid": true
+    }
+  ],
+  "blocked": [
+    {
+      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
+      "owed_by": "T-10",
+      "cell": "html/sample-report@1000",
+      "medium": "html",
+      "template": "sample-report",
+      "issues": 1000
+    },
+    {
+      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
+      "owed_by": "T-10",
+      "cell": "html/sample-report@10000",
+      "medium": "html",
+      "template": "sample-report",
+      "issues": 10000
+    },
+    {
+      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
+      "owed_by": "T-10",
+      "cell": "html/sample-report@100000",
+      "medium": "html",
+      "template": "sample-report",
+      "issues": 100000
+    },
+    {
+      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
+      "owed_by": "T-10",
+      "cell": "html/version-status@1000",
+      "medium": "html",
+      "template": "version-status",
+      "issues": 1000
+    },
+    {
+      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
+      "owed_by": "T-10",
+      "cell": "html/version-status@10000",
+      "medium": "html",
+      "template": "version-status",
+      "issues": 10000
+    },
+    {
+      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
+      "owed_by": "T-10",
+      "cell": "html/version-status@100000",
+      "medium": "html",
+      "template": "version-status",
+      "issues": 100000
+    },
+    {
+      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
+      "owed_by": "T-10",
+      "cell": "pdf/sample-report@1000",
+      "medium": "pdf",
+      "template": "sample-report",
+      "issues": 1000
+    },
+    {
+      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
+      "owed_by": "T-10",
+      "cell": "pdf/sample-report@10000",
+      "medium": "pdf",
+      "template": "sample-report",
+      "issues": 10000
+    },
+    {
+      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
+      "owed_by": "T-10",
+      "cell": "pdf/sample-report@100000",
+      "medium": "pdf",
+      "template": "sample-report",
+      "issues": 100000
+    },
+    {
+      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
+      "owed_by": "T-10",
+      "cell": "pdf/version-status@1000",
+      "medium": "pdf",
+      "template": "version-status",
+      "issues": 1000
+    },
+    {
+      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
+      "owed_by": "T-10",
+      "cell": "pdf/version-status@10000",
+      "medium": "pdf",
+      "template": "version-status",
+      "issues": 10000
+    },
+    {
+      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
+      "owed_by": "T-10",
+      "cell": "pdf/version-status@100000",
+      "medium": "pdf",
+      "template": "version-status",
+      "issues": 100000
+    }
+  ]
+}

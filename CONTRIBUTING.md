@@ -34,6 +34,8 @@ so only one of the two can be installed at a time.
 | **adapter execution** | `spec/adapter/` | A PostgreSQL or MySQL/MariaDB server | The aggregator's SQL actually run against a real engine |
 | **minitest** | `test/unit`, `test/functional`, `test/integration` | Redmine (reporter optional) | Dashboard controllers, models, helpers, the HTTP verb of every route, and the golden scope fixture |
 | **golden corpus** | `spec/golden/`, verified by `spec/adapter/aggregation_corpus_spec.rb` | A database **and** `RRD_REFERENCE_DATE` | That the aggregation numbers have not moved — gate G7's differential |
+| **R7 invariants** | `spec/adapter/performance_invariants_spec.rb` | A database | Query count independent of issue count, zero issue instantiation, bounded output — asserted hard, every run |
+| **performance baseline** | `spec/golden/performance/`, measured by `spec/adapter/performance_baseline_spec.rb` | A database, `RRD_REFERENCE_DATE` **and** `RRD_BENCH=1` | The timings the re-seam will be compared against. Opt-in, ~3 minutes, and it asserts no timing |
 
 The RSpec specs run without `redmine_reporter` and without a database. The minitest
 suite boots the full Redmine app; since reporter became optional it runs **standalone**,
@@ -59,6 +61,20 @@ regenerated once `scope_resolution.rb` is deleted.
 The corpus is verified, not generated, by `test_plugin.sh` and by CI. It is generated
 only deliberately, with `RRD_CORPUS_WRITE=1` — and a difference is a finding to explain,
 never a file to bring into line.
+
+### The performance baseline
+
+Same directory, opposite kind of file. `spec/golden/performance/baseline.json` is a
+**measurement**, not an oracle: nothing asserts a millisecond figure, because no tolerance
+has been decided and a red/green verdict on a timing would be a number this project
+invented on hardware it does not control. The benchmark prints its drift against the
+committed artefact labelled *advisory*.
+
+The parts of the performance requirement that *are* falsifiable — query count independent
+of issue count, zero issue-object instantiation, bounded output — are ordinary assertions in
+`spec/adapter/performance_invariants_spec.rb` and run on every engine on every adapter run.
+The benchmark itself is opt-in (`RRD_BENCH=1`), takes about three minutes and seeds 100 000
+issues; `spec/golden/README.md` has the commands and the knobs.
 
 ### Ruby version floor
 

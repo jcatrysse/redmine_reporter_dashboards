@@ -85,6 +85,7 @@ module RrdAdapterHarness
   PROJECT_ARCHIVED = 2 # status 9 — excluded by both stubbed visibility conditions
   PROJECT_SWEEP    = 3 # active; holds the one-issue-per-day calendar sweep
   PROJECT_WIDE     = 4 # active; holds the cap-boundary fixture (see seed_wide!)
+  PROJECT_BENCH    = 5 # active; empty unless seed_bench! is called (T-03, see below)
 
   CF_DEPARTMENT = 10 # list,  visible everywhere
   CF_POINTS     = 11 # int,   visible everywhere
@@ -141,6 +142,35 @@ module RrdAdapterHarness
   # Exactly MAX_DIMENSION_KEYS distinct CF_WIDE values, with no blank bucket — the
   # scope that lands an axis ON the cap rather than one past it.
   WIDE_AT_CAP = 200
+
+  # ------------------------------------------------------------------
+  # The T-03 benchmark substrate. Seeded only by seed_bench!, which nothing calls
+  # unless a performance spec asks for it — 100 000 issues have no business in the
+  # ordinary adapter run.
+  #
+  # Its own project, at its own id base, for the same reason PROJECT_WIDE is: every
+  # existing assertion is read off the four hand-built MAIN issues and the 250 WIDE
+  # ones, and a hundred thousand more in either scope would rewrite all of them.
+  # ------------------------------------------------------------------
+  BENCH_ID_BASE     = 1_000_000
+  BENCH_VERSION_IDS = (1_000..1_007).to_a.freeze
+  # 400 days, matching SWEEP_DAYS, so a 12-month period window and the production
+  # aging boundaries (30/60/90/180) all have rows in every bucket.
+  BENCH_SPREAD_DAYS = 400
+  # Rows per insert_all!. Large enough that the round trips are not the cost, small
+  # enough that neither Ruby nor the server has to hold 100 000 rows at once.
+  BENCH_BATCH = 5_000
+  # Knuth's multiplicative constant. The fixture varies by index arithmetic from a
+  # RECORDED seed and never by rand: two runs must produce the same rows (CLAUDE.md
+  # §6), and a seed that is written into the artefact is what lets a later reader ask
+  # whether a result is an artefact of one data shape.
+  BENCH_HASH_MULTIPLIER = 2_654_435_761
+  BENCH_HASH_MODULUS    = 4_294_967_296 # 2**32
+
+  # CF_DEPARTMENT's values in the bench substrate: six labels and a blank. Six because
+  # that is the order of magnitude a real list custom field has, and the blank because
+  # the completeness workload has to have something to count as unfilled.
+  BENCH_DEPARTMENTS = ['Sales', 'Ops', 'Support', 'Finance', 'Legal', 'Field', ''].freeze
 
   class << self
     def url
@@ -584,7 +614,8 @@ module RrdAdapterHarness
         { id: PROJECT_MAIN,     name: 'Main',     status: 1 },
         { id: PROJECT_ARCHIVED, name: 'Archived', status: 9 },
         { id: PROJECT_SWEEP,    name: 'Sweep',    status: 1 },
-        { id: PROJECT_WIDE,     name: 'Wide',     status: 1 }
+        { id: PROJECT_WIDE,     name: 'Wide',     status: 1 },
+        { id: PROJECT_BENCH,    name: 'Bench',    status: 1 }
       ])
 
       ::IssueStatus.insert_all!([
@@ -665,7 +696,16 @@ module RrdAdapterHarness
         [6, ACTORS[:reporter],  PROJECT_WIDE,  ROLE_REPORTER],
         # The same role as the manager, held somewhere else: CF_SALARY resolves for
         # this actor, and its values are still hidden on every MAIN issue.
-        [7, ACTORS[:auditor],   PROJECT_WIDE,  ROLE_MANAGER]
+        [7, ACTORS[:auditor],   PROJECT_WIDE,  ROLE_MANAGER],
+        # The benchmark project (T-03). Seeded unconditionally even though the project
+        # is empty unless seed_bench! runs, so the membership table is one fact rather
+        # than one that depends on whether a benchmark happened to run in this process
+        # — an actor's entitlement is interpolated as a literal id list, and a list
+        # that changed with the spec order would be an order dependency in the SQL
+        # itself. PROJECT_BENCH holds no issues in any corpus scope, so no recorded
+        # number moves; the corpus verification is what proves that rather than this
+        # comment.
+        [8, ACTORS[:manager],   PROJECT_BENCH, ROLE_MANAGER]
       ]
 
       ::Member.insert_all!(memberships.map { |id, uid, pid, _rid| { id: id, user_id: uid, project_id: pid } })
@@ -817,12 +857,157 @@ module RrdAdapterHarness
       ::CustomValue.insert_all!(values)
     end
 
+    # ------------------------------------------------------------------
+    # The T-03 benchmark substrate
+    # ------------------------------------------------------------------
+
+    # Seeds `count` issues in PROJECT_BENCH, deterministically from `seed`.
+    #
+    # IDEMPOTENT and MONOTONIC: a second call for the same seed and a count that is
+    # already covered is a no-op, and a larger count re-seeds from scratch. That is
+    # what makes the two performance specs order-independent — the invariants spec
+    # asks for 10 000 and the benchmark for 100 000, in either order, and neither can
+    # observe whether the other ran first. Row content depends only on the index and
+    # the seed, so the first 10 000 rows of a 100 000-row substrate are byte-identical
+    # to a 10 000-row one.
+    #
+    # Every count is taken as an ID RANGE rather than a LIMIT: the entry points unscope
+    # order, so a LIMIT would need an ORDER BY to mean anything, and the three sizes
+    # have to be the same data at three sizes rather than three samples of it.
+    def seed_bench!(count, seed:)
+      return count if @bench_seeded && @bench_seeded[:seed] == seed && @bench_seeded[:count] >= count
+
+      truncate_bench!
+      seed_bench_versions!
+      seed_bench_issues!(count, seed)
+      @bench_seeded = { seed: seed, count: count }
+      count
+    end
+
+    def bench_seeded
+      @bench_seeded
+    end
+
+    def truncate_bench!
+      c = ActiveRecord::Base.connection
+      c.delete("DELETE FROM custom_values WHERE customized_type = 'Issue' AND customized_id >= #{BENCH_ID_BASE}")
+      c.delete("DELETE FROM time_entries WHERE project_id = #{PROJECT_BENCH}")
+      c.delete("DELETE FROM issues WHERE project_id = #{PROJECT_BENCH}")
+      c.delete("DELETE FROM versions WHERE project_id = #{PROJECT_BENCH}")
+      @bench_seeded = nil
+    end
+
+    # Eight versions, so version_rollup returns a row count a real project would have
+    # rather than one row or a thousand. Their effective dates straddle `today`, which
+    # is what makes the overdue/upcoming split in that entry point non-trivial.
+    def seed_bench_versions!
+      rows = BENCH_VERSION_IDS.each_with_index.map do |id, i|
+        { id: id, project_id: PROJECT_BENCH, name: format('bench v%d.0', i + 1),
+          effective_date: today + ((i - 3) * 45) }
+      end
+      ::Version.insert_all!(rows)
+    end
+
+    # The scope a benchmark cell runs against: the first `count` bench issues.
+    def bench_scope(count)
+      base_scope.where(project_id: PROJECT_BENCH)
+                .where('issues.id < ?', BENCH_ID_BASE + count)
+    end
+
+    # A 32-bit multiplicative hash of the index, mixed with the seed. Deliberately not
+    # Ruby's #hash: that is salted per process and would make the fixture different on
+    # every run, which is the failure mode CLAUDE.md §6 is about.
+    def bench_hash(index, seed)
+      (((index + 1) * BENCH_HASH_MULTIPLIER) + seed) % BENCH_HASH_MODULUS
+    end
+
+    def seed_bench_issues!(count, seed)
+      (0...count).each_slice(BENCH_BATCH) do |slice|
+        issues = []
+        values = []
+        entries = []
+
+        slice.each do |i|
+          h = bench_hash(i, seed)
+          issues << bench_issue_row(i, h)
+          values.concat(bench_custom_values(i, h))
+          # A time entry on every fourth issue. Enough that the visibility-subquery
+          # join has rows to aggregate, few enough that the join is not the fixture.
+          entries << bench_time_entry_row(i, h) if (h % 4).zero?
+        end
+
+        ::Issue.insert_all!(issues)
+        ::CustomValue.insert_all!(values)
+        ::TimeEntry.insert_all!(entries) unless entries.empty?
+      end
+    end
+
+    # Each field is derived from a DIFFERENT byte range of the same hash, so the
+    # dimensions are independent of one another: status correlated with age would make
+    # a crosstab measure a correlation the fixture invented.
+    def bench_issue_row(index, hash)
+      day     = hash % BENCH_SPREAD_DAYS
+      status  = WIDE_STATUS_CYCLE[(hash >> 9) % WIDE_STATUS_CYCLE.length]
+      closed  = [STATUS_CLOSED, STATUS_REJECTED].include?(status)
+      version = ((hash >> 13) % 4).zero? ? nil : BENCH_VERSION_IDS[(hash >> 15) % BENCH_VERSION_IDS.length]
+      est     = ((hash >> 19) % 4).zero? ? nil : (((hash >> 21) % 16) + 1) * 0.5
+
+      # closed_on only where the status is closed, and not on all of those: a closed
+      # issue with no closed_on is a real Redmine shape (it predates the column), but
+      # it is the exception, and a fixture where it was the rule would leave every
+      # closed-series measurement reading off nothing.
+      closed_on = closed && !((hash >> 27) % 8).zero? ? at(day / 2) : nil
+
+      { id: BENCH_ID_BASE + index, project_id: PROJECT_BENCH,
+        tracker_id: ((hash >> 5) % 2) + 1, status_id: status,
+        priority_id: ((hash >> 7) % 3) + 1, category_id: nil,
+        fixed_version_id: version, author_id: ACTORS[:manager],
+        assigned_to_id: WIDE_ASSIGNEE_CYCLE[(hash >> 11) % WIDE_ASSIGNEE_CYCLE.length],
+        parent_id: nil, done_ratio: ((hash >> 17) % 5) * 25,
+        subject: "bench #{index}",
+        description: ((hash >> 23) % 3).zero? ? nil : "described #{index}",
+        estimated_hours: est,
+        start_date: today - day,
+        due_date: ((hash >> 25) % 3).zero? ? nil : today - day + 30,
+        created_on: at(day), updated_on: at(day),
+        closed_on: closed_on }
+    end
+
+    # Three values per issue, one per shape the workloads need:
+    #
+    #   CF_WIDE        one DISTINCT value per issue -> the pareto/OTHER-collapse path
+    #                  at 100 000 keys, which is the cap under real pressure
+    #   CF_DEPARTMENT  six values and a blank -> a low-cardinality axis, and the blank
+    #                  is what the completeness workload counts as unfilled
+    #   CF_POINTS      an integer -> the numeric-measure path (numeric_cast)
+    def bench_custom_values(index, hash)
+      id = BENCH_ID_BASE + index
+      [
+        { customized_type: 'Issue', customized_id: id, custom_field_id: CF_WIDE,
+          value: format('b%06d', index) },
+        { customized_type: 'Issue', customized_id: id, custom_field_id: CF_DEPARTMENT,
+          value: BENCH_DEPARTMENTS[(hash >> 3) % BENCH_DEPARTMENTS.length] },
+        { customized_type: 'Issue', customized_id: id, custom_field_id: CF_POINTS,
+          value: ((hash >> 6) % 21).to_s }
+      ]
+    end
+
+    def bench_time_entry_row(index, hash)
+      { project_id: PROJECT_BENCH, issue_id: BENCH_ID_BASE + index,
+        user_id: ACTORS[:manager],
+        hours: (((hash >> 8) % 16) + 1) * 0.25,
+        spent_on: today - (hash % BENCH_SPREAD_DAYS) }
+    end
+
     def truncate_all!
       %w[issues custom_values time_entries projects issue_statuses trackers
          issue_categories enumerations users versions custom_fields
          roles members member_roles].each do |table|
         ActiveRecord::Base.connection.delete("DELETE FROM #{table}")
       end
+      # The bench substrate went with them, so the memo has to go too or seed_bench!
+      # would report a substrate that no longer exists.
+      @bench_seeded = nil
     end
 
     def sweep_dates
@@ -839,6 +1024,48 @@ module RrdAdapterHarness
       when 'month' then date.strftime('%Y-%m')
       when 'year'  then date.strftime('%Y')
       end
+    end
+
+    # ------------------------------------------------------------------
+    # Instrumentation (T-03). Two specs read these — the R7 invariants and the
+    # baseline benchmark — so they live with the harness rather than being written
+    # twice with two definitions of "a query".
+    # ------------------------------------------------------------------
+
+    # The SQL a block issues. Schema reflection and transaction control are not the
+    # workload, and a CACHED query has already been counted once — including it would
+    # let a change that added a repeat of an identical query look free.
+    def count_queries
+      collected = []
+      subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*args|
+        payload = ActiveSupport::Notifications::Event.new(*args).payload
+        next if payload[:cached]
+        next if %w[SCHEMA TRANSACTION].include?(payload[:name].to_s)
+        next if payload[:sql].to_s.match?(/\A\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b/i)
+
+        collected << payload[:sql].to_s
+      end
+      yield
+      collected
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
+    end
+
+    # record_count summed over `instantiation.active_record` for ONE class. Zero events
+    # and one event carrying record_count: 0 both mean "nothing was instantiated", so
+    # the sum is the honest measure rather than the event count — and the class is
+    # named explicitly, because `as_actor` instantiates a User on every call and the
+    # criterion is about issue objects.
+    def count_instantiations(class_name)
+      total = 0
+      subscriber = ActiveSupport::Notifications.subscribe('instantiation.active_record') do |*args|
+        payload = ActiveSupport::Notifications::Event.new(*args).payload
+        total += payload[:record_count].to_i if payload[:class_name].to_s == class_name
+      end
+      yield
+      total
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
     end
 
     # MySQL/MariaDB only. Runs the block with the strictest GROUP BY mode a

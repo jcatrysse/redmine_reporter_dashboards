@@ -52,7 +52,7 @@ fact that CI has not yet run on this work at all.
 | T-00 | **VOID** — the fork is out of scope (curator, 2026-08-05). See below. |
 | T-01 | **done** — reference date, canonicaliser, baseline commit, the 176-case value corpus, the per-adapter overlay, the 46-triple scope fixture and the `corpus` CI job. **It found defect D-1 on the way in** — see §Findings |
 | T-02 | not started |
-| T-03 | not started |
+| T-03 | **partly done** — the aggregation baseline is measured and committed (9 workloads × 3 issue counts, 20 warm runs, provenance-stamped) and R7's three *absolute* criteria are now hard assertions on every engine. **The HTML\|PDF half is blocked and recorded as blocked** — see §Findings P-2 |
 | T-04 | **done** — `RedmineReporterDashboards::Positioned` replaces `up_acts_as_list` |
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
@@ -84,6 +84,51 @@ reason CI had been green.
 first CI run refuted it.* MySQL 8.0 answers correctly, so the overlay now has a **`mariadb` family
 of its own**, separate from `mysql`; the adapter name cannot tell them apart (mysql2 reports
 "Mysql2" for both), so the family is asked of the server version.
+
+**D-1's mechanism, measured 2026-08-05, and it corrects this entry's own prescription.** The line
+above — "the one-line change is to alias the group expression or group on a short one" — does not
+survive measurement. Two facts, both probed against the running stack rather than read off the source:
+
+1. **The alias is already truncated on the engine that WORKS.** ActiveRecord derives the result-column
+   name from the group expression's text (`calculations.rb#execute_grouped_calculation` →
+   `ColumnAliasTracker#column_alias_for` → `table_alias_for`, which slices at `table_alias_length`).
+   On PostgreSQL that limit is **63**, so the age CASE's alias is cut at 63 for three, four and five
+   boundaries alike — measured expression lengths 242 / 305 / 368, aliases 218 / 274 / 330 — and
+   PostgreSQL answers correctly at every one of them, because AR asks for the same truncated name it
+   sent. The mysql2 adapter hardcodes **256** (`mysql/schema_statements.rb:130`), so AR emits a
+   256-character alias there and MariaDB hands back a shorter one; MySQL 8 does not. So "the alias is
+   too long" is not the defect — *the two ends disagreeing about the truncation* is, and shortening
+   the expression only moves the cliff from four boundaries to some larger number. `MAX_AGE_BUCKETS`
+   is 24, and 24 branches cannot fit in 256 characters at ~60 characters a branch.
+2. **A select alias cannot be introduced without leaving AR's grouped-calculation path.**
+   `execute_grouped_calculation` does `select_values += self.select_values` **`unless
+   having_clause.empty?`** — with no HAVING it *overwrites* the relation's select list. Measured:
+   `.select("CASE … AS rrd_short").group("rrd_short").count(…)` raises
+   `PG::UndefinedColumn: column "rrd_short" does not exist`, because the SELECT that defined the alias
+   was discarded.
+
+So the fix is structural, not textual. The two candidates, both of which change how *every* measure
+reads its groups: (a) leave `.count`/`.sum` on a grouped relation and read a hand-built
+`select_all` with an alias this code owns; or (b) drop the GROUP BY for the age axis entirely and use
+the shape `completeness` already uses — `aggregate_row(base, buckets.map { count_case(…) })`, one
+query, one `COUNT(DISTINCT CASE …)` per bucket, read back **positionally** so no alias exists to
+truncate. (b) is the smaller of the two and fits the age dimension exactly, because its keys are fixed
+(`fixed_keys: labels`) just as completeness's are; it still has to be threaded through
+`single_result`, `crosstab_result`, `fold_values` and `bucket_filter`.
+
+**That is T-08-sized work in the file gate G7 freezes byte-for-byte, and it can only be *verified* on
+MariaDB** — the one engine where the defect exists, and one this session's container does not have
+installed (MySQL and MariaDB conflict; switching costs an apt purge and a datadir re-init). Two things
+therefore need a curator decision before it is written, and neither is a judgement the specs leave to
+the implementer:
+
+- **G7.** Fixing the kernel means it is no longer byte-identical to `eddb8fa`, so the gate as written
+  can never pass again. The honest mechanism is a *declared exception with its own ratchet*, mirroring
+  `AdapterOverlay`: the diff against v0.5.0 must equal exactly the recorded hunk, with its reason. That
+  is a change to a hard gate's reference, which `CLAUDE.md` §7 and §11.4 put outside an implementer's
+  authority — the gate exists to answer a red-team finding, and the argument belongs with the finding.
+- **Where it lands.** T-08 is where the kernel legitimately moves and where the corpus differential is
+  the point. Absorbing it into another task's branch is exactly the R-02 stall risk §11.5 names.
 
 *Not fixed in T-01, and for two independent reasons in the operating rules rather than one:* gate G7
 diffs the kernel byte-for-byte against the baseline, and **§1's ordering guard refuses a change to
@@ -148,6 +193,58 @@ lists (`Project.allowed_to_condition`), and `IssueCustomField#visibility_by_proj
 emit a subquery but keys it on `issues.project_id` (`custom_field.rb:262`). The adapter harness had
 invented the one shape Redmine never produces, so MySQL made the *harness* lie about visibility —
 caught by the first CI run, and now the stub emits what Redmine emits.
+
+**P-1 · the query-count control was a guess, and the measurement said so.** T-03's first draft
+asserted one global ceiling — "no workload issues more than 12 queries" — and `version_rollup` issues
+**18**. The interesting part is which of the two possible explanations it was. It issues 18 at 100
+issues and 18 at 10 000: eleven grouped aggregates, the closed-status lookup, the cost-field
+resolution and one grouped sum per cost field, none of which scale with rows *or* with the number of
+versions. So the finding was the ceiling, not an N+1 — and a guessed ceiling cannot tell you that,
+which is the whole argument for T-03 existing. The control is now
+`PerformanceCases::QUERY_BUDGET`: one **measured** figure per workload, asserted as a ratchet
+(`<=`), so a kernel that gets tighter passes and a kernel that adds a query fails with the workload
+named. Every figure is also carried per cell in the artefact, so a later reader can see what was
+true when.
+
+*The same measurement caught a second thing, and this one was mine.* `completeness.seven` asked for
+`assigned_to` and `done_ratio`. Neither is a completeness field — `assignee` is the alias and
+`done_ratio` is not offered — so the kernel warned, dropped both, and the cell measured a **five**
+field panel under a seven-field name. Every entry point logs-and-degrades on an unusable argument,
+which is right for a template author and silent for a benchmark. `EXPECTED_RESULT_SIZE` now pins
+what each workload must give back, asserted on every engine: a workload that quietly answers a
+smaller question gets faster and reads as an improvement.
+
+**P-2 · T-03's HTML|PDF half cannot be measured here, and the artefact says so rather than omitting
+it.** The Accept list's axis is (reference template × issue count × **HTML|PDF**). The aggregation
+axis is measured — 9 workloads × 3 issue counts, 20 warm runs after 3 discarded, provenance-stamped.
+The render axis is not, for two reasons that are facts about the tree rather than decisions: **the only
+Liquid renderer today is `redmine_reporter`'s**, a separate private plugin (T-10…T-15 build the
+owned one), and **there is no PDF engine reachable from this session** — the curator has said a
+running Gotenberg is not something they can provide. So all 12 render cells are written into
+`spec/golden/performance/baseline.json` as `blocked`, each naming **T-10** as the task that owes it,
+and a DB-less spec asserts they are all still declared blocked. An unmeasured cell written down as
+unmeasured is a pause point; an unmeasured cell that is simply absent is a baseline quietly claiming
+coverage it does not have — INV-7's rule applied to performance instead of to versions.
+
+**P-3 · the timings are noisier than any tolerance anyone would set, measured.** Two consecutive runs
+of the identical matrix on the identical machine, minutes apart, moved p95 by up to **×1.26** — and
+`version_rollup.costs@100000` came back **invalid** (dispersion 0.417) in the first and valid (0.090)
+in the second. The committed artefact therefore has zero invalid cells and that is an accident of when
+it was measured, not a property of the kernel. This is the concrete argument for the `[GAP]` in
+`functional-spec.md` §R7 being real: a relative p95 gate with any tolerance under ~30% would be red on
+a quiet machine's bad minute. So the drift report is labelled **ADVISORY — non-deterministic — not a
+correctness guarantee** (`CLAUDE.md` §7), and what carries the weight is the three *absolute* criteria,
+which are exact integers and cannot be noisy. If a curator does set a tolerance, it needs to be set
+against a dedicated runner, and the artefact records the CPU model, core count and image digest so
+that comparison is possible rather than implied.
+
+*One deliberate widening, labelled as such:* the two reference templates between them reach exactly
+two of the kernel's six entry points (`.breakdown` and `.version_rollup`). T-07 and T-08 re-seam all
+six, and a baseline over two of them would go stale the moment the re-seam touched the other four —
+with no way back to it, which is the reason this task precedes them. So a third pseudo-template,
+`production-shapes`, carries seven more workloads drawn from **T-02's survey of the 26 real
+templates**, each naming the survey line it comes from. It measures more than the Accept list's axis,
+never less.
 
 **F-2 · the registers relation path is not visibility-scoped.** `resolve_scope` returns
 `registers[:container]` as-is when it is an AR relation, intersecting only the DROP path with
