@@ -1,0 +1,33 @@
+# Files allowed to mention redmine_reporter, Redmineup or up_acts_as_list, with the
+# reason for each. Gate: script/gates/zero_reporter.sh.
+#
+# This list may only SHRINK. Adding an entry is a decision to take in review, with a
+# reason written here, not a way to make the gate green. At 1.0 it should be empty:
+# the goal is a plugin that names neither upstream anywhere in app/, lib/, db/,
+# config/ or init.rb.
+#
+# Note the negative lookahead in the gate: `redmine_reporter(?!_dashboards)`. A plain
+# grep for "redmine_reporter" matches this plugin's own name several hundred times.
+#
+# Format: <path><TAB or spaces><reason>
+
+# --- Detection and gating of the optional dependency. Cannot be removed while the
+# --- integration exists at all: something has to name what it is looking for.
+lib/redmine_reporter_dashboards/reporter_presence.rb   owns the detection; PLUGIN_ID names the plugin being looked for
+lib/redmine_reporter_dashboards.rb                     routes the reporter-only patch list behind reporter_present?
+init.rb                                                logs which mode the plugin booted in; documents that reporter is optional
+lib/redmine_reporter_dashboards/project_page.rb        OPTIONAL_BLOCKS declares which plugin each optional widget needs
+
+# --- The integration surface itself: code that only runs when reporter is present.
+# --- Goes away with Phase 4, when the reporting surface is owned (T-30..T-35).
+lib/redmine_reporter_dashboards/patches/report_patch.rb          patches reporter's Report#to_pdf
+lib/redmine_reporter_dashboards/liquid/issue_drop_patch.rb       prepends into reporter's IssueDrop
+lib/redmine_reporter_dashboards/liquid/custom_field_value_drop.rb documents the reporter drop it extends
+app/controllers/reporter_project_pages_controller.rb            report_pdf declines when the plugin is absent
+app/helpers/reporter_project_pages_helper.rb                    comment explaining the widget degradation path
+app/views/my/_report.erb                                        renders a reporter report template
+app/views/my/blocks/_report_by_issues.erb                       renders a reporter report template
+
+# --- Historical record. Comments only; no executable reference.
+lib/redmine_reporter_dashboards/positioned.rb          comments naming the vendor gem method it replaced
+db/migrate/001_create_reporter_dashboards_tables.rb    migration comment referring to the original coupling

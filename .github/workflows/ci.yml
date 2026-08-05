@@ -1,21 +1,37 @@
-# One workflow instead of the three near-identical per-version ones it replaces
-# (rspec_minitest-51/-60/-61.yml). Those were workflow_dispatch-only, because every
-# one of them checked out the PRIVATE redmine_reporter plugin with
-# secrets.REPORTER_REPO_TOKEN before running anything — a secret no fork PR can see,
-# so `on: pull_request` would have made every outside contribution red.
+# THE WHOLE SUITE RUNS ON A FORK PULL REQUEST. That is the point of this file, and it
+# is new: until redmine_reporter became optional, the functional tests checked out a
+# PRIVATE plugin using secrets.REPORTER_REPO_TOKEN. A secret is not readable from a
+# fork, so those tests were skipped on every outside contribution — and a skipped job
+# reads exactly like a passing one. An outside contributor could not have their work
+# tested, and nobody could tell.
 #
-# The split below is what makes automatic runs possible:
+# The secret, the probe job that checked whether it was readable, and the private
+# checkout step are all gone. `script/gates/no_secrets.sh` is what stops them coming
+# back, because the way they come back is not malice — it is one convenient step added
+# during an unrelated change by someone who never read this comment.
 #
-#   rspec     — the plugin's own specs. They stub Redmine away and never boot Rails,
-#               so they need neither the private plugin nor a database. Runs on every
-#               push and pull request, across the supported Redmine branches.
-#   adapter   — spec/adapter, the specs that run the aggregator's SQL against a real
-#               server. One job per engine: PostgreSQL, MySQL and MariaDB.
-#   minitest  — the functional tests, which DO boot the full app and therefore DO
-#               need redmine_reporter. Gated on the secret actually being readable,
-#               so it is skipped rather than failed on a fork PR.
+# The jobs:
+#
+#   rspec      — the plugin's own specs. They stub Redmine away and never boot Rails,
+#                so they need no database. Every supported Redmine branch.
+#   adapter    — spec/adapter, the aggregator's SQL against a real server. One job per
+#                engine: PostgreSQL, MySQL, MariaDB.
+#   minitest   — the functional tests, which boot the full application, STANDALONE:
+#                no redmine_reporter, no redmineup gem. Every supported branch.
+#                This is the configuration the plugin promises and it is now the one
+#                CI proves.
+#   baseline   — the corpus reference checks, run from the PLUGIN CHECKOUT rather than
+#                the mirror. They need git history, and redmine_clone.sh / the rsync
+#                below deliberately exclude .git, so run there they would skip — and a
+#                skipped guard is indistinguishable from a passing one.
+#   gates      — the non-test checks. A green suite says nothing about these.
 #   ruby-floor — the plugin declares Redmine 5.1 support, and Redmine 5.1 runs on
-#               Ruby 2.7. Guards the syntax that floor rules out.
+#                Ruby 2.7. Guards the syntax that floor rules out.
+#
+# What is NOT covered, stated rather than implied: the two report widgets need
+# redmine_reporter, which is private, so their four functional tests SKIP here with a
+# reason. They are exercised by running the suite locally with a reporter checkout
+# (see CONTRIBUTING / .codex/redmine_clone.sh). Every other test runs on every PR.
 
 name: CI
 
@@ -197,35 +213,12 @@ jobs:
         working-directory: redmine
 
   # ------------------------------------------------------------------
-  # Is the private redmine_reporter reachable from this run at all?
-  # ------------------------------------------------------------------
-  reporter-secret:
-    name: Check redmine_reporter access
-    runs-on: ubuntu-latest
-    outputs:
-      available: ${{ steps.check.outputs.available }}
-    steps:
-      - id: check
-        env:
-          TOKEN: ${{ secrets.REPORTER_REPO_TOKEN }}
-        run: |
-          if [ -n "$TOKEN" ]; then
-            echo 'available=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::REPORTER_REPO_TOKEN is not readable from this run ' \
-                 '(fork pull request, or the secret is unset), so the minitest job is skipped. ' \
-                 'The RSpec and adapter jobs do not need it.'
-          fi
-
-  # ------------------------------------------------------------------
-  # Functional tests — boot the full app, so redmine_reporter must be present
+  # Functional tests — the full application, STANDALONE. No secret, no private
+  # plugin, so this runs on a fork pull request like everything else.
   # ------------------------------------------------------------------
   minitest:
-    name: Minitest (Redmine ${{ matrix.redmine }})
+    name: Minitest standalone (Redmine ${{ matrix.redmine }})
     runs-on: ubuntu-latest
-    needs: reporter-secret
-    if: needs.reporter-secret.outputs.available == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -264,17 +257,10 @@ jobs:
           mkdir -p redmine/plugins/redmine_reporter_dashboards
           rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
 
-      # redmine_reporter is a private hard dependency: init.rb raises without it and
-      # the functional tests boot the full app. Provide a read-only credential
-      # (fine-grained PAT or deploy key) as the REPORTER_REPO_TOKEN secret, and
-      # adjust `repository` if the reporter repo lives elsewhere.
-      - name: Checkout redmine_reporter dependency (private)
-        uses: actions/checkout@v4
-        with:
-          repository: jcatrysse/redmine_reporter
-          token: ${{ secrets.REPORTER_REPO_TOKEN }}
-          path: redmine/plugins/redmine_reporter
-
+      # Nothing is checked out here on purpose. redmine_reporter is optional, and its
+      # absence is the configuration under test: the plugin must boot, the dashboards
+      # must work, and the two widgets that do need it must be absent from the picker
+      # rather than breaking the page.
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev
 
@@ -309,9 +295,93 @@ jobs:
           bundle exec rake redmine:plugins:migrate
         working-directory: redmine
 
+      # Belt and braces: if a future change reintroduces the dependency, this fails
+      # here with one clear line instead of quietly making the run mean something else.
+      - name: Assert the standalone configuration
+        run: |
+          if [ -d redmine/plugins/redmine_reporter ]; then
+            echo "redmine_reporter is present — this job asserts its ABSENCE." >&2
+            exit 1
+          fi
+          echo 'No redmine_reporter plugin: standalone, as intended.'
+
       - name: Run plugin functional tests
         run: bundle exec rake redmine:plugins:test NAME=redmine_reporter_dashboards
         working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # Corpus reference checks — from the PLUGIN CHECKOUT, where git history exists.
+  #
+  # Deliberately not folded into the rspec job: that one runs from inside the Redmine
+  # clone, where the plugin was rsynced without .git, so these examples would skip.
+  # A guard that skips is indistinguishable from a guard that passes, which is exactly
+  # the false assurance gate G7 exists to prevent.
+  # ------------------------------------------------------------------
+  baseline:
+    name: Corpus baseline reference
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the baseline is a commit, and a shallow clone cannot resolve it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      - name: Install rspec
+        run: gem install rspec --no-document
+
+      - name: Verify the baseline commit and the byte-identity reference
+        run: rspec -I spec spec/golden --format documentation
+
+      # If these skip, the job is green and has checked nothing. Say so out loud.
+      - name: Refuse a run in which the baseline checks skipped
+        run: |
+          out="$(rspec -I spec spec/golden 2>&1)"
+          echo "$out"
+          if echo "$out" | grep -qE '[1-9][0-9]* pending'; then
+            echo "The baseline checks were PENDING, so nothing was verified." >&2
+            echo "They need git history — see spec/golden/baseline_spec.rb." >&2
+            exit 1
+          fi
+
+  # ------------------------------------------------------------------
+  # Non-test gates. A green suite says nothing about any of these.
+  # ------------------------------------------------------------------
+  gates:
+    name: Gates (no_secrets, zero_reporter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # no_secrets.sh parses the workflow expressions with Ruby. The runner image
+      # happens to ship one, but a gate that depends on that is a gate that erupts on
+      # an image change — and an erupting gate is one nobody trusts.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      # G1 — the fork-PR promise. Fails on any secret but GITHUB_TOKEN.
+      - name: no_secrets
+        run: ./script/gates/no_secrets.sh
+
+      # G8 — layer purity, reporter half. Warn mode: the integration still exists, so
+      # a handful of files legitimately name it and each says why in the allowlist.
+      # What is enforced is the ratchet — an unlisted reference fails.
+      - name: zero_reporter
+        run: ./script/gates/zero_reporter.sh
+
+      # Not a gate, and deliberately not failing the build: the number that has to
+      # reach zero by 1.0, printed where a reviewer sees it move.
+      - name: Report the remaining reporter surface
+        if: always()
+        run: |
+          n="$(./script/gates/zero_reporter.sh | sed -nE 's/.*referencing files=([0-9]+).*/\1/p')"
+          echo "::notice::${n} file(s) still reference redmine_reporter or redmineup. Target at 1.0: 0."
 
   # ------------------------------------------------------------------
   # Ruby 2.7 floor

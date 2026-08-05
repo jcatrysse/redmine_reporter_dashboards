@@ -51,73 +51,90 @@ including the specs. `./.codex/check_ruby_floor.sh` greps for the constructs tha
 floor rules out (endless method definitions, `Hash#except`, hash value omission) and
 runs in CI.
 
-## The `redmine_reporter` dependency
+## The `redmine_reporter` dependency — optional
 
-`redmine_reporter` is a private plugin. Only *fetching it over the network onto a fresh machine* requires a credential. If a checkout already exists next to this plugin, everything works without any configuration.
+**You do not need it.** Clone this repository, run the scripts, and the whole suite
+runs: the plugin boots on a plain Redmine, and CI runs its full test suite that way
+on every pull request, including one from a fork.
 
-| Environment | How reporter is provided | Credential needed? |
-|-------------|--------------------------|-------------------|
-| Local | `redmine_clone.sh` copies the sibling `../redmine_reporter` directory (rsync, no git) | No |
-| Cloud agent with reporter pre-seeded | sibling checkout or `REPORTER_PLUGIN_PATH` | No |
-| Cloud agent without reporter | a setup step must clone reporter | Yes |
-| GitHub Actions | `actions/checkout` of the private repo | Yes — `REPORTER_REPO_TOKEN` secret |
+It used to be a hard dependency enforced by a `raise` in `init.rb`, which meant no
+outside contributor could run — or have CI run — the functional tests at all.
 
-**Point the script at a specific reporter checkout:**
+What still needs it is the two **report widgets** and their PDF export, because those
+render one of Reporter's own report templates. Their four functional tests `skip` with
+a reason when it is absent, so the number is visible rather than the coverage being
+silently smaller.
+
+| Environment | Reporter provided how | Credential? |
+|-------------|-----------------------|-------------|
+| Local, standalone | nothing to do | No |
+| Local, with reporter | `redmine_clone.sh` copies the sibling `../redmine_reporter`, or `REPORTER_PLUGIN_PATH` | No |
+| GitHub Actions | **not at all, deliberately** — see below | **No** |
+
+**Running the reporter-present configuration locally**, if you have a checkout:
 
 ```bash
 # Default: ../redmine_reporter is detected automatically.
-./.codex/redmine_clone.sh 5.1-stable
+./.codex/redmine_clone.sh 6.1-stable
 
-# Or point REPORTER_PLUGIN_PATH at any path:
-REPORTER_PLUGIN_PATH=/abs/path/to/redmine_reporter ./.codex/redmine_clone.sh 5.1-stable
+# Or point it anywhere:
+REPORTER_PLUGIN_PATH=/abs/path/to/redmine_reporter ./.codex/redmine_clone.sh 6.1-stable
 ```
 
-**When reporter is missing — script behaviour:**
-
-If reporter is not found, `redmine_clone.sh` prints a warning and continues. The scripts then run only the standalone RSpec specs and skip the minitest suite. To enforce the full suite:
-
-```bash
-REQUIRE_REPORTER_PLUGIN=1 ./.codex/test_setup.sh
-REQUIRE_REPORTER_PLUGIN=1 ./.codex/test_plugin.sh
-```
-
-`CI=true` enables this strict mode automatically. Set `REQUIRE_REPORTER_PLUGIN=0` only for an intentional standalone-spec run.
-
-**Cloud agent that must fetch reporter itself:**
-
-```bash
-gh repo clone jcatrysse/redmine_reporter ../redmine_reporter
-```
-
-Prefer platform authentication, a deploy key, or a masked secret — avoid pasting a token into shell history.
+`REQUIRE_REPORTER_PLUGIN=1` makes the scripts **fail** if reporter is missing — use it
+when you mean to test that configuration and want a missing checkout to be an error
+rather than a quietly different run. It no longer decides whether the full-app tests
+run at all: they run either way, because the standalone configuration is the one most
+worth exercising.
 
 ## GitHub Actions
 
-One workflow, `.github/workflows/ci.yml`, running on every push and pull request.
-It has four jobs, split by what each one actually needs:
+One workflow, `.github/workflows/ci.yml`, on every push and pull request.
 
-| Job | Matrix | Needs a database? | Needs `redmine_reporter`? |
-|-----|--------|-------------------|---------------------------|
+**No job needs a secret.** That is the headline, and it is what makes an outside
+contribution testable:
+
+| Job | Matrix | Database | Needs `redmine_reporter`? |
+|-----|--------|----------|---------------------------|
 | `rspec` | Redmine 5.1 / 6.0 / 6.1 / 7.0 | No | No |
 | `adapter` | PostgreSQL 16, MySQL 8.0, MariaDB 11 | Yes (service container) | No |
-| `minitest` | Redmine 5.1 / 6.0 / 6.1 / 7.0 | PostgreSQL 16 | **Yes** |
+| `minitest` | Redmine 5.1 / 6.0 / 6.1 / 7.0 | PostgreSQL 16 | **No — asserts its absence** |
+| `baseline` | — | No | No |
+| `gates` | — | No | No |
 | `ruby-floor` | — | No | No |
 
-That split is the point. The three workflows this replaced were
-`workflow_dispatch`-only because each of them checked out the private
-`redmine_reporter` plugin before running anything, and a fork pull request cannot
-read `secrets.REPORTER_REPO_TOKEN` — so `on: pull_request` would have made every
-outside contribution red. Only `minitest` needs that secret now, and a
-`reporter-secret` job checks whether it is readable so `minitest` is *skipped*
-rather than failed when it is not.
+### Why there is no longer a `REPORTER_REPO_TOKEN`
 
-### Setting up `REPORTER_REPO_TOKEN`
+The `minitest` job used to check out the private `redmine_reporter` repository with
+`secrets.REPORTER_REPO_TOKEN`. A fork pull request cannot read a secret, so a
+`reporter-secret` probe job decided whether `minitest` ran — and on every outside
+contribution it did not. The suite was *skipped*, and a skipped job is
+indistinguishable from a passing one at a glance.
 
-1. Create a **fine-grained PAT** with `Contents: read` access to the `redmine_reporter` repo only.
-2. Store it as the secret `REPORTER_REPO_TOKEN` on *this* repo (Settings → Secrets → Actions).
-3. The secret is encrypted and never exposed in logs.
+The secret, the probe job and the private checkout step are all deleted.
+`script/gates/no_secrets.sh` fails the build on any secret other than `GITHUB_TOKEN`,
+which GitHub provides to every run including a fork's. If a private dependency is ever
+genuinely needed again, that gate makes it a deliberate decision rather than a step
+someone adds in passing — the cost being the project's ability to accept tested
+contributions.
 
-Adjust the `repository:` line in the `minitest` job if your reporter repo path differs.
+The trade-off, stated plainly: the two report widgets are not exercised in CI. Run the
+suite locally with a reporter checkout to cover them.
+
+### The non-test gates
+
+A green test suite says nothing about these, which is why they are separate jobs:
+
+- **`no_secrets`** — no secret but `GITHUB_TOKEN`, as above.
+- **`zero_reporter`** — every file naming `redmine_reporter` / `redmineup` is on
+  `script/gates/zero_reporter.allowlist` with a written reason. A new reference fails;
+  a stale entry is reported so the list shrinks. `ZERO_REPORTER_MODE=strict` is what
+  1.0 has to pass, and it fails today by design. The remaining count is printed on
+  every run.
+- **`baseline`** — the corpus reference checks, run from the plugin checkout rather
+  than the mirrored copy inside the Redmine clone, because the mirror has no git
+  history and the checks would skip there. The job **fails if they skip**: a guard that
+  quietly checks nothing is worse than no guard.
 
 ### Triggering the workflow manually
 
