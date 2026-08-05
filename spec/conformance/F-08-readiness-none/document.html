@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-08</title></head><body>
+<h1>READINESS-NONE</h1>
+<script>window.__rdOptions = { clientTimeoutMs: 4000 };</script>
+@@CHART_SHELL@@
+<p id="state">RD-STATE pending</p>
+<script>
+  /* The shell owns readiness; this only MIRRORS it into the DOM so the PDF can be
+     asked what the page believed. Nothing here participates in the protocol. */
+  (function () {
+    function mirror() {
+      var rd = window.__rd;
+      document.getElementById('state').textContent =
+        'RD-STATE ready=' + rd.ready + ' pending=' + rd.pending +
+        ' degraded=[' + rd.degraded.join(',') + ']';
+    }
+    setInterval(mirror, 50);
+    mirror();
+  }());
+</script>
+</body></html>

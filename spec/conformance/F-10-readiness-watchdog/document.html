@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-10</title></head><body>
+<h1>READINESS-WATCHDOG</h1>
+<script>window.__rdOptions = { clientTimeoutMs: 2000 };</script>
+@@CHART_SHELL@@
+<p id="c1">chart 1 will never finish</p>
+<table><tr><td>TABLE-ROW-7</td><td>content unrelated to the chart</td></tr></table>
+<p id="state">RD-STATE pending</p>
+<script>
+  (function () {
+    window.__rd.begin();   /* and deliberately never end() */
+    function mirror() {
+      var rd = window.__rd;
+      document.getElementById('state').textContent =
+        'RD-STATE ready=' + rd.ready + ' pending=' + rd.pending +
+        ' degraded=[' + rd.degraded.join(',') + ']';
+    }
+    setInterval(mirror, 50);
+    mirror();
+  }());
+</script>
+</body></html>

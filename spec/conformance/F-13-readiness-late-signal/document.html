@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-13</title></head><body>
+<h1>LATE-SIGNAL</h1>
+<script>window.__rdOptions = { clientTimeoutMs: 18000 };</script>
+@@CHART_SHELL@@
+<p id="c1">chart pending</p>
+<p id="state">RD-STATE pending</p>
+<script>
+  (function () {
+    window.__rd.begin();
+    setTimeout(function () {
+      /* The marker is written BEFORE end(), so a document printed at any point before
+         the signal cannot contain it. That ordering is the falsifier. */
+      document.getElementById('c1').textContent = 'POST-READINESS-MARKER';
+      window.__rd.end();
+    }, 6000);
+
+    function mirror() {
+      var rd = window.__rd;
+      document.getElementById('state').textContent =
+        'RD-STATE ready=' + rd.ready + ' pending=' + rd.pending +
+        ' degraded=[' + rd.degraded.join(',') + ']';
+    }
+    setInterval(mirror, 100);
+    mirror();
+  }());
+</script>
+</body></html>

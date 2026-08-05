@@ -1,0 +1,185 @@
+# Engine capability declarations — DoR-5, specified in technical-spec.md §5 and §5.1.
+#
+# WHAT THIS FILE IS. One place where every render engine says what it can do, what it
+# costs to install, and whether anybody has actually run it. It exists because §5.2
+# requires the engine-selection UI to "state the trade in one line per engine —
+# generated from capabilities.yml, never hand-written", and because a capability that
+# lives only inside an adapter class cannot be read by an operator choosing between
+# them.
+#
+# WHAT IT IS NOT. It is not a source of behaviour. Nothing here is loaded as Ruby, no
+# class name is resolved from it, and an engine id in this file does not cause an
+# adapter to exist — `Render::Registry` is a closed map written in Ruby, for the reason
+# CLAUDE.md §5 forbids `YAML.load_file` + `constantize`: a class instantiated from file
+# content is arbitrary code execution wearing a configuration hat.
+#
+# HOW IT IS KEPT HONEST. `spec/conformance/conformance_spec.rb` asserts that a
+# registered adapter's own `#capabilities` equals its `capabilities:` list here. The two
+# cannot drift: either they agree or the suite is red. And `verification:` is checked
+# against the conformance run itself — an engine that claims `corpus` and did not run
+# fails matrix generation rather than printing an empty column.
+#
+# THE VOCABULARY IS CLOSED. Every entry under `capabilities:` must be in
+# `Render::Capabilities::ALL`. An open vocabulary lets an adapter declare `:whatever`
+# and a request require it, and the negotiation between them then always succeeds —
+# which is the same as not having one.
+---
+version: 1
+
+# --- Asset models (technical-spec.md §5.1) -----------------------------------------
+#
+# Every HTML-to-PDF engine offers some subset of exactly three, and nothing else. There
+# is no packaging standard to adopt here — MHTML is accepted by none of the candidate
+# engines — so the abstraction is the triple itself, with a policy over it.
+asset_models:
+  inline:
+    capability: asset_inline
+    egress: false
+    description: >-
+      data: URIs for images and fonts; CSS, JS and SVG inlined into one document body.
+      This is what `asset_policy: :bundled` uses, and it is why the default install
+      renders correctly with the engine's name resolution denied.
+  upload:
+    capability: asset_upload
+    egress: false
+    description: >-
+      the request carries named asset bytes and the engine reads them from memory —
+      Gotenberg's multipart form, CDP request interception, WeasyPrint's url_fetcher.
+      The portable middle model: local bytes too large to inline travel without anyone
+      touching the network.
+  fetch:
+    capability: asset_http
+    egress: true
+    description: >-
+      the engine resolves absolute URLs itself. The only model that puts the renderer
+      on the network, which is why the plugin fetches and hands over bytes instead
+      wherever the engine supports upload — INV-8 is "the renderer is never the thing
+      holding the network".
+
+# --- Engines ------------------------------------------------------------------------
+engines:
+  chromium_cdp:
+    label: Headless Chromium over CDP
+    role: reference
+    default: true
+    # `pending` until T-13 registers the adapter. Deliberately not `corpus` yet: the
+    # matrix generator REFUSES to print a column for an engine that claims to have been
+    # conformance-run and was not, and that refusal is the only thing standing between
+    # this file and a support claim nobody measured (INV-7).
+    verification: pending
+    verification_note: >-
+      the corpus and the contract exist (T-12); the adapter does not yet (T-13). This
+      column carries no measurements and says so rather than being left out — an absent
+      column reads as "nothing to report" and means "nobody checked".
+    needs_service: false
+    renders_offline: true
+    install: one documented package install (chromium), not provided by bundle install
+    version_floor: Chromium 120
+    asset_models: [inline]
+    deprecated: false
+    trade: >-
+      the reference engine and the default. Modern CSS (flexbox, grid), a current
+      JavaScript engine, tagged PDF and document outlines. Costs one package install
+      that `bundle install` does not perform — G7's "≈3 commands" is honestly "≈3
+      commands plus one documented package install", and pretending otherwise is how an
+      operator finds out at the wrong moment.
+    capabilities:
+      - javascript
+      - readiness_expression
+      - print_backgrounds
+      - header
+      - footer
+      - page_furniture_tokens
+      - custom_page_size
+      - landscape
+      - margins
+      - scale
+      - page_break_css
+      - media_print
+      - outline
+      - tagged_pdf
+      - pdf_metadata
+      - asset_inline
+      - timeout
+
+  wkhtmltopdf:
+    label: wkhtmltopdf (compatibility)
+    role: compatibility
+    default: false
+    verification: pending
+    verification_note: >-
+      as above — the adapter arrives with T-13. wkhtmltopdf is additionally the engine
+      this container cannot install, so its cells will come from CI rather than from a
+      developer machine, which is the normal case for this project and not a weakness
+      of the result.
+    needs_service: false
+    renders_offline: true
+    install: provided by bundle install; no service, no configuration
+    version_floor: wkhtmltopdf 0.12.6
+    asset_models: [inline]
+    deprecated: true
+    deprecation: >-
+      declared deprecated on arrival, with an INV-7-shaped removal condition: it goes
+      when its CI cells have been green on a modern replacement for two releases AND no
+      supported install still selects it. It is not kept because it is good; it is kept
+      because it is the only engine `bundle install` provisions, and dropping it would
+      break every existing install on the day of the upgrade.
+    trade: >-
+      the migration engine. Every existing install and template keeps rendering, on
+      shared hosting and air-gapped, with zero configuration. The cost is a 2011
+      WebKit: no flexbox, no grid, a JavaScript engine old enough to need shims, and no
+      tagged PDF. Choose it to migrate, not to build on.
+    capabilities:
+      - javascript
+      - print_backgrounds
+      - header
+      - footer
+      - page_furniture_tokens
+      - custom_page_size
+      - landscape
+      - margins
+      - media_print
+      - page_break_css
+      - pdf_metadata
+      - asset_inline
+      - timeout
+
+  gotenberg:
+    label: Gotenberg (containerised Chromium)
+    role: documented
+    default: false
+    # No adapter ships yet — T-34. `documented` is what stops the matrix printing an
+    # empty column and calling it a result.
+    verification: documented
+    needs_service: true
+    renders_offline: true
+    install: an operator-run container; the plugin never ships one
+    version_floor: Gotenberg 8
+    asset_models: [upload]
+    deprecated: false
+    verification_note: >-
+      no adapter in the tree yet (T-34). Declared here because the capability shape and
+      the security conditions were decided with it in view — `/forms/chromium/convert/url`
+      is a forbidden code path (SSRF), only `convert/html` with the upload model, and a
+      Gotenberg reachable without its configured credential is a preflight FAILURE with
+      a named remediation rather than a warning.
+    trade: >-
+      the same Chromium, in somebody else's container. Buys a render path that is
+      already isolated at the network level; costs a service to run, monitor and patch,
+      and a default configuration that is unauthenticated.
+    capabilities:
+      - javascript
+      - readiness_expression
+      - print_backgrounds
+      - header
+      - footer
+      - page_furniture_tokens
+      - custom_page_size
+      - landscape
+      - margins
+      - scale
+      - page_break_css
+      - media_print
+      - pdf_metadata
+      - asset_upload
+      - timeout

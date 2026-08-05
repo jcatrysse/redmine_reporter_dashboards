@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-09</title></head><body>
+<h1>READINESS-CHARTS</h1>
+<script>window.__rdOptions = { clientTimeoutMs: 8000 };</script>
+@@CHART_SHELL@@
+<p id="c1">chart 1 pending</p>
+<p id="c2">chart 2 pending</p>
+<p id="c3">chart 3 pending</p>
+<p id="state">RD-STATE pending</p>
+<script>
+  (function () {
+    /* Stands in for {% chart %}: begin() inline, end() when the draw finishes. The
+       author never writes either call — that is T-11's rule, and the reason this
+       fixture puts them in the shell's own idiom rather than in the markup. */
+    function chart(id, ms) {
+      window.__rd.begin();
+      setTimeout(function () {
+        document.getElementById(id).textContent = 'CHART-DONE-' + id.substring(1);
+        window.__rd.end();
+      }, ms);
+    }
+    chart('c1', 600); chart('c2', 600); chart('c3', 600);
+
+    function mirror() {
+      var rd = window.__rd;
+      document.getElementById('state').textContent =
+        'RD-STATE ready=' + rd.ready + ' pending=' + rd.pending +
+        ' degraded=[' + rd.degraded.join(',') + ']';
+    }
+    setInterval(mirror, 50);
+    mirror();
+  }());
+</script>
+</body></html>

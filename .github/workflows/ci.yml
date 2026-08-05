@@ -32,6 +32,17 @@
 #   gates      — the non-test checks. A green suite says nothing about these.
 #   ruby-floor — the plugin declares Redmine 5.1 support, and Redmine 5.1 runs on
 #                Ruby 2.7. Guards the syntax that floor rules out.
+#   render-smoke — T-12. The engine conformance corpus and the generated support
+#                matrix, gates G12 and G9. The only job with a browser in it.
+#
+# ONE render-smoke job, not one per engine, and that is a deviation from
+# technical-spec.md §8's target table worth stating rather than hiding. The target is
+# three jobs (`:chromium_cdp`, `:wkhtmltopdf`, `:gotenberg`); today one of those
+# adapters exists and the other two do not, so a three-cell matrix would be two cells
+# reporting nothing. The suite already runs every registered adapter and names each in
+# its own example, so a red engine is identifiable either way. It splits into a matrix
+# when there is a second engine whose failure could mask a first — which is a decision
+# about isolation, and today there is nothing to isolate from.
 #
 # What is NOT covered, stated rather than implied: the two report widgets need
 # redmine_reporter, which is private, so their four functional tests SKIP here with a
@@ -603,6 +614,114 @@ jobs:
         run: |
           n="$(./script/gates/compat_size.sh | sed -nE 's/.*code lines=([0-9]+).*/\1/p')"
           echo "::notice::compat is ${n} code line(s). Every one is a Redmine version this plugin still bends around."
+
+  # ------------------------------------------------------------------
+  # Render conformance — T-12, gates G9 and G12
+  #
+  # The one job with a browser in it. Everything else in this file deliberately has
+  # none: `rspec` stubs Redmine away and runs on four branches, and putting a Chromium
+  # install in front of the fastest feedback in the project would be paid on every
+  # push for the benefit of one directory.
+  #
+  # What it enforces:
+  #
+  #   G12  the three-state rule. An UNDECLARED capability skips with a reason; a
+  #        DECLARED one that fails is a hard failure. The corpus is what tells those
+  #        apart, and the harness itself is negative-tested — engines that decline,
+  #        engines that lie, engines that return bytes which are not a PDF.
+  #   G9   the support matrix is GENERATED FROM THE RUN and the committed file has to
+  #        match. A hand-written matrix ages into a lie; INV-7 is this project's record
+  #        of exactly that, four minor versions long.
+  #
+  # It runs the harness half on every push (no engine needed, no browser touched) and
+  # the corpus half against whatever adapters are registered. Until T-13 registers one,
+  # the corpus half has nothing to drive and the catalogue says so in as many words —
+  # `verification: pending`, printed into the matrix.
+  # ------------------------------------------------------------------
+  render-smoke:
+    name: Render conformance (G9, G12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      - name: Install rspec and the PDF probes
+        run: |
+          gem install rspec --no-document
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          pdfinfo -v 2>&1 | head -1
+
+      # A MISSING PROBE IS AN ERROR, NOT A SKIP. The harness raises rather than
+      # skipping when pdfinfo/pdftotext/pdftoppm are absent, because a matrix generated
+      # without them still says PASS for every check that never ran. This step is here
+      # so the failure names the package before the suite has to.
+      - name: Assert the probes are present
+        run: |
+          for tool in pdfinfo pdftotext pdftoppm; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool is missing"; exit 1; }
+          done
+
+      # THE SANDBOX STAYS ON. `--no-sandbox` is not set by the adapter and must not be
+      # set here either: a browser rendering attacker-influenced HTML with its sandbox
+      # off is the one configuration this design exists to avoid. Ubuntu 24.04 runners
+      # restrict unprivileged user namespaces through AppArmor, which is what Chromium's
+      # sandbox needs, so the restriction is lifted for the job rather than the sandbox
+      # being disabled for the browser. Those are not the same trade and the difference
+      # is the whole point.
+      - name: Allow the Chromium sandbox to initialise
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || \
+            echo "::notice::no AppArmor userns restriction to lift on this image"
+
+      - name: Locate a browser
+        id: browser
+        run: |
+          for candidate in "$CHROME_PATH" google-chrome-stable google-chrome chromium chromium-browser; do
+            [ -n "$candidate" ] || continue
+            path="$(command -v "$candidate" || true)"
+            [ -n "$path" ] || continue
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            "$path" --version
+            exit 0
+          done
+          echo "::notice::no browser on this image; the corpus half will report no adapter"
+
+      # The harness's own tests: the three-state rule, the matrix generator, and the
+      # catalogue's validation. No browser involved, so this half cannot be flaky and
+      # cannot be skipped.
+      - name: Conformance harness (negative-tested)
+        run: rspec spec/conformance/conformance_harness_spec.rb --format documentation
+
+      # The corpus, against every registered adapter. `RRD_CONFORMANCE=1` is the opt-in;
+      # an engine the catalogue calls `verification: corpus` with no adapter behind it
+      # fails here rather than being quietly absent.
+      - name: Engine conformance corpus
+        env:
+          RRD_CONFORMANCE: '1'
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+        run: rspec spec/conformance --format documentation
+
+      # G9. Regenerating and diffing rather than trusting the spec's own comparison,
+      # so the failure output is the diff itself — a reviewer should be able to see
+      # WHICH cell moved without re-running anything.
+      - name: The committed support matrix matches the run
+        env:
+          RRD_CONFORMANCE: '1'
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+        run: |
+          cp docs/engine-support-matrix.md /tmp/committed-matrix.md
+          RRD_MATRIX_WRITE=1 rspec spec/conformance/conformance_spec.rb > /dev/null
+          if ! diff -u /tmp/committed-matrix.md docs/engine-support-matrix.md; then
+            echo "::error::docs/engine-support-matrix.md disagrees with this run. A PR that"
+            echo "::error::changes a capability or a cap must carry the regenerated matrix."
+            exit 1
+          fi
+          echo "support matrix: OK — the committed file is what this run produced"
 
   # ------------------------------------------------------------------
   # Ruby 2.7 floor
