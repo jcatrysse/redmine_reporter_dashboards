@@ -37,23 +37,74 @@ impossible or much more expensive later.
 | ~~DoR-4~~ | ~~Answer OQ-3/OQ-4~~ — **ANSWERED 2026-08-04.** External container: yes, *as one option*, documented and safe → third CI-verified adapter, default unchanged (T-34). Assets: fetch external references, ship local ones with the request → three models + `asset_policy`, `:bundled` default, allowlist-only above (T-33) | it determined what the asset-resolution test expects; it now does |
 | ~~DoR-5~~ | ~~Agree the engine `capabilities.yml` schema~~ — **SPECIFIED**: the closed capability vocabulary in `technical-spec.md` §5 plus the three asset models in §5.1. Written as a file in T-12, no longer a decision | the three-state conformance rule now has something to read |
 
+## Status — what has landed
+
+Kept here so a fresh session can read it rather than reconstruct it. `git log --oneline` is still
+the authority; this is a summary, and CLAUDE.md §1 says to verify it.
+
+| Task | State |
+|---|---|
+| T-00 | **VOID** — the fork is out of scope (curator, 2026-08-05). See below. |
+| T-01 | **partial** — the two §2-Step-0 prerequisites done; corpus, scope fixture, overlay and CI job still owed |
+| T-02 | not started |
+| T-03 | not started |
+| T-04 | **done** — `RedmineReporterDashboards::Positioned` replaces `up_acts_as_list` |
+| T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
+| T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
+| T-07 onward | not started |
+
+**Phase 1's promise is met and measured**: the plugin installs and runs with neither
+`redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
+reporter, and on 7.0-stable standalone, against real PostgreSQL. Not yet verified anywhere: Redmine
+5.1 and 6.0, and MySQL/MariaDB — CI covers those, a local run has not.
+
+**The one thing still owed before 0.6.0 can honestly ship** is T-09's CI change: the workflow still
+checks out the private reporter plugin with a secret, so the standalone claim is not yet proved by
+CI on every pull request. Until it is, INV-7 says the claim is weaker than it looks.
+
 ## 1. Work breakdown
 
 ### Phase 0 — unblock and freeze
 
-**T-00 · Fix the Rails 8 `enum` in the fork**
-*Goal:* Redmine 7 stops being blocked today. *Touches:* `redmine_reporter/app/models/report_template.rb:26`.
-*Deps:* none.
-*Accept:* the positional form with an **explicit integer hash** `{portrait: 0, landscape: 1}` (not
-`%i[…]` — the column is `integer default 0`, so the mapping is stated rather than positional);
-the plugin loads on Redmine 7.0; the four functional tests that currently `skip` via
-`skip_unless_reporter_report_templates_load` now **assert**; that helper and its call sites are
-deleted. **G2.**
+**~~T-00~~ · VOID — the fork is out of scope** *(closed 2026-08-05 by curator decision)*
+
+The task was "fix `enum orientation: [...]` in `redmine_reporter/app/models/report_template.rb:26`".
+The curator has ruled that **`redmine_reporter` is not to be modified**: the goal is to merge and
+improve its capabilities *into this plugin*, not to maintain the fork. T-00 therefore has no
+deliverable and **must not be attempted**.
+
+What replaced it, and why nothing is lost:
+
+- **Redmine 7 was unblocked from the other end.** Since T-05 made reporter optional, the enum
+  defect stops the two report widgets instead of the whole plugin. Redmine 7.0-stable was then run
+  standalone and is green — 900 specs, 86 adapter specs, 114 full-application tests, 0 failures.
+  The blocker was never in this plugin.
+- **The `skip_unless_reporter_report_templates_load` helper stays.** T-00 would have deleted it;
+  it is now load-bearing for a supported configuration, so it remains, with its message corrected
+  to distinguish "reporter absent" (normal) from "reporter installed but broken" (a defect).
+- **The tooling half of T-00 is done** and was mostly a false premise — see `CLAUDE.md` §4.
+  `.codex/ruby_version.sh` fixes the real gap; `redmine_clone.sh` and `test_setup.sh` were also
+  fixed so the standalone configuration can be set up and switched to at all.
+- **The enum divergence is still owed to `compat/enum.rb`** for this plugin's own models, if any
+  ever need an enum. Measured: `enum :name, {...}` raises `ArgumentError` on Rails 6.1, and
+  `enum name: [...]` raises on Rails 8.1, so neither form spans 5.1→7.0 alone. Stored integers are
+  identical either way.
+
+*If reporter is ever fixed upstream*, the four skipping tests begin asserting on their own; nothing
+here needs changing to allow that.
 
 **T-01 · Freeze the oracle** *(the only time-sensitive task)*
 *Goal:* capture what "the same numbers" means, before anything moves.
-*Touches:* new `spec/golden/aggregation/**`, a generator extending `spec/adapter/adapter_helper.rb` — **extend, do not write a parallel harness**.
-*Deps:* T-00 (the generator must be able to boot).
+*Touches:* new `spec/golden/**` (`reference_date.rb`, `corpus_canonicaliser.rb`, `baseline.rb` and
+the `aggregation/` fixtures) and a generator extending `spec/adapter/adapter_helper.rb` —
+**extend, do not write a parallel harness**. **Corrected 2026-08-05:** the value corpus can be
+generated from that harness, but **the scope fixture cannot** — `ScopeResolution#resolve_scope`
+reaches `Issue.visible`, `IssueQuery.visible` and a thread-local, none of which exist in a harness
+whose whole point is not booting Redmine. The scope fixture therefore also touches `test/` (the
+full-app suite), where real roles and a real `IssueQuery` exist. Budget it as two pieces, not one.
+*Deps:* none. **Corrected 2026-08-05:** was `T-00 (the generator must be able to boot)`. T-00 is
+void, and the premise was wrong anyway — the generator boots on any Redmine whose Rails accepts
+reporter's enum, and standalone it does not need reporter at all.
 *Accept:*
 - Generated against the **`v0.5.0` tag**, not a working tree.
 - **A pinned reference date** is required and the verifier **refuses to run without it**. The
@@ -76,6 +127,15 @@ deleted. **G2.**
   reproducible is not an oracle.
 - New CI job `corpus`, green, and **it stays green through every later task**.
 
+*Progress (2026-08-05):* the two prerequisites `technical-spec.md` §2 Step 0 names are **done** —
+the pinned reference date (`spec/golden/reference_date.rb`, default `2025-12-29`, verifier refuses
+to run unpinned) and the canonicaliser (`spec/golden/corpus_canonicaliser.rb`). The baseline
+reference is **`spec/golden/baseline.rb`**: commit `eddb8fa`, not a tag, because this repository has
+no tags — see that file. Two findings from doing it: pinning the fixture is not enough on its own,
+the **clock must be frozen to the same date** or every period window comes back empty; and the
+aggregator's only clock read is Ruby-side, so freezing Ruby is sufficient. **Still owed:** the
+scope fixture, the value corpus itself, the per-adapter overlay, and the `corpus` job.
+
 **T-02 · `import:plan` — the read-only survey**
 *Goal:* make DoR-1 repeatable, and give the operator the blast radius before anything lands.
 *Touches:* new rake task; the template linter's first rules.
@@ -87,7 +147,7 @@ accessors, `new Chart(` occurrences and their `type:` values); exits 0 with a su
 
 **T-03 · Measure the performance baseline**
 *Goal:* convert R7 from unfalsifiable to relative.
-*Deps:* T-00. *Must precede T-10.*
+*Deps:* none *(corrected 2026-08-05: was T-00, which is void)*. *Must precede T-10.*
 *Accept:* p50/p95/max/stddev over ≥20 warm runs (3 discarded) per (reference template × issue
 count 1 000/10 000/100 000 × HTML|PDF), with a **recorded seed**, the runner image digest and the
 CPU model captured; committed as a provenance-stamped artefact; a cell with `stddev/p50 > 0.35`
