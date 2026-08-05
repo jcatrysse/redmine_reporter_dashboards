@@ -65,6 +65,12 @@ require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggreg
 #                        "rrd_cv_g.value"                            => {'415'=>3}
 #                        ["rrd_cv_g.value", "rrd_cv_s.value"]        => {['415','345']=>3}
 #                        :any                                        => matches any grouping
+#   bucket_counts    — the row a COUNTED bucket axis is read back from: one count per
+#                      bucket, POSITIONALLY, in `[nil, *labels]` order. That axis
+#                      (age) issues no GROUP BY at all since defect D-1's fix, so
+#                      there is no group key to key a fixture on — which is exactly
+#                      what makes the defect unrepresentable, and what makes this a
+#                      different input rather than another spelling of grouped_counts
 #   flag_counts      — keyed by the sorted filter symbols applied so far, e.g.
 #                        { [] => 49, [:closed] => 2, [:open, :overdue] => 3 }
 #   minimums / maximums — keyed by column symbol, for the flags path
@@ -73,13 +79,13 @@ require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggreg
 # derived copy, so a spec can assert on what the final chained scope received.
 class ScopeStub
   attr_reader :last_group_field, :conditions, :joins_sql, :group_expressions, :count_columns,
-              :pluck_expressions, :sum_columns, :average_columns, :where_conditions,
-              :picked
+              :pluck_expressions, :pluck_calls, :sum_columns, :average_columns,
+              :where_conditions, :picked
 
   def initialize(created_counts: {}, closed_counts: {}, open_count: 5, total: 10,
                  breakdown_counts: {}, grouped_counts: {}, flag_counts: nil,
-                 minimums: {}, maximums: {}, pluck_rows: [], sums: nil, averages: nil,
-                 ordered_dates: [])
+                 minimums: {}, maximums: {}, pluck_rows: [], bucket_counts: nil,
+                 sums: nil, averages: nil, ordered_dates: [])
     @created_counts    = created_counts
     @closed_counts     = closed_counts
     @open_count        = open_count
@@ -97,8 +103,9 @@ class ScopeStub
     @joins_sql         = []
     @group_expressions = []
     @count_columns     = []
-    @pluck_rows        = pluck_rows
+    @pluck_rows        = bucket_counts ? bucket_row(bucket_counts) : pluck_rows
     @pluck_expressions = []
+    @pluck_calls       = 0
     @sums              = sums
     @averages          = averages
     @sum_columns       = []
@@ -147,6 +154,7 @@ class ScopeStub
   # Conditional-aggregate rows: {[matcher, ...] => [v1, v2]} is overkill, so the
   # fixture is a lambda over the expression list, or a flat Array reused per call.
   def pluck(*expressions)
+    @pluck_calls += 1
     @pluck_expressions.concat(expressions)
     answer = @pluck_rows.respond_to?(:call) ? @pluck_rows.call(expressions) : @pluck_rows
     row    = Array(answer).first(expressions.length)
@@ -211,6 +219,21 @@ class ScopeStub
   end
 
   private
+
+  # bucket_counts is answered through the existing @pluck_rows callable hook, but it
+  # RAISES on a length mismatch instead of letting `pluck` pad the row with zeros.
+  # A short fixture would otherwise read as "those buckets are empty" — the exact
+  # failure shape defect D-1 produced in production, reproduced in the test double.
+  def bucket_row(counts)
+    lambda do |expressions|
+      if expressions.length != counts.length
+        raise ArgumentError, "bucket_counts has #{counts.length} entries but the kernel " \
+                             "asked for #{expressions.length} buckets"
+      end
+
+      counts
+    end
+  end
 
   # A fixture keys on the aggregate expression, on :any, or is the bare value. A
   # grouped call answers the per-group Hash; an ungrouped one (the `total`) answers
@@ -2026,11 +2049,36 @@ RSpec.describe SqlAggregation::QueryAggregator do
     # ----------------------------------------------------------------
 
     context 'group_by: age' do
-      let(:scope) do
-        ScopeStub.new(grouped_counts: { any: { '0-30' => 4, '91-180' => 2, nil => 1 } })
-      end
+      # [nil, '0-30', '31-60', '61-90', '91-180', '>180'] — the order the kernel asks
+      # for the buckets in and reads them back in. This used to be a grouped_counts
+      # fixture keyed by label; the counted age axis no longer groups (defect D-1).
+      let(:scope) { ScopeStub.new(bucket_counts: [1, 4, 0, 0, 2, 0]) }
 
       subject(:result) { described_class.dimension_breakdown(scope, group_by: 'age') }
+
+      # ----------------------------------------------------------------
+      # DEFECT D-1, at the MECHANISM rather than at the numbers.
+      #
+      # These two come first deliberately. The first attempt at the fix guarded on
+      # `measure.nil?` — and `resolve_measure(nil, nil)` answers `Measure.new(kind:
+      # :count)`, never nil, so the dispatch never fired and the GROUP BY was still
+      # emitted. Every count below passed anyway, because the fix was inert and the
+      # old path still produced the right numbers on a stub. Only an assertion about
+      # HOW the answer is obtained can see that.
+      # ----------------------------------------------------------------
+
+      it 'issues no GROUP BY for a counted age axis' do
+        result
+
+        expect(scope.group_expressions).to be_empty
+      end
+
+      it 'counts every bucket in a single query' do
+        result
+
+        expect(scope.pluck_calls).to eq(1)
+        expect(scope.pluck_expressions.length).to eq(6)
+      end
 
       it 'returns the default buckets in ascending age order' do
         expect(result['buckets'].map { |b| b['label'] }).to eq(
@@ -2053,22 +2101,34 @@ RSpec.describe SqlAggregation::QueryAggregator do
       end
 
       it 'accepts custom boundaries' do
-        short = ScopeStub.new(grouped_counts: { any: { '0-7' => 3, nil => 1 } })
+        short = ScopeStub.new(bucket_counts: [1, 3, 0, 0])
         r = described_class.dimension_breakdown(short, group_by: 'age', age_buckets: [7, 14])
         expect(r['buckets'].map { |b| b['label'] }).to eq(['0-7', '8-14', '>14', '(none)'])
       end
 
       it 'sorts and de-duplicates the boundaries it is given' do
-        short = ScopeStub.new(grouped_counts: { any: { '0-7' => 3 } })
+        short = ScopeStub.new(bucket_counts: [0, 3, 0, 0])
         r = described_class.dimension_breakdown(short, group_by: 'age', age_buckets: ['14', '7', '7'])
         expect(r['buckets'].map { |b| b['label'] }).to eq(['0-7', '8-14', '>14'])
       end
 
-      it 'keeps counts for a value outside the expected bucket list rather than dropping them' do
-        odd = ScopeStub.new(grouped_counts: { any: { '0-30' => 2, 'unexpected' => 5 } })
-        r = described_class.dimension_breakdown(odd, group_by: 'age')
-        expect(r['buckets'].last).to include('label' => 'unexpected', 'count' => 5)
-        expect(r['total']).to eq(7)
+      # This REPLACES 'keeps counts for a value outside the expected bucket list rather
+      # than dropping them', which pinned the kernel's defensive handling of a group
+      # value the DATABASE invented. Defect D-1 *is* that case — on MariaDB every group
+      # key came back nil — so the behaviour that example protected is the behaviour
+      # the fix removes: the bucket keys now come from Ruby and an undeclared key is
+      # unreachable by construction. Deleting a defensive assertion is argued in the
+      # pull request, not quietly rewritten to match; this is the invariant that holds
+      # in its place, and it is the stronger of the two.
+      it 'cannot report a bucket it did not declare, whatever the database answers' do
+        expect(result['buckets'].map { |b| b['label'] })
+          .to eq(['0-30', '31-60', '61-90', '91-180', '>180', '(none)'])
+        expect(result['total']).to eq(7)
+
+        short = ScopeStub.new(bucket_counts: [0, 9, 9, 9])
+        r     = described_class.dimension_breakdown(short, group_by: 'age', age_buckets: [7, 14])
+
+        expect(r['buckets'].map { |b| b['label'] }).to eq(['0-7', '8-14', '>14'])
       end
 
       it 'falls back to the defaults for a garbage boundary list' do
@@ -2076,41 +2136,61 @@ RSpec.describe SqlAggregation::QueryAggregator do
         described_class.dimension_breakdown(scope, group_by: 'age', age_buckets: ['x'])
       end
 
+      # AT the cap and one past it: MAX_AGE_BUCKETS boundaries is 25 labels, so the
+      # kernel asks for 26 counts, and bucket_row raises if it asks for any other
+      # number. That is the whole cap, asserted twice over.
       it 'caps a runaway boundary list instead of generating a huge CASE' do
-        wide = ScopeStub.new(grouped_counts: { any: {} })
+        wide = ScopeStub.new(bucket_counts: [0] * (described_class::MAX_AGE_BUCKETS + 2))
         r = described_class.dimension_breakdown(wide, group_by: 'age', age_buckets: (1..500).to_a)
         expect(r['buckets'].length).to eq(described_class::MAX_AGE_BUCKETS + 1)
       end
 
       it 'warns when it caps the boundary list' do
-        wide = ScopeStub.new(grouped_counts: { any: {} })
+        wide = ScopeStub.new(bucket_counts: [0] * (described_class::MAX_AGE_BUCKETS + 2))
         expect(Rails.logger).to receive(:warn).with(/keeping the first/)
         described_class.dimension_breakdown(wide, group_by: 'age', age_buckets: (1..500).to_a)
       end
 
+      # The generated SQL these three examine moved: the counted axis reads its
+      # buckets out of conditional aggregates, so the date arithmetic now lives in the
+      # PLUCK expressions rather than in the GROUP BY. Same claim, different accessor
+      # — and asserted on the expressions that actually run, not on the CASE, which
+      # only the measure and crosstab paths still group on.
       it 'generates portable SQL — no DATEDIFF' do
         result
-        expect(scope.group_expressions.first).not_to match(/DATEDIFF/i)
+        expect(scope.pluck_expressions.join(' ')).not_to match(/DATEDIFF/i)
       end
 
       it 'generates portable SQL — no CURRENT_DATE arithmetic' do
         result
-        expect(scope.group_expressions.first).not_to match(/CURRENT_DATE|NOW\(\)|GETDATE/i)
+        expect(scope.pluck_expressions.join(' ')).not_to match(/CURRENT_DATE|NOW\(\)|GETDATE/i)
+      end
+
+      it 'asks for the no-date bucket first, then one bucket per range' do
+        result
+        expect(scope.pluck_expressions.first)
+          .to eq('COUNT(DISTINCT CASE WHEN issues.created_on IS NULL THEN issues.id END)')
       end
 
       it 'compares the date column against bound boundaries' do
         result
-        expect(scope.group_expressions.first).to start_with('CASE WHEN issues.created_on IS NULL THEN NULL')
+        # The newest bucket is open at the recent end, a middle one is half-open on
+        # both, and the oldest is open at the old end and excludes NULL explicitly.
+        expect(scope.pluck_expressions[1]).to match(/issues\.created_on >= '[^']+' THEN/)
+        expect(scope.pluck_expressions[2])
+          .to match(/issues\.created_on >= '[^']+' AND issues\.created_on < '[^']+' THEN/)
+        expect(scope.pluck_expressions.last)
+          .to match(/issues\.created_on IS NOT NULL AND issues\.created_on < '[^']+' THEN/)
       end
 
       it 'buckets on due_date with age_field: due' do
         described_class.dimension_breakdown(scope, group_by: 'age', age_field: 'due')
-        expect(scope.group_expressions.first).to include('issues.due_date')
+        expect(scope.pluck_expressions.join(' ')).to include('issues.due_date')
       end
 
       it 'buckets on updated_on with age_field: updated' do
         described_class.dimension_breakdown(scope, group_by: 'age', age_field: 'updated')
-        expect(scope.group_expressions.first).to include('issues.updated_on')
+        expect(scope.pluck_expressions.join(' ')).to include('issues.updated_on')
       end
 
       it 'warns and falls back for an unknown age_field' do
@@ -2763,9 +2843,9 @@ RSpec.describe SqlAggregation::QueryAggregator do
         let(:today) { Date.new(2026, 5, 17) }
 
         before { allow(described_class).to receive(:current_date).and_return(today) }
-        let(:scope) do
-          ScopeStub.new(grouped_counts: { any: { '0-30' => 4, '31-60' => 3, '>180' => 2, nil => 1 } })
-        end
+        # [nil, '0-30', '31-60', '61-90', '91-180', '>180'] — positional, since the
+        # counted age axis no longer groups (defect D-1).
+        let(:scope) { ScopeStub.new(bucket_counts: [1, 4, 3, 0, 0, 2]) }
 
         subject(:buckets) { described_class.dimension_breakdown(scope, group_by: 'age')['buckets'] }
 
@@ -2817,16 +2897,23 @@ RSpec.describe SqlAggregation::QueryAggregator do
         end
 
         it 'follows custom boundaries' do
-          short = ScopeStub.new(grouped_counts: { any: { '8-14' => 3 } })
+          short = ScopeStub.new(bucket_counts: [0, 0, 3, 0])
           r     = described_class.dimension_breakdown(short, group_by: 'age', age_buckets: [7, 14])
           expect(r['buckets'][1]['filter']['values'])
             .to eq([(today - 14).strftime('%Y-%m-%d'), (today - 8).strftime('%Y-%m-%d')])
         end
 
-        it 'gives no filter to a group value that is not an age label' do
-          odd = ScopeStub.new(grouped_counts: { any: { 'unexpected' => 5 } })
-          r   = described_class.dimension_breakdown(odd, group_by: 'age')
-          expect(r['buckets'].last['filter']).to be_nil
+        # This REPLACES 'gives no filter to a group value that is not an age label',
+        # for the same reason as its sibling in the `group_by: age` block above: the
+        # value it fed in was a group key only a database could have invented, and the
+        # counted axis has no group keys any more. `age_bucket_filter` keeps its
+        # `labels.index(...)` nil guard — it is still reached by the OTHER dimensions'
+        # collapsed buckets — but it can no longer be provoked through the age axis, so
+        # what is asserted here is the property that took its place.
+        it 'gives every declared bucket a filter, and the empty one Redmine "none"' do
+          expect(buckets.map { |b| b['filter'] }).to all(be_a(Hash))
+          expect(buckets.last['filter'])
+            .to eq('field' => 'created_on', 'operator' => '!*', 'values' => [''])
         end
       end
 

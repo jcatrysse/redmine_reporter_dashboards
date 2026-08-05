@@ -4,6 +4,33 @@ All notable changes to this plugin are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`group_by: age` reported every issue as `(none)` on MariaDB, silently, with the
+  default settings.** If you run MariaDB and have an aging chart, it was wrong — and
+  worse than wrong: the total was taken from whichever group the server returned last,
+  so an issue could disappear from the count as well as from its bucket. PostgreSQL and
+  MySQL 8.0 were unaffected, measured on both.
+
+  The age dimension grouped on a generated `CASE`. ActiveRecord reads a grouped result
+  back out of the row *by the group expression's own text*, and MariaDB truncates a
+  returned column label at 256 characters — so past four age boundaries the two ends
+  were asking and answering with different names, and every key came back `NULL`. Four
+  boundaries is the default (`30, 60, 90, 180`).
+
+  A counted age axis no longer groups at all. Its buckets are fixed and known before the
+  query runs, so they are counted with one conditional aggregate each in a single
+  statement and read back **by position**. There is no column label left for either end
+  to truncate. The workaround this project previously documented — pass three boundaries
+  or fewer on MariaDB — is no longer needed for a counted axis at any boundary count.
+
+  **Still outstanding, deliberately:** an age axis with `measure:` (`sum`, `avg`,
+  `distinct`) or inside a crosstab keeps its `GROUP BY` and is still affected on MariaDB
+  past ~4 boundaries. Covering those means generalising the per-bucket aggregate to
+  arbitrary measures, which is a larger change than this defect justifies; see the
+  README's database section for what to do in the meantime. No behaviour changed on
+  PostgreSQL or MySQL: the 176-value golden aggregation corpus is byte-identical.
+
 ### Added
 
 - **`rake reporter_dashboards:import:plan`** — a read-only survey of the

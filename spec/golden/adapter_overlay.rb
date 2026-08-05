@@ -68,47 +68,33 @@ module RrdGolden
     # THE ENTRIES
     # ------------------------------------------------------------------
     #
-    # DEFECT D-1 (found 2026-08-05 by this corpus on MariaDB 10.11; confirmed by the
-    # first CI run on MariaDB 11; MEASURED ABSENT on MySQL 8.0.46 and on
-    # PostgreSQL 16):
+    # EMPTY, and that is the state it is supposed to be in: "an empty overlay passes".
     #
-    #   The `age` dimension groups on a generated CASE expression. ActiveRecord reads
-    #   the group key back out of the result row by the expression's own text, and
-    #   MariaDB truncates a returned column label at 256 characters. Measured with this
-    #   expression shape: 261 characters still works, 262 does not. Past the limit the
-    #   lookup misses, EVERY group key comes back nil, and the whole result collapses
-    #   into the "(none)" bucket — with a total taken from whichever group the server
-    #   happened to return last.
+    # It held two entries between 2026-08-05 and this commit, both `cap/age.*` on
+    # MariaDB, both for DEFECT D-1 — the `age` dimension grouped on a generated CASE,
+    # ActiveRecord read the group key back out of the row BY THE EXPRESSION'S OWN TEXT,
+    # and MariaDB truncates a returned column label at 256 characters (measured: 261
+    # works, 262 does not), so past four boundaries every key came back nil and the
+    # whole result collapsed into "(none)". MySQL 8.0.46 and PostgreSQL 16 were
+    # measured unaffected, which is why the entries were MariaDB's alone and why this
+    # file has a `mariadb` family separate from `mysql` in the first place.
     #
-    #   MySQL 8.0.46 does NOT truncate it and answers correctly. That is why this is a
-    #   MariaDB entry and not a MySQL-family one: the original write-up here said
-    #   "reproducible on any MySQL-family server", which was an inference from one
-    #   engine, and the first CI run refuted it.
+    # D-1 is fixed: the counted age axis no longer groups at all. So both entries are
+    # gone, RATCHET is back to 0, and `aggregation/overlay/mariadb.jsonl` is deleted —
+    # the spec beside this file fails if a recorded file outlives the entry that
+    # declared it, because a recorded exception nobody declares is a second corpus.
     #
-    #   FOUR age boundaries are enough to cross it, and DEFAULT_AGE_BUCKETS is
-    #   [30, 60, 90, 180] — four. So on MariaDB the DEFAULT age dimension reports every
-    #   issue as having no age, today, in production. The existing adapter execution
-    #   specs missed it because each of them happens to use three boundaries or fewer.
-    #
-    #   Not fixed here, and not because it is small: T-01 freezes the kernel and gate
-    #   G7 diffs it byte for byte against the baseline commit, so the fix belongs to
-    #   the task that may touch it (T-08 re-seams the dimension layer; see the plan's
-    #   §Findings note). These two entries are what keeps that fact visible instead of
-    #   letting a green MariaDB run imply the numbers agree.
-    ENTRIES = [
-      { case: 'cap/age.at', family: 'mariadb',
-        reason: 'DEFECT D-1: a 24-boundary age CASE is 1 506 characters, past ' \
-                "MariaDB's 256-character column-label limit, so every row lands in " \
-                '(none). MySQL 8.0 is unaffected. Delete this entry when D-1 is fixed.' },
-      { case: 'cap/age.past', family: 'mariadb',
-        reason: 'DEFECT D-1, same CASE: the 25th boundary is dropped by MAX_AGE_BUCKETS, ' \
-                'so this case generates the identical statement and fails identically.' }
-    ].freeze
+    # This is reason 2 in the list above working as intended: a named pre-existing
+    # defect is a TEMPORARY entry, and the commit that fixes it deletes the entry and
+    # lowers the ratchet. Kept as history rather than deleted outright because the
+    # separate `mariadb` family only makes sense next to the measurement that forced
+    # it, and the next long grouped expression will meet the same 256-character limit.
+    ENTRIES = [].freeze
 
     # The ratchet. It is the COMMITTED SIZE of ENTRIES, not a budget: the spec beside
     # this file fails when ENTRIES is longer AND when RATCHET is larger than ENTRIES,
     # so a lowered ratchet can never be silently left behind either.
-    RATCHET = 2
+    RATCHET = 0
 
     class << self
       def entries_for(family)

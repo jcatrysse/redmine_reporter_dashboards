@@ -288,24 +288,18 @@ else
     end
 
     describe 'the 24-age-bucket cap' do
-      # Both engines are asserted, neither is skipped, and the MySQL branch asserts
-      # the DEFECT rather than the intent — see DEFECT D-1 in
-      # spec/golden/adapter_overlay.rb. When D-1 is fixed this example fails, which is
-      # exactly the signal wanted: the fix has to come here and delete the branch.
+      # This used to branch: MariaDB asserted DEFECT D-1 (a 24-boundary CASE is 1 506
+      # characters, past MariaDB's 256-character column-label limit, so every bucket
+      # came back empty and a 26th "(none)" bucket held everything), every other engine
+      # asserted the intent. The branch was written so that fixing D-1 would fail here
+      # — which is the signal the fixer wants — and it has now done its job: the
+      # counted age axis issues no GROUP BY, so there is no column label to truncate
+      # and every engine answers the same thing. ONE assertion, no engine branch.
       it 'produces one bucket per bound plus the open-ended one' do
         buckets = result('cap/age.at')['buckets']
 
-        if RrdAdapterHarness.mariadb?
-          expect(buckets.length).to eq(RrdGolden::CorpusCases::CAP_AGE_BUCKETS + 2)
-          expect(buckets.last['label']).to eq('(none)'),
-                                           'DEFECT D-1 has changed shape: MariaDB used to ' \
-                                           'collapse a >256-character age CASE into the empty ' \
-                                           'bucket. Re-read the overlay entry before touching it.'
-          expect(buckets[0..-2].map { |b| b['count'] }.uniq).to eq([0])
-        else
-          expect(buckets.length).to eq(RrdGolden::CorpusCases::CAP_AGE_BUCKETS + 1)
-          expect(buckets.sum { |b| b['count'] }).to eq(RrdAdapterHarness::WIDE_ISSUES)
-        end
+        expect(buckets.length).to eq(RrdGolden::CorpusCases::CAP_AGE_BUCKETS + 1)
+        expect(buckets.sum { |b| b['count'] }).to eq(RrdAdapterHarness::WIDE_ISSUES)
       end
 
       # True on both engines: the 25th bound never reaches the SQL, so the statement —

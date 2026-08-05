@@ -2,6 +2,7 @@
 
 require_relative '../spec_helper'
 require_relative 'baseline'
+require_relative 'kernel_exception'
 
 # The corpus and gate G7 both compare against one commit. If that commit stops
 # resolving, or stops being the thing it claims to be, every comparison built on it
@@ -74,19 +75,36 @@ RSpec.describe RrdGolden::Baseline do
     # THE G7 ASSERTION. Before T-08 moved the files this compared a path with itself and
     # passed trivially; now it compares the ported file with the v0.5.0 blob, which is
     # what "byte-identical" was always supposed to mean.
+    #
+    # "Byte-identical" now reads "byte-identical to the blob with every DECLARED hunk
+    # applied" — see kernel_exception.rb. With no declared hunks the two are the same
+    # sentence. With one, the licensed change is the only difference that can pass, and
+    # it had to be written down with a reason before it could.
     it 'is byte-identical to the baseline blob at the ported location' do
-      described_class::KERNEL_FILES.each do |current_path, baseline_path|
+      described_class::KERNEL_FILES.each_key do |current_path|
         working = File.join(described_class.repo_root, current_path)
 
         expect(File.exist?(working)).to be(true),
                                        "#{current_path} is missing. KERNEL_FILES names where the ported " \
                                        'kernel lives; if it moved again, this map moves with it.'
-        expect(File.binread(working)).to eq(described_class.file_at_baseline(baseline_path)),
+        expect(File.binread(working)).to eq(RrdGolden::KernelException.expected_for(current_path)),
                                         "#{current_path} differs from its v0.5.0 blob " \
-                                        "(#{baseline_path}). Gate G7 is byte-identity: the only change " \
+                                        "(#{described_class::KERNEL_FILES[current_path]}) by something no " \
+                                        'declared hunk accounts for. Gate G7 is byte-identity: the only change ' \
                                         'the kernel may carry is the one T-08 argues for, and it has to be ' \
-                                        'declared rather than discovered here.'
+                                        'declared in kernel_exception.rb rather than discovered here.'
       end
+    end
+
+    # The exception mechanism is only worth anything if it is actually load-bearing:
+    # a file with no declared hunk must still be held to plain byte-identity, and
+    # drill_through.rb is the one that has none.
+    it 'holds the kernel file with no declared hunk to plain byte-identity' do
+      path = 'lib/redmine_reporter_dashboards/aggregation/drill_through.rb'
+
+      expect(RrdGolden::KernelException.entries_for(path)).to be_empty
+      expect(RrdGolden::KernelException.expected_for(path))
+        .to eq(described_class.file_at_baseline(described_class::KERNEL_FILES.fetch(path)))
     end
   end
 end

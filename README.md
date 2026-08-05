@@ -79,7 +79,7 @@ request. Two suites run there, and they prove different things:
 |----------|--------|
 | PostgreSQL 16 | tested — `spec/adapter` runs against it |
 | MySQL 8.0 | tested — `spec/adapter` runs against it |
-| MariaDB 11 | tested — `spec/adapter` runs against it. **One known defect: `group_by: age` with four or more boundaries — see below** |
+| MariaDB 11 | tested — `spec/adapter` runs against it |
 | anything else | not supported. The aggregation tags refuse to guess at date formatting and log one clear line instead — SQLite included |
 
 `requires_redmine` is set to 5.1 to match this table. Earlier 5.x releases may
@@ -145,42 +145,44 @@ explanation above rather than failing anonymously.
 So on Redmine 7.0 today: every dashboard widget except the two report widgets works
 normally, and a dashboard that contains one of those stays usable.
 
-#### Known defect: `group_by: age` reports everything as `(none)` on MariaDB
+#### Fixed: `group_by: age` used to report everything as `(none)` on MariaDB
 
-**This affects a default MariaDB installation, silently, and it is not fixed yet.**
-Found on 2026-08-05 by the golden aggregation corpus on MariaDB 10.11 and confirmed on
-MariaDB 11. **PostgreSQL 16 and MySQL 8.0 are unaffected** — measured, on both.
+**If you run MariaDB and used `group_by: age`, your aging charts were wrong before this
+release.** Found on 2026-08-05 by the golden aggregation corpus on MariaDB 10.11 and
+confirmed on MariaDB 11. **PostgreSQL 16 and MySQL 8.0 were unaffected** — measured, on
+both — so nothing changes for those engines.
 
-The `age` dimension groups on a generated `CASE` expression. ActiveRecord reads the
+The `age` dimension grouped on a generated `CASE` expression. ActiveRecord reads the
 group key back out of the result row *by the expression's own text*, and MariaDB
-truncates a returned column label at 256 characters. Past that limit the lookup misses,
-every group key comes back `NULL`, and the whole chart collapses into the `(none)`
+truncates a returned column label at 256 characters. Past that limit the lookup missed,
+every group key came back `NULL`, and the whole chart collapsed into the `(none)`
 bucket — with a total taken from whichever group the server happened to return last, so
-an issue can vanish from the count as well.
+an issue could vanish from the count as well. **Four age boundaries are enough to cross
+the limit, and the default is four** (`30, 60, 90, 180`), so this was the default
+behaviour on MariaDB.
 
-**Four age boundaries are enough to cross the limit, and the default is four**
-(`30, 60, 90, 180`). So on MariaDB:
+A counted age axis no longer groups at all. Its buckets are fixed and known in Ruby, so
+they are read from one conditional aggregate per bucket in a single query, *by
+position*. There is no column label for either end to truncate, and the workaround this
+section used to recommend — pass three boundaries or fewer — is no longer needed at any
+boundary count, up to the 24 the plugin allows.
 
-| `age_buckets:` | Result on MariaDB |
+**One case is deliberately not covered**, because it needs a different change and no
+template surveyed in this project reaches it:
+
+| `group_by: age` block | MariaDB |
 |---|---|
-| up to three boundaries (e.g. `30;60;90`) | correct |
-| four or more, the default included | every issue in `(none)`, and the total may be short |
+| a plain count, at any boundary count | correct |
+| with `measure: sum \| avg \| distinct` | still grouped, so still wrong past ~four boundaries |
+| as `split_by:`, or with a `split_by:` of its own (a crosstab) | still grouped, same |
 
-Until it is fixed, **on MariaDB pass three boundaries or fewer** to any `group_by: age`
-block. PostgreSQL and MySQL need no workaround. Nothing 500s and no other dimension is
-affected — `period`, the core fields and `cf_<id>` all group on a bare column or a short
-function.
+Those paths keep the `GROUP BY` because reading them positionally means generalising
+the per-bucket aggregate to arbitrary measures, which is a larger change than the
+defect justifies. **On MariaDB, a measured or crosstabbed age axis should stay at three
+boundaries or fewer.** Nothing 500s in any case, and no other dimension is affected —
+`period`, the core fields and `cf_<id>` all group on a bare column or a short function.
 
-The fix is a one-line change in the aggregation kernel, and it is deliberately not in
-this release: the kernel is frozen byte-for-byte against the `v0.5.0` baseline while
-the golden corpus is being established (gate G7), and the performance baseline has to be
-measured against the unmodified aggregator before it moves. Every engine is asserted in
-`spec/adapter/query_aggregator_execution_spec.rb` — MariaDB's branch pins the defect,
-the others pin the correct answer — and the two affected corpus cases carry MariaDB
-entries in `spec/golden/adapter_overlay.rb`, so the day it is fixed the suite says so
-and those entries go away.
-
-#### One known database limitation: `group_by: age` on MariaDB with `ONLY_FULL_GROUP_BY`
+#### One known database limitation: a MEASURED `group_by: age` on MariaDB with `ONLY_FULL_GROUP_BY`
 
 Every dimension groups on a bare column or a plain function — except `age`, whose
 group expression is unavoidably a `CASE` over date boundaries. MariaDB's
@@ -189,6 +191,10 @@ the same expression as the `CASE` in the `GROUP BY`, so it rejects the statement
 `'created_on' isn't in GROUP BY`. PostgreSQL and MySQL 8 both accept it (MySQL has
 had expression matching since 5.7.5, and `ONLY_FULL_GROUP_BY` is in its default
 `sql_mode`).
+
+This now applies **only to the same paths as the section above** — `measure:` on an age
+axis, and age in a crosstab. A plain counted age axis issues no `GROUP BY`, so there is
+nothing for the check to reject.
 
 `ONLY_FULL_GROUP_BY` is **not** in MariaDB's default `sql_mode`, so this only bites
 where a DBA has turned it on — and note that Rails appends to the server's mode

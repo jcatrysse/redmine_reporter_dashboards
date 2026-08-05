@@ -1,0 +1,6 @@
+    private_class_method :apply_dimension
+
+    def self.single_result(base, dim, sort:, limit:, other_label:, group_by:, measure: nil)
+      totals = measure_groups(base.group(dim.sql), measure)
+      axis   = build_axis(dim, totals, sort: sort, limit: limit, other_label: other_label)
+      values = fold_values(base, dim, axis, totals, measure)

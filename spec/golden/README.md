@@ -106,13 +106,20 @@ cp -r redmine/plugins/redmine_reporter_dashboards/spec/golden/{aggregation,scope
 
 ## What the corpus has already found
 
-**Defect D-1** — `group_by: age` collapses into the `(none)` bucket on **MariaDB**
-whenever the generated `CASE` passes 256 characters, which four age boundaries do, which
-is the default. Documented in the README's database section, asserted on every engine in
-`spec/adapter/query_aggregator_execution_spec.rb` (MariaDB's branch pins the defect, the
-others pin the correct answer), and carried as the overlay's only two entries. Not fixed
-here: gate G7 freezes the kernel byte-for-byte, and §1's ordering guard refuses a change
-to the aggregator until T-03 has measured the performance baseline against it.
+**Defect D-1** — `group_by: age` collapsed into the `(none)` bucket on **MariaDB**
+whenever the generated `CASE` passed 256 characters, which four age boundaries do, which
+is the default. **Fixed in T-08**, where the plan said it had to land: the counted age
+axis no longer groups, so there is no returned column label for MariaDB to truncate. The
+overlay's only two entries are gone and `RATCHET` is back to **0** — which is the
+mechanism working as designed rather than the entries having been wrong. "A named
+pre-existing defect is a TEMPORARY entry; the commit that fixes it deletes the entry and
+lowers the ratchet" is written in `adapter_overlay.rb`, and this is that commit.
+
+Fixing it needed a second mechanism as well, because gate G7 could previously express
+only "identical" or "different": `kernel_exception.rb` records the byte-exact hunks the
+kernel is allowed to carry against the v0.5.0 blob, each with a reason, under its own
+ratchet. The check reconstructs the expected file from the blob plus those hunks — so
+one undeclared byte, *including inside a declared hunk*, still fails.
 
 **And the corpus corrected itself.** D-1 was first written up as affecting the whole
 MySQL family, on the evidence of one engine. The first CI run measured MySQL 8.0.46

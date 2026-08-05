@@ -57,7 +57,7 @@ fact that CI has not yet run on this work at all.
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
 | T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
-| T-08 | **port done, D-1 NOT done** — both kernel files moved to `aggregation/`, **byte-identical to their v0.5.0 blobs** (G7 now asserts that against `git show` at the ported location instead of comparing a path with itself), plus the 4-line namespace assignment. **D-1's fix is still owed and blocked** — see §Findings |
+| T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly three declared hunks**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 3`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on PostgreSQL only — MariaDB is CI's to judge** |
 | T-09 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -71,25 +71,26 @@ CI on every pull request. Until it is, INV-7 says the claim is weaker than it lo
 
 ## Findings — what the work has turned up, and who owns the fix
 
-**D-1 · `group_by: age` reports everything as `(none)` on MariaDB.** Found 2026-08-05 by T-01's
-corpus on MariaDB 10.11, confirmed by the first CI run on MariaDB 11, and **measured absent on
-MySQL 8.0.46 and PostgreSQL 16**. The age dimension groups on a generated `CASE`; ActiveRecord reads
-the group key back out of the row **by the expression's own text**, and MariaDB truncates a returned
-column label at 256 characters (measured: 261 works, 262 does not). Past it every key comes back
-`NULL`, the chart collapses into the empty bucket, and the total is taken from whichever group the
-server returned last — so an issue can vanish from the count as well. **Four boundaries cross the
-limit and `DEFAULT_AGE_BUCKETS` is four**, so this is the DEFAULT behaviour on MariaDB, in
-production, today. Every existing adapter example used three boundaries or fewer, which is the only
-reason CI had been green.
+**D-1 · `group_by: age` reported everything as `(none)` on MariaDB — FIXED 2026-08-05, in T-08.**
+Found by T-01's corpus on MariaDB 10.11, confirmed by the first CI run on MariaDB 11, and **measured
+absent on MySQL 8.0.46 and PostgreSQL 16**. The age dimension grouped on a generated `CASE`;
+ActiveRecord reads the group key back out of the row **by the expression's own text**, and MariaDB
+truncates a returned column label at 256 characters (measured: 261 works, 262 does not). Past it
+every key came back `NULL`, the chart collapsed into the empty bucket, and the total was taken from
+whichever group the server returned last — so an issue could vanish from the count as well. **Four
+boundaries cross the limit and `DEFAULT_AGE_BUCKETS` is four**, so this was the DEFAULT behaviour on
+MariaDB, in production. Every existing adapter example used three boundaries or fewer, which is the
+only reason CI had been green.
 
 *First written up as affecting "the whole MySQL family" — an inference from one engine, and the
-first CI run refuted it.* MySQL 8.0 answers correctly, so the overlay now has a **`mariadb` family
-of its own**, separate from `mysql`; the adapter name cannot tell them apart (mysql2 reports
-"Mysql2" for both), so the family is asked of the server version.
+first CI run refuted it.* MySQL 8.0 answers correctly, so the overlay has a **`mariadb` family of
+its own**, separate from `mysql`; the adapter name cannot tell them apart (mysql2 reports "Mysql2"
+for both), so the family is asked of the server version. That distinction outlives the defect and is
+kept.
 
-**D-1's mechanism, measured 2026-08-05, and it corrects this entry's own prescription.** The line
-above — "the one-line change is to alias the group expression or group on a short one" — does not
-survive measurement. Two facts, both probed against the running stack rather than read off the source:
+**The mechanism, measured 2026-08-05 — and it corrected this entry's own original prescription**
+("alias the group expression or group on a short one"). Two facts, both probed against the running
+stack rather than read off the source:
 
 1. **The alias is already truncated on the engine that WORKS.** ActiveRecord derives the result-column
    name from the group expression's text (`calculations.rb#execute_grouped_calculation` →
@@ -99,9 +100,9 @@ survive measurement. Two facts, both probed against the running stack rather tha
    PostgreSQL answers correctly at every one of them, because AR asks for the same truncated name it
    sent. The mysql2 adapter hardcodes **256** (`mysql/schema_statements.rb:130`), so AR emits a
    256-character alias there and MariaDB hands back a shorter one; MySQL 8 does not. So "the alias is
-   too long" is not the defect — *the two ends disagreeing about the truncation* is, and shortening
-   the expression only moves the cliff from four boundaries to some larger number. `MAX_AGE_BUCKETS`
-   is 24, and 24 branches cannot fit in 256 characters at ~60 characters a branch.
+   too long" was never the defect — *the two ends disagreeing about the truncation* is — and
+   shortening the expression only moves the cliff. `MAX_AGE_BUCKETS` is 24, and 24 branches cannot fit
+   in 256 characters at ~60 characters a branch.
 2. **A select alias cannot be introduced without leaving AR's grouped-calculation path.**
    `execute_grouped_calculation` does `select_values += self.select_values` **`unless
    having_clause.empty?`** — with no HAVING it *overwrites* the relation's select list. Measured:
@@ -109,55 +110,58 @@ survive measurement. Two facts, both probed against the running stack rather tha
    `PG::UndefinedColumn: column "rrd_short" does not exist`, because the SELECT that defined the alias
    was discarded.
 
-So the fix is structural, not textual. The two candidates, both of which change how *every* measure
-reads its groups: (a) leave `.count`/`.sum` on a grouped relation and read a hand-built
-`select_all` with an alias this code owns; or (b) drop the GROUP BY for the age axis entirely and use
-the shape `completeness` already uses — `aggregate_row(base, buckets.map { count_case(…) })`, one
-query, one `COUNT(DISTINCT CASE …)` per bucket, read back **positionally** so no alias exists to
-truncate. (b) is the smaller of the two and fits the age dimension exactly, because its keys are fixed
-(`fixed_keys: labels`) just as completeness's are; it still has to be threaded through
-`single_result`, `crosstab_result`, `fold_values` and `bucket_filter`.
+**So the fix is structural, and it is the one that makes the state unrepresentable rather than
+smaller.** The age axis has `fixed_keys`, so it does not need a `GROUP BY` at all: `dimension_totals`
+counts a dimension that declares `bucket_conditions` with the shape `completeness` already uses in
+the same file — `aggregate_row(base, conditions.map { |c| count_case(c) })`, ONE query, one
+`COUNT(DISTINCT CASE WHEN … THEN issues.id END)` per bucket, read back **positionally**. No group
+alias exists, so there is nothing for either end to truncate. Query count is unchanged, so T-03's
+budget for `dimension.age.string_bounds` (2) is unaffected — asserted, not assumed.
 
-**That is T-08-sized work in the file gate G7 freezes byte-for-byte, and it can only be *verified* on
-MariaDB** — the one engine where the defect exists, and one this session's container does not have
-installed (MySQL and MariaDB conflict; switching costs an apt purge and a datadir re-init). Two things
-therefore need a curator decision before it is written, and neither is a judgement the specs leave to
-the implementer:
+**What landed, in one commit.** The three-hunk kernel edit; the **G7 declared-exception mechanism**
+(`spec/golden/kernel_exception.rb` + its spec — recorded baseline/current byte fragments, a reason
+each, `RATCHET = 3`, and the working file must equal the v0.5.0 blob with exactly those hunks
+applied); the MariaDB branch of `spec/adapter/query_aggregator_execution_spec.rb` deleted in favour
+of one expectation that holds on every engine; and both overlay entries deleted with
+`AdapterOverlay::RATCHET` lowered to **0** and `aggregation/overlay/mariadb.jsonl` removed.
 
-- **G7 — and this half is already decided, in T-08's own `Accept:` line.** Fixing the kernel means it
-  is no longer byte-identical to `eddb8fa`. T-08 states that it "owns the fix for defect D-1 … **the
-  only place the kernel may legitimately change a byte**", so the exception is granted *there* and
-  nowhere else. It was written up here on 2026-08-05 as needing a fresh curator decision; re-reading
-  T-08 shows the plan had already taken it, which is worth recording so a later session does not ask
-  again. What T-08 still has to *build* is the mechanism: a declared exception with its own ratchet,
-  mirroring `AdapterOverlay` — the diff against v0.5.0 must equal exactly the recorded hunk, with its
-  reason — because "byte-identical except one argued hunk" is not something the current check can
-  express.
-- **Where it lands.** T-08, for the reason above. Absorbing it into another task's branch is exactly
-  the R-02 stall risk §11.5 names.
+*Deliberately NOT covered, and documented in the README rather than left silent:* age as a **measure**
+axis and age inside a **crosstab** stay on the `GROUP BY` path and stay exposed on MariaDB past ~4
+boundaries. No corpus case and no surveyed production template reaches either (every real template is
+count mode, and the non-cap age cases use three boundaries). Widening the fix means generalising
+`count_case` to arbitrary measures — a bigger change than the defect justifies today. Both paths are
+now *asserted* rather than merely described: `spec/adapter/query_aggregator_execution_spec.rb` has an
+example that pins the measure path still grouping.
 
-*Not fixed in T-01, and for two independent reasons in the operating rules rather than one:* gate G7
-diffs the kernel byte-for-byte against the baseline, and **§1's ordering guard refuses a change to
-the aggregator while T-03 has not landed** — the performance baseline cannot be measured after the
-aggregator moves, and there is no way back to it. So the earliest honest slot is **after T-03**, and
-the natural home is **T-08**, which is where the kernel legitimately moves; the one-line change is to
-alias the group expression or group on a short one.
+**Verification, and the honest limit of it.** All 176 recorded corpus values are byte-identical on
+PostgreSQL with the fix in place (217 corpus examples, 0 failures), the DB-less kernel suite is green
+(404 examples), and `spec/golden` run from the plugin checkout — where gate G7 has its git history —
+is 166 examples, 0 failures, **0 pending**. What none of that can do is exercise MariaDB: it is not
+installed in this container, and per §1b the `adapter (MariaDB 11)` and `corpus (MariaDB 11)` CI
+cells are the measurement. **A red MariaDB cell after this lands is information, not a regression.**
 
-**DECIDED by the curator, 2026-08-05: wait for T-08.** They first asked for D-1 to be fixed and left
-the timing open; when the measurement above showed it is not a one-line change and that fixing it now
-would mean weakening gate G7's byte-identity reference, they chose to leave the kernel frozen and let
-the fix land in T-08, where that file is rewritten anyway. **Their own production runs PostgreSQL,
-which is measured unaffected**, so the wait carries no exposure for them — it is other installations,
-on MariaDB, that stay broken until T-08. Do not "helpfully" fix this earlier: the decision is
-recorded, and re-opening it means re-opening the G7 question with the curator.
+**Two things a later session should not have to rediscover.** `measure.nil?` is the WRONG guard and it
+fails SILENTLY — `resolve_measure(nil, nil)` returns `Measure.new(kind: :count)`, not nil, so the
+dispatch never fires while every number still agrees. The guard is `measure.nil? || measure.kind ==
+:count`, and it is held by two assertions *about the mechanism* — "issues no GROUP BY for a counted
+age axis" and "counts every bucket in a single query" — which are the only things that can see an
+inert fix. And the assertion **"keeps counts for a value outside the expected bucket list rather than
+dropping them"** was DELETED, not rewritten: it pinned defensive handling of a group key the DATABASE
+invented, and D-1 *is* that case, so the fix makes it unreachable by construction. Its replacement is
+the invariant that now holds — an axis with declared buckets cannot report a bucket it did not
+declare — and the same argument retired its sibling in the drill-through block. Both are argued in the
+pull request body rather than quietly matched to the new behaviour.
 
-Meanwhile every engine is asserted in
-`spec/adapter/query_aggregator_execution_spec.rb` (MariaDB's branch pins the defect, the others pin
-the correct answer), it is documented in the README's database section, and the two affected corpus
-cases carry MariaDB overlay entries — so the day it is fixed the suite says so and the ratchet goes
-down. **It is also evidence on C-003** (`claims.json`, updated): the corpus is already not green on
-all three engines before any port, and the cause is structural. Status and confidence left for the
-curator.
+**It is also evidence on C-003** (`claims.json`, updated 2026-08-05): the defect was fixed *inside the
+ported kernel* under a declared exception, not by the rewrite that claim's `evidence_against`
+supposed would be needed. Status and confidence left for the curator.
+
+**A note for T-03's artefact.** The performance baseline was measured against the pre-fix aggregator,
+which is exactly why §1's ordering guard put D-1 after it. The R7 *invariants* are hard assertions and
+they still pass, query counts included; the *timings* in the recorded artefact now describe an
+aggregator one hunk older. No timing is a gate (finding P-3), so nothing is red — but the artefact is
+not re-measured, and that is deliberate rather than overlooked.
+
 
 **D-2 · the plugin could not run on Redmine 5.1 at all — FIXED 2026-08-05.**
 `app/models/reporter_project_tab.rb:3` read `class ReporterProjectTab < ApplicationRecord`, and
@@ -194,8 +198,10 @@ the 5.1 path is testable on a machine that cannot run 5.1.
 writes `age_buckets: "30;60;90;180"` — the STRING form. `normalize_age_buckets` accepts a string or an
 Array, and the corpus only ever asked for the Array, so the branch every real caller goes through was
 unfrozen. Two cases added (`;` and `,` separated), plus an assertion that the string and Array
-spellings answer identically. Three boundaries, not production's four: four is defect D-1's trigger
-and belongs in `cap/age.*`, not in a parser case.
+spellings answer identically. Three boundaries, not production's four: four was defect D-1's trigger
+and belongs in `cap/age.*`, not in a parser case. That reasoning is spent now D-1 is fixed, but the
+case stays where it is — a parser case should test the parser, and `cap/age.*` is where boundary
+counts are exercised.
 
 **E-1 · an environment fact worth not rediscovering: MySQL 8 ignores a `projects`-keyed subquery in a
 LEFT JOIN's ON clause.** Measured on 8.0.46 while fixing the above: `projects.id IN (SELECT …)`
@@ -263,122 +269,15 @@ with no way back to it, which is the reason this task precedes them. So a third 
 templates**, each naming the survey line it comes from. It measures more than the Accept list's axis,
 never less.
 
-**D-1's fix is now fully specified, and it is smaller than the mechanism note suggested.** Written
-2026-08-05 after checking which cases the overlay actually covers — the one fact that sizes the work:
-
-**Both overlay entries are `cap/age.at` and `cap/age.past`, and both are plain
-`dimension_breakdown(group_by: 'age')` in COUNT mode.** Neither is a measure and neither is a
-crosstab. So a fix that covers count mode alone empties the overlay, and `RATCHET` goes to **0** in
-the same commit — not to 1.
-
-*The fix, in count mode only:* the age axis has `fixed_keys`, so it does not need a `GROUP BY` at
-all. Use the shape `completeness` already uses in this same file — `aggregate_row(base,
-conditions.map { |c| count_case(c) })`, ONE query, one `COUNT(DISTINCT CASE WHEN … THEN issues.id
-END)` per bucket, read back **positionally**. No group alias exists, so there is nothing for either
-end to truncate and the defect is unrepresentable rather than patched. Query count stays 1, so the
-T-03 budget for `dimension.age.string_bounds` (2) is unaffected.
-
-    # age_dimension gains: bucket_conditions: [sql, ...]  (same bounds it already has)
-    # single_result / crosstab_result:
-    totals = if dim.bucket_conditions && measure.nil?
-               row = aggregate_row(base, dim.bucket_conditions.map { |c| count_case(c) })
-               dim.fixed_keys.each_with_index.to_h { |label, i| [label, row[i].to_i] }
-             else
-               measure_groups(base.group(dim.sql), measure)   # unchanged
-             end
-
-*Deliberately NOT covered:* age as a measure axis and age inside a crosstab stay on the `GROUP BY`
-path and stay broken on MariaDB past ~4 boundaries. That is acceptable and must be **documented in
-the README**, not silently left: no corpus case and no production template hits it (every real
-template is count mode, and the non-cap age cases use three boundaries, under the limit). Widening
-the fix to those means generalising `count_case` to arbitrary measures, which is a bigger change
-than the defect justifies today.
-
-*The four things that must land in the SAME commit:* the kernel edit; a **G7 declared-exception
-mechanism** — the diff against the v0.5.0 blob must equal exactly this recorded hunk, mirroring
-`AdapterOverlay`'s ratchet, because "byte-identical except one argued hunk" is not something
-`baseline_spec.rb` can express today; the MariaDB branch of
-`spec/adapter/query_aggregator_execution_spec.rb` flipped from pinning the defect to pinning the
-correct answer; and the two overlay entries deleted with `RATCHET` lowered to 0.
-
-*Verification, decided by the curator on 2026-08-05:* push it and let the `adapter (MariaDB 11)` and
-`corpus (MariaDB 11)` CI cells judge. MariaDB is not installed in the session container. A red
-MariaDB cell after this lands is the measurement, not a regression.
-
-**ATTEMPTED AND REVERTED 2026-08-05, with three measurements worth more than the attempt.** The fix
-above was written in full, run, and then backed out. Nothing of it is in the tree; all three findings
-are, and they change what the next attempt has to do.
-
-1. **It is behaviour-preserving on PostgreSQL. All 217 corpus examples passed** with the fix in place,
-   which is the strongest evidence available without MariaDB: every one of the 176 recorded values —
-   every age case among them — was unchanged. The fix does what it claims on the engine that was
-   already correct.
-2. **`measure.nil?` is the wrong guard, and it fails SILENTLY.** `resolve_measure(nil, nil)` returns
-   `Measure.new(kind: :count)`, not nil — `raw_measure` answers `nil` and `:count` identically, which
-   is why nobody notices. So the dispatch never fired and the GROUP BY was still emitted. Guard on
-   `measure.nil? || measure.kind == :count`. This was caught by two assertions added *about the
-   mechanism* — "issues no GROUP BY for a counted age axis" and "counts every bucket in a single
-   query" — rather than by any assertion about the numbers, which all passed while the fix was inert.
-   **Write those two first.**
-3. **The real remaining work is 11 unit examples, and one of them is a DECISION.** In
-   `spec/sql_aggregation/query_aggregator_spec.rb`: nine in `group_by: age` (lines ~2035-2111) and two
-   in `drill-through descriptors the age dimension` (~2812-2826). Nine are stub-shape — that suite
-   stubs a relation that records `group(...).count`, and the fix calls `pluck`, so the double simply
-   does not answer. Mechanical.
-
-   The eleventh is not: **"keeps counts for a value outside the expected bucket list rather than
-   dropping them"** pins the kernel's *defensive* handling of a group value that is not one of its
-   labels. With bucket keys supplied by Ruby that state is unreachable by construction — which is
-   good, and is precisely what closes D-1, since "every key came back nil" IS that state. But it
-   means deleting an assertion that documents defensive behaviour, and that has to be argued in the
-   pull request rather than quietly rewritten to match.
-
-**THE 11TH ASSERTION IS DECIDED (implementer's call, delegated by the curator 2026-08-05): delete it
-and assert the inverse.** `"keeps counts for a value outside the expected bucket list rather than
-dropping them"` documents defensive handling of a group key the DATABASE invented. D-1 *is* that case
-— on MariaDB every key came back nil — so the behaviour it protects is the behaviour the fix removes.
-Replace it with the invariant that now holds: **an axis with declared buckets cannot report a bucket
-it did not declare.** Same file, same block, one example, and the pull request body says why the old
-one went.
-
-**The arithmetic for the nine stub-shape examples, so it is not re-derived.** `ScopeStub` needs a
-`bucket_counts:` input answered by `#pluck` (it already has a `@pluck_rows` hook that accepts a
-callable, so this is one small addition, not a rewrite). The kernel asks in bucket order
-`[nil, *labels]`, so each existing `grouped_counts` maps to:
-
-| existing stub | bucket_counts |
-|---|---|
-| `{'0-30'=>4, '91-180'=>2, nil=>1}` (the block's main `let`) | `[1, 4, 0, 0, 2, 0]` |
-| `{'0-7'=>3, nil=>1}` with `age_buckets: [7, 14]` | `[1, 3, 0, 0]` |
-| `{'0-7'=>3}` with `age_buckets: ['14','7','7']` | `[0, 3, 0, 0]` |
-
-Three more need their blocks read first: `buckets on due_date with age_field: due` (~2106),
-`on updated_on with age_field: updated` (~2111), and `compares the date column against bound
-boundaries` (~2101) — that last one asserts on the generated SQL, which now lives in the **pluck
-expressions** rather than in the GROUP BY, so it reads a different accessor on the stub. Plus the two
-drill-through descriptor examples (~2812, ~2826).
-
-**Why it was reverted rather than pushed with 11 red examples:** they are in the *frozen kernel's*
-unit suite, and rewriting 11 assertions in a 2 800-line file at the end of a session — one of them a
-judgement about defensive behaviour — is how a suite starts lying. The tree is back at the last fully
-green commit. The next attempt starts from the three findings above and should take well under an
-hour.
-
-**Why it was still owed before that attempt: session budget, stated plainly.** The design above is complete; what is not
-done is writing it. It is a change to the byte-frozen kernel plus a new gate mechanism, and starting
-that with too little room left to review and re-run it is the one thing `CLAUDE.md` §6 refuses. The
-next session should be able to go straight to code from this entry.
-
-**The original blocker, for the record.** The port
-half of T-08 is done and verified; the fix is not, and it must not be written blind. D-1 manifests
-only on **MariaDB**, and MariaDB is not installed in the session container (its Debian packages
-conflict with MySQL; switching costs an apt purge and a datadir re-init). Writing a structural change
-to the age dimension — the `aggregate_row`/`count_case` shape, threaded through `single_result`,
-`crosstab_result`, `fold_values` and `bucket_filter` — and then **deleting the two overlay entries and
-lowering the ratchet** on the strength of a PostgreSQL run would be asserting a fix on the one engine
-where the defect does not exist. Either of two things unblocks it: install MariaDB locally, or push
-the fix and let the `adapter (MariaDB 11)` CI cell judge it. The second is slower and is the
-configuration that actually answers the question.
+**D-1's fix as built — the entry above is the current record; this is what the attempt cost.**
+The design was written, run, and backed out once on 2026-08-05 before landing. Three measurements came
+out of that and all three are folded into the entry above: the fix is behaviour-preserving on
+PostgreSQL (all 217 corpus examples passed with it in place), `measure.nil?` is the wrong guard and
+fails silently, and the remaining work was 11 named unit examples of which one was a decision about
+defensive behaviour rather than a mechanical edit. It was reverted rather than pushed with 11 red
+examples because they sit in the *frozen kernel's* unit suite, and rewriting 11 assertions in a
+2 800-line file at the end of a session is how a suite starts lying — see §1b: local red is fixed or
+reverted, only an engine that cannot be run here is left to CI.
 
 **F-3 · gate G8's "empty allowlist at 1.0" target cannot survive shipping an importer, and that
 is a curator question.** `script/gates/zero_reporter.allowlist` opens with "At 1.0 it should be
@@ -503,7 +402,8 @@ anyone touching these artefacts.
   and hides the values while keeping the issues for the fourth.
 - **The per-adapter overlay** — `spec/golden/adapter_overlay.rb`, file-backed, ratcheted, and
   **exhaustive by assertion**: the cases that differ on an engine must be exactly the cases it
-  names. Two entries, both defect D-1 below.
+  names. It held two entries, both defect D-1 below; **both are gone and `RATCHET` is 0** now that
+  D-1 is fixed, which is the mechanism working as specified rather than the entries being wrong.
 - **The scope fixture** — `test/unit/golden_scope_fixture_test.rb` + `spec/golden/scope/scope.jsonl`,
   **46 (template, query, actor) triples** over all eleven documented resolution paths, four actors
   with three `issues_visibility` rules, private issues, an archived project and a project with no
@@ -519,8 +419,10 @@ inside a rolled-back transaction has no stable ids and Redmine's own fixture set
 5.1 and 7.0 — recording keys is what lets the fixture be verified on all four branches instead of
 one pinned branch (ids are recorded too; the test assigns them explicitly from a reserved range).
 And the 5 000-cell boundary is built from a `period` split rather than an `age` split, because a
-24-boundary age CASE is exactly the shape defect D-1 breaks, and a cell-count boundary built on a
-broken dimension would measure the defect instead of the cap.
+24-boundary age CASE was exactly the shape defect D-1 broke, and a cell-count boundary built on a
+broken dimension would have measured the defect instead of the cap. It stays a `period` split now
+that D-1 is fixed: a crosstab still groups on the age CASE, so an age split is still the wrong
+substrate for that boundary — for a smaller reason than before, but the same one.
 
 *One constraint on that job, found the hard way:* `redmine_clone.sh` rsyncs the plugin into
 `redmine/plugins/<name>/` with `--exclude .git/`, so the copy the suite normally runs from has no
@@ -596,10 +498,14 @@ have reporter (via `glue/legacy/`).
 namespace assignment.
 *Deps:* T-01 (complete). **This task owns the fix for defect D-1** (§Findings) — the only place the
 kernel may legitimately change a byte. Fixing it deletes the overlay's two entries and lowers its
-ratchet in the same commit.
+ratchet in the same commit. **Both halves are done.**
 *Accept:* both files are **byte-identical** to their `v0.5.0` blobs — `git diff --no-index` output
 **empty**, not "ignoring whitespace"; they still open `module SqlAggregation`; namespacing is a
-separate assignment file; the `corpus` job enforces this on every PR. *Re-indentation is a separate
+separate assignment file; the `corpus` job enforces this on every PR. *As built, "byte-identical"
+reads "byte-identical to the blob with every DECLARED hunk applied" — three of them, all D-1's,
+each with a written reason and a ratchet (`spec/golden/kernel_exception.rb`). `drill_through.rb`
+carries none and is held to the plain form. That is the exception this `Deps:` line grants, made
+mechanical: a fourth hunk fails the gate as loudly as an undeclared byte does.* *Re-indentation is a separate
 mechanical commit, only after `corpus` has been green a full release cycle, and reverted rather
 than fixed if it goes red.*
 

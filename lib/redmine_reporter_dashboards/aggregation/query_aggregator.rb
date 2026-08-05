@@ -250,6 +250,10 @@ module SqlAggregation
     #                    must not degrade "Assignee #10" into a bare "10")
     #   order_map    — ->(raw_keys) { {raw => Integer} } for sort: position (may be nil)
     #   fixed_keys   — every expected raw key, in display order (period, age)
+    #   bucket_conditions — one self-contained SQL condition per bucket, in
+    #                  `[nil, *fixed_keys]` order, for a dimension that can be counted
+    #                  WITHOUT a GROUP BY (see dimension_totals and defect D-1). nil
+    #                  for every dimension that has to group
     #   project_join — true when the join fragment references the projects table
     #   filter_field — IssueQuery filter name for drill-through ('cf_92',
     #                  'status_id', 'created_on'); nil when the dimension cannot
@@ -258,7 +262,8 @@ module SqlAggregation
     #                  one raw key for a normal bucket and every collapsed raw key
     #                  for the Other bucket
     Dimension = Struct.new(:name, :sql, :join, :project_join, :scope_filter, :label_map,
-                           :fallback_label, :order_map, :fixed_keys, :field_name, :multi_value,
+                           :fallback_label, :order_map, :fixed_keys, :bucket_conditions,
+                           :field_name, :multi_value,
                            :empty_label, :filter_field, :filter_for, keyword_init: true)
 
     # Result of ordering one axis: display keys, their labels, raw => display key.
@@ -1252,8 +1257,58 @@ module SqlAggregation
     end
     private_class_method :apply_dimension
 
+    # {raw group value => measure} for one axis.
+    #
+    # A dimension that declares `bucket_conditions` and is being COUNTED skips the
+    # GROUP BY entirely: one conditional aggregate per bucket in a single query, read
+    # back POSITIONALLY, so no group alias exists for either end to truncate.
+    #
+    # That is defect D-1's fix, and it removes the defect rather than patching it.
+    # ActiveRecord reads a grouped result back BY THE GROUP EXPRESSION'S OWN TEXT
+    # (execute_grouped_calculation -> ColumnAliasTracker#column_alias_for), and MariaDB
+    # cuts a returned column label at 256 characters. The age dimension's generated
+    # CASE passes that at FOUR boundaries — which is DEFAULT_AGE_BUCKETS — so every key
+    # came back nil, the whole axis collapsed into the empty bucket, and the total was
+    # taken from whichever group the server returned last. Shortening the expression
+    # only moves the cliff (MAX_AGE_BUCKETS is 24, and 24 branches cannot fit in 256
+    # characters); removing the alias makes the state unrepresentable.
+    #
+    # Only the counting measures take this path. Sum, average and distinct-count still
+    # group and are still exposed on MariaDB past ~4 boundaries — no corpus case and no
+    # surveyed production template reaches that, and it is written down in the README's
+    # database section rather than left silent.
+    def self.dimension_totals(base, dim, measure)
+      return measure_groups(base.group(dim.sql), measure) unless counted_buckets?(dim, measure)
+
+      row    = aggregate_row(base, dim.bucket_conditions.map { |condition| count_case(condition) })
+      totals = {}
+      [nil, *dim.fixed_keys].each_with_index do |key, index|
+        count = row[index].to_i
+        # A GROUP BY never returns a key with no rows behind it, and build_axis derives
+        # the empty bucket from the keys that DID come back. A zero here must therefore
+        # not invent an empty bucket the grouped path would not have produced; the
+        # labelled buckets are filled from fixed_keys either way.
+        next if key.nil? && count.zero?
+
+        totals[key] = count
+      end
+      totals
+    end
+    private_class_method :dimension_totals
+
+    # `resolve_measure(nil, nil)` answers `Measure.new(kind: :count)` and never nil, and
+    # `raw_measure` treats nil and :count identically — so a lone `measure.nil?` guard
+    # here reads correctly, never fires, and leaves the dispatch silently inert. It was
+    # written that way once and every number still agreed. Both spellings, deliberately.
+    def self.counted_buckets?(dim, measure)
+      return false if dim.bucket_conditions.nil?
+
+      measure.nil? || measure.kind == :count
+    end
+    private_class_method :counted_buckets?
+
     def self.single_result(base, dim, sort:, limit:, other_label:, group_by:, measure: nil)
-      totals = measure_groups(base.group(dim.sql), measure)
+      totals = dimension_totals(base, dim, measure)
       axis   = build_axis(dim, totals, sort: sort, limit: limit, other_label: other_label)
       values = fold_values(base, dim, axis, totals, measure)
 
@@ -2123,12 +2178,16 @@ module SqlAggregation
       column = AGE_DATE_COLUMNS[field]
       labels = age_bucket_labels(bounds)
       today  = current_date
+      # One boundary VALUE per bound, computed ONCE. The CASE and the per-bucket
+      # conditions below describe the same buckets and must not be able to drift
+      # apart, and `days.days.ago` reads the clock on every call.
+      at = bounds.map { |days| field == 'due' ? today - days : days.days.ago }
 
       fragments = ["CASE WHEN #{column} IS NULL THEN NULL"]
       binds     = []
-      bounds.each_with_index do |days, index|
+      at.each_with_index do |boundary, index|
         fragments << "WHEN #{column} >= ? THEN ?"
-        binds << (field == 'due' ? today - days : days.days.ago) << labels[index]
+        binds << boundary << labels[index]
       end
       fragments << 'ELSE ? END'
       binds << labels.last
@@ -2139,12 +2198,41 @@ module SqlAggregation
         name: name,
         sql: Arel.sql(ActiveRecord::Base.sanitize_sql_array([fragments.join(' '), *binds])),
         fixed_keys: labels,
+        bucket_conditions: age_bucket_conditions(column, at),
         empty_label: empty_label.nil? ? DEFAULT_EMPTY_LABEL : empty_label.to_s,
         filter_field: filter_field,
         filter_for: ->(raws) { age_bucket_filter(filter_field, labels, bounds, today, raws) }
       )
     end
     private_class_method :age_dimension
+
+    # The same buckets the CASE above describes, as one self-contained condition each,
+    # in `[nil, *labels]` order — the order `dimension_totals` reads them back in. At
+    # most MAX_AGE_BUCKETS + 2 = 26 of them, which is one query, not a growing number.
+    #
+    # The CASE assigns a row to its FIRST matching branch. These are evaluated
+    # independently, so every bucket but the newest also carries the preceding
+    # boundary as an EXCLUSIVE upper limit: `at` runs from the most recent boundary to
+    # the oldest, so bucket i is [at[i], at[i - 1]).
+    def self.age_bucket_conditions(column, at)
+      conditions = ["#{column} IS NULL"]
+      at.each_with_index do |boundary, index|
+        conditions <<
+          if index.zero?
+            ActiveRecord::Base.sanitize_sql_array(["#{column} >= ?", boundary])
+          else
+            ActiveRecord::Base.sanitize_sql_array(["#{column} >= ? AND #{column} < ?",
+                                                   boundary, at[index - 1]])
+          end
+      end
+      # The CASE's ELSE branch: older than every boundary. NULL is excluded explicitly
+      # rather than left to three-valued logic, so the condition says what the branch
+      # it replaces says — the CASE tests IS NULL first and never reaches ELSE with one.
+      conditions << ActiveRecord::Base.sanitize_sql_array(["#{column} IS NOT NULL AND " \
+                                                           "#{column} < ?", at.last])
+      conditions
+    end
+    private_class_method :age_bucket_conditions
 
     def self.normalize_age_buckets(value)
       list = case value
