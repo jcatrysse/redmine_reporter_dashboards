@@ -143,6 +143,29 @@ check. `working-directory` is per step, not per job.
 
 ---
 
+## 1b. Working agreement — verification, decided by the curator
+
+**Curator decision, 2026-08-05: prefer pushing and letting CI judge over stopping.** Asked
+whether a change whose only remaining unknown is an engine this container cannot run should
+be held back or pushed, the answer was push. So:
+
+- **A red CI cell on an engine that cannot be run locally is an ACCEPTED outcome**, not a
+  failure of the change. MariaDB and MySQL are the concrete cases (their Debian packages
+  conflict, so only one can be installed and neither is by default). Push, read the cell,
+  iterate.
+- **This does NOT extend to a locally red suite.** The distinction is the whole point: a
+  test that could have been run here and was not is a different thing from a test that
+  cannot be run here at all. D-1's first attempt was reverted because it left **11 DB-less
+  unit examples** red — nothing to do with MariaDB — and that is still the right call.
+  Local green, remote unknown: push. Local red: fix it or revert it.
+- **Do not weaken an assertion to make the local suite green.** If an assertion has to
+  change because the implementation legitimately made its subject unreachable, that is an
+  argument for the pull request body, not an edit that quietly matches the new behaviour.
+  There is exactly one such assertion waiting in D-1's remaining work, and §Findings names
+  it.
+
+---
+
 ## 2. Known and deliberately untouched
 
 **`lib/sql_aggregation/scope_resolution.rb` contains nine `rescue nil`,** a construct
