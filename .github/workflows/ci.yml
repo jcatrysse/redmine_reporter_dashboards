@@ -574,8 +574,12 @@ jobs:
       # one whether our own layers reach into each other. Warn mode because render/
       # does not exist until T-10; the job reports an absent layer on its own line
       # rather than passing quietly over it, and T-10 flips this to strict.
+      # STRICT since T-10: render/ now exists, so an absent layer means the layout
+      # moved and this gate lost its subject rather than having nothing to say.
       - name: layer_purity
         run: ./script/gates/layer_purity.sh
+        env:
+          LAYER_PURITY_MODE: strict
 
       # E4 — version divergence has exactly one home. Fails on a `Rails::VERSION` or
       # `Redmine::VERSION` outside compat, and prints the compat LOC.

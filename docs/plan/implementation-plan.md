@@ -60,7 +60,8 @@ fact that CI has not yet run on this work at all.
 | T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on all three engines by CI run 31036305443 — 17/17 green**, `adapter (MariaDB 11)` included |
 | T-09 | **done** — the secret, the probe job and the private checkout were removed earlier (which is what let 5.1 run at all and exposed D-2/D-3); this session added the two gates its `Accept:` list still named, `layer_purity.sh` (E3) and `compat_size.sh` (E4), and moved the one scattered version check into `Compat`. **One item is a human artefact and is NOT done: the dated fork-PR run per release** — see §Findings F-5 |
 | T-21 | **done** — `test/unit/multi_actor_visibility_test.rb`: five actors (`all`/`default`/`own`, an outsider, anonymous) over a private project with a private issue, a role-restricted custom field and a private `IssueQuery`; exact totals AND strict inequality; the restricted field's NAME asserted absent from every entry point, not just its values; the two fail-closed `1=0` branches as DB-less unit tests; ordering in both directions plus A/B/A; the monotonicity property with both its limits written into the file. **Mutation-tested**: dropping `Issue.visible` from the scope fails 4 of its 13 tests |
-| T-10 onward | not started |
+| T-10 | **done** — `render/{capabilities,page_furniture,failure,result,document_request,registry,renderer}.rb`: a frozen `DocumentRequest` with **no field a credential could travel in** (asserted against the constructor's signature, so a future `headers:` has to be argued), `print_backgrounds` defaulting to `true` rather than to Chromium's `false`, `PageFurniture` as slots plus a closed token set, `Result = Success \| Failure` with closed code sets, and `Renderer` enforcing the `%PDF-`/`%%EOF` and minimum-size post-conditions **above every adapter**. 29 DB-less examples; `layer_purity` flipped to **strict** in the same PR, as its own comment asked |
+| T-11 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -265,6 +266,23 @@ running Gotenberg is not something they can provide. So all 12 render cells are 
 and a DB-less spec asserts they are all still declared blocked. An unmeasured cell written down as
 unmeasured is a pause point; an unmeasured cell that is simply absent is a baseline quietly claiming
 coverage it does not have — INV-7's rule applied to performance instead of to versions.
+
+**P-2's premise is now HALF FALSE, measured 2026-08-05 — and it changes what T-11…T-13 can attempt.**
+P-2 gives two reasons the render axis is unmeasurable here. The first still holds: the only Liquid
+renderer today is `redmine_reporter`'s. **The second does not.** "There is no PDF engine reachable
+from this session" is true of Gotenberg, which the curator said they cannot provide — but
+**Chromium 141.0.7390.37 is installed in this container** (`/opt/pw-browsers/chromium`, with
+Playwright configured to find it), and `:chromium_cdp` is the plan's own *reference, CI-verified,
+default* adapter. So the engine half of T-13 is attemptable locally, and the 12 `blocked` render
+cells are blocked on the RENDERER, not on the absence of an engine.
+
+Two things follow, and neither is a licence to declare the axis measured. **A local Chromium is not
+a CI-verified engine** — INV-7 forbids claiming an untested configuration, and CI runners would need
+their own install step, which is T-12's `render-smoke` job rather than a footnote here. And a
+measurement taken against a browser this container happens to ship is not a measurement of the
+engine a deployment will use. What it does mean: T-11's readiness protocol and T-13's Chromium
+adapter can be **developed and exercised** rather than written blind, which is a different position
+from the one P-2 describes.
 
 **P-3 · the timings are noisier than any tolerance anyone would set, measured.** Two consecutive runs
 of the identical matrix on the identical machine, minutes apart, moved p95 by up to **×1.26** — and

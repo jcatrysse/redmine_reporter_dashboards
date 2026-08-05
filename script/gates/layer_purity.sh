@@ -51,15 +51,25 @@ LAYERS=(
 # Hence: exit 0 = matches, 1 = no matches, anything else = the tool failed and this gate
 # knows nothing. `|| true` on a search is never safe in a gate — it cannot tell "clean"
 # from "did not run", and those are the two states a gate exists to distinguish.
+# Whole-line comments are stripped before matching, for the same reason compat_size.sh
+# does it: the FIRST run of this gate against a real render/ failed on the two comments
+# that explain WHY the boundary exists — "not `Rails.logger`, mechanism E5" and "no field
+# a credential could travel in — no `cookies:`". A gate that punishes writing down its own
+# rationale teaches people to delete the rationale, so it would damage the codebase in
+# precisely the dimension it exists to protect. A trailing comment on a line of code still
+# counts; that line is code.
 search() {
-  local pattern="$1" path="$2" out rc
-  out="$(grep -rnE "$pattern" "$path" 2>&1)"; rc=$?
-  if [ "$rc" -gt 1 ]; then
-    echo "layer_purity: FAIL — the search itself failed (exit $rc) on $path:" >&2
-    echo "$out" | sed 's/^/    /' >&2
-    exit 2
-  fi
-  echo "$out"
+  local pattern="$1" path="$2" file stripped rc out=''
+  while IFS= read -r file; do
+    stripped="$(sed 's/^[[:space:]]*#.*$//' "$file" | grep -nE "$pattern")"; rc=$?
+    if [ "$rc" -gt 1 ]; then
+      echo "layer_purity: FAIL — the search itself failed (exit $rc) on $file" >&2
+      exit 2
+    fi
+    [ -n "$stripped" ] && out="$out$(echo "$stripped" | sed "s|^|$file:|")
+"
+  done < <(find "$path" -name '*.rb' -type f | sort)
+  printf '%s' "$out"
 }
 
 STATUS=0

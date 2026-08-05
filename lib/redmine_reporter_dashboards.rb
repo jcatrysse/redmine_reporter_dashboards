@@ -6,6 +6,18 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/row_layout'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/pdf_polyfills'
+
+# The render layer (T-10). Loaded here rather than autoloaded because a plugin's lib/
+# is not on Redmine's autoload paths, and required at boot rather than lazily so a
+# syntax or load error surfaces on the branch that broke it instead of on the first
+# render. Nothing calls it yet — T-11 onward do.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/capabilities'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/page_furniture'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/failure'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/result'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/document_request'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/registry'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/renderer'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards

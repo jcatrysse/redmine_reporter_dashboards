@@ -135,10 +135,20 @@ is **dead code on Rails 7+** — the `respond_to?` guard is false, so the ignore
 the first place. Only `app/` is autoloaded, and THERE the constraint is real.
 
 An earlier session did record a genuine `Zeitwerk::NameError` from
-`lib/redmine_reporter_dashboards/compat/base_record.rb`. This correction does not explain
-that observation — it only shows the stated mechanism cannot be it. `compat.rb` was kept as
-one file anyway and works, so nothing is blocked; if you hit a NameError from `lib/`, treat
-the cause as **unknown** rather than as this entry, and measure before concluding.
+`lib/redmine_reporter_dashboards/compat/base_record.rb`, and this correction did not explain
+it — it only showed the stated mechanism could not be it. **T-10 reproduced it cleanly on
+2026-08-05 and it is REAL:** `render/result.rb` defined only `Success` and `Degradation`, and
+the full application refused to boot with
+
+    expected file .../render/result.rb to define constant
+    RedmineReporterDashboards::Render::Result, but didn't (Zeitwerk::NameError)
+
+So **path-to-constant agreement IS enforced for this plugin's `lib/`**, whatever the three
+`false` measurements above say about autoload paths — they were taken from inside a booted
+app and evidently do not describe what Zeitwerk scans at boot. Do not resolve the
+contradiction by trusting either half: **name every file under `lib/` after the constant it
+defines** and the question never arises. `compat.rb` is one file for this reason, and
+`result.rb` now defines a `Result` module as well as the two classes.
 
 **Redmine 6.0 is where BOTH `ApplicationRecord` and `IconsHelper#sprite_icon` arrived.**
 Neither exists on 5.1, and calling either raises rather than degrading. Both were in this
@@ -347,6 +357,20 @@ of a CI that runs on fork pull requests.
    The trap it exists for is ORDERING: a memoised `User.current` or a cached visibility
    condition gives the second actor in a process the first one's answer, and every
    per-actor assertion still passes because each asserts one actor at a time.
+9. **T-10 is done — `render/` exists and `layer_purity` is STRICT.** The document-request
+   interface only: types, a sum type, and the wrapper that makes INV-5 mechanical.
+   Nothing renders yet. Two things a later session should know. **`DocumentRequest`'s
+   security property is its SHAPE** — the spec asserts against the constructor's
+   parameter list that no `cookies:`/`headers:`/`auth:`/`url:` exists, so adding any
+   general-purpose escape hatch fails a test rather than passing review; read the file
+   comment before you add a field. And **`Renderer` is where INV-5 stops being a rule** —
+   it rewrites any adapter's output that is not `%PDF-`…`%%EOF` or is under
+   MIN_PDF_BYTES, so no adapter can breach it by accident. Its documented LIMIT is next
+   to the check: the byte test kills "exception as document" and says nothing about a
+   VALID PDF whose content is wrong. Do not let it stand in for the whole invariant.
+   **P-2's second premise is now half false** — Chromium 141 IS in this container, so
+   T-11/T-13 can be exercised rather than written blind. A local Chromium is still not a
+   CI-verified engine; that is T-12's job.
 4. **T-02 is done.** `rake reporter_dashboards:import:plan` is the repeatable form of the
    R-15 measurement, and `RedmineReporterDashboards::TemplateLinter` is the linter FR-71
    later puts behind the editor's lint panel — so extend that one rule table rather than
