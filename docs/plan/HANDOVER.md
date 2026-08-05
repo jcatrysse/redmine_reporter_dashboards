@@ -336,6 +336,17 @@ of a CI that runs on fork pull requests.
    still exposed, on purpose: a MEASURED age axis (README, database section). Read the
    §Findings entry before touching it — the first attempt is written up there and the
    reason it was replaced is a performance fact, not a correctness one.
+8. **T-21 is done — the multi-actor visibility suite.** `test/unit/multi_actor_visibility_test.rb`,
+   in the FULL APP because real `Role#issues_visibility`, a real private issue, a real
+   role-restricted custom field and a real `IssueQuery` exist nowhere else. It builds its
+   OWN substrate at reserved ids 940_xxx rather than sharing
+   `golden_scope_fixture_test.rb`'s — that one is a frozen oracle whose output must not
+   move, and the two need different rows. **Mutation-tested**: replacing
+   `Issue.visible(User.current)` with `Issue` in its `base_scope` fails 4 of its 13
+   tests, so it is load-bearing rather than decorative. Do that again if you change it.
+   The trap it exists for is ORDERING: a memoised `User.current` or a cached visibility
+   condition gives the second actor in a process the first one's answer, and every
+   per-actor assertion still passes because each asserts one actor at a time.
 4. **T-02 is done.** `rake reporter_dashboards:import:plan` is the repeatable form of the
    R-15 measurement, and `RedmineReporterDashboards::TemplateLinter` is the linter FR-71
    later puts behind the editor's lint panel — so extend that one rule table rather than

@@ -59,6 +59,7 @@ fact that CI has not yet run on this work at all.
 | T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
 | T-08 | **done** — both kernel files moved to `aggregation/`, plus the 4-line namespace assignment; `drill_through.rb` is byte-identical to its v0.5.0 blob and `query_aggregator.rb` is that blob **plus exactly ONE declared hunk**, which is D-1's fix. G7 gained the mechanism that can say so (`spec/golden/kernel_exception.rb`, `RATCHET = 1`); the per-adapter overlay is **empty again, `RATCHET = 0`**. **Verified on all three engines by CI run 31036305443 — 17/17 green**, `adapter (MariaDB 11)` included |
 | T-09 | **done** — the secret, the probe job and the private checkout were removed earlier (which is what let 5.1 run at all and exposed D-2/D-3); this session added the two gates its `Accept:` list still named, `layer_purity.sh` (E3) and `compat_size.sh` (E4), and moved the one scattered version check into `Compat`. **One item is a human artefact and is NOT done: the dated fork-PR run per release** — see §Findings F-5 |
+| T-21 | **done** — `test/unit/multi_actor_visibility_test.rb`: five actors (`all`/`default`/`own`, an outsider, anonymous) over a private project with a private issue, a role-restricted custom field and a private `IssueQuery`; exact totals AND strict inequality; the restricted field's NAME asserted absent from every entry point, not just its values; the two fail-closed `1=0` branches as DB-less unit tests; ordering in both directions plus A/B/A; the monotonicity property with both its limits written into the file. **Mutation-tested**: dropping `Issue.visible` from the scope fails 4 of its 13 tests |
 | T-10 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -297,6 +298,25 @@ defensive behaviour rather than a mechanical edit. It was reverted rather than p
 examples because they sit in the *frozen kernel's* unit suite, and rewriting 11 assertions in a
 2 800-line file at the end of a session is how a suite starts lying — see §1b: local red is fixed or
 reverted, only an engine that cannot be run here is left to CI.
+
+**F-6 · FR-23 and FR-24 are owned by no task, and T-21's `Accept:` list depends on one of them.**
+Found 2026-08-05 while building T-21. `functional-spec.md` FR-23 says "Every aggregation result
+carries a `degraded` flag with reasons; a refusal is distinguishable from a true zero", and FR-24
+says a cap that truncates or refuses must set the same flag. The spec itself marks this as **new** —
+"today's contract is" the older one — and **no task in this plan mentions FR-23 or FR-24 at all**
+(`grep -n 'FR-23\|FR-24' implementation-plan.md` returns nothing). So an aggregation result has no
+`degraded` field today and nothing is scheduled to give it one.
+
+T-21's `Accept:` line asks for "a zero-with-`degraded: false` case (a correctly-applied filter
+yielding zero is *not* a refusal)". The DISTINCTION is testable today and is tested: a refusal
+answers `nil`, a filter that legitimately matches nothing answers a result whose numbers are zero.
+The FLAG is not, because it does not exist. Both halves are written into the test with a pointer
+here, so the day FR-23 lands the test says what it should become rather than quietly passing on a
+weaker contract.
+
+For the curator: FR-23 wants an owning task. It is not a small one — "every result" spans all six
+aggregator entry points plus the render path's `Failure`, and the aggregator today signals refusal
+by returning `nil` from six different methods, which is exactly the shape FR-23 exists to replace.
 
 **F-4 · `CLAUDE.md` and `technical-spec.md` disagree about the `compat/` budget, and the number is
 a curator decision.** CLAUDE.md §4 says "There is a committed LOC budget on that directory and a gate

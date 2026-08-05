@@ -3368,4 +3368,64 @@ RSpec.describe SqlAggregation::QueryAggregator do
       end
     end
   end
+
+  # ------------------------------------------------------------------
+  # T-21 — the fail-closed branches, as unit tests
+  #
+  # INV-3: when a visibility condition cannot be CONSTRUCTED, the answer fails closed.
+  # These branches are unreachable through the public surface — they only fire when
+  # Redmine's own visibility API raises or answers with nothing — so they are exercised
+  # directly. A security branch that no test can reach is a comment.
+  #
+  # Note the deliberate ASYMMETRY between the two, which is not a bug and is pinned here
+  # so nobody "fixes" it: an EMPTY condition from a custom field legitimately means "no
+  # restriction, everyone may see this", so it becomes 1=1. An empty condition from
+  # TimeEntry never legitimately means that, so it becomes 1=0. An EXCEPTION means the
+  # same thing in both cases — we do not know — and both fail closed.
+  # ------------------------------------------------------------------
+
+  describe 'fail-closed visibility conditions' do
+    describe '.visibility_condition (custom fields)' do
+      it 'is 1=1 for a field that has no visibility API at all' do
+        expect(described_class.send(:visibility_condition, Object.new)).to eq('1=1')
+      end
+
+      it 'is 1=1 for a field whose condition is empty — no restriction means everyone' do
+        field = double(visibility_by_project_condition: '   ')
+        expect(described_class.send(:visibility_condition, field)).to eq('1=1')
+      end
+
+      it 'passes a real condition through untouched' do
+        field = double(visibility_by_project_condition: 'projects.id IN (1,2)')
+        expect(described_class.send(:visibility_condition, field)).to eq('projects.id IN (1,2)')
+      end
+
+      it 'FAILS CLOSED to 1=0 when building the condition raises' do
+        field = double(id: 92)
+        allow(field).to receive(:visibility_by_project_condition).and_raise(RuntimeError, 'boom')
+
+        expect(Rails.logger).to receive(:warn).with(/hiding its values/)
+        expect(described_class.send(:visibility_condition, field)).to eq('1=0')
+      end
+
+      # The log line matters as much as the return value: a silently hidden field looks
+      # exactly like a field with no values, and an operator needs to be able to tell.
+      it 'says so in the log rather than hiding the field silently' do
+        field = double(id: 92)
+        allow(field).to receive(:visibility_by_project_condition).and_raise(RuntimeError, 'boom')
+
+        expect(Rails.logger).to receive(:warn).with(/custom field #92.*RuntimeError: boom/)
+        described_class.send(:visibility_condition, field)
+      end
+    end
+
+    describe '.time_entry_visibility_condition' do
+      # In this DB-less suite TimeEntry is not defined at all, which IS the first branch:
+      # no TimeEntry class means no way to ask, which means report no spent time.
+      it 'is 1=0 when TimeEntry is not available to ask' do
+        expect(defined?(TimeEntry)).to be_nil
+        expect(described_class.send(:time_entry_visibility_condition)).to eq('1=0')
+      end
+    end
+  end
 end
