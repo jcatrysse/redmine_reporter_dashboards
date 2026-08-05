@@ -13,9 +13,9 @@ unless defined?(Rails)
   end
 end
 
-require_relative '../lib/reporter_list_patch'
+require_relative '../lib/redmine_reporter_dashboards/glue/legacy/reporter_list_patch'
 
-# Chainable AR scope stand-in: ReporterListPatch decides between the scope it was
+# Chainable AR scope stand-in: the patch decides between the scope it was
 # handed and query.base_scope by duck-typing on where/group.
 class PatchScopeStub
   def where(*); self; end
@@ -60,7 +60,7 @@ class ReporterTemplateStub
   def liquidize(scope)
     @liquidize_calls << scope
     # What a Liquid tag would see mid-render.
-    @queries_seen << Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY]
+    @queries_seen << Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY]
     raise StandardError, 'liquid blew up' if @raise_in_liquidize
 
     '<html>'
@@ -75,8 +75,8 @@ class ReporterTemplateStub
   end
 end
 
-RSpec.describe ReporterListPatch do
-  let(:key)   { SqlAggregation::ScopeResolution::QUERY_THREAD_KEY }
+RSpec.describe RedmineReporterDashboards::Glue::Legacy::ReporterListPatch do
+  let(:key)   { RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY }
   let(:scope) { PatchScopeStub.new }
   let(:query) { PatchQueryStub.new(scope) }
 
@@ -91,7 +91,7 @@ RSpec.describe ReporterListPatch do
   after { Thread.current[key] = nil }
 
   def template(**opts)
-    Class.new(ReporterTemplateStub) { prepend ReporterListPatch }.new(**opts)
+    Class.new(ReporterTemplateStub) { prepend RedmineReporterDashboards::Glue::Legacy::ReporterListPatch }.new(**opts)
   end
 
   it 'renders through liquidize with the scope, not the loaded Array' do

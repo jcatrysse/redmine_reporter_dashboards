@@ -186,6 +186,13 @@ A green test suite says nothing about these, which is why they are separate jobs
   a stale entry is reported so the list shrinks. `ZERO_REPORTER_MODE=strict` is what
   1.0 has to pass, and it fails today by design. The remaining count is printed on
   every run.
+- **`no_thread_local`** — `Thread.current` (and `thread_variable_*`, and `Fiber[]`)
+  appears nowhere in `lib/` or `app/` except under `glue/legacy/`. The owned path
+  carries the actor, the scope and the query in a `Liquid::RenderContext`, which is an
+  argument; the legacy glue still needs a thread-local because the host plugin's
+  `liquidize()` has no channel to pass an `IssueQuery` through. Two exemptions, each
+  with its reason in the script, and the list may only shrink.
+  `NO_THREAD_LOCAL_MODE=strict` is what 1.0 has to pass, when that glue is gone.
 - **`baseline`** — the corpus reference checks, run from the plugin checkout rather
   than the mirrored copy inside the Redmine clone, because the mirror has no git
   history and the checks would skip there. The job **fails if they skip**: a guard that

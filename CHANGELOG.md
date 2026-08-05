@@ -27,6 +27,20 @@ All notable changes to this plugin are documented in this file.
 
 ### Changed
 
+- **The Liquid aggregation tags now resolve their issue scope from two sources instead
+  of six.** `{% sql_aggregate %}` and `{% version_rollup %}` used to work out what to
+  count by inspection — walking a Liquid drop's instance variables, digging a query out
+  of a controller, rebuilding a scope from a loaded array of issue ids, reading a
+  thread-local. Both remaining sources start from Redmine's own `Issue.visible`, so the
+  viewer's permissions are now enforced by construction rather than by a patch applied
+  afterwards (which had to fail *open*, because it was defending paths whose origin it
+  could not check).
+
+  **Nothing changes for an existing installation.** The old resolution still runs, from
+  `glue/legacy/`, whenever a report is rendered by `redmine_reporter` — including
+  drill-through URLs. The frozen test fixtures that record what the old code resolved
+  are byte-identical, which is how that is checked rather than claimed.
+
 - **`redmine_reporter` is now optional.** The plugin used to `raise` at load time
   without it, which made it uninstallable alongside a plain Redmine. Project
   dashboards, the tab bar, `{% sql_aggregate %}`, `{% version_rollup %}`,

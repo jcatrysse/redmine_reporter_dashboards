@@ -63,6 +63,12 @@ end
 
 require_relative '../../lib/sql_aggregation/query_aggregator'
 require_relative '../../lib/sql_aggregation/liquid_aggregate_tag'
+# T-07: these examples exercise the LEGACY resolution path — a tag renders with no
+# RenderContext in its registers, so Liquid::ScopeBinding falls back to
+# Glue::Legacy::ScopeResolution. On a real install that module is loaded because
+# reporter is present (REPORTER_GLUE_FILES); here it has to be required explicitly,
+# and requiring it is the point: without it ScopeBinding correctly resolves nothing.
+require_relative '../../lib/redmine_reporter_dashboards/glue/legacy/scope_resolution'
 
 # AR-scope stub
 class LiquidTagScopeStub
@@ -1325,7 +1331,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       build_tag(markup).resolve_query(build_context(assigns, registers))
     end
 
-    after { Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = nil }
+    after { Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = nil }
 
     it 'resolves the query_id param through the visibility scope' do
       LiquidTagIssueQueryStub.register(42, scope)
@@ -1374,13 +1380,13 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'resolves the thread-local ReporterListPatch sets' do
-      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = query
+      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = query
       expect(resolve('from: issues')).to be(query)
     end
 
     it 'prefers the registers over the thread-local' do
       other = LiquidTagIssueQueryStub.new(LiquidTagScopeStub.new)
-      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = other
+      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = other
       expect(resolve('from: issues', {}, { sql_issue_query: query })).to be(query)
     end
 
@@ -1401,7 +1407,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       # ReporterListPatch resolves it with a bare find_by, because that lookup also
       # feeds base_scope — so the gate has to sit on the reading side.
       query.visible = false
-      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = query
+      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = query
       expect(resolve('from: issues')).to be_nil
     end
 
@@ -1432,7 +1438,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'ignores a thread-local that is not an IssueQuery' do
-      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = scope
+      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = scope
       expect(resolve('from: issues')).to be_nil
     end
   end
@@ -1792,11 +1798,11 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       end
 
       it 'uses the thread-local when nothing else holds a query' do
-        Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = query
+        Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = query
         res = render('group_by: cf_92, drill: true, assign_to: stats', registers: { container: scope })
         expect(res['drill_available']).to be(true)
       ensure
-        Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = nil
+        Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = nil
       end
     end
 

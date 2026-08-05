@@ -56,7 +56,8 @@ fact that CI has not yet run on this work at all.
 | T-04 | **done** — `RedmineReporterDashboards::Positioned` replaces `up_acts_as_list` |
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
-| T-07 onward | not started |
+| T-07 | **done** — `Liquid::ScopeBinding` (two sources) + `Liquid::RenderContext` (an actor is required to construct one); `ScopeResolution` and the thread-local's owner demoted to `glue/legacy/`; new `no_thread_local` gate. **The scope fixture and all 176 corpus cases are byte-identical** |
+| T-08 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without

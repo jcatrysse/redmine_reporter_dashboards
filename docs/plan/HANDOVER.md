@@ -258,74 +258,71 @@ of a CI that runs on fork pull requests.
    which is the curator's. What is still owed by a later task: `rake
    reporter_dashboards:lint_templates`, which the spec names in §6 — today it would be a
    duplicate of `import:plan`'s section 5, so it was deliberately not written twice.
-5. **T-07 / T-08**: the re-seam. Both are unblocked, and T-08 carries D-1. T-07's design
-   is worked out in §6 below — start there rather than re-deriving it.
+5. **T-07 is done** — §6 records what is exercised and what deliberately is not. **T-08**
+   is next: port the kernel byte-identically, and it carries D-1's fix, which is the only
+   place the kernel may legitimately change a byte.
 
 ---
 
-## 6. T-07's design, and the F-2 decision it turns on
+## 6. T-07 as built — what is exercised, and what deliberately is not
 
-Worked out on 2026-08-05 and **not implemented**: the seam is small but its verification
-surface is the two things this plan says must never move — the 46-triple scope fixture and
-the 176-case corpus — and a half-finished refactor of the *visibility* path is the one
-thing `CLAUDE.md` §6 refuses outright. Written down so the next session implements instead
-of re-deriving.
+Implemented 2026-08-05. The design that preceded it was right about the shape; this
+records what a reader cannot see from the diff.
 
-**The seam is five call sites, not a rewrite.** `rg -n 'resolve_scope|resolve_query|ScopeResolution|Thread.current' lib app`:
+**The seam was five call sites.** Two `include`s, two `resolve_scope`, one
+`resolve_query`. `Liquid::ScopeBinding` keeps those two method names, so each tag
+changed by one line.
 
-| Site | What it does |
-|---|---|
-| `liquid_aggregate_tag.rb:106`, `liquid_version_rollup_tag.rb:38` | `include SqlAggregation::ScopeResolution` |
-| `liquid_aggregate_tag.rb:135`, `liquid_version_rollup_tag.rb:51` | `resolve_scope(context)` |
-| `liquid_aggregate_tag.rb:354` | `resolve_query(context)` (drill-through only) |
-| `reporter_list_patch.rb:82-87` | owns the `Thread.current` the Accept list deletes |
+| Layer | File | Sources |
+|---|---|---|
+| owned | `liquid/scope_binding.rb` | **two**: `query_id:` → `IssueQuery.visible(actor)`, else `RenderContext#scope` |
+| owned | `liquid/render_context.rb` | — carries actor, scope, query. **An actor is required to construct one** |
+| legacy | `glue/legacy/scope_resolution.rb` | six, unchanged, moved |
+| legacy | `glue/legacy/reporter_list_patch.rb` | owns the thread-local, moved |
 
-**The shape.** All six of today's resolution sources are archaeology performed *at read
-time*, inside the tag. Invert it: perform the archaeology **once, in the glue**, and have
-it produce one explicit object the owned path reads.
+**`enforce_visibility` was not ported, and that is the point.** It exists in the legacy
+module because five of its six sources have provenance it cannot vouch for — which is
+also why it has to fail OPEN. Both owned sources start from `Issue.visible`, so there is
+nothing left to defend. An invariant held by construction, not by a patch.
 
-```
-lib/redmine_reporter_dashboards/liquid/render_context.rb   actor, scope, query — explicit (INV-1)
-lib/redmine_reporter_dashboards/liquid/scope_binding.rb    exactly two sources, ~60 lines
-lib/glue/legacy/scope_resolution.rb                        today's module, MOVED, unchanged
-lib/glue/legacy/reporter_list_patch.rb                     MOVED — it is the thread-local's owner
-```
+**THE OWNED PATH IS NOT EXERCISED IN PRODUCTION YET, and must not be made to look as
+if it is.** Nothing builds a `RenderContext`: these tags only ever run inside the
+optional host plugin's renderer, and standalone T-06 degrades the widgets. So every
+real render still takes the legacy path, which is exactly what T-07's acceptance list
+asks for. T-10 is what fills it in. If you are tempted to have the glue synthesise a
+`RenderContext` from the host's registers to "finish" this — don't. It would run the
+same archaeology behind a new name and make the owned path look tested.
 
-`ScopeBinding`'s two sources, and nothing else: `query_id:` →
-`IssueQuery.visible(actor).find_by(id:)#base_scope`, else `RenderContext#scope`. Both are
-visibility-scoped by construction, so `enforce_visibility` — and its fail-open rescue —
-has nothing left to defend and is not ported.
+What *is* exercised: `spec/liquid/scope_binding_spec.rb`, 25 examples, including one
+that stubs `User.current` to RAISE and asserts the owned path completes. INV-1 is the
+easiest invariant here to lose silently, so it is tested by explosion rather than by
+reading the code.
 
-**Who fills a `RenderContext` today: nobody, and that is correct.** These tags only ever
-run inside reporter's renderer (standalone, T-06 makes the widgets degrade and `report_pdf`
-404). So T-07 installs the seam and T-10 plugs the owned render path into it. Until then a
-reporter install takes the legacy path, which is exactly what "drill-through still works
-for installs that still have reporter (via `glue/legacy/`)" asks for. **Do not** invent a
-producer to make the owned path look exercised — an untested path that looks tested is
-worse than an empty one.
+**The two results that mattered, both measured:** `spec/golden/` is byte-identical
+(`git diff --stat -- spec/golden` empty) and all **217 corpus examples** pass — T-07's
+acceptance list calls that "the single most important assertion in the whole plan".
+F-2's decision is what bought the first one: closing the leak by construction in the
+owned path, rather than patching the legacy module, means the frozen scope-fixture
+triple never moved.
 
-**F-2's decision, and its argument.** F-2 is the registers-relation path handing back
-`registers[:container]` unscoped. The decision is: **close it by construction in the owned
-path, and leave the legacy module's behaviour exactly as it is.**
+**A trap for the next mover.** The two tag specs and the scope-fixture test exercise
+the LEGACY path, so they must `require` `glue/legacy/scope_resolution` explicitly.
+On a real install it arrives via `REPORTER_GLUE_FILES`; in a spec process nothing loads
+it, and `ScopeBinding` then correctly resolves *nothing* — which reads as 40 broken
+examples rather than as a missing require.
 
-- The owned path *cannot* have the leak: it has no registers source. Both of its two
-  sources start from `Issue.visible`. So F-2 is closed by design rather than by a patch,
-  which is the stronger form.
-- The legacy module keeps its current behaviour, and therefore **the frozen scope-fixture
-  triple does not change.** That matters more than it looks: the fixture is the one
-  artefact in this repository that cannot be regenerated, and "T-07 went green without
-  moving the oracle" is a far better result than an argued change to it.
-- What the legacy module gets is a comment naming F-2 and pointing at the owned path, so
-  nobody reads its silence as approval.
+**`REPORTER_GLUE_FILES` is separate from `REPORTER_PATCH_FILES` on purpose.** The legacy
+module is loaded whenever the host plugin is present, not as a side effect of the
+`IssueListReportTemplate` prepend succeeding. Tying the two would mean one failed patch
+silently costing an install its scope resolution.
 
-**What will break on the first run, and is not a defect:**
-`test/unit/golden_scope_fixture_test.rb` names `SqlAggregation::ScopeResolution` directly.
-Moving the module renames the constant, so the test must follow it. The JSONL under
-`spec/golden/scope/` must stay **byte-identical** — that is the assertion, and if it moves,
-the move is the finding.
+**The gate:** `script/gates/no_thread_local.sh`, wired into the `gates` job. It also
+catches `thread_variable_set`/`Fiber[]`, because swapping the spelling would satisfy a
+naive grep while changing nothing. Warn mode passes with two exemptions; strict mode
+fails today by design, and is what 1.0 must pass once `glue/legacy/` is gone.
 
-**The gate the Accept list asks for**: `Thread.current` absent from `lib/` and `app/`
-outside `glue/legacy/`. Model it on `script/gates/zero_reporter.sh` — same allowlist idiom,
-same warn/strict split — and wire it into the `gates` CI job next to the other two.
-
-Use `TASK-PROMPT.md`; fill in the STATE block from §4 above rather than from memory.
+**Still under `lib/` rather than `glue/`**, and deliberately left for a later mechanical
+move: `reporter_report_content_patch.rb`, `patches/report_patch.rb`,
+`liquid/issue_drop_patch.rb`, `liquid/custom_field_value_drop.rb`. All host-plugin-only.
+T-07 moved exactly what its `Touches:` line named plus what the new gate forced; a
+general reorganisation is a different commit.

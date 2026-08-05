@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'scope_resolution'
+require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
 require_relative 'drill_through'
 
 module SqlAggregation
@@ -103,7 +103,10 @@ module SqlAggregation
   # so the rest of the template renders without crashing.
 
   class LiquidAggregateTag < Liquid::Tag
-    include SqlAggregation::ScopeResolution
+    # T-07: two resolution sources, both starting from Issue.visible. The six-source
+    # archaeology this replaced now lives in Glue::Legacy::ScopeResolution and is
+    # reached only when no RenderContext is present, i.e. on a reporter install.
+    include RedmineReporterDashboards::Liquid::ScopeBinding
 
     # Matches: key: "quoted" | key: 'quoted' | key: bare_value
     PARAM_RE = /(\w+)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/
@@ -176,9 +179,10 @@ module SqlAggregation
 
     private
 
-    # Scope resolution (resolve_scope, scope_from_registers, scope_from_query_id,
-    # scope_from_drop, ar_scope?) lives in SqlAggregation::ScopeResolution, shared
-    # with {% version_rollup %}.
+    # Scope resolution (resolve_scope, resolve_query) lives in
+    # RedmineReporterDashboards::Liquid::ScopeBinding, shared with {% version_rollup %}.
+    # It has exactly two sources; see that file for why there is no enforce_visibility
+    # any more.
 
     # ------------------------------------------------------------------
     # Modes — each returns a result Hash, or nil for "assign the empty result"

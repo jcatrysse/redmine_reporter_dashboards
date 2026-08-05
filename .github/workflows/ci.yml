@@ -540,7 +540,7 @@ jobs:
   # Non-test gates. A green suite says nothing about any of these.
   # ------------------------------------------------------------------
   gates:
-    name: Gates (no_secrets, zero_reporter)
+    name: Gates (no_secrets, zero_reporter, no_thread_local)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -562,6 +562,12 @@ jobs:
       # What is enforced is the ratchet — an unlisted reference fails.
       - name: zero_reporter
         run: ./script/gates/zero_reporter.sh
+
+      # T-07 — no ambient per-thread state outside glue/legacy/. Warn mode: the legacy
+      # glue still needs it, because reporter's liquidize() has no channel to pass an
+      # IssueQuery through. Strict is what 1.0 must pass, when that glue is gone.
+      - name: no_thread_local
+        run: ./script/gates/no_thread_local.sh
 
       # Not a gate, and deliberately not failing the build: the number that has to
       # reach zero by 1.0, printed where a reviewer sees it move.

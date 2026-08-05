@@ -23,6 +23,19 @@ module RedmineReporterDashboards
     redmine_reporter_dashboards/patches/report_patch
   ].freeze
 
+  # Glue that is not a patch: code loaded only because reporter is installed, which
+  # something else then uses. Loaded with the reporter patches and for the same
+  # reason, but listed separately because it prepends into nothing.
+  #
+  # `glue/legacy/scope_resolution` is here rather than left to
+  # `reporter_list_patch`'s own require: `Liquid::ScopeBinding` falls back to it when
+  # no RenderContext is present, so on a reporter install it has to be loaded whether
+  # or not the prepend into IssueListReportTemplate succeeded. Tying it to that would
+  # mean one failed patch silently costing a reporter install its scope resolution.
+  REPORTER_GLUE_FILES = %w[
+    redmine_reporter_dashboards/glue/legacy/scope_resolution
+  ].freeze
+
   module_function
 
   def lib_root
@@ -41,7 +54,7 @@ module RedmineReporterDashboards
   end
 
   def load_patches
-    files = PATCH_FILES + (reporter_present? ? REPORTER_PATCH_FILES : [])
+    files = PATCH_FILES + (reporter_present? ? REPORTER_GLUE_FILES + REPORTER_PATCH_FILES : [])
     files.each { |file| require File.join(lib_root, file) }
   rescue LoadError, StandardError => e
     # A patch failing to load must never abort the after_plugins_loaded chain
@@ -142,7 +155,9 @@ module RedmineReporterDashboards
   # Apply the performance patches to reporter's classes. Only called when
   # reporter_present? is true, so absence is not a case handled here.
   def apply_reporter_patches
-    apply_patch('IssueListReportTemplate', 'reporter_list_patch', 'ReporterListPatch')
+    apply_patch('IssueListReportTemplate',
+                'redmine_reporter_dashboards/glue/legacy/reporter_list_patch',
+                'RedmineReporterDashboards::Glue::Legacy::ReporterListPatch')
     apply_patch('ReportTemplatesController', 'reporter_report_content_patch', 'ReporterReportContentPatch')
   end
 

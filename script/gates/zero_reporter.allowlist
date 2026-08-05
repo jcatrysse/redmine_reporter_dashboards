@@ -57,3 +57,7 @@ lib/redmine_reporter_dashboards/import/survey.rb         reads reporter's tables
 lib/redmine_reporter_dashboards/import/plan_report.rb    tells the operator which plugin's data was surveyed
 lib/redmine_reporter_dashboards/template_linter.rb       usage groups name the gem the accessors come from
 lib/tasks/reporter_dashboards.rake                       `rake -T` must say what import:plan surveys
+
+# --- The legacy glue itself (T-07). Named because naming it is the point: this
+# --- directory exists only while the base plugin does, and it is deleted at 1.0.
+lib/redmine_reporter_dashboards/glue/legacy/scope_resolution.rb   says in one line why glue/legacy/ exists at all

@@ -7,7 +7,7 @@ require File.expand_path('../../spec/golden/scope_fixture', __dir__)
 # replaced.
 #
 # The aggregation NUMBERS are regenerable from the baseline commit; the SCOPE is not.
-# `lib/sql_aggregation/scope_resolution.rb` answers two questions — "what do I count?"
+# `lib/redmine_reporter_dashboards/glue/legacy/scope_resolution.rb` answers two questions — "what do I count?"
 # (`resolve_scope`) and "which IssueQuery was this built from?" (`resolve_query`) — for
 # every combination of tag markup, render context, stored query and viewer. T-07
 # replaces it with `Liquid::ScopeBinding` and T-08 deletes it. After that there is no
@@ -76,7 +76,7 @@ class GoldenScopeFixtureTest < ActiveSupport::TestCase
 
   # The host tag: ScopeResolution is a mixin expecting @raw_params.
   class Host
-    include SqlAggregation::ScopeResolution
+    include RedmineReporterDashboards::Glue::Legacy::ScopeResolution
 
     def initialize(raw_params)
       @raw_params = raw_params
@@ -139,7 +139,7 @@ class GoldenScopeFixtureTest < ActiveSupport::TestCase
   end
 
   def teardown
-    Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] = nil
+    Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = nil
     User.current = @previous_user
   end
 
@@ -495,7 +495,7 @@ class GoldenScopeFixtureTest < ActiveSupport::TestCase
     as_actor(actor) do
       host = Host.new(raw_params_for(template, query))
       context = context_for(template, query)
-      Thread.current[SqlAggregation::ScopeResolution::QUERY_THREAD_KEY] =
+      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] =
         template == 'thread_local' ? @queries[query] : nil
 
       scope = host.resolve_scope(context)

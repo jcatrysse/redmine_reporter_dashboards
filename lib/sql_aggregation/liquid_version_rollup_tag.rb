@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'scope_resolution'
+require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
 require_relative '../redmine_reporter_dashboards/liquid/version_drop'
 
 module SqlAggregation
@@ -35,7 +35,10 @@ module SqlAggregation
   # On any error the tag assigns an empty Array and logs to Rails.logger so the
   # rest of the template still renders. render returns '' (side-effect tag).
   class LiquidVersionRollupTag < Liquid::Tag
-    include SqlAggregation::ScopeResolution
+    # T-07: two resolution sources, both starting from Issue.visible. The six-source
+    # archaeology this replaced now lives in Glue::Legacy::ScopeResolution and is
+    # reached only when no RenderContext is present, i.e. on a reporter install.
+    include RedmineReporterDashboards::Liquid::ScopeBinding
 
     # Matches: key: "quoted" | key: 'quoted' | key: bare_value
     PARAM_RE = /(\w+)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/
