@@ -61,7 +61,8 @@ fact that CI has not yet run on this work at all.
 | T-09 | **done** — the secret, the probe job and the private checkout were removed earlier (which is what let 5.1 run at all and exposed D-2/D-3); this session added the two gates its `Accept:` list still named, `layer_purity.sh` (E3) and `compat_size.sh` (E4), and moved the one scattered version check into `Compat`. **One item is a human artefact and is NOT done: the dated fork-PR run per release** — see §Findings F-5 |
 | T-21 | **done** — `test/unit/multi_actor_visibility_test.rb`: five actors (`all`/`default`/`own`, an outsider, anonymous) over a private project with a private issue, a role-restricted custom field and a private `IssueQuery`; exact totals AND strict inequality; the restricted field's NAME asserted absent from every entry point, not just its values; the two fail-closed `1=0` branches as DB-less unit tests; ordering in both directions plus A/B/A; the monotonicity property with both its limits written into the file. **Mutation-tested**: dropping `Issue.visible` from the scope fails 4 of its 13 tests |
 | T-10 | **done** — `render/{capabilities,page_furniture,failure,result,document_request,registry,renderer}.rb`: a frozen `DocumentRequest` with **no field a credential could travel in** (asserted against the constructor's signature, so a future `headers:` has to be argued), `print_backgrounds` defaulting to `true` rather than to Chromium's `false`, `PageFurniture` as slots plus a closed token set, `Result = Success \| Failure` with closed code sets, and `Renderer` enforcing the `%PDF-`/`%%EOF` and minimum-size post-conditions **above every adapter**. 29 DB-less examples; `layer_purity` flipped to **strict** in the same PR, as its own comment asked |
-| T-11 onward | not started |
+| T-11 | **partly done** — `render/readiness.rb` and `assets/javascripts/chart_shell.js`: one DOM contract (`window.__rd` with `pending/ready/begin/end/fail`, plus `data-rd-ready` and `window.status`, all set at the same instant), an in-page watchdog firing BEFORE the engine timeout, `Degradation(:readiness_timeout, pending: n)` unless `strict`, and `begin`/`end` owned by the shell. The JS is **executed in node**, not mocked. **The three-fixture timing falsifier is NOT done — it needs an engine and is F-7** |
+| T-12 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -316,6 +317,32 @@ defensive behaviour rather than a mechanical edit. It was reverted rather than p
 examples because they sit in the *frozen kernel's* unit suite, and rewriting 11 assertions in a
 2 800-line file at the end of a session is how a suite starts lying — see §1b: local red is fixed or
 reverted, only an engine that cannot be run here is left to CI.
+
+**F-7 · T-11's falsifier cannot be run until an engine exists, and that is the honest half of
+"partly done".** T-11's `Accept:` ends with a deliberately hard test: three fixtures — 0 charts,
+3 charts that finish, 1 chart that never calls `end()` — with expected durations <1 s / <3 s /
+≈timeout, "a fixture signalling at ~6 s must produce a document containing the post-readiness
+marker, and the harness's own monotonic measurement must be ≥5.9 s and ≤12 s", run 3/3 attempts.
+That is a statement about WALL CLOCK THROUGH A REAL ENGINE. It exists to falsify exactly the
+implementation this task replaces — "an implementation using today's fixed 3-second delay fails
+this by construction; one that just waits out the timeout fails the upper bound."
+
+What landed is the protocol and its logic, with the JS **executed in node** rather than described:
+the chart-free case, the pending/ready arithmetic, all three signals set together, a failed chart
+still counting as finished, and a late chart reopening readiness. What did not land is the timing,
+because there is no engine to time it through — `Render::Registry` has no adapter registered, and
+building one is T-13.
+
+**Do not mark T-11 done without it.** The three durations are the whole point: every one of the
+logic assertions above passes on an implementation that sleeps for three seconds and ignores the
+contract entirely. Chromium 141 is in this container (see P-2's correction), so the fixture is
+runnable the moment T-13's adapter exists — it is blocked on the adapter, not on the engine.
+
+**One thing the protocol work already found**, which the falsifier's first fixture would have
+caught later and more expensively: the shell as first written never signalled ready for a
+CHART-FREE document. Nothing called `end()`, so `pending` never reached zero from above it, and a
+page with nothing to draw would have been the slowest to render — waiting out the watchdog. Fixed
+by `settle()` on `DOMContentLoaded`, and asserted.
 
 **F-6 · FR-23 and FR-24 are owned by no task, and T-21's `Accept:` list depends on one of them.**
 Found 2026-08-05 while building T-21. `functional-spec.md` FR-23 says "Every aggregation result

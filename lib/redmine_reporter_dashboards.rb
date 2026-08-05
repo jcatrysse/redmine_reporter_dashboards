@@ -18,6 +18,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/result'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/document_request'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/registry'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/renderer'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/readiness'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards
