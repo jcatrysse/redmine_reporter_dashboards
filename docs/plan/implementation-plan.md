@@ -333,6 +333,31 @@ are, and they change what the next attempt has to do.
    means deleting an assertion that documents defensive behaviour, and that has to be argued in the
    pull request rather than quietly rewritten to match.
 
+**THE 11TH ASSERTION IS DECIDED (implementer's call, delegated by the curator 2026-08-05): delete it
+and assert the inverse.** `"keeps counts for a value outside the expected bucket list rather than
+dropping them"` documents defensive handling of a group key the DATABASE invented. D-1 *is* that case
+— on MariaDB every key came back nil — so the behaviour it protects is the behaviour the fix removes.
+Replace it with the invariant that now holds: **an axis with declared buckets cannot report a bucket
+it did not declare.** Same file, same block, one example, and the pull request body says why the old
+one went.
+
+**The arithmetic for the nine stub-shape examples, so it is not re-derived.** `ScopeStub` needs a
+`bucket_counts:` input answered by `#pluck` (it already has a `@pluck_rows` hook that accepts a
+callable, so this is one small addition, not a rewrite). The kernel asks in bucket order
+`[nil, *labels]`, so each existing `grouped_counts` maps to:
+
+| existing stub | bucket_counts |
+|---|---|
+| `{'0-30'=>4, '91-180'=>2, nil=>1}` (the block's main `let`) | `[1, 4, 0, 0, 2, 0]` |
+| `{'0-7'=>3, nil=>1}` with `age_buckets: [7, 14]` | `[1, 3, 0, 0]` |
+| `{'0-7'=>3}` with `age_buckets: ['14','7','7']` | `[0, 3, 0, 0]` |
+
+Three more need their blocks read first: `buckets on due_date with age_field: due` (~2106),
+`on updated_on with age_field: updated` (~2111), and `compares the date column against bound
+boundaries` (~2101) — that last one asserts on the generated SQL, which now lives in the **pluck
+expressions** rather than in the GROUP BY, so it reads a different accessor on the stub. Plus the two
+drill-through descriptor examples (~2812, ~2826).
+
 **Why it was reverted rather than pushed with 11 red examples:** they are in the *frozen kernel's*
 unit suite, and rewriting 11 assertions in a 2 800-line file at the end of a session — one of them a
 judgement about defensive behaviour — is how a suite starts lying. The tree is back at the last fully
