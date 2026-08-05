@@ -120,8 +120,9 @@ module RrdGolden
         return {} if case_ids_for(family).empty?
 
         unless exist?(family)
-          raise "#{path_for(family)} is missing, but the overlay declares " \
-                "#{case_ids_for(family).length} entr(y|ies) for #{family}. Regenerate it with " \
+          count = case_ids_for(family).length
+          raise "#{path_for(family)} is missing, but the overlay declares #{count} " \
+                "#{count == 1 ? 'entry' : 'entries'} for #{family}. Regenerate it with " \
                 'RRD_CORPUS_OVERLAY_WRITE=1 against that engine.'
         end
 
