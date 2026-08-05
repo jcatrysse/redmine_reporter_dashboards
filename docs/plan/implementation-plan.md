@@ -42,6 +42,11 @@ impossible or much more expensive later.
 Kept here so a fresh session can read it rather than reconstruct it. `git log --oneline` is still
 the authority; this is a summary, and CLAUDE.md §1 says to verify it.
 
+**Read [`HANDOVER.md`](./HANDOVER.md) alongside this table.** It carries what this table cannot: the
+traps that produce a green run meaning nothing, the code that looks like a violation and must be left
+alone, and — most importantly — **which configurations have actually been executed**, including the
+fact that CI has not yet run on this work at all.
+
 | Task | State |
 |---|---|
 | T-00 | **VOID** — the fork is out of scope (curator, 2026-08-05). See below. |

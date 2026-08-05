@@ -77,6 +77,11 @@ plan.
 
 Do this *per task*, scoped to the task. Do not front-load 1 500 lines of spec.
 
+0. **Read `docs/plan/HANDOVER.md` first — it is short.** It records what was learned by
+   *running* the plan rather than reading it: traps that produce a green run meaning
+   nothing, code that looks like a violation and is deliberately untouched, environment
+   quirks, and **which configurations have actually been executed**. Skipping it is how a
+   session re-discovers the same trap or "fixes" work that is about to be deleted.
 1. **Read the task** in `implementation-plan.md`: `Touches:`, `Deps:`, `Accept:`.
 2. **Read the referenced spec sections** in `technical-spec.md`, and the FR numbers in
    `functional-spec.md`. Those FRs are your acceptance vocabulary.
