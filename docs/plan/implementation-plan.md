@@ -66,6 +66,7 @@ fact that CI has not yet run on this work at all.
 | T-13 | **done for `:chromium_cdp`, written-but-unrun for `:wkhtmltopdf`** — `render/engines/{cdp_client,chromium_cdp,wkhtmltopdf}.rb` and `render/process_pool.rb`; `pdf_polyfills.rb` → `glue/legacy/wk_legacy_shims.rb` with the payload asserted byte-identical. CDP over a **pipe, not a port**; `--no-sandbox` never set (so the browser itself enforces non-root); pool of 1 with a bounded queue answering `Failure(:engine_unavailable)`. **20 of 20 conformance fixtures green on Chromium 141.** wkhtmltopdf is registered and has **never been executed** — its package is gone from Ubuntu 24.04 — so it stays `verification: pending` and the matrix prints "not verified" rather than cells nobody measured. **The corpus found three defects on its first run** — see §Findings E-2, E-3, E-4 |
 | T-15 | **partly done** — `render/batch_guard.rb` plus `spec/render/chromium_containment_spec.rb`. The cap OWNS the render loop rather than sitting beside it, so "refuse before any render" is a property of the object and not of the caller's discipline; asserted with a double that counts calls (**zero** over the cap), at the cap and one past it. Batch deadline keeps what is finished and refuses the rest, typed, with each undrawn document's own correlation id. Against a real browser: a wedged renderer times out bounded-and-monotonic **and the browser is gone from the process table**, the next render is served from a fresh one, shutdown leaves nothing behind, and concurrency never exceeds one browser. **Two Accept items are blocked on an entry point that does not exist** — see §Findings E-6 |
 | T-17 | **done** — `liquid/{execution_policy,template_renderer}.rb` plus gate `single_parse.sh`. **Both mechanisms, because neither alone suffices**: per-CLASS resource limits (widget/report/preview, preview deliberately on the widget's numbers so an author feels the limit at the keyboard) handed to the `Liquid::Context` — the only per-render channel either Liquid 4 or 5 offers, verified on 4.0.4 and 5.13.0 — and a **cooperative monotonic deadline** wired into all three own tags, a no-op where no budget is bound. `Timeout.timeout` is not used and the file says why. **Errors never enter the document**: the spec first DEMONSTRATES Liquid's default of writing `Liquid error:` into the output, then shows the same template becoming a typed failure with no body at all. 36 examples against the real gem; the gate negative-tested |
+| T-18 | **begun — the prerequisite only.** T-18's Accept list names a *"Required spec before this task is done"*, and that is what landed: `liquid/drops/named_ref_drop.rb` and its proof, green on Liquid **4.0.4 and 5.13.0**, 28 examples each, every one comparing the drop's rendering against the **String's**. It found a protocol-breaking defect (`key?` made every accessor render empty) and **two gaps in §3.3's own table** which are E-8 and the curator's. **The other 12 drop classes and `liquid/batch.rb` are not started** — deliberately, rather than left as stubs |
 | T-14, T-16 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -361,6 +362,52 @@ with non-breaking spaces in the literal segments. The rewrite exposed a second d
 asked about: slot text was being interpolated into that document **raw**, so an unescaped `<` from a
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
+
+**E-8 · `NamedRefDrop` is proven, and the proof found TWO gaps in §3.3's table plus one defect the
+table could not have predicted. CURATOR DECISION on the first two.** `technical-spec.md` §3.3 marks
+the class `[UNVERIFIED]` until its five substitutability claims are proven "under both Liquid 4.0.x
+and 5.x", and says why: *"Every one is a claim about Liquid's internals and must be proven by test,
+not by reasoning."* It is now green on 4.0.4 and 5.13.0, 28 examples each, every one comparing the
+drop's rendering against the **String's** rather than against a literal somebody typed.
+
+**The defect the proof found, and it was mine.** The first draft also defined `key?` and
+`attributes` as ordinary conveniences, and `key?` broke the drop protocol outright — `{{ status.id }}`
+rendered **empty**. Liquid's `VariableLookup` asks `respond_to?(:key?)` to decide whether a value is
+hash-like; having answered yes, it asked `key?('id')`, got false from the attributes hash, and
+returned nil without ever trying the method. A method named `key?` was enough to make every accessor
+on the class unreachable from a template, and nothing about writing it suggests that. This is the
+single best argument for §3.3's insistence on proof: no amount of reading would have found it.
+
+**TWO GAPS IN THE TABLE, both measured, both now asserted AS THEY ARE so a future change reports
+itself rather than going quietly green:**
+
+1. **The reversed comparison.** `{% if issue.status == "Closed" %}` works — it is what the table
+   protects. `{% if "Closed" == issue.status %}` **does not**: it renders `no` through the drop and
+   `yes` through the String. Ruby asks the LEFT operand, so this is `String#==(drop)`, which answers
+   false for anything that is not a String.
+2. **`{{ status | size }}`** answers `0` through the drop and `6` through the String. `size` asks the
+   object, not its string form, and a Drop has no size.
+
+**The first one is not fixable within the design, and that is the finding.** The only two fixes are
+monkey-patching `String` (forbidden) or making `NamedRefDrop` a **subclass of String** — which would
+make it substitutable everywhere, including both comparison orders and `| size`, and would forfeit
+the `Liquid::Drop` protocol and with it `{{ status.id }}`, `{{ status.url }}` and the caller-supplied
+attributes. **You cannot have both in one Liquid value:** Drop buys you the new accessors, String
+buys you substitutability, and §3.3 chose Drop without recording that the choice costs these two
+idioms.
+
+So this is the curator's, and the options are honest ones:
+
+* **accept the two gaps** and have T-19's linter flag `"literal" == x` and `| size` on a reference,
+  turning a silent wrong branch into an authoring error — probably the best of the three, since the
+  linter already exists;
+* **ship a String subclass instead** and give up `{{ status.id }}`, which reopens ADR-004's rejected
+  "keep Strings, add `*_id` only" and leaves `{% geo_version_map %}`'s 295 lines alive;
+* **ship both shapes** and let the caller choose, which doubles the vocabulary a template author has
+  to hold.
+
+Pending that, the class is as §3.3 specifies and the two gaps are pinned by tests that fail if the
+behaviour changes in either direction.
 
 **E-7 · the Liquid stub and the real gem cannot share a process, and 200+ specs are written
 against the stub.** Found while building T-17, by trying it. The plugin has never loaded Liquid

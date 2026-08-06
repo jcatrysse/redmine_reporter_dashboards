@@ -116,6 +116,30 @@ jobs:
             --format progress
         working-directory: redmine
 
+      # BOTH LIQUID MAJORS, and this is the only place either is pinned.
+      #
+      # `technical-spec.md` §3.3 marks NamedRefDrop `[UNVERIFIED]` until its five
+      # substitutability claims are proven "under both Liquid 4.0.x and 5.x" — because
+      # the lexer, the comparison operators and Drop's method dispatch all changed
+      # between them, and every one of those claims is about Liquid's internals.
+      #
+      # Run outside bundler, against system gems, because the point is to pin a version
+      # the plugin's Gemfile deliberately does not: it declares `>= 4.0, < 6.0` so an
+      # install that already has 4.x is not forced to upgrade. One Redmine branch only —
+      # this proves a property of the GEM, and running it four times proves it four
+      # times.
+      - name: NamedRefDrop under both Liquid majors
+        if: matrix.redmine == '6.1-stable'
+        run: |
+          gem install rspec --no-document
+          gem install liquid -v 4.0.4 --no-document
+          gem install liquid -v '~> 5.0' --no-document
+          for constraint in '4.0.4' '~> 5.0'; do
+            printf "gem 'liquid', '%s'\nrequire 'liquid'\n" "$constraint" > /tmp/pin.rb
+            echo "--- Liquid $constraint"
+            rspec -r /tmp/pin.rb spec_liquid --format progress
+          done
+
       # A SECOND INVOCATION, and it has to be second rather than part of the first.
       # `spec/spec_helper.rb` stubs Liquid so the tag specs can run without the gem, and
       # the stub cannot share a process with the real gem: `Liquid::Tag.new` is public on
