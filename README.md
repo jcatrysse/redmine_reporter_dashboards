@@ -385,6 +385,22 @@ working offline is not the thing a report author points at.
    - `manage_reporter_project_tabs` — create and rename tabs
 3. A **Project dashboard** link appears in the project menu. The first visit automatically creates a default tab.
 
+Those three are the only permissions this plugin declares today; the reporting features
+still being built arrive with their own, per role and per project, rather than switching on
+through a plugin setting. Two things worth knowing either way.
+
+**This plugin never grants a permission to a role — but Redmine's default configuration
+does.** Nothing here ticks a box for you; administrators bypass permission checks, everyone
+else starts with what you grant. The exception is not ours: *Administration → Settings →
+Load the default configuration* creates a *Manager* role holding every permission it can
+give, a plugin's included. If you run that step on a fresh Redmine that already has this
+plugin installed, look at what *Manager* came out with.
+
+**A permission name can only belong to one plugin.** If another installed plugin registers
+one of these names too, the log says so at start-up and names it. That puts two identical
+rows on the roles screen and makes access checks behave unpredictably, so it is worth
+reporting rather than working around.
+
 Widget settings (a query, a report template, an item limit, a column list) are
 validated before they are stored: a setting whose value is not of the expected shape
 is dropped rather than saved, with one line in `log/production.log` naming the widget

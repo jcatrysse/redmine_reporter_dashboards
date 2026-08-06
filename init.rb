@@ -55,14 +55,29 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
            },
            partial: 'settings/reporter_dashboards'
 
-  project_module :reporter_project_dashboards do
-    permission :view_reporter_project_page, { reporter_project_pages: [:show, :report_pdf] }, read: true
-    permission :manage_reporter_project_page, {
-      reporter_project_pages: [:update_page, :add_block, :remove_block, :move_block]
-    }
-    permission :manage_reporter_project_tabs, {
-      reporter_project_tabs: [:create, :update, :destroy, :order]
-    }
+  # --- Permissions (T-40; technical-spec.md §4.1, FR-21/FR-21b) ---
+  #
+  # The permission SET is data, in `lib/redmine_reporter_dashboards/permissions.rb`, and
+  # this loop is the only place it becomes a registration. That is not indirection for its
+  # own sake: `spec/permissions/permission_map_spec.rb` reads the same data to assert that
+  # every action here exists, that its controller really calls `authorize`, that every
+  # permission is labelled in all nine locales, and that no public controller action is
+  # left unaccounted for. None of that can be asked of a literal list inside this block
+  # without booting Redmine.
+  #
+  # Registration order is REGISTERED's order, because the roles screen renders a module's
+  # permissions in declaration order and that ordering is what an administrator reads. It
+  # sorts the MODULES alphabetically, so no order here decides which fieldset comes first.
+  #
+  # `PLANNED` — the reporting permissions T-23/T-25/T-28/T-32 will add — is deliberately
+  # NOT registered. A permission an administrator can tick, that guards nothing, is a lie
+  # in the interface. See that file for the whole model and for why `[OQ-F]`'s
+  # `template_authoring` setting is gone.
+  RedmineReporterDashboards::Permissions.registrations_by_module
+                                        .each do |project_module_name, registrations|
+    project_module project_module_name do
+      registrations.each { |name, actions, options| permission name, actions, options }
+    end
   end
 
   # T-14. No icon class: the admin menu's icon mechanism changed between Redmine 5.1
@@ -114,6 +129,11 @@ class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
         'dashboards, SQL aggregation and statistics are unaffected'
       end
     )
+
+    # T-40. Every plugin's init.rb has run, so the permission registry is complete and the
+    # question "did someone else register one of our names" finally has a trustworthy
+    # answer. Log-only; see the method for why it does not raise.
+    RedmineReporterDashboards.check_permission_collisions
 
     # Register the Liquid tags FIRST and independently. Report templates depend on
     # {% sql_aggregate %} / {% geo_aggregate %}, so their registration must never be

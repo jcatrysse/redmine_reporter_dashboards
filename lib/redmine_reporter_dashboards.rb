@@ -2,6 +2,11 @@
 
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/compat'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
+# T-40. Required BEFORE anything else that could fail, because `init.rb`'s
+# `Redmine::Plugin.register` block reads it to declare the permissions: a plugin whose
+# permission set failed to load would boot with an authorize call that permits nobody,
+# which looks exactly like a misconfigured role.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/row_layout'
@@ -122,6 +127,47 @@ module RedmineReporterDashboards
 
   def safe_logger
     defined?(::Rails) && ::Rails.respond_to?(:logger) ? ::Rails.logger : nil
+  end
+
+  # T-40. Asked at after_plugins_loaded, which is the first moment the answer is complete,
+  # and for the same reason `reporter_present?` is asked there.
+  #
+  # `technical-spec.md` §7 makes simultaneous installation of both plugins a DESIGN GOAL —
+  # it is the whole A/B argument — and `Redmine::AccessControl` keeps permissions in a flat
+  # array with no uniqueness check. Two plugins registering one name give an administrator
+  # two identical rows on the roles screen and an action map that is the union of both,
+  # which is a real authorization bug wearing a cosmetic disguise.
+  #
+  # Logged at ERROR and not raised: refusing to boot over another plugin's registration
+  # would take the dashboards down for a problem the operator cannot fix from here. Loud,
+  # not silent, and not fatal (INV-4).
+  #
+  # The message itself is built by `Permissions.collision_message`, which is where its tests
+  # are; this is the wiring. `Array()` guards the case where `AccessControl.permissions`
+  # answers `nil` — it returns a bare `@permissions`, unset until something registers — so a
+  # half-initialised registry reads as "no collision" instead of raising inside a boot hook.
+  #
+  # `safe_logger` is DELIBERATELY NOT used with `&.` here. Its whole purpose is to tolerate a
+  # missing `Rails.logger`, and a `&.` on both branches would have made a real collision and
+  # a failed check equally silent in that case — which is `rescue nil` wearing a safer name
+  # (INV-4). With no logger the message goes to stderr, where an operator can still see it.
+  def check_permission_collisions
+    message = Permissions.collision_message(
+      Array(::Redmine::AccessControl.permissions).map(&:name)
+    )
+    return if message.nil?
+
+    log_or_warn(:error, message)
+  rescue StandardError => e
+    # A diagnostic must never be the reason a boot step fails. Same discipline as the tag
+    # registrations below: its own rescue, and it says what it could not check.
+    log_or_warn(:warn, '[reporter_dashboards] permission collision check skipped ' \
+                       "(#{e.class}: #{e.message})")
+  end
+
+  def log_or_warn(level, message)
+    logger = safe_logger
+    logger ? logger.public_send(level, message) : warn(message)
   end
 
   # Whether the optional redmine_reporter plugin is installed. One memo, owned by

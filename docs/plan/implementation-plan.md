@@ -73,6 +73,7 @@ fact that CI has not yet run on this work at all.
 | T-16 | **done** — `charts/` (palette, spec, layout, SVG renderer, Chart.js emitter, collector), `liquid/tags/chart_tag.rb`, `assets/javascripts/chart_boot.js`, **Chart.js 4.5.0 vendored** with its digest in `THIRD_PARTY.md` and a `vendor_integrity` gate that recomputes it. `{% chart %}` **emits no markup** — a placeholder and a `ChartSpec`, and the output binding decides: `<canvas>` + `<script type="application/json">` for HTML, inline `<svg>` for PDF with `<a xlink:href>` per element and no JavaScript at all. **One `ChartLayout` for both paths**, and the claim is MEASURED rather than argued: the falsifier renders a horizontal bar with twelve long labels in a real Chromium and compares `chart.chartArea` with `ChartLayout#plot` — worst edge **1.17%** against T-16's 2% tolerance, with Chart.js using exactly the ticks, min and max it was handed. **It found two defects doing so** (§Findings **E-16**), neither findable in Ruby. Ten SVG goldens as deterministic text; `responsive`/`animation`/`devicePixelRatio` derived from the output binding, never from the author (G3). Left for the curator: **F-13** (where the chart layer lives), **F-14** (a `:responsive_canvas` capability), **F-15** (the two legacy examples' CDN reference) |
 | T-33 | **done** — `assets/` (policy, origin, reference, content types, bundled assets, local store, fetcher, document scanner, resolver, resolution) plus `render/asset_binding.rb`, the plugin's first `settings` block and its admin partial, and two new `layer_purity` arms. **Its review found four blockers and they are fixed** — a stylesheet's own `url()`/`@import` reaching the engine live (which made the whole `:bundled` promise false), an `ArgumentError` out of a method documented never to raise, `<style/>` hiding an entire stylesheet from the scanner, and a production transport with no test at all. §Findings **E-17**. **`:bundled` is the default and `:asset_http` is never selected** — not "off wherever the engine supports upload", but off in every mode for every capability shape, asserted against an engine declaring all three. An **empty allowlist collapses any upgraded mode to `:bundled`** and the collapse is asserted as an equality of body, refusals, counts and models — the fail-closed clause T-33 flags as most likely to be got wrong. The fetcher's closed header set is proven by a **recording double**, not by reading the file; the resolved-IP check runs **after** DNS and the connection is made to the checked address via `ipaddr=`, which is the only version that closes the rebinding window; size, time, redirect and inline caps each have an AT-and-one-past test. Containment is `realpath`, tested against a literal `..`, a percent-encoded one, a **double**-encoded one and a **symlink** inside the root pointing out of it. **Structural inlining falls back to base64 on `</style` / `</script`**, which is an injection rather than a rendering bug. 201 new DB-less examples; **1768 total, 0 failures**; all seven gates green, `layer_purity` strict, and both new arms **negative-tested**. It settled **F-13, F-13b, F-14** and answered **F-15**, and left **F-16** and **T-39** |
 | T-35 | **done, re-scoped** — vendored Mermaid 11.16.1 (3.5 MB, digest in `THIRD_PARTY.md`, byte-identical across THREE independent origins), `liquid/tags/mermaid_tag.rb`, `assets/javascripts/mermaid_boot.js`, `:modern_javascript` in the closed vocabulary, and the regenerated support matrix. **No sanitiser, no `MermaidSpec`, no collector, no `:mermaid` capability** — §Findings F-17 is why, and the tag is 210 lines against `{% chart %}`'s 324 as a result. `{% mermaid %}` inherits `Liquid::Raw` so `B{Choice}` and `-->|yes|` survive; `interpolate: true` substitutes VALUES and escapes them, with no second `Template.parse` (the gate forbids one) and no `{% %}` execution. **The boot script is ES5 and that is load-bearing** — one arrow function and it dies at parse time on the very engine whose fallback it exists to produce, so it is asserted by a real ES5 parse plus 14 node-driven behaviour examples. **MEASURED end to end on both engines**: Chromium draws the diagram (labels present, source gone, interpolated value present, no degradations); wkhtmltopdf leaves the source visible and marks it unsupported. **Three cross-major defects found by running it under both Liquid majors** — §Findings **E-19** |
+| T-40 | **done** — `lib/redmine_reporter_dashboards/permissions.rb`, `spec/permissions/permission_map_spec.rb` and `spec/permissions/registration_dsl_spec.rb`, closing `[OQ-F]` the way the curator decided on 2026-08-06: **the `template_authoring` setting is deleted, not defaulted**, and replaced by 13 role permissions in two project modules (`technical-spec.md` §4.1). Three are live and unchanged, and the loop that replaced their three literal `permission` calls is asserted **twice** — once as data, once by a committed recorder that mimics `Redmine::Plugin#project_module`'s `instance_eval` and receives the same three calls argument for argument. Ten are declared as **design and deliberately not registered**, because a permission an administrator can tick that guards nothing is a lie in the interface. **Its review found four blockers and a refuted claim, and all five are fixed** — §Findings **E-20**: the coverage gate could not see a controller in a subdirectory, `authorize` was asserted per controller so `only:` plus `skip_before_action` hollowed it out, `define_method` and a `def` inside a version conditional were invisible, the "no grant" glob never scanned `init.rb` at all, and **`:admins_only` is not a construction guarantee** — core's `DefaultData::Loader` gives Manager every setable permission on a fresh install. `require: :member` is now genuinely **derived** from `authoring: true` rather than typed and asserted to agree; coverage is **per action** and reads `config/routes.rb` too; the reader's answers about `only:`/`except:`/`skip_before_action`/`define_method`/nested `def` are asserted against **fixture controllers**, because the four real ones contain none of those constructs. 81 examples, **1933 total, 0 failures**, 92 pending (no new skips), all seven gates green, and **fourteen negative tests** — the four bypasses the review used, plus a deleted `before_action :authorize`, a missing locale label, an authoring entry that types `requires` instead of deriving it, a label for an unregistered permission, a mapped action that does not exist, a `lands_in` naming a task absent from the plan, and three against §4.1's table (a drifted name, a wrong task, and the heading gone — which must fail loudly rather than extract nothing). **The last of those found a hole in the fix itself**: `actions_guarded_by` returned `nil` for a guard that was *absent*, which reads as "covers every action", so DELETING `before_action :authorize` outright still passed the per-action check. Absent is now `[]` |
 | T-22 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -865,11 +866,17 @@ engine has no network (INV-8, measured by `F-15-egress-denial`) and the output i
 session — so "may author templates" becomes operationally equivalent to "may run code as any user who
 views a report, including an administrator". That is not an argument for a sanitiser (a sanitiser on
 Mermaid's SVG would not touch it). It is an argument that the permission must be treated as
-administrator-adjacent, which is exactly what T-27 and the `template_authoring` setting already do —
-so the answer to the curator's *"I hope this is more or less safe"* is: **yes for PDFs; for on-screen
-reports it is as safe as the trust placed in whoever holds the authoring permission, and that
-permission is the control.** `[OQ-F]` (whether `template_authoring` defaults to `:admins_only`) stops
-being a naming question and becomes the load-bearing decision of this whole area.
+administrator-adjacent — so the answer to the curator's *"I hope this is more or less safe"* is:
+**yes for PDFs; for on-screen reports it is as safe as the trust placed in whoever holds the
+authoring permission, and that permission is the control.** That made `[OQ-F]` the load-bearing
+decision of this whole area rather than a naming question, and **it is now settled**: the curator
+rejected the `template_authoring` setting outright on 2026-08-06 in favour of role permissions
+granted the normal Redmine way. See **T-40** and `technical-spec.md` §4.1 — four authoring
+permissions, `require: :member` derived from the fact that they execute code, and nothing in this
+plugin granting any of them. **With one honest limit T-40's review established:** core's
+`DefaultData::Loader` hands the **Manager** role every setable permission on a fresh install, so
+`:admins_only` is not a construction guarantee — which is why the upgrade diagnostic has to list the
+roles holding *our* authoring permissions, not only the base plugin's.
 
 **T-35 IS RE-SCOPED, because as specified it is exactly the "specific management of specific
 libraries" the curator does not want.** A `{% mermaid %}` tag, a vendored Mermaid, a `:mermaid`
@@ -1057,6 +1064,84 @@ falls back to a `data:` URI, which keeps the element intact.
 RUNNING a document through the layer. None was visible in review of the source, and two of them
 (the CSS hole and the `<style/>` slash) were in code whose comments explained at length why the
 opposite hazard had been closed. A comment describing a defence is not the defence.
+
+**E-20 · T-40's review found four ways past its own gate, and refuted the claim the whole design
+rested on.** One fresh subagent over the diff, told to reject it and to reproduce every finding. The
+four bypasses were each two lines of ordinary controller code, and each left the suite **green**:
+
+**1. A controller in a subdirectory was invisible.** `Dir[app/controllers/*_controller.rb]` is not
+recursive, so `app/controllers/reporter_dashboards/templates_controller.rb` with two unguarded actions
+passed the coverage gate — while `#exist?` resolved the same namespaced key happily, meaning such a
+controller could be permission-**mapped** and invisible to coverage at once. T-23, T-25, T-28 and T-32
+are the four tasks that add controllers, and a namespace is the obvious shape for them. **The shape of
+the mistake:** the gate's one job is to see every controller, and it was written against the four that
+exist rather than against the ones it exists to judge.
+
+**2. `authorize` was asserted per controller, so `only:` plus `skip_before_action` hollowed it out.**
+`before_action :authorize, only: [:create]` and `skip_before_action :authorize, only: [:order]` left
+three of four mapped actions unauthorized, and *the AST meta-test stayed green too* because `authorize`
+was still in position 3 of the guard list. It matters concretely: T-28 ships
+`publish_reporter_dashboards_reports` — *reachable without a Redmine account* — which is precisely the
+controller that will carry a `skip_before_action`. Now per action, honouring all three keywords.
+
+**3. `define_method` and a `def` inside a version conditional were both unseen.** The first is an
+`FCALL` (an `ITER` wrapping one, in fact — the first fix missed that too); the second is a `DEFN`
+nested inside an `IF`, never a direct statement of the class body. A version-conditional `def` is a
+construct a plugin spanning three Rails majors is *likely* to write. Nesting is now searched, and
+`define_method` is **refused** rather than ignored: its name can be computed, so no parser can promise
+to know the action it creates, and reporting full coverage over a construct you cannot read is worse
+than refusing it.
+
+**4. The "nothing grants a permission" glob never scanned `init.rb`.** `{app,lib,db,init.rb}/**/*.rb`
+expands to `init.rb/**/*.rb`, which matches nothing — so the one file where a plugin would actually
+call `add_permission!` was the one file unchecked, and a planted grant in it passed. **A glob that
+matches nothing looks exactly like a glob that matches nothing offending**, which is the same
+failure class as E-14's scanner: an assertion that cannot see its subject reports success.
+
+**And the refutation, which changed the design and not only the wording.** §4.1 claimed *"no role
+holds an authoring permission until an administrator grants it — which is `:admins_only` by
+construction"*, in five places including the README and the CHANGELOG. It is false. Redmine's own
+`lib/redmine/default_data/loader.rb:51` runs
+`manager.permissions = manager.setable_permissions.collect {|p| p.name}`, identically on 5.1 → 7.0, and
+`Role#setable_permissions` subtracts only `public_permissions` for a givable role. So *Load the default
+configuration* on a fresh install with this plugin present grants **Manager** every setable permission
+of ours, `require: :member` included — which, once T-23 lands, is literally `:project_managers`, the
+`[OQ-F]` value the curator rejected, arriving by a path the spec said could not exist. The spec example
+that claimed to assert the property greps *this repository*, and the grant is made in core.
+
+**It is still not an argument for restoring the setting** — the setting would have produced the same
+grant on *every* install rather than on one ordering, and silently. It is an argument that T-27's
+diagnostic must list the roles holding **our** authoring permissions and not only the base plugin's,
+which is now in T-27's `Accept:`, and that a claim no test in this repository can reach should not be
+written as though a test reached it.
+
+Eight further findings were confirmed and fixed: `require: :member` was hand-typed while four
+documents called it *derived* (now genuinely derived from `authoring: true`); the boot hook had **no
+test at all** and could be silent on both branches when `Rails.logger` is absent; the plan said T-40
+*"blocks nothing"* while T-27's `Deps:` named it, and assigned the `visibility` column to T-22 and T-23
+in different sentences; the recorder proving the registration loop was run out of band and discarded
+(now committed); *"Redmine removes a `:member` permission on upgrade"* was the wrong mechanism (it
+stops **offering** it, and the active grant disappears at the next unrelated save); the new project
+module's nine `project_module_*` labels were absent from the promotion checklist and from the gate; the
+roles screen sorts modules alphabetically rather than by declaration order; and `.freeze` on the arrays
+was shallow while every comment called the model frozen data.
+
+**And one hole in the FIX, found by re-running the negative tests against it.** `actions_guarded_by`
+returned `nil` — meaning "runs for every action" — for a guard that was **absent**, so a controller that
+had simply DELETED its `before_action :authorize` answered "everything is covered" and the shiny new
+per-action assertion skipped it. The review's finding, restored in a new shape by its own remedy, and
+caught only because the old negative tests were re-run against the new code rather than assumed to still
+hold. Absent is now `[]`, with its own example. **The lesson is about process, not about `nil`:** a fix
+for a finding needs the finding's own negative test re-run, and CLAUDE.md's "never declare a result you
+did not observe" applies as much to a repair as to the original.
+
+**What the episode says about the gate rather than about the bugs.** Every one of the four bypasses was
+a construct the reader had never been shown. The meta-test was described — in this file and in
+`HANDOVER.md` — as making a silent-empty extraction *impossible*, and it did protect against that for
+the four controllers in the tree; it could not protect against a construct nobody had written down. The
+fix is not more comments: it is `spec/permissions/fixtures/controllers/`, two files containing every
+construct `app/controllers/` happens not to contain, so the reader's answers about them are behaviour
+rather than reading.
 
 **E-19 · T-35's three defects were all cross-major, and none was visible by reading.** Found by
 `spec_liquid/mermaid_tag_spec.rb`, which runs the same 23 examples under Liquid 4.0.4 and 5.13.0 —
@@ -1876,12 +1961,24 @@ names so **both plugins can be installed simultaneously** (which turns the riski
 project from a leap of faith into a comparison); schedule dates as `date` not `datetime`; run-state
 columns; **a unique index on `(schedule_id, occurrence_date)`**; recipients are `user_id` only —
 no free-text `to`/`cc`/`bcc`/`from`, a security-motivated schema decision; an append-only
-template-versions table.
+template-versions table. **Plus a `visibility` column on the template table (T-40):** private /
+roles / project, the three values Redmine's saved queries already use, because
+`manage_public_reporter_dashboards_templates` governs nothing without it and adding the column later
+is a migration this plan does not need. `lock_version` and every unique index are created **in the
+same migration as their table** — see `technical-spec.md` §7 rule 6.
 
 **T-23 · Template model, CRUD, preview.** *Accept:* template types by `source` field (T-31), not a subclass tree; the
 template resolves through the same scope its picker offers; import uses a **closed type map** and
 `safe_load` — never `YAML.load_file` + `constantize`, and never `rescue Exception`; export is a
-plain Hash.
+plain Hash. **Plus T-40's promotion of six permissions** —
+`view_reporter_dashboards_reports`, the four authoring ones and
+`manage_public_reporter_dashboards_templates`: each gets its action map, loses its `lands_in`, and
+gains labels in **all nine** locales, with `add_…`'s label reading *"Author report templates
+(executes server-side code)"*. Import requires `add_…` **and** `edit_…` — it authors code from a
+file — and export requires whichever permission shows the content in the editor; neither gets a
+permission of its own (`technical-spec.md` §4.1). A permission test **per action**, not per
+controller, and `edit_own_…` tested with a template somebody else authored, which is the case that
+looks right until it is tried.
 
 **T-24 · `import:run` / `import:verify`.** *Accept:* copy-only, forward-only, **never writes to
 reporter's tables**, idempotent, stamping `source_template_id` + digest; `import_status` reports
@@ -1898,7 +1995,9 @@ non-zero; bounded catch-up (`max_catchup_days` default 7 — a schedule dormant 
 emit 365 e-mails), and a **plain run does not silently backfill**; a failure notifies the owner
 **with no attachment**; the render identity is explicit, stored and auditable, and a test send uses
 the **same** identity as the real run; the cron requirement is **documented** and preflight warns
-when the task has never run.
+when the task has never run. **Plus T-40's promotion of `view_reporter_dashboards_schedules`
+(`read: true`) and `manage_reporter_dashboards_schedules`** — the split exists so an operator can
+answer *"did it run"* without being able to change who receives it.
 
 **T-28 · Share links** *(deps: T-22, T-23)*
 *Accept:* two tables (links + access log); **only the token digest stored**, constant-time
@@ -1908,6 +2007,11 @@ and recording `render_as_user_id`; attachment URLs scoped to the link and revoke
 UI listing active links with revoke and revoke-all. Tests: an expired link is refused; a revoked link
 is refused; a link over `max_uses` is refused; a snapshot link returns identical bytes regardless of
 who opens it; **a database dump contains no usable token**; every access appears in the log.
+**Plus T-40's promotion of `share_reporter_dashboards_reports` and
+`publish_reporter_dashboards_reports`** — two grants and not one, because *"anyone holding this
+URL"* and *"anyone on the internet"* are different decisions; revocation stays with the link's
+creator, the template's owner and admins (FR-53), which is ownership rather than a permission, and a
+test asserts a third party holding **both** permissions still cannot revoke somebody else's link.
 
 **T-29 · Template exchange bundle** *(deps: T-23)*
 *Accept:* canonical **JSON** export with `format_version`; YAML accepted for reading via `safe_load`
@@ -1938,7 +2042,11 @@ requester cannot see is refused, not silently included; **`From` is server-contr
 requester in `Reply-To`; recipients are Redmine users unless an admin enables external addresses,
 then against a **domain allowlist**; every send audited (who, when, template, issues, recipients) and
 visible to admins; rate-limited per user; a render failure produces a failure notice, never a mail
-with a broken attachment.
+with a broken attachment. **Plus T-40's promotion of `mail_reporter_dashboards_reports`**, which
+carries `require: :loggedin` and not `:member`: it must never reach the Anonymous role, and a
+logged-in non-member legitimately mails themselves a report they can already read. The external-address
+switch stays an **admin setting plus a domain allowlist** and does *not* become a role permission —
+it is a policy about the installation (§4.1).
 
 **T-26 · My-page widgets, locales, and the final gate flip.** *Accept:* `zero_reporter.sh` flips
 from warn to **hard gate**; `glue/legacy/` deleted; the secret-gated job deleted;
@@ -2044,16 +2152,77 @@ meaning rests on colour alone fails a lint; drill-through links in the PDF are r
 by extracting the link annotations from the produced PDF. Chrome uses Redmine's own classes and icon
 set per branch — a grep gate forbids a plugin-local design token in chrome CSS.
 
-**T-27 · INV-9 as an enforced boundary.** *Accept:* the permission label reads *"Author report
-templates (executes server-side code)"* with an inline warning and a README section; a
-`template_authoring` setting (`:project_managers` for **upgraded** installs — a silent break is the
-failure mode this project keeps naming — `:admins_only` for **new** ones); the widget iframe carries
+**T-27 · INV-9 as an enforced boundary.** *(deps: T-26, T-40)* *Accept:* the permission label reads
+*"Author report templates (executes server-side code)"* with an inline warning and a README section;
+**the `template_authoring` setting this line used to require is GONE** — T-40 replaced it with
+§4.1's role permissions, so what T-27 owes here instead is the **upgrade diagnostic** that made the
+setting unnecessary: the preflight page lists every role holding the base plugin's authoring
+permission **beside every role holding ours**, with a test for the case where the base plugin is absent
+(the list is empty, not an error) **and a test for a role that holds ours and not theirs** — which is
+not a hypothetical, because core's `DefaultData::Loader` grants Manager every setable permission on a
+fresh install, so on that path the diagnostic is the *only* thing that surfaces a code-execution grant
+nobody chose (§4.1, T-40 finding 2); the widget iframe carries
 `sandbox="allow-scripts"` **without** `allow-same-origin` plus a restrictive CSP, so template
 JavaScript can neither read the session cookie nor call the API as the viewer; **the named
 regression handled rather than discovered** — the height-fit script reads
 `frame.contentWindow.document` and **breaks** under an opaque origin, so the shell posts its height
 via `postMessage` with an `event.source` check and a numeric-range guard; `no_html_safe` gate allows
 `raw(` in ≤2 files.
+
+**T-40 · The permission model, and the parity gate that keeps it honest** *(no deps; **blocks T-27**,
+constrains T-22, T-23, T-25, T-28, T-32)*
+*Touches:* `lib/redmine_reporter_dashboards/permissions.rb`, `init.rb`,
+`lib/redmine_reporter_dashboards.rb`, `spec/permissions/permission_map_spec.rb`,
+`spec/permissions/registration_dsl_spec.rb`, `spec/permissions/fixtures/controllers/`,
+`technical-spec.md` §4.1, `functional-spec.md` FR-21b.
+*Accept:* the `template_authoring` setting is **deleted from the specs**, not given a default, and
+`[OQ-F]` is closed with it — the curator's decision of 2026-08-06 is that roles get permissions the
+normal Redmine way; the permission set is **data** so that a DB-less spec can assert it, and `init.rb`
+holds the only loop that turns it into a registration, with that loop asserted **twice** — as data,
+and by a committed recorder mimicking `Redmine::Plugin#project_module`'s `instance_eval`, which must
+receive the same three calls the literals made, argument for argument, and which fails if `init.rb`
+stops containing the loop it copies; `require: :member` is **derived** from `authoring: true` — not
+written on the entry at all, with an example asserting no authoring entry writes one, because a
+consistency check between two hand-typed fields cannot catch both being wrong together; every
+registered permission is labelled in **all nine** locales, **its project module too**, and every
+*planned* one in none, so promotion cannot happen one locale at a time; the spec **parses** each
+controller rather than grepping it (§Findings E-14 is why) and fails on a mapped action that does not
+exist or is private, on `authorize` not running **for a mapped action** — honouring `only:`, `except:`
+and `skip_before_action`, not merely appearing in the file — on **any public action** that is neither
+mapped nor recorded in `NON_PERMISSION_GUARDS`, on a **routed** endpoint the reader cannot see, on a
+route written in a form it does not recognise, and on a `define_method` in a controller body; the
+controller search is **recursive**, so a namespaced controller counts; each `NON_PERMISSION_GUARDS`
+entry names the guard it really uses and the spec checks that claim against the controller **for that
+action**; a boot-time collision check logs at **error** when another plugin has registered one of our
+names, with its message built by a tested method rather than inline in the boot hook, and reaching
+stderr when there is no logger rather than nothing; §4.1's table is asserted to list exactly the
+permissions in the map, in order, with the right task beside each unregistered one; and the AST reader
+has its own examples against **fixture controllers** carrying every construct `app/controllers/` does
+not — because an extraction broken by a newer Ruby, or by a construct it never learned, returns
+**nothing** and turns every assertion above green for the wrong reason.
+
+**What T-40 does NOT do, and must not be read as having done.**
+
+1. **It registers no reporting permission.** The ten in §4.1's table are design until the task named
+   beside each one ships the controller it guards. Each of those tasks owes the promotion (action map,
+   drop the task id, nine `permission_*` labels, and for the first one the nine `project_module_*`
+   labels) and a permission test **per entry point** rather than per controller (G5). **T-22** owes
+   the template model's `visibility` column — T-22 and not T-23, because §7 rule 6 requires a column
+   in the same migration as its table, and `manage_public_reporter_dashboards_templates` governs
+   nothing without it.
+2. **It does not make a fresh install `:admins_only`.** T-40's review refuted that claim, which this
+   section made in its first version. This plugin grants nothing, but core's `DefaultData::Loader`
+   runs `manager.permissions = manager.setable_permissions.collect(&:name)` on a fresh install
+   (identically on 5.1 → 7.0), and `setable_permissions` subtracts only `public_permissions` for a
+   givable role — so an install that loads the default configuration with the plugin present hands
+   **Manager** every setable permission of ours, `require: :member` included. **T-27's diagnostic must
+   therefore list the roles holding OUR authoring permissions, not only the base plugin's**, and its
+   `Accept:` says so. That is the one thing that surfaces this, and no spec in this repository can:
+   the grant is made in code this repository does not contain.
+3. **It does not prove Redmine accepts the registration.** Only the `minitest` CI jobs do, through
+   `test/functional/reporter_project_{pages,tabs}_controller_test.rb`, which grant and withhold these
+   permissions and assert 200/403. Those were **not run for T-40** — no Redmine checkout in the
+   container — so CI is their first execution against the loop.
 
 ## 2. Sequencing
 
@@ -2094,6 +2263,14 @@ off it** — none of the six is a prerequisite of another task, which is why the
 this long without the plan noticing. That is a property of the plan worth distrusting, not
 celebrating: *off the critical path* and *optional* are not the same thing, and T-36 in particular
 must ship **with** T-22 rather than after it.
+
+**T-40 is not on the graph, but it is not dependency-free in both directions: it has no dependencies
+and it BLOCKS T-27**, whose `Deps:` line names it, because T-27's upgrade diagnostic is what replaced
+the deleted setting. For everything else it is a *constraint* rather than a prerequisite — T-22, T-23,
+T-25, T-28 and T-32 each promote permissions out of its table or owe a column to it, and its parity
+spec is what fails if one of them ships an action nobody guards. Landing it early was the cheap move:
+the gate exists before the controllers it will judge, so no task has to be re-reviewed for
+authorization after the fact.
 
 **T-28…T-32 (the six carried-forward capabilities, `technical-spec.md` §7b) hang off T-23** and
 parallelise with each other and with T-25. T-30 additionally needs T-13/T-15 (the render path), and

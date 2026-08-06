@@ -436,6 +436,7 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-35: Mermaid, DB-less** | **yes, locally (2026-08-06)** | **1852 rspec examples, 0 failures** (was 1832), 92 pending — 20 new for `mermaid_boot.js` including a real `vm.Script` ES5 parse. **301 `spec_liquid` under each major** (was 278): the 23 tag examples found **three cross-major defects** (§Findings E-19). All seven gates green, `vendor_integrity` with two vendored files |
 | **T-35 end to end, both engines** | **yes, locally (2026-08-06)** | One document through the tag, the T-33 resolver and both adapters. `chromium_cdp` Chrome/141: diagram **drawn** — node labels and the interpolated value extract from the PDF, the literal source is gone, no degradations. `wkhtmltopdf` 0.12.6.1 patched: **source still visible** and marked unsupported, only the expected `legacy_engine` degradation. The resolver inlined all three scripts, the 3.5 MB bundle via its `data:` fallback. Support matrix REGENERATED from a real run: one new row, `:modern_javascript` yes/yes/— |
 | **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
+| **T-40: the permission model, DB-less** | **yes, locally (2026-08-06)** | **1933 rspec examples, 0 failures** (was 1852), 92 pending — unchanged skip count. All seven gates green. **Fourteen negative tests, each observed to fail an intended example**: the four bypasses T-40's review used (an unguarded action in a NAMESPACED controller; `authorize` scoped away from three of four mapped actions by `only:` plus `skip_before_action`; a `define_method` in a controller body; a `def` inside a version conditional), plus a new unguarded action, a DELETED `before_action :authorize`, a `permission_*` key removed from `ru.yml`, an authoring entry that types `requires` instead of deriving it, a locale label added for an unregistered permission, a mapped action that does not exist, a `lands_in` naming a task absent from the plan, and three against §4.1's table — a drifted name, a wrong task, and the heading removed, which must fail LOUDLY rather than quietly extract nothing. **Several fail two or three examples rather than one** (the coverage check and the AST meta-test both, which is the pair working as designed); an earlier claim of "the intended example and only it" was wrong and is withdrawn. **One of them found a hole in the fix itself** — a guard that was absent answered `nil`, i.e. "covers every action", so deleting `before_action :authorize` outright passed the per-action check; absent is now `[]` and the case has its own example. **NOT RUN HERE: the functional suite, which EXISTS and covers this** — `test/functional/reporter_project_{pages,tabs}_controller_test.rb` grant and withhold these permissions and assert 200/403, and they are the only thing that proves the registration loop registered anything in a booted Redmine. No Redmine checkout in this container, so CI is their first execution against the loop |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -653,6 +654,65 @@ of a CI that runs on fork pull requests.
    `Liquid::Filters::Escaping` keeps the constants as aliases. Two copies of a
    security-bearing escaper was the alternative, and the copy that drifts is always the one
    without a test.
+
+18. **T-40 is done — the permission model, and `[OQ-F]` is CLOSED because the SETTING is gone.**
+   `lib/redmine_reporter_dashboards/permissions.rb`, `spec/permissions/permission_map_spec.rb` and
+   `spec/permissions/registration_dsl_spec.rb`. Read `technical-spec.md` §4.1 and §Findings **E-20**
+   before touching anything about authorization. Six things a later session should know.
+
+   **Do not add a `template_authoring` setting back.** The curator rejected it outright on
+   2026-08-06: roles get permissions the normal Redmine way. Both of `[OQ-F]`'s candidate defaults
+   were wrong for the same reason, and the one the spec *recommended* was the worse of the two —
+   `:project_managers` would have widened a code-execution privilege on upgrade, silently and
+   installation-wide. If a future task wants an install-wide switch over authoring, that is the same
+   mistake wearing a new name.
+
+   **`:admins_only` IS NOT A CONSTRUCTION GUARANTEE, and the first version of this entry said it
+   was.** This plugin grants nothing — but core's `lib/redmine/default_data/loader.rb:51` runs
+   `manager.permissions = manager.setable_permissions.collect {|p| p.name}`, identically on 5.1 →
+   7.0, and `setable_permissions` subtracts only `public_permissions` for a givable role. *Load the
+   default configuration* on a fresh install with this plugin present therefore grants **Manager**
+   every setable permission of ours, `require: :member` included. **No spec in this repository can
+   see that** — the grant is in core — which is why T-27's diagnostic has to list the roles holding
+   OUR authoring permissions and not only the base plugin's. Do not restate the absolute claim.
+
+   **The ten reporting permissions are DESIGN, not code, and that is deliberate.** They live in
+   `PLANNED` with the task that registers each one. A permission an administrator can tick that
+   guards nothing is a lie in the roles screen. Promotion is four parts — fill in `actions`, drop
+   `lands_in`, add the nine `permission_*` labels, and for the FIRST one promoted the nine
+   `project_module_reporter_dashboards_reports` labels, because the reports module is new and its
+   fieldset legend goes through `l_or_humanize(mod, prefix: 'project_module_')` in two views. The
+   spec asserts all four the moment you start.
+
+   **The spec PARSES the controllers, and the fixtures are the load-bearing part — not the
+   meta-test.** `RubyVM::AbstractSyntaxTree` answers "which methods are public actions", because a
+   regexp cannot know where `private` is (§Findings E-14, and the deleted ES5 "shorthand method"
+   regexp). The failure mode of reading an AST is the *opposite* of a regexp's: a construct the
+   reader never learned makes it return **nothing**, and every assertion built on it passes
+   vacuously. The meta-test against the four real controllers did not stop that — T-40's review got
+   past the gate four times with ordinary controller code (E-20). `spec/permissions/fixtures/controllers/`
+   is the answer: two files carrying `only:`, `except:`, `skip_before_action`, `define_method`, a `def`
+   inside a conditional, `private def`, `def self.`, `class << self`, and `protected` followed by
+   `public`. **If you extend the reader, extend the fixtures — a construct that is not in them is a
+   construct the gate cannot see.** Note Ruby 3.4 renamed `NODE_LIT` to `NODE_SYM`, which is why both
+   are accepted, and that a call with a block is an `ITER` wrapping the `FCALL`, which the first fix
+   for `define_method` missed.
+
+   **`init.rb` no longer contains the permission list, and the loop is asserted twice.** Three
+   literal `permission` calls became a loop over `registrations_by_module`; the spec compares its
+   output with those three calls argument for argument, and `registration_dsl_spec.rb` runs the loop
+   against a recorder mimicking `Redmine::Plugin#project_module`'s `instance_eval` — committed this
+   time, and it fails if `init.rb` stops containing the loop it copies. `Entry#registration_options`
+   omits `read`/`require` rather than passing `false`/`nil`, which is what the literals did; not a
+   correctness requirement (`Permission#initialize` reads `options[:read] || false`), just easier to
+   assert as identical.
+
+   **What still has not been run: the full-app half, and it EXISTS.** The first version of this entry
+   said "there is none". Wrong — `test/functional/reporter_project_tabs_controller_test.rb` and
+   `reporter_project_pages_controller_test.rb` call `Role.find(1).add_permission!` and assert
+   200/403, and they are the only thing in the tree that proves the loop registered anything in a
+   booted Redmine. There is no Redmine checkout in this container, so **CI is their first execution
+   against the loop.**
 
 17. **T-35 is done and was RE-SCOPED — read §Findings F-17 before touching it.** Vendored Mermaid,
    a thin block tag, `:modern_javascript`, and deliberately **no** sanitiser, no `MermaidSpec`, no

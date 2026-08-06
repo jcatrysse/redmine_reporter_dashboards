@@ -44,6 +44,39 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **A permission model, in the normal Redmine way — and a warning when another plugin
+  claims one of our permission names.**
+
+  Nothing changes for an existing installation: the three dashboard permissions
+  (*View project dashboard*, *Manage project dashboard widgets*, *Manage project dashboard
+  tabs*) are exactly the same permissions, in the same project module, with the same
+  behaviour. What is new is underneath and ahead of them.
+
+  Underneath: the permission set is declared in one place and checked in CI. Every action
+  the plugin serves — including every action reachable through its routes — is either covered
+  by a permission or recorded with the check it does use instead, and that record is verified
+  against the code rather than taken on trust. The check reads the controllers with Ruby's own
+  parser, so it also refuses a few ways of writing an action that would hide it.
+
+  Ahead: the reporting features being built (report templates, schedules, share links,
+  report mail) get **their own permissions per role and per project**, rather than a
+  plugin-wide switch. Authoring a report template runs code on the server, so it is a
+  separate grant from reading a report, and Redmine will not offer it to the *Anonymous* or
+  *Non-member* role. None of those permissions appears on the roles screen yet: each arrives
+  with the feature it guards, because a checkbox that controls nothing is worse than no
+  checkbox.
+
+  One thing worth knowing when the authoring permissions do arrive: **this plugin never
+  grants a permission to a role**, but Redmine's *Load the default configuration* step gives
+  the *Manager* role every permission it can, including a plugin's. If you load the default
+  configuration on a fresh Redmine that already has this plugin installed, check what
+  *Manager* ended up with.
+
+  Also new: if another installed plugin registers a permission name this one uses, the log
+  now says so at start-up, naming the permission. That situation shows two identical rows on
+  the roles screen and makes access checks behave unpredictably, and it was previously
+  invisible.
+
 - **`{% mermaid %}` — flowcharts, sequence diagrams, gantt charts and four more, from text.**
 
   ```liquid

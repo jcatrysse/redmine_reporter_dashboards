@@ -548,12 +548,183 @@ shell posts its height via `postMessage`; the parent listens with an
 
 **INV-9 as an enforced boundary — five mechanisms + three reductions.** Permission label reads
 *"Author report templates (executes server-side code)"* with an inline warning on the permissions
-screen and a README section; a `template_authoring: :admins_only | :project_managers` setting
-(`[OQ-F]` recommended: `:project_managers` for **upgraded** installs — a silent break is the
-failure mode this project keeps naming — and `:admins_only` for **new** ones); the opaque-origin
-iframe; zero renderer egress; and an **append-only `template_versions` table** — *a
+screen and a README section; **the granular role-permission model of §4.1**, which replaced the
+`template_authoring: :admins_only | :project_managers` setting this paragraph used to name
+(`[OQ-F]` **CLOSED 2026-08-06 by curator decision** — the setting is deleted, not defaulted); the
+opaque-origin iframe; zero renderer egress; and an **append-only `template_versions` table** — *a
 code-execution privilege without an audit trail is not a boundary*, and it gives authors rollback
 they want anyway. Reductions: no `call_method`, no template regexes, no token-minting filters.
+
+### 4.1 The permission model — INV-9's boundary is a role grant, not a plugin setting
+
+**Curator decision, 2026-08-06, verbatim in substance:** *the plugin must provide permissions in
+the normal Redmine way, so that roles can be given exactly what they may and may not do; there
+will need to be a fairly extensive permission system.* The `template_authoring` setting is
+**deleted**, and `[OQ-F]` — which asked only which of its two values should be the default — is
+closed with it.
+
+**The rejection was right, and for a reason worth recording rather than merely obeying.** The
+recommended value for upgraded installs, `:project_managers`, would have **widened a
+code-execution privilege on upgrade, silently, installation-wide**, to whatever set of roles an
+operator thinks of as managers. That is the failure this project keeps naming, pointed the other
+way — and it is worse than the break it was avoiding, because a break is visible. The other value,
+`:admins_only`, would have put the feature out of reach of the person it is for. Neither is
+recoverable by picking better, because the *shape* is wrong: a setting cannot say *"this role, in
+this project"*, and that is the only sentence that answers the question.
+
+**Where the model lives.** `lib/redmine_reporter_dashboards/permissions.rb` — as **data**, not as
+a list of calls inside `Redmine::Plugin.register`, so that
+`spec/permissions/permission_map_spec.rb` can assert it. `init.rb` reads the same data and is the
+only place it becomes a registration.
+
+#### The set — 13 permissions in two modules
+
+`Module`: `D` = `:reporter_project_dashboards` (**pre-exists**; the name cannot change, an
+installation has it enabled per project). `R` = `:reporter_dashboards_reports` (**new** — *"we
+want dashboards, not the reporting surface"* is a real answer, and a project module is how Redmine
+asks that question). `Req` is Redmine's `require:`; `read` is Redmine's `read: true`, meaning
+*permitted in a **closed** project*.
+
+| Permission | Mod | read | Req | Covers | Lands in |
+|---|---|---|---|---|---|
+| `view_reporter_project_page` | D | ✓ | — | Open a project dashboard, and export it as a PDF | **live** |
+| `manage_reporter_project_page` | D | — | — | Add, remove, move and configure dashboard widgets | **live** |
+| `manage_reporter_project_tabs` | D | — | — | Create, rename, reorder and delete dashboard tabs | **live** |
+| `view_reporter_dashboards_reports` | R | ✓ | — | See the templates a project offers; open or download the document one produces | T-23 |
+| `view_reporter_dashboards_schedules` | R | ✓ | — | See a schedule and its run state — last run, status, duration, error — without changing it | T-25 |
+| **`add_reporter_dashboards_templates`** | R | — | `member` | **Create a report template. Code execution (INV-9)** | T-23 |
+| **`edit_own_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete the templates you authored** | T-23 |
+| **`edit_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete any template in the project** | T-23 |
+| **`manage_public_reporter_dashboards_templates`** | R | — | `member` | **Give a template a visibility wider than its author** — Redmine's `manage_public_queries` decision, for templates | T-23 |
+| `manage_reporter_dashboards_schedules` | R | — | `member` | Create, edit, disable and delete schedules, choose recipients, send a test run | T-25 |
+| `mail_reporter_dashboards_reports` | R | — | `loggedin` | Send a report by e-mail on demand, to Redmine users | T-32 |
+| `share_reporter_dashboards_reports` | R | — | `member` | Create a share link: an expiring, revocable URL serving a snapshot to whoever holds it | T-28 |
+| `publish_reporter_dashboards_reports` | R | — | `member` | Turn a share link into a **public** link, reachable without a Redmine account (FR-62) | T-28 |
+
+The four in bold are the code-execution class, and their `require: :member` is **derived** from
+that fact rather than typed on each row (`Entry#requires`), so the two cannot come apart.
+
+**A `visibility` column on the template model is a consequence of row 9** and belongs to **T-22**,
+the tables task — not to T-23 and not to a later retrofit. `manage_public_…` has nothing to govern
+without it, and §7 rule 6 requires a column to be created in the same migration as its table, so
+assigning it anywhere else licenses exactly the second migration that rule forbids. Private / roles
+/ project, the three values Redmine's saved queries already use, so an administrator meets one
+concept rather than two.
+
+**`read: true` on `view_reporter_dashboards_reports` is a decision, recorded rather than left
+implicit.** It means the permission still applies in a **closed** project, and opening a report runs
+a template and may start a PDF engine — more expensive than any `read: true` in Redmine core, all of
+which are cheap reads. Kept deliberately: reading last quarter's report out of a project the
+organisation has since frozen is most of what a closed project's reports are *for*, and the cost is
+bounded by §4's execution policy and FR-32's caps rather than by this flag. The authoring
+permissions are **not** `read: true`, which is where the closed-project line actually matters.
+
+**The three live permissions are unchanged, including the absence of `require: :member` on the two
+`manage_` ones.** Neither is a code-execution privilege, so the derivation does not reach them — and
+adding it by hand would do something worse than warn. **Stated precisely, because the first draft of
+this paragraph got the mechanism wrong:** nothing is revoked. `Role#permissions=` writes whatever it
+is given, unfiltered and unvalidated, and `Role#allowed_to?` keeps honouring an existing grant; what
+changes is that `roles/_form` renders only `setable_permissions`, so the grant becomes **invisible on
+the roles screen while still active** and is dropped the next time anybody saves that role for an
+unrelated reason. An active-but-unmanageable permission that vanishes later without a trace is worse
+than either revoking it or leaving it. Left alone deliberately.
+
+**And the cost of leaving them, said out loud:** a permission with neither `require:` nor `public:`
+**is** offerable to the Anonymous and Non-member roles, so an administrator can grant *Manage project
+dashboard widgets* to Anonymous today. Pre-existing behaviour, not a new decision — written down so
+the next person weighs it rather than rediscovers it.
+
+**Nothing planned is registered until its controller exists.** A permission an administrator can
+tick that guards nothing is a lie in the interface. Promotion is one move with four parts — fill in
+the action map, drop the task id, add the nine `permission_<name>` labels, and (for the first entry
+promoted) the nine `project_module_reporter_dashboards_reports` labels, because the reports module is
+new and both `roles/_form` and `projects/settings/_modules` render its legend through
+`l_or_humanize(mod, prefix: 'project_module_')`. The parity spec asserts all four.
+
+#### Deliberately *not* permissions
+
+An unused checkbox costs an administrator attention every time they read the roles screen, so each
+of these was considered and rejected with a reason:
+
+| Considered | Instead | Why |
+|---|---|---|
+| Exporting a document, separately from viewing one | `view_…_reports` | Redmine does not separate "see the issue list" from "export it as CSV". Render cost is bounded by FR-32's caps and the engine's own limits, not by a role grant |
+| Importing a bundle | `add_…` **and** `edit_…` | Import **is** authoring: it creates templates whose content is code. A weaker permission of its own would be a way around the authoring one |
+| Exporting a bundle | whichever permission shows the content in the editor | The bundle **is** the content |
+| Reading version history, rolling back | the same permission that edits that template | FR-21's audit trail is for whoever can change the thing |
+| Revoking a share link | the link's creator, the template's owner, admins | FR-53 makes it ownership, which a permission cannot express |
+| Sending to an external address | admin setting + domain allowlist | FR-61 already puts it there: a policy about the installation, not a capability of a role |
+| Authoring a template with no project | admin | Redmine has no role grant outside a project, so `project_id IS NULL` is admin-only by construction |
+
+#### How `[OQ-F]`'s two worries are answered without a default
+
+* *A fresh install must not hand out code execution.* **This plugin grants nothing** — it can
+  declare a permission, it has no way to tick one — so on any install that already has roles,
+  authoring starts nowhere and only administrators (whose flag bypasses the check) can author.
+  Asserted mechanically: nothing in `app/`, `lib/`, `db/` or `init.rb` calls `add_permission` or
+  writes `roles_permissions`.
+
+  **THE ABSOLUTE FORM OF THAT CLAIM IS FALSE, and this section said it before the review of T-40
+  refuted it.** Redmine's own default-data loader runs, identically on 5.1 → 7.0
+  (`lib/redmine/default_data/loader.rb:51`):
+
+  ```ruby
+  manager.permissions = manager.setable_permissions.collect {|p| p.name}
+  ```
+
+  and `Role#setable_permissions` subtracts only `public_permissions` for a givable role. So on a
+  **brand-new** install — `Role.where(builtin: 0)` empty, which is the loader's own precondition —
+  *Load the default configuration* with this plugin already present grants the **Manager** role
+  every setable permission of ours, `require: :member` included. Once T-23 registers the authoring
+  four, that is literally `:project_managers`, arriving from core rather than from a setting.
+
+  **This is not a reason to restore the setting.** The setting would have produced the same grant on
+  *every* install rather than on one ordering, and silently. It is a reason the diagnostic below must
+  report **our** roles rather than only the base plugin's, and a reason a grep of this repository is
+  not evidence for the absolute claim — the grant is made in code this repository does not contain.
+* *An upgraded install must not break silently.* Not answered by a default either, because the
+  default would have closed the gap by *granting* code execution to roles nobody re-examined.
+  Answered by naming it: **the preflight page and `import:plan` list every role holding the base
+  plugin's authoring permission and every role holding ours**, so the administrator reads the
+  situation instead of discovering it (T-24, T-27) — and, per the paragraph above, that list is also
+  the only thing that surfaces a Manager role seeded by core.
+
+#### Four mechanisms, so the model is enforcement and not prose
+
+1. **`require: :member` on every authoring permission, DERIVED from `authoring: true`** — the field
+   is not written on the entry at all, `Entry#requires` reads it from the flag, and an example
+   asserts no authoring entry writes one. It is Redmine's own machinery refusing to *offer* a
+   code-execution privilege to the Anonymous or Non-member role (`Role#setable_permissions`
+   subtracts `members_only_permissions` for Non-member and `loggedin_only_permissions`, a superset,
+   for Anonymous). The label is a warning; this is the control. **Precisely: "never offered" is not
+   "never granted"** — `add_permission!`, a rake task or a hand-crafted POST all bypass the roles
+   screen, because `Role#permissions=` does no filtering.
+2. **`authorize` is checked, per ACTION.** The parity spec parses each controller with
+   `RubyVM::AbstractSyntaxTree` and fails if `authorize` does not run for a mapped action —
+   honouring `only:`, `except:` and `skip_before_action`. Per *controller* was the first version and
+   the review of T-40 hollowed it out with two lines: `before_action :authorize, only: [:create]`
+   plus `skip_before_action :authorize, only: [:order]` left three of four mapped actions
+   unauthorized with the suite green.
+3. **No action is unaccounted for, and reachability is checked from the routes as well.** Every
+   public action of every controller — **searched recursively, so a namespaced controller counts**,
+   and including a `def` nested inside a version conditional — is either mapped by a declared
+   permission or listed in `NON_PERMISSION_GUARDS` **with the guard it really uses**, which the spec
+   verifies against the controller *for that action*. `config/routes.rb` is read too, so a route to
+   an action the reader cannot see is a failure rather than a silent gap, and a route written in a
+   form the reader does not recognise fails instead of being skipped. `define_method` in a controller
+   body is **refused**: its name can be computed, so no parser can promise to know the action it
+   creates. Today three actions are listed (`reporter_preflight#show`, `#run` → `require_admin`;
+   `sql_stats#monthly_flow` → `require_login` plus core `:view_issues` over `Issue.visible`). An
+   allowlist nobody verifies is how an unguarded action gets written down as a decision.
+4. **A permission-name collision is checked at boot.** §7 makes simultaneous installation with the
+   base plugin a *design goal*, and `Redmine::AccessControl` keeps permissions in a flat array with
+   no uniqueness check: two plugins registering one name give two identical rows on the roles
+   screen and an action map that is the union of both. Every name added here is prefixed to make
+   that implausible, and `after_plugins_loaded` logs at **error** if it happens anyway — because
+   "implausible" is not a mechanism. Loud, not fatal (INV-4): refusing to boot over another
+   plugin's registration would take the dashboards down for something the operator cannot fix from
+   here. The message is built by a tested method rather than inline in the boot hook, and reaches
+   stderr when there is no logger rather than reaching nobody.
 
 **Liquid 5 deltas that matter:** `Strainer` → `StrainerFactory`/`StrainerTemplate` (which is *why*
 per-render scoping is a portability decision, not only hygiene); `Drop#invokable_methods`
@@ -942,9 +1113,12 @@ service whoever wrote it).
 **And the residual risk, stated rather than implied:** on the `:pdf` path this is safe by construction
 — the engine has no network and the output is a document. On the `:html` path author-written script
 runs in the *viewer's* browser with the viewer's session, so the authoring permission is
-administrator-adjacent and **the permission is the control**. That makes `[OQ-F]` — whether
-`template_authoring` defaults to `:admins_only` — the load-bearing decision of this area rather than a
-naming question.
+administrator-adjacent and **the permission is the control**. That made `[OQ-F]` the load-bearing
+decision of this area rather than a naming question — and **it is now answered** (§4.1, 2026-08-06):
+not by defaulting a setting, but by four authoring permissions that this plugin never grants and that
+Redmine's own `require: :member` refuses to offer to the Anonymous or Non-member role. With one limit
+stated there rather than glossed: core's default-data loader can hand them to Manager on a fresh
+install, which is why the diagnostic lists the roles holding them.
 
 **Diagram types are not enumerated and deliberately so** — unlike charts, where six types are
 enumerated because *we* compute the layout. Mermaid computes its own; the allowlist is on the
@@ -1324,7 +1498,7 @@ Covered above at their point of use; collected here for review:
 
 | Concern | Mechanism |
 |---|---|
-| Template authorship = code execution | §4 INV-9: label + docs, `template_authoring` setting, opaque-origin sandbox, zero egress, append-only version audit, three filter reductions |
+| Template authorship = code execution | §4 INV-9: label + docs, **§4.1's granular role permissions** (`require: :member` derived from `authoring: true`; the plugin grants nothing itself, though core's default-data loader gives Manager every setable permission on a fresh install — which is why the upgrade diagnostic lists **our** roles; per-action `authorize` and route/action coverage asserted by parsing the controllers; boot-time name-collision check), opaque-origin sandbox, zero egress, append-only version audit, three filter reductions |
 | Renderer credential exposure | **`DocumentRequest` has no field a credential could travel in** — no `cookies:`, `headers:`, `auth:`. Cookie-passing is not discouraged, it is *unrepresentable* |
 | SSRF / egress | inline-only asset default; Chromium name resolution denied; Gotenberg's URL-conversion endpoint a forbidden code path; a `render-smoke` variant in a route-less namespace that must still produce a correct PDF |
 | Supply chain | vendored Chart.js with a recorded sha256; no CDN; `StandardFilters` enumeration spec catching dependency capability drift |
@@ -1472,7 +1646,7 @@ sidebar. Neither is load-bearing for phases 0–2.
 | ~~**OQ-C**~~ | **CLOSED 2026-08-06 by measurement, in T-19.** Enumerated on both majors: 4.0.4 provides **49** filters, 5.13.0 provides **61**. Of §3.6's list, `where` and `sort_natural` are provided by BOTH, behave identically, and already work on the owned drops (Liquid's `where` reads through `Drop#[]`) — so they are **inherited, not reimplemented**. `sum` is provided by **5.x only**, which is a cross-major divergence a plugin supporting both cannot leave in place, so it **is** owned and reproduces Liquid 5's semantics exactly. Everything else on the list is absent from both. `spec_liquid/filters_spec.rb` **pins the full name list per version and FAILS on an unpinned one**, so a `bundle update` that adds a filter is a decision rather than a silent capability grant — Liquid 5 added twelve since 4.0.4, every one of which became template surface without anybody choosing it | §3.6 |
 | **OQ-D** | Liquid floor `>= 5.5` or `>= 5.6` (`Liquid::Environment` for scoped **tag** registration) | §4 |
 | **OQ-E** | Redmine 7.0's asset pipeline | §6 (design does not depend on it) |
-| **OQ-F** | `template_authoring` default — `:project_managers` upgraded, `:admins_only` new? | §4 |
+| ~~**OQ-F**~~ | **CLOSED 2026-08-06 by curator decision — the question is void because the SETTING is deleted.** It asked which default `template_authoring` should take, and both answers were wrong for the same reason: a global switch cannot say *"this role, in this project"*. `:project_managers` would have **widened a code-execution privilege on upgrade, silently and installation-wide**, which is worse than the break it avoided because a break is visible. Replaced by §4.1's 13 role permissions in two modules, with `require: :member` **derived** from `authoring: true`, the upgrade situation **named** by preflight and `import:plan` instead of papered over by a default, and a parity spec that parses the controllers so an unguarded action cannot ship. **One claim in the first version of this row was refuted by T-40's review and is corrected in §4.1:** the plugin grants nothing, but *"no role holds one until an administrator grants it"* is not true in general — core's `DefaultData::Loader` gives the **Manager** role every setable permission on a fresh install, ours included, so `:admins_only` is not a construction guarantee and the diagnostic has to list our roles too. T-40 | §4.1 |
 | **OQ-G** | The 19-vs-17 delegated-accessor count in `reference/redmineup-gem-drop-surface.md` | §3.2 |
 | ~~**OQ-H**~~ | **CLOSED 2026-08-04 by curator decision.** The third template type is built — as a `source` field, not a branch (§7b.4). Still `[OQ]` and *scoped narrowly*: whether `JournalDrop` and `time_in_status` are built. Those two were never part of the six required capabilities, and `import:plan`'s usage counts now inform that one remaining call | §3.1 |
 | ~~**OQ-I**~~ | **CLOSED 2026-08-04 by OQ-4's answer.** Yes — `asset_policy: :redmine` / `:external`, allowlist-only, empty allowlist fails closed, and **the plugin fetches, not the engine** (§5.1). Now a supported, CI-tested mode rather than a documented-unverified one | §5.1 |
