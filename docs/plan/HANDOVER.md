@@ -442,9 +442,28 @@ of a CI that runs on fork pull requests.
    rather than a race. Without the shell the probe waited out the full watchdog — 17.5 s and a
    spurious `readiness_timeout` — which is §Findings E-10's first defect.
 
-   **The Minitest half has never run.** `test/functional/reporter_preflight_controller_test.rb` and
-   `test/unit/render_preflight_rake_test.rb` need a booted Redmine, so the `standalone` CI job is
-   their first execution. Read that job's output before believing the admin page works.
+   **The probe's colours are load-bearing, and one of them was wrong.** `PROBE_PNG` must be a
+   colour that appears NOWHERE else in the document. It was `#00aaff`, the page background, and
+   the `inline_asset` check therefore passed whether or not the image decoded — the `<img>` has a
+   fixed height, so the page showed through. If you change either `PROBE_PNG` or
+   `body { background }`, check they still differ; a spec asserts it, because nothing else can.
+
+   **A check that cannot run is emitted, never omitted.** `DOCUMENT_CHECKS` drives both the run
+   path and the poppler-missing skip path so the report has ONE shape. The first version returned
+   early with an umbrella skip and silently dropped the INV-8 containment check; two installs' JSON
+   were also not comparable. Add a check to that table, not to the array.
+
+   **`degradations` is not "any degradation is a defect".** wkhtmltopdf stamps `legacy_engine` on
+   every render by design, and the blocked hosted image produces `asset_unresolved` — the one the
+   probe deliberately provokes. Both are expected, both are still printed. Only the asset one is
+   conditional: with no Redmine base URL, an unresolved asset IS a defect.
+
+   **The Minitest half had never run when it was written.** `test/functional/reporter_preflight_controller_test.rb`
+   and `test/unit/render_preflight_rake_test.rb` need a booted Redmine, so the `standalone` CI job
+   is their first execution — it went green on all four branches on the first try. Local
+   verification of anything in `app/` stops at `ruby -c` plus an ERB compile; note that plain ERB
+   mis-parses `<%= form_tag … do %>` where Rails does not, so a bare `ERB.new(...).src` syntax check
+   reports a false failure on any view with a block helper.
 
 9. **T-10 is done — `render/` exists and `layer_purity` is STRICT.** The document-request
    interface only: types, a sum type, and the wrapper that makes INV-5 mechanical.

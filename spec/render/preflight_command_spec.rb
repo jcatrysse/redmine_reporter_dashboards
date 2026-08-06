@@ -5,6 +5,7 @@ require 'stringio'
 require_relative '../spec_helper'
 require_relative '../conformance/harness_engines'
 require_relative '../../lib/redmine_reporter_dashboards/render/preflight_command'
+require_relative '../../lib/redmine_reporter_dashboards/render/preflight_suite'
 
 module RedmineReporterDashboards
   module Render
@@ -139,11 +140,23 @@ module RedmineReporterDashboards
           expect(out.string.scan('render preflight:').length).to eq(1)
         end
 
-        # A TYPO MUST NOT LOOK LIKE A CLEAN RUN. `RRD_ENGINE=chromium_cpd` matching zero
-        # engines and exiting 0 is the same defect as the empty registry, one layer up.
-        it 'raises on an id the registry does not have, rather than matching nothing' do
-          expect { run(engine_ids: 'chromium_cpd') }
-            .to raise_error(Registry::UnknownEngine, /chromium_cpd.*Known: a, b/m)
+        # A TYPO MUST NOT LOOK LIKE A CLEAN RUN — and it must not look like a broken
+        # renderer either. The first version let `UnknownEngine` out of `call`, so rake
+        # aborted with a stack trace and exit **1**, indistinguishable from FAILURES: an
+        # operator who typed `chromium_cpd` in a deploy step was told render is broken.
+        # It lands on 2, with the rest of "nothing was verified".
+        it 'exits 2 on an id the registry does not have, naming it and the known ids' do
+          expect(run(engine_ids: 'chromium_cpd')).to eq(described_class::NOTHING_TO_RUN)
+          expect(out.string).to include('chromium_cpd')
+          expect(out.string).to include('Known: a, b')
+          expect(out.string).to include('Nothing was verified')
+        end
+
+        # The suite still raises rather than matching nothing — that is where the
+        # decision belongs, and the command is what turns it into an exit code.
+        it 'is the suite that refuses, not the command that guesses' do
+          expect { PreflightSuite.new(engine_ids: 'nope').resolved_ids }
+            .to raise_error(Registry::UnknownEngine, /nope.*Known: a, b/m)
         end
       end
 
@@ -211,7 +224,10 @@ module RedmineReporterDashboards
         end
 
         # The report is already built by the time shutdown runs. Losing it to a cleanup
-        # error would be the worst possible trade.
+        # error would be the worst possible trade — and it is REPORTED, on the logger,
+        # which is where every other render-layer diagnostic goes (`Renderer` logs its
+        # degradations there too). `rescue nil` is a forbidden construct; silence would
+        # be the same thing spelled differently.
         it 'reports a shutdown that failed without losing the report' do
           broken = Class.new(Conformance::HarnessEngines::Scripted) do
             def initialize(*)
@@ -225,9 +241,15 @@ module RedmineReporterDashboards
           Registry.register(:broken, broken)
           stub_preflight(:pass)
 
-          expect(run).to eq(described_class::OK)
-          expect(out.string).to include('did not shut down cleanly')
-          expect(out.string).to include('the browser would not stop')
+          logger = instance_double('Logger')
+          lines = []
+          allow(logger).to receive(:warn) { |line| lines << line }
+
+          expect(run(logger: logger)).to eq(described_class::OK)
+          expect(out.string).to include('render preflight:')
+          expect(out.string).to include('PASS')
+          expect(lines.join("\n")).to include('could not shut down broken')
+          expect(lines.join("\n")).to include('the browser would not stop')
         end
 
         # An engine that never had a shutdown method must not be a NoMethodError out of
@@ -254,6 +276,7 @@ module RedmineReporterDashboards
 
           run(redmine_base_url: 'https://redmine.example')
         end
+
       end
     end
   end

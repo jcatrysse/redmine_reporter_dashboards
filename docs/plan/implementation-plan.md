@@ -67,7 +67,7 @@ fact that CI has not yet run on this work at all.
 | T-15 | **partly done** — `render/batch_guard.rb` plus `spec/render/chromium_containment_spec.rb`. The cap OWNS the render loop rather than sitting beside it, so "refuse before any render" is a property of the object and not of the caller's discipline; asserted with a double that counts calls (**zero** over the cap), at the cap and one past it. Batch deadline keeps what is finished and refuses the rest, typed, with each undrawn document's own correlation id. Against a real browser: a wedged renderer times out bounded-and-monotonic **and the browser is gone from the process table**, the next render is served from a fresh one, shutdown leaves nothing behind, and concurrency never exceeds one browser. **Two Accept items are blocked on an entry point that does not exist** — see §Findings E-6 |
 | T-17 | **done** — `liquid/{execution_policy,template_renderer}.rb` plus gate `single_parse.sh`. **Both mechanisms, because neither alone suffices**: per-CLASS resource limits (widget/report/preview, preview deliberately on the widget's numbers so an author feels the limit at the keyboard) handed to the `Liquid::Context` — the only per-render channel either Liquid 4 or 5 offers, verified on 4.0.4 and 5.13.0 — and a **cooperative monotonic deadline** wired into all three own tags, a no-op where no budget is bound. `Timeout.timeout` is not used and the file says why. **Errors never enter the document**: the spec first DEMONSTRATES Liquid's default of writing `Liquid error:` into the output, then shows the same template becoming a typed failure with no body at all. 36 examples against the real gem; the gate negative-tested |
 | T-18 | **begun — the prerequisite only.** T-18's Accept list names a *"Required spec before this task is done"*, and that is what landed: `liquid/drops/named_ref_drop.rb` and its proof, green on Liquid **4.0.4 and 5.13.0**, 28 examples each, every one comparing the drop's rendering against the **String's**. It found a protocol-breaking defect (`key?` made every accessor render empty) and **two gaps in §3.3's own table** which are E-8 and the curator's. **The other 12 drop classes and `liquid/batch.rb` are not started** — deliberately, rather than left as stubs |
-| T-14 | **done** — `render/preflight.rb`, `render/pdf_inspector.rb`, `render/preflight_command.rb`, plus the admin page (`ReporterPreflightController` + helper + view, `require_admin` **per action**) and `rake reporter_dashboards:render:preflight` **exiting 0/1/2** (2 = nothing was registered, so nothing was verified — deliberately not 0). Nine document checks, each a ROUND TRIP read back out of the PDF, `:expected_failure` a distinct state from `:fail` so the INV-8 containment result cannot be confused with a defect, and a missing `poppler-utils` a **skip naming the package** with `complete?` false and the headline never a bare OK. `spec/conformance/pdf_probe.rb` is now a **policy over `PdfInspector`**, not a second implementation — same mechanism, opposite policy (hard error there, skip here) — so the corpus and the operator's diagnostic cannot drift apart. **Negative-tested**: the canned single-page PDF drives every one of the six document checks red, one at a time. **Measured against real Chromium 141: 9/9 in 943 ms**, hosted image `expected_failure`. It found three defects in its own first run — see §Findings E-10 |
+| T-14 | **done** — `render/preflight.rb`, `render/pdf_inspector.rb`, `render/preflight_command.rb`, plus the admin page (`ReporterPreflightController` + helper + view, `require_admin` **per action**) and `rake reporter_dashboards:render:preflight` **exiting 0/1/2** (2 = nothing was registered, so nothing was verified — deliberately not 0). Nine document checks, each a ROUND TRIP read back out of the PDF, `:expected_failure` a distinct state from `:fail` so the INV-8 containment result cannot be confused with a defect, and a missing `poppler-utils` a **skip naming the package** with `complete?` false and the headline never a bare OK. `spec/conformance/pdf_probe.rb` is now a **policy over `PdfInspector`**, not a second implementation — same mechanism, opposite policy (hard error there, skip here) — so the corpus and the operator's diagnostic cannot drift apart. **Negative-tested**: the canned single-page PDF drives every one of the six document checks red, one at a time. **Measured against real Chromium 141: 9/9 in 943 ms**, hosted image `expected_failure`. **It found nine defects in itself** — three on its first real run, five more in review, one in CI — including an `inline_asset` check that was a tautology and a missing poppler DELETING the INV-8 check rather than skipping it. See §Findings E-10 |
 | T-16 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -400,6 +400,47 @@ produced a diagnostic that still *looked* like a working diagnostic. Bytes came 
 opened, the run went green in the places nobody was reading. That is the same shape as the failure
 T-14 exists to catch, one level up, and it is why the spec drives all six document checks RED
 against a canned single-page PDF before anything is believed about a run where they pass.
+
+**AND THEN REVIEW AND CI FOUND SIX MORE, INCLUDING THE WORST ONE.** A fresh-subagent review plus
+the first CI run turned up defects the local green run could not see. The two that matter:
+
+**The `inline_asset` check was a TAUTOLOGY and could never fail for its stated reason.** The probe
+PNG was `#00aaff` — *which is also the page background*. The `<img>` has a fixed height, so a
+data: URI that failed to decode showed the page through it, the sampled pixel matched, and the check
+returned PASS for exactly the defect its own comment says it exists to catch ("an engine can accept
+a data: URI, fail to decode it, and draw the broken-image glyph"). Confirmed by decoding the IDAT:
+the first scanline is `[0,170,255]`. The negative test could not see it either — it failed that
+check against a blank white page, which is not the discriminating case. The plate is now `#00ff00`,
+`PLATE_RGB` is its own constant, and two specs assert the colours differ and that a right background
+with a missing plate FAILS. **Three documents — the README, HANDOVER and this file — had already
+published "9/9 measured" with this check among them.**
+
+**A missing poppler DELETED checks rather than skipping them.** `document_checks` returned one
+umbrella `:document` skip and returned early, so on a host without poppler the INV-8 containment
+check — the one T-14's Accept list singles out — was **absent from the report**, not unanswered. The
+artefact also changed shape between installs, so two JSON reports could not be diffed. Found by
+review and independently by CI on all four Redmine branches, where a spec asserting `hosted_asset`
+skips found it missing entirely. Every document check is now emitted by name from one
+`DOCUMENT_CHECKS` table that drives both the run path and the skip path.
+
+**CI found a third, on wkhtmltopdf: the `degradations` check could never pass on that engine.** It
+stamps `legacy_engine` on every render *by design*, and the blocked hosted image produces
+`asset_unresolved` — the degradation this probe deliberately provokes, and which `hosted_asset`
+already reports as an `expected_failure`. So one report contained two states contradicting each
+other. Expected degradations are now named, still printed in the detail, and carry
+`:expected_failure`; the asset one only counts as expected when the probe actually asked for a
+blocked asset.
+
+Three smaller ones, each real: `Registry::UnknownEngine` escaped `PreflightCommand#call`, so a typo
+in `RRD_ENGINE` exited **1** — "render is broken" — instead of 2; `to_text` promised one line per
+check and interpolated multi-line engine stderr raw, with a length assertion that could not fail
+because every detail it exercised was single-line; and `PdfProbe`'s "hard error, never a skip"
+policy stopped applying to the probes themselves once they delegated, leaving two exception classes
+for one condition in the file that says why that must not happen.
+
+`PreflightSuite` was extracted in the same pass. The controller and the command had near-identical
+copies of "resolve the engines, construct, run, shut down" — which is why the browser-leak fix had
+to be made twice on the same day, and is CLAUDE.md hard rule 6 in its concrete form.
 
 **E-9 · the two engines disagreed about whether a blocked asset destroys a report, and the
 abstraction is the thing that must not.** Measured across two CI runs on fixture F-15.

@@ -26,6 +26,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engine_cat
 # render path works.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/pdf_inspector'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight_suite'
 # The adapters. Requiring them REGISTERS them; it does not start a browser or run a
 # binary, so a host without either boots exactly as before and finds out at preflight.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/chromium_cdp'

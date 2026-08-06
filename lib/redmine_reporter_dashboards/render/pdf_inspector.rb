@@ -188,9 +188,16 @@ module RedmineReporterDashboards
         bytes.byteslice(offset, 3).unpack('C3')
       end
 
+      # NOT MEMOISED, DELIBERATELY. It was, keyed by path+size+mtime — a sensible
+      # micro-optimisation in a short-lived test process with stable fixture paths, and
+      # a defect the moment this file moved to `lib/`. `with_document` mints a fresh
+      # `Dir.mktmpdir` path per call, so every admin-page POST and every rake run added
+      # an entry that could never be hit again: an unbounded, never-evicted hash in a
+      # long-running web process, shared across request threads with no synchronisation.
+      # `pdfinfo` costs a few milliseconds; the cache was buying nothing and holding
+      # memory forever.
       def info(path)
-        @info ||= {}
-        @info[cache_key(path)] ||= parse_info(run('pdfinfo', path))
+        parse_info(run('pdfinfo', path))
       end
 
       def parse_info(output)
@@ -198,13 +205,6 @@ module RedmineReporterDashboards
           key, _, value = line.partition(':')
           out[key.strip] = value.strip unless value.empty?
         end
-      end
-
-      # The path alone is not a key: a fixture may render twice to the same temporary
-      # file, and a cached page count from the previous render is a silent lie.
-      def cache_key(path)
-        stat = File.stat(path)
-        [path, stat.size, stat.mtime.to_f].join('|')
       end
 
       # The output is tagged UTF-8 rather than left at the default external encoding.

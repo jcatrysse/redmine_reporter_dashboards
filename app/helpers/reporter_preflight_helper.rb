@@ -11,6 +11,16 @@
 # than prose, so it is the part that keys a locale file. A view keyed on the title would
 # break every translation the day somebody improves the wording, which is the same
 # reason the diagnostic emits JSON instead of log lines.
+#
+# --- ONE THING ON THE PAGE IS DELIBERATELY NOT TRANSLATED: `Check#detail` ---
+#
+# It carries an engine's own message, an exception class and text, a URL, a pixel
+# triple. Those are DIAGNOSTIC VALUES, not prose: they are what an administrator pastes
+# into an issue and what a maintainer greps for, and translating `Errno::ENOENT` or
+# `rgb[0, 170, 255]` would make the report less useful in every language including
+# English. §10's rule is about strings the product SAYS; this column is data the engine
+# reported. Everything the product says here — every label, every state, every unit — is
+# keyed.
 module ReporterPreflightHelper
   # Closed maps, not `"label_..._#{id}"`. An unknown id must not become a missing
   # translation an operator sees as `translation missing: ...`; it falls back to the
@@ -18,7 +28,6 @@ module ReporterPreflightHelper
   CHECK_LABELS = {
     engine: :label_reporter_preflight_check_engine,
     degradations: :label_reporter_preflight_check_degradations,
-    document: :label_reporter_preflight_check_document,
     page_breaks: :label_reporter_preflight_check_page_breaks,
     footer: :label_reporter_preflight_check_footer,
     background: :label_reporter_preflight_check_background,
@@ -47,6 +56,12 @@ module ReporterPreflightHelper
     skip: 'icon icon-help',
     expected_failure: 'icon icon-warning'
   }.freeze
+
+  # Even the unit. `ms` reads the same in most of the nine locales and not in all of
+  # them, and a view that hardcodes one token is a view that hardcodes the next one too.
+  def reporter_preflight_duration(ms)
+    l(:label_reporter_preflight_duration_ms, count: ms.to_i)
+  end
 
   def reporter_preflight_check_label(check)
     key = CHECK_LABELS[check.id.to_sym]

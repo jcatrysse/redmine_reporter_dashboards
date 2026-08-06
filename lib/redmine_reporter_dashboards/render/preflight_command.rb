@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
-require_relative 'preflight'
+require 'json'
+
+require_relative 'preflight_suite'
 require_relative 'registry'
 
 module RedmineReporterDashboards
@@ -11,8 +13,11 @@ module RedmineReporterDashboards
     #
     # `lib/tasks/reporter_dashboards.rake` already sets the pattern and states the
     # reason: a rake file that grew a method is a place tests cannot reach. Everything
-    # with a decision in it — which engines to run, what the exit code means, what
-    # happens when there are none — lives here, and the task is four lines of glue.
+    # with a decision in it — what the exit code means, what happens when there are no
+    # engines, what a typo does — lives here, and the task is glue.
+    #
+    # Running the engines is NOT one of those decisions: that is `PreflightSuite`, which
+    # the admin controller shares. See its comment for why it was extracted.
     #
     # --- THE EXIT CODE IS THE PRODUCT ---
     #
@@ -21,7 +26,7 @@ module RedmineReporterDashboards
     #
     #   0  every check that ran passed (skips are reported, and forgiven — see Preflight)
     #   1  at least one check failed
-    #   2  there was nothing to run, so nothing was verified
+    #   2  nothing was run, so nothing was verified
     #
     # 2 is separate from 1 on purpose. "No engine is registered" is not a render defect,
     # and it must not be reported as one — but it absolutely must not be a 0 either,
@@ -43,82 +48,42 @@ module RedmineReporterDashboards
 
       def initialize(engine_ids: nil, redmine_base_url: nil, format: :text,
                      out: $stdout, logger: nil)
-        @engine_ids = normalise_ids(engine_ids)
-        @redmine_base_url = redmine_base_url
+        @suite = PreflightSuite.new(engine_ids: engine_ids,
+                                    redmine_base_url: redmine_base_url, logger: logger)
         @format = format.to_sym
         @out = out
-        @logger = logger
         return if FORMATS.include?(@format)
 
         raise ArgumentError, "unknown format #{format.inspect}; one of #{FORMATS.inspect}"
       end
 
-      attr_reader :engine_ids, :redmine_base_url, :format, :out
+      attr_reader :suite, :format, :out
 
       def call
-        ids = resolve_ids
-        return nothing_to_run(ids) if ids.empty?
+        reports = suite.reports
+        return nothing_registered if reports.empty?
 
-        reports = ids.map { |id| report_for(id) }
         emit(reports)
         reports.all?(&:ok?) ? OK : FAILURES
+      rescue Registry::UnknownEngine => e
+        unknown_engine(e)
       end
 
       private
 
-      # A report per engine, and a CONSTRUCTION failure is one of them rather than an
-      # exception out of a diagnostic. "Chromium is not installed" is the single most
-      # likely thing this command finds, and it is an answer, not a crash.
-      # The engine is shut down before the next one starts. Running two engines in one
-      # invocation is the default (no `RRD_ENGINE`), and leaving the first one's browser
-      # alive while the second launches doubles the memory a diagnostic costs — on a box
-      # whose render path is already suspect. `ensure`, so it happens on the failure path
-      # too, which is the one where a half-started engine is most likely to be holding
-      # something.
-      def report_for(id)
-        adapter = Registry.fetch(id)
-        engine = adapter.new
-        begin
-          Preflight.new(engine: engine, redmine_base_url: redmine_base_url, logger: @logger).run
-        ensure
-          shutdown(engine, id)
-        end
-      rescue StandardError => e
-        Preflight::Report.new(
-          engine_id: id, engine_version: 'unavailable', duration_ms: 0,
-          checks: [Preflight::Check.new(
-            id: :engine, title: 'the render engine could be started', state: :fail,
-            detail: "#{e.class}: #{e.message}", duration_ms: 0
-          )]
-        )
+      # A TYPO IS NOT A RENDER DEFECT, AND IT IS CERTAINLY NOT SUCCESS.
+      #
+      # `PreflightSuite` raises rather than matching nothing, which is right — but the
+      # first version let the exception out of `call`, so rake aborted with a stack trace
+      # and exit code **1**, indistinguishable from `FAILURES`. An operator who typed
+      # `RRD_ENGINE=chromium_cpd` in a deploy step was told "render is broken". It lands
+      # on 2 with the rest of "nothing was verified", where it belongs.
+      def unknown_engine(error)
+        out.puts("render preflight: #{error.message} Nothing was verified.")
+        NOTHING_TO_RUN
       end
 
-      # A cleanup error must not destroy a completed report. Reported on the command's
-      # own output rather than swallowed — `rescue nil` is a forbidden construct here,
-      # and a browser that would not shut down is something an operator wants to know.
-      def shutdown(engine, id)
-        engine.shutdown if engine.respond_to?(:shutdown)
-      rescue StandardError => e
-        out.puts("render preflight: #{id} did not shut down cleanly (#{e.class}: #{e.message})")
-      end
-
-      # An id the caller named and the registry does not have is an ERROR, not a quiet
-      # omission — `RRD_ENGINE=chromium_cpd` (sic) must not report a clean run of the
-      # zero engines that matched.
-      def resolve_ids
-        return Registry.ids if engine_ids.empty?
-
-        unknown = engine_ids.reject { |id| Registry.registered?(id) }
-        unless unknown.empty?
-          raise Registry::UnknownEngine,
-                "no render engine registered as #{unknown.map(&:to_s).join(', ')}. " \
-                "Known: #{Registry.ids.map(&:to_s).join(', ')}."
-        end
-
-        engine_ids
-      end
-
-      def nothing_to_run(_ids)
+      def nothing_registered
         out.puts('render preflight: NO ENGINE REGISTERED — nothing was verified. ' \
                  'Load an engine adapter (lib/redmine_reporter_dashboards/render/engines) ' \
                  'before running this.')
@@ -131,13 +96,6 @@ module RedmineReporterDashboards
         else
           out.puts(reports.map(&:to_text).join("\n\n"))
         end
-      end
-
-      def normalise_ids(ids)
-        Array(ids).flat_map { |id| id.to_s.split(',') }
-                  .map { |id| id.strip.to_sym }
-                  .reject { |id| id.to_s.empty? }
-                  .uniq
       end
     end
   end

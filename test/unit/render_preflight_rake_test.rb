@@ -22,6 +22,13 @@ class RenderPreflightRakeTest < ActiveSupport::TestCase
   Render = RedmineReporterDashboards::Render
 
   def setup
+    # CLEARED IN setup AS WELL AS teardown. The render-smoke job exports `RRD_*` vars,
+    # and if either of these were exported into a test process
+    # `test_it_exits_2_when_no_engine_is_registered` would raise `UnknownEngine` instead
+    # of returning 2 — a failure whose cause is the environment, in the one file whose
+    # whole subject is reading the environment.
+    ENV.delete('RRD_ENGINE')
+    ENV.delete('RRD_FORMAT')
     @previous = Rake.application
     @previous_metadata = Rake::TaskManager.record_task_metadata
     Rake.application = Rake::Application.new

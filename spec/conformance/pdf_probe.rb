@@ -76,20 +76,33 @@ module RedmineReporterDashboards
       # Path-based: a fixture has already written its document to the work directory,
       # and the inspector's byte-based spellings would copy it back out to a second
       # temporary file for nothing.
+      #
+      # EVERY ONE ASKS `require_tools!` FIRST, and that is the policy, not ceremony.
+      # The inspector has its own guard and it raises `Inspector::Unavailable` with the
+      # inspector's wording — which is right for an operator and wrong here, and would
+      # leave TWO EXCEPTION CLASSES FOR ONE CONDITION. This file says a few lines up why
+      # that must not happen. Without these calls the harness's own message —
+      # "a matrix generated without the probes would report PASS for checks that never
+      # ran" — is reachable only from `Runner`'s single up-front check, and the per-call
+      # guard is gone. Caught in review.
 
       def page_count(pdf_path)
+        require_tools!
         Inspector.page_count_at(pdf_path)
       end
 
       def page_size_pt(pdf_path)
+        require_tools!
         Inspector.page_size_pt_at(pdf_path)
       end
 
       def text(pdf_path, page: nil)
+        require_tools!
         Inspector.text_at(pdf_path, page: page)
       end
 
       def pixel(pdf_path, page: 1, x: 0.5, y: 0.5, dpi: 24)
+        require_tools!
         Inspector.pixel_at(pdf_path, page: page, x: x, y: y, dpi: dpi)
       end
 

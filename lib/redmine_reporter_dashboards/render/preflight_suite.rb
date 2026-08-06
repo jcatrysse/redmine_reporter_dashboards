@@ -1,0 +1,118 @@
+# frozen_string_literal: true
+
+require_relative 'preflight'
+require_relative 'registry'
+
+module RedmineReporterDashboards
+  module Render
+    # Run the preflight against every engine, once, and hand back the reports.
+    #
+    # --- WHY THIS EXISTS: IT WAS WRITTEN TWICE AND THE COPIES HAD ALREADY DIVERGED ---
+    #
+    # `PreflightCommand` and `ReporterPreflightController` both needed the same four
+    # steps — resolve the engines, construct each adapter, run the preflight, shut the
+    # engine down whatever happened — and both had their own copy. They were not
+    # identical for long: the shutdown that stops an admin page leaking a browser had to
+    # be fixed in two places on the same day, which is the concrete form of CLAUDE.md
+    # hard rule 6 ("no second way of doing something that already has a way").
+    #
+    # What stays with the callers is what genuinely differs: the command owns the exit
+    # codes and the output format, the controller owns authorization and a view. This
+    # owns the part where a mistake is a leaked browser or a swallowed engine.
+    #
+    # --- `redmine_base_url` IS A PORT ---
+    #
+    # This layer must not know how to ask Redmine for its own URL — that is
+    # `Setting.protocol`/`host_name`, which would drag `Rails.` under `render/**`
+    # (mechanism E5, and the boundary `layer_purity.sh` enforces). Each caller computes
+    # it in application code and passes it in.
+    class PreflightSuite
+      def initialize(engine_ids: nil, redmine_base_url: nil, logger: nil)
+        @engine_ids = normalise_ids(engine_ids)
+        @redmine_base_url = redmine_base_url
+        @logger = logger
+      end
+
+      attr_reader :engine_ids, :redmine_base_url, :logger
+
+      # Raises `Registry::UnknownEngine` when the caller named an id the registry does
+      # not have. A TYPO MUST NOT LOOK LIKE A CLEAN RUN — `RRD_ENGINE=chromium_cpd`
+      # matching zero engines and reporting success is the same defect as an empty
+      # registry reporting success, one level up. What each caller *does* about it is
+      # theirs; that it cannot pass silently is decided here.
+      def resolved_ids
+        return Registry.ids if engine_ids.empty?
+
+        unknown = engine_ids.reject { |id| Registry.registered?(id) }
+        unless unknown.empty?
+          raise Registry::UnknownEngine,
+                "no render engine registered as #{unknown.map(&:to_s).join(', ')}. " \
+                "Known: #{Registry.ids.map(&:to_s).join(', ')}."
+        end
+
+        engine_ids
+      end
+
+      def reports
+        resolved_ids.map { |id| report_for(id) }
+      end
+
+      private
+
+      # A construction failure is a REPORT, not an exception out of a diagnostic.
+      # "Chromium is not installed" is the single most likely thing this finds, and it
+      # is an answer — a stack trace tells the operator less than the check that says so
+      # by name.
+      #
+      # THE ENGINE IS SHUT DOWN, EVERY TIME. The Chromium adapter owns a process pool
+      # that starts a browser on its first render, and running every registered engine
+      # is the default. Without the `ensure`, an administrator clicking the button three
+      # times leaves three browsers alive for the lifetime of the web worker — a
+      # diagnostic whose own side effect is the resource leak it exists to detect.
+      def report_for(id)
+        engine = Registry.fetch(id).new
+        begin
+          Preflight.new(engine: engine, redmine_base_url: redmine_base_url,
+                        logger: logger).run
+        ensure
+          shutdown(engine, id)
+        end
+      rescue StandardError => e
+        unstartable_report(id, e)
+      end
+
+      def unstartable_report(id, error)
+        warn_line("[render] preflight could not start #{id}: #{error.class}: #{error.message}")
+        Preflight::Report.new(
+          engine_id: id, engine_version: 'unavailable', duration_ms: 0,
+          checks: [Preflight::Check.new(
+            id: :engine, title: 'the render engine could be started', state: :fail,
+            detail: "#{error.class}: #{error.message}", duration_ms: 0
+          )]
+        )
+      end
+
+      # A cleanup error must not destroy a completed report — it is already built by the
+      # time this runs, and losing it to a shutdown failure would be the worst possible
+      # trade. Logged rather than swallowed: `rescue nil` is a forbidden construct here
+      # (CLAUDE.md §5), and a browser that would not stop is something an operator wants
+      # to know about.
+      def shutdown(engine, id)
+        engine.shutdown if engine.respond_to?(:shutdown)
+      rescue StandardError => e
+        warn_line("[render] preflight could not shut down #{id}: #{e.class}: #{e.message}")
+      end
+
+      def warn_line(line)
+        logger.warn(line) if logger.respond_to?(:warn)
+      end
+
+      def normalise_ids(ids)
+        Array(ids).flat_map { |id| id.to_s.split(',') }
+                  .map { |id| id.strip.to_sym }
+                  .reject { |id| id.to_s.empty? }
+                  .uniq
+      end
+    end
+  end
+end

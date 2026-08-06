@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'securerandom'
 
 require_relative 'capabilities'
 require_relative 'document_request'
@@ -45,11 +46,25 @@ module RedmineReporterDashboards
     # exists only as log lines gets checked by grepping, and a grep is a test that
     # breaks when somebody improves the wording.
     class Preflight
-      # An 8x8 solid `#00aaff` PNG. Inline, small, and its COLOUR is the assertion:
+      # An 8x8 solid `#00ff00` PNG. Inline, small, and its COLOUR is the assertion:
       # an engine can accept a data: URI, fail to decode it, and draw the broken-image
       # glyph — same document size, no error, wrong report.
+      #
+      # --- IT IS GREEN, AND THAT IS THE WHOLE POINT OF THIS CONSTANT ---
+      #
+      # The first version of this file used `#00aaff`, WHICH IS ALSO THE PAGE
+      # BACKGROUND. The `<img>` has an explicit height, so a data: URI that failed to
+      # decode showed the page through it — the identical rgb — and the check returned
+      # PASS. It carried no information the `background` check did not already carry,
+      # and it could not fail for the reason its own comment gives. Caught in review and
+      # confirmed by decoding the IDAT.
+      #
+      # So the plate's colour must appear NOWHERE else in the probe document. Changing
+      # either this or `body { background }` to the other's value silently disarms the
+      # check; `spec/render/preflight_spec.rb` asserts the two are different for that
+      # reason.
       PROBE_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSnc' \
-                  'AAAAEElEQVR4nGNgWPUfOxpaEgBEb2pBQs1a6AAAAABJRU5ErkJggg=='
+                  'AAAAEElEQVR42mNg+M+AHQ0tCQDpMD/BHYHcAQAAAABJRU5ErkJggg=='
 
       # THE SHIPPED SHELL, not a copy of it. A probe document that hand-rolled its own
       # readiness signal would verify a signal nobody uses; this one exercises the file
@@ -67,8 +82,25 @@ module RedmineReporterDashboards
       # than a resemblance.
       BACKGROUND_RGB = [0, 170, 255].freeze
       BADGE_RGB = [204, 0, 0].freeze
+      # The inline plate. DISTINCT FROM `BACKGROUND_RGB` on purpose — see `PROBE_PNG`.
+      PLATE_RGB = [0, 255, 0].freeze
 
       STATES = %i[pass fail skip expected_failure].freeze
+
+      # THE CHECKS THAT NEED TO LOOK INSIDE THE DOCUMENT, and their titles, in one
+      # place. The list is a CONTRACT rather than a convenience: the report must have
+      # the same shape whether or not poppler is installed, so the skip path and the run
+      # path are built from this same table. Two JSON artefacts from two installs are
+      # only comparable if the check list does not move.
+      DOCUMENT_CHECKS = {
+        page_breaks: 'page breaks produce more than one page',
+        footer: 'the page-number footer is compiled and numbered',
+        background: 'backgrounds are printed, so badges keep their colour',
+        inline_asset: 'an inline (data:) image decodes to the right colour',
+        javascript: 'the JavaScript path runs, so charts can draw',
+        readiness: 'the readiness shell loads, so a chart-free page does not wait',
+        hosted_asset: 'a Redmine-hosted image is blocked (expected: the renderer has no network)'
+      }.freeze
 
       # --- WHAT MAKES THE RUN RED, AND WHAT ONLY MAKES IT INCOMPLETE ---
       #
@@ -249,7 +281,11 @@ module RedmineReporterDashboards
       def render_probe
         request = DocumentRequest.new(
           body: probe_document,
-          correlation_id: "preflight-#{Time.now.to_i}",
+          # A RANDOM SUFFIX, because a whole-second timestamp is not unique here: both
+          # callers loop over every registered engine in one invocation, so two engines
+          # diagnosed in the same second would share a correlation id — and INV-5's
+          # point is that a correlation id identifies ONE render in the log.
+          correlation_id: "preflight-#{Time.now.to_i}-#{SecureRandom.hex(3)}",
           page_size: 'A4',
           print_backgrounds: true,
           margins_mm: { 'top' => 0, 'right' => 0, 'bottom' => 10, 'left' => 0 },
@@ -290,13 +326,45 @@ module RedmineReporterDashboards
                     # where it did not — a timing column with a hole in it is read as
                     # "instant", which is the wrong lesson from a slow engine.
                     duration_ms: success.duration_ms || render_ms),
-          Check.new(id: :degradations,
-                    title: 'nothing was silently degraded',
-                    state: success.degraded? ? :fail : :pass,
-                    detail: success.degraded? ? success.degradations.map(&:to_s).join('; ') : 'none',
-                    duration_ms: 0)
+          degradation_check(success)
         ]
         checks + document_checks(success.bytes)
+      end
+
+      # NOT EVERY DEGRADATION IS A DEFECT, and the first version of this check said they
+      # all were. Measured in CI, on wkhtmltopdf, which failed it for two reasons that
+      # are both correct behaviour:
+      #
+      #   legacy_engine      stamped on EVERY wkhtmltopdf render, by design. A check
+      #                      that can never pass on an engine says nothing about that
+      #                      engine's install.
+      #   asset_unresolved   the blocked Redmine-hosted image — the degradation this
+      #                      probe deliberately provokes, and which `hosted_asset`
+      #                      already reports as an `expected_failure`. Counting it twice,
+      #                      once as expected and once as a failure, is the two states
+      #                      contradicting each other in one report.
+      #
+      # So the expected ones are named, reported in the detail (never hidden), and carry
+      # `:expected_failure`; anything else is a real silent degradation and fails. The
+      # asset one is only expected when the probe ASKED for a blocked asset — with no
+      # Redmine base URL the only remote reference is the inline data: URI, and that
+      # failing to resolve is a genuine defect.
+      LEGACY_DEGRADATIONS = %i[legacy_engine].freeze
+
+      def degradation_check(success)
+        unless success.degraded?
+          return Check.new(id: :degradations, title: 'nothing was silently degraded',
+                           state: :pass, detail: 'none', duration_ms: 0)
+        end
+
+        expected = LEGACY_DEGRADATIONS.dup
+        expected << :asset_unresolved unless redmine_base_url.to_s.empty?
+        unexpected = success.degradations.reject { |d| expected.include?(d.capability.to_sym) }
+
+        Check.new(id: :degradations, title: 'nothing was silently degraded',
+                  state: unexpected.empty? ? :expected_failure : :fail,
+                  detail: success.degradations.map(&:to_s).join('; '),
+                  duration_ms: 0)
       end
 
       # THE CHECKS THAT NEEDED A PREFLIGHT IN THE FIRST PLACE. Every one of these passes
@@ -304,38 +372,56 @@ module RedmineReporterDashboards
       # its images, which is exactly why looking inside is the whole job.
       def document_checks(bytes)
         unless PdfInspector.available?
-          # A skip, WITH THE PACKAGE NAMED. Not a pass: the operator has to know that
-          # the interesting half did not run.
-          return [Check.new(id: :document, title: 'the document was inspected',
-                            state: :skip,
-                            detail: PdfInspector::INSTALL_HINT, duration_ms: 0)]
+          # A SKIP PER CHECK, EACH WITH THE PACKAGE NAMED — not one umbrella skip, and
+          # certainly not silence.
+          #
+          # The first version returned a single `:document` skip and returned early,
+          # which DELETED the remaining checks from the report rather than skipping
+          # them. Two things went wrong at once. The INV-8 containment question — the
+          # one T-14's Accept list singles out — simply was not in the report, so an
+          # operator was told the document had not been inspected rather than that the
+          # network question went unanswered. And the artefact changed SHAPE between
+          # installs, so two JSON reports could not be diffed. Caught by review, and
+          # independently by CI: a spec asserting `hosted_asset` skips found it absent.
+          #
+          # `complete?` counts skips, so every one of these is now counted.
+          return DOCUMENT_CHECKS.map do |id, title|
+            Check.new(id: id, title: title, state: :skip,
+                      detail: PdfInspector::INSTALL_HINT, duration_ms: 0)
+          end
         end
 
-        [timed(:page_breaks, 'page breaks produce more than one page') do
+        [timed(:page_breaks, DOCUMENT_CHECKS[:page_breaks]) do
            count = PdfInspector.page_count(bytes)
            [count >= 2, "#{count} page(s)"]
          end,
-         timed(:footer, 'the page-number footer is compiled and numbered') do
+         timed(:footer, DOCUMENT_CHECKS[:footer]) do
            first = PdfInspector.flat_text(bytes, page: 1)
            [first.include?('Page 1 of 2'), first[/Page \d+ of \d+/] || 'no page number found']
          end,
-         timed(:background, 'backgrounds are printed, so badges keep their colour') do
+         timed(:background, DOCUMENT_CHECKS[:background]) do
            page = PdfInspector.pixel(bytes, x: 0.5, y: 0.30)
            badge = PdfInspector.pixel(bytes, x: 0.5, y: 0.60)
            ok = PdfInspector.colour_matches?(page, BACKGROUND_RGB) &&
                 PdfInspector.colour_matches?(badge, BADGE_RGB)
            [ok, "page rgb#{page.inspect}, badge rgb#{badge.inspect}"]
          end,
-         timed(:inline_asset, 'an inline (data:) image decodes to the right colour') do
+         timed(:inline_asset, DOCUMENT_CHECKS[:inline_asset]) do
+           # SAMPLED AGAINST `PLATE_RGB`, WHICH IS NOT THE PAGE BACKGROUND. Compared
+           # against the background — as the first version did, because the probe image
+           # happened to be that same colour — this passes when the image does not
+           # decode at all, because the `<img>` has a fixed height and the page shows
+           # through it. See `PROBE_PNG`.
            sample = PdfInspector.pixel(bytes, x: 0.5, y: 0.12)
-           [PdfInspector.colour_matches?(sample, BACKGROUND_RGB), "rgb#{sample.inspect}"]
+           [PdfInspector.colour_matches?(sample, PLATE_RGB),
+            "rgb#{sample.inspect}, wanted rgb#{PLATE_RGB.inspect}"]
          end,
-         timed(:javascript, 'the JavaScript path runs, so charts can draw') do
+         timed(:javascript, DOCUMENT_CHECKS[:javascript]) do
            state = PdfInspector.flat_text(bytes, page: 1)
            [state.include?('CANVAS-STATE drawn'),
             state[/CANVAS-STATE \w+/] || 'no canvas state reported']
          end,
-         timed(:readiness, 'the readiness shell loads, so a chart-free page does not wait') do
+         timed(:readiness, DOCUMENT_CHECKS[:readiness]) do
            # Three outcomes, not two. The marker says `present`, or it says `missing`,
            # or it is not in the document at all — and the first draft reported that
            # third case as "loaded" while failing the check, which is a failure whose
@@ -354,7 +440,7 @@ module RedmineReporterDashboards
       # deliberately different states: give them the same colour and the one that
       # matters gets ignored along with the one that does not.
       def hosted_image_check(bytes)
-        title = 'a Redmine-hosted image is blocked (expected: the renderer has no network)'
+        title = DOCUMENT_CHECKS[:hosted_asset]
         if redmine_base_url.to_s.empty?
           return Check.new(id: :hosted_asset, title: title, state: :skip,
                            detail: 'no Redmine base URL was supplied', duration_ms: 0)
@@ -394,10 +480,29 @@ module RedmineReporterDashboards
                   duration_ms: (monotonic_ms - started).round)
       end
 
+      # An adapter that cannot even say what it is must not take the report down with
+      # it — but the failure is LOGGED rather than swallowed. A silent `rescue` around a
+      # question asked of a possibly-broken object is how this project's worst hidden
+      # coupling stayed invisible for four minor versions (CLAUDE.md §5, the swallowed
+      # `NameError` around a registration), and a report headed `unknown` with no trace
+      # anywhere gives an operator nothing to search for.
+      #
+      # A `nil` ANSWER IS ALSO ABSENCE. `respond_to?` is true and nothing raises when an
+      # adapter's `version` simply returns nil, so without the `.nil?` arm the fallback
+      # never applies and the admin page renders a blank cell.
       def safe(method, fallback)
-        engine.respond_to?(method) ? engine.public_send(method) : fallback
-      rescue StandardError
+        return fallback unless engine.respond_to?(method)
+
+        value = engine.public_send(method)
+        value.nil? ? fallback : value
+      rescue StandardError => e
+        warn_line("[render] preflight could not read #{method} from the engine: " \
+                  "#{e.class}: #{e.message}")
         fallback
+      end
+
+      def warn_line(line)
+        @logger.warn(line) if @logger.respond_to?(:warn)
       end
 
       def monotonic_ms
@@ -416,11 +521,6 @@ module RedmineReporterDashboards
           @checks = checks
           @duration_ms = duration_ms
           @bytes = bytes
-        end
-
-        def add(check)
-          @checks << check
-          self
         end
 
         # An EXPECTED failure does not make the run red. The Redmine-hosted image is
@@ -460,8 +560,13 @@ module RedmineReporterDashboards
         def to_text
           lines = ["render preflight: #{engine_id} #{engine_version} (#{headline}, #{duration_ms}ms)"]
           checks.each do |check|
+            # SQUISHED. `Failure#detail` routinely carries an engine's stderr, which is
+            # multi-line — and this method promises one line per check, which
+            # `preflight_spec.rb` asserts by counting them. Truncating without
+            # flattening kept the newlines inside the 90 characters and silently broke
+            # both the promise and any per-report parsing of this format.
             lines << format('  %-18s %-46s %s', check.state.to_s.upcase, check.title,
-                            check.detail.to_s[0, 90])
+                            check.detail.to_s.gsub(/\s+/, ' ').strip[0, 90])
           end
           lines.join("\n")
         end

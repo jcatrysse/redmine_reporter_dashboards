@@ -41,8 +41,10 @@
     <p>
       <%= reporter_preflight_summary(report) %>
       <span class="nodata">
-        <%= l(:label_reporter_preflight_engine_version) %>: <%= report.engine_version %> —
-        <%= l(:label_reporter_preflight_duration) %>: <%= report.duration_ms %> ms
+        <%= l(:label_reporter_preflight_engine_version) %>:
+        <%= report.engine_version %>,
+        <%= l(:label_reporter_preflight_duration) %>:
+        <%= reporter_preflight_duration(report.duration_ms) %>
       </span>
     </p>
 
@@ -70,10 +72,28 @@
               exceptions to it).
             %>
             <td><%= check.detail %></td>
-            <td><%= check.duration_ms %> ms</td>
+            <td><%= reporter_preflight_duration(check.duration_ms) %></td>
           </tr>
         <% end %>
       </tbody>
     </table>
+  <% end %>
+
+  <%#
+    THE ARTEFACT, WHERE THE PERSON WITHOUT A SHELL CAN REACH IT.
+
+    The Accept list wants structured JSON "so it is asserted on rather than
+    log-scraped", and `RRD_FORMAT=json` gives the rake user exactly that. This page
+    exists for the administrator who has no shell — so without this block, the one
+    user it was built for is the one user who cannot paste the report into an issue.
+  %>
+  <% if @reports.any? %>
+    <fieldset class="collapsible collapsed">
+      <legend onclick="toggleFieldset(this);"><%= l(:label_reporter_preflight_json) %></legend>
+      <div style="display: none;">
+        <p><%= l(:text_reporter_preflight_json) %></p>
+        <pre><%= JSON.pretty_generate(@reports.map(&:to_h)) %></pre>
+      </div>
+    </fieldset>
   <% end %>
 <% end %>

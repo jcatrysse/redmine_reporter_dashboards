@@ -56,6 +56,18 @@ module RedmineReporterDashboards
         # case waiting out the watchdog, which is the defect `settle()` exists to
         # prevent. A probe that hand-rolled its own signal would have verified a signal
         # nobody uses.
+        # THE ASSERTION THAT KEEPS `inline_asset` FROM BEING A TAUTOLOGY. The first
+        # version's probe image was `#00aaff` — the page background — so a data: URI
+        # that failed to decode showed the page through the fixed-height <img>, the
+        # sampled pixel matched, and the check PASSED for the exact failure it was
+        # written to catch. Nothing in the suite could see it: the negative test failed
+        # that check against a blank white page, which is not the discriminating case.
+        it 'draws the plate in a colour that appears nowhere else on the page' do
+          expect(described_class::PLATE_RGB).not_to eq(described_class::BACKGROUND_RGB)
+          expect(described_class::PLATE_RGB).not_to eq(described_class::BADGE_RGB)
+          expect(html).not_to include('#00ff00')
+        end
+
         it 'inlines assets/javascripts/chart_shell.js itself' do
           shipped = File.read(described_class::CHART_SHELL_PATH, encoding: 'UTF-8')
 
@@ -132,6 +144,31 @@ module RedmineReporterDashboards
           end
         end
 
+        # THE CASE THE TAUTOLOGY HID: background right, plate missing. Driven through
+        # the inspector rather than through a browser, because what is under test is
+        # whether the CHECK can tell the two apart — not whether Chromium can draw.
+        it 'fails inline_asset when the page renders but the plate does not' do
+          allow(PdfInspector).to receive(:pixel) do |_bytes, opts|
+            opts[:y] == 0.12 ? described_class::BACKGROUND_RGB.dup : described_class::BACKGROUND_RGB.dup
+          end
+
+          expect(check(report, :inline_asset).state).to eq(:fail)
+          expect(check(report, :inline_asset).detail).to include('wanted rgb[0, 255, 0]')
+        end
+
+        it 'passes inline_asset only when the plate is its own colour' do
+          allow(PdfInspector).to receive(:pixel) do |_bytes, opts|
+            case opts[:y]
+            when 0.12 then described_class::PLATE_RGB.dup
+            when 0.30 then described_class::BACKGROUND_RGB.dup
+            else described_class::BADGE_RGB.dup
+            end
+          end
+
+          expect(check(report, :inline_asset).state).to eq(:pass)
+          expect(check(report, :background).state).to eq(:pass)
+        end
+
         it 'times every check it ran' do
           timed = report.checks.reject { |c| c.id == :degradations }
           expect(timed.map(&:duration_ms)).to all(be_a(Numeric))
@@ -150,6 +187,56 @@ module RedmineReporterDashboards
       end
 
       describe 'degradations' do
+        # NOT EVERY DEGRADATION IS A DEFECT, and the first version said they all were.
+        # Measured in CI on wkhtmltopdf, which failed for two reasons that are both
+        # correct behaviour: `legacy_engine` is stamped on every one of its renders by
+        # design, and `asset_unresolved` is the blocked hosted image this probe
+        # deliberately provokes — the very thing `hosted_asset` reports as an
+        # `expected_failure`. Counting it twice, once as expected and once as a failure,
+        # is two states in one report contradicting each other.
+        it 'treats an engine that always stamps legacy_engine as expected, not broken' do
+          legacy = Conformance::HarnessEngines::Scripted.new(
+            id: :legacy,
+            degradations: [Degradation.new(capability: :legacy_engine, detail: 'compat engine')]
+          )
+          check = check(report_for(legacy), :degradations)
+
+          expect(check.state).to eq(:expected_failure)
+          expect(check).to be_ok
+          # Reported, never hidden: the operator still reads what was degraded.
+          expect(check.detail).to include('legacy_engine')
+        end
+
+        # ...but only when the probe ASKED for a blocked asset. With no Redmine base URL
+        # the only remote reference is the inline data: URI, and that failing to resolve
+        # is a genuine defect.
+        it 'expects asset_unresolved only when a hosted image was requested' do
+          degraded = lambda do
+            Conformance::HarnessEngines::Scripted.new(
+              id: :blocked,
+              degradations: [Degradation.new(capability: :asset_unresolved, detail: 'blocked')]
+            )
+          end
+
+          with_url = report_for(degraded.call, redmine_base_url: 'https://redmine.example')
+          without = report_for(degraded.call)
+
+          expect(check(with_url, :degradations).state).to eq(:expected_failure)
+          expect(check(without, :degradations).state).to eq(:fail)
+        end
+
+        it 'still fails on a degradation nobody expected' do
+          surprising = Conformance::HarnessEngines::Scripted.new(
+            id: :surprising,
+            degradations: [Degradation.new(capability: :legacy_engine, detail: 'fine'),
+                           Degradation.new(capability: :readiness_timeout, detail: 'not fine')]
+          )
+          check = check(report_for(surprising), :degradations)
+
+          expect(check.state).to eq(:fail)
+          expect(check.detail).to include('readiness_timeout')
+        end
+
         # THE CASE THAT DECIDED `required` OVER `essential`. An engine that cannot do
         # JavaScript must still be diagnosable — a preflight that refuses to run on the
         # engine it was asked about has answered nothing — so a missing capability is a
@@ -185,13 +272,27 @@ module RedmineReporterDashboards
 
         # A SKIP WITH THE PACKAGE NAMED. Never a pass — the operator has to know the
         # interesting half did not run — and never six speculative skips either.
-        it 'reports one skip naming the package, instead of six checks it cannot run' do
+        # THE REPORT KEEPS ITS SHAPE. The first version returned one umbrella
+        # `:document` skip and returned early, which DELETED the rest — so the INV-8
+        # containment question was absent from the report rather than unanswered, and
+        # two installs' JSON could not be diffed. Caught by review, and independently by
+        # CI when a spec asserting `hosted_asset` skips found it missing entirely.
+        it 'skips every document check by name, and drops none of them' do
           report = report_for(engine)
-          document = check(report, :document)
 
-          expect(document.state).to eq(:skip)
-          expect(document.detail).to include('poppler-utils')
-          expect(report.checks.map(&:id)).to eq(%i[engine degradations document])
+          expect(report.checks.map(&:id))
+            .to eq(%i[engine degradations] + described_class::DOCUMENT_CHECKS.keys)
+          described_class::DOCUMENT_CHECKS.each_key do |id|
+            expect(check(report, id).state).to eq(:skip), "#{id} is not a skip"
+            expect(check(report, id).detail).to include('poppler-utils')
+          end
+        end
+
+        # The one the Accept list singles out. It must be present and unanswered, never
+        # absent — "the network question did not run" and "there is no network question"
+        # are different reports.
+        it 'still carries the INV-8 containment check, as a skip' do
+          expect(check(report_for(engine), :hosted_asset).state).to eq(:skip)
         end
 
         # The decision recorded on `Check`: a missing optional tool does not make the
@@ -271,6 +372,22 @@ module RedmineReporterDashboards
           expect(text.first).to include('render preflight: perfect')
           expect(text.length).to eq(report_for(engine).checks.length + 1)
           expect(text[1]).to match(/\A\s+(PASS|FAIL|SKIP|EXPECTED_FAILURE)\s/)
+        end
+
+        # ONE LINE PER CHECK, INCLUDING WHEN THE DETAIL IS NOT ONE LINE. `Failure#detail`
+        # routinely carries an engine's stderr. The count assertion above cannot fail on
+        # its own — every detail it exercises is single-line — so the multi-line case is
+        # driven explicitly.
+        it 'keeps one line per check when a detail carries engine stderr' do
+          report = described_class::Report.new(
+            engine_id: :x, engine_version: '1', duration_ms: 1,
+            checks: [described_class::Check.new(id: :engine, title: 't', state: :fail,
+                                                detail: "chrome died\nline1\nline2",
+                                                duration_ms: 1)]
+          )
+
+          expect(report.to_text.lines.length).to eq(2)
+          expect(report.to_text).to include('chrome died line1 line2')
         end
 
         it 'reports every state it knows about as a symbol the caller can branch on' do

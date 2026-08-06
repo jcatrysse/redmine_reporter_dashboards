@@ -239,11 +239,31 @@ class ReporterPreflightControllerTest < ActionController::TestCase
   # The view is keyed on `Check#id`, so a check the render layer gained and the locale
   # files did not would render its English title in a Russian UI. Asserted here rather
   # than trusted, because the fallback is silent by design.
+  # READ OFF THE RENDER LAYER, not typed out here. A hand-written list is a list that
+  # stops matching the day somebody adds a check, and the symptom is an English title
+  # in a Russian UI — which the fallback makes silent by design.
   def test_every_check_id_the_preflight_can_emit_has_a_label
-    emitted = %i[engine degradations document page_breaks footer background
-                 inline_asset javascript readiness hosted_asset]
+    emitted = Render::Preflight::DOCUMENT_CHECKS.keys + %i[engine degradations]
 
-    assert_equal [], emitted - ReporterPreflightHelper::CHECK_LABELS.keys
+    assert_equal [], emitted - ReporterPreflightHelper::CHECK_LABELS.keys,
+                 'a check the render layer emits has no locale key'
+    assert_equal [], ReporterPreflightHelper::CHECK_LABELS.keys - emitted,
+                 'a locale key names a check the render layer no longer emits'
+  end
+
+  # THE ARTEFACT HAS TO BE REACHABLE FROM THE PAGE. The rake user gets it from
+  # RRD_FORMAT=json; without this block the administrator this page exists for is the
+  # one person who cannot paste the report into an issue.
+  def test_the_page_carries_the_json_artefact
+    @request.session[:user_id] = @admin.id
+
+    with_engine(:stub, UnstartableAdapter) do
+      post :run
+
+      assert_response :success
+      assert_select 'pre', text: /"engine": "stub"/
+      assert_select 'pre', text: /"state": "fail"/
+    end
   end
 
   def test_every_state_has_a_label_and_a_distinct_class
@@ -265,6 +285,8 @@ class ReporterPreflightControllerTest < ActionController::TestCase
               text_reporter_preflight_no_engine text_reporter_preflight_ok
               text_reporter_preflight_problems text_reporter_preflight_incomplete
               label_reporter_preflight_engine_version label_reporter_preflight_duration
+              label_reporter_preflight_duration_ms label_reporter_preflight_json
+              text_reporter_preflight_json
               label_reporter_preflight_state label_reporter_preflight_check
               label_reporter_preflight_detail]
 
