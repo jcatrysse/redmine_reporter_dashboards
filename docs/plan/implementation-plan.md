@@ -928,23 +928,32 @@ measuring before attributing its behaviour to the code.** It cost a wrong claim 
 
 **THE TWO BUILDS, and the distinction is the load-bearing part.**
 
-| build | source | headers/footers |
+| build | source | footers (what was MEASURED) |
 |---|---|---|
 | `wkhtmltopdf 0.12.6` | `noble/universe`, `apt install wkhtmltopdf` | **NO** — unpatched Qt |
 | `wkhtmltopdf 0.12.6.1 (with patched qt)` | the release `.deb`, which is what CI installs | yes |
 
+**Footers is what was measured, and the row says only that on purpose.** Upstream documents
+unpatched Qt as lacking headers too, and the binary carries an advisory string ("These versions are
+missing some features") without enumerating them — but `F-04-page-furniture` is the corpus's only
+page-furniture fixture and it sets `footer:` alone, so a 17/1/2 result says nothing about headers.
+Do not widen this row without a fixture behind it.
+
 So HANDOVER's old "cannot be installed here" was *nearly* right and for the right reason — the
 usable engine is only in a release `.deb` — and wrong in its conclusion, because **that `.deb`
-installs fine on noble**. The jammy asset (`wkhtmltox_0.12.6.1-3.jammy_amd64.deb`, the exact URL
-`ci.yml:750` uses; there is no noble asset) installs with `apt-get install ./wkhtmltox.deb`. Two
-commands, and `:wkhtmltopdf` stops being CI-only:
+installs fine on noble**. The jammy asset (`wkhtmltox_0.12.6.1-3.jammy_amd64.deb` — byte-for-byte
+the URL `ci.yml:750` already uses) installs with `apt-get install ./wkhtmltox.deb`; the equivalent
+`…noble_amd64.deb` URL **404s**, which is the observation rather than a claim about the release page.
+Two commands, and `:wkhtmltopdf` stops being CI-only:
 
     curl -fsSL -o /tmp/wkhtmltox.deb https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb
     sudo apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb
 
 Do NOT `apt install wkhtmltopdf` and think you have measured the engine. The distro build passes 17
 of 20 and the difference is entirely the footer fixture — a plausible-looking result from the wrong
-binary, which is this repository's favourite failure mode wearing new clothes.
+binary, which is this repository's favourite failure mode wearing new clothes. The flags are
+discarded with a message on stderr ("is not support using unpatched qt, and will be ignored") —
+loud enough to read, quiet enough to miss in a corpus run.
 
 **THE MEASUREMENT, on the build CI uses, both engines, run as the non-root user:**
 
@@ -1791,9 +1800,11 @@ second fails to PARSE, so the statement before it never runs), not inferred from
 So this task builds with `:mermaid` **absent** for
 wkhtmltopdf as a measured fact rather than an expectation, and the "settles `[OQ-L]` by measurement"
 clause below is already satisfied — the conformance fixture confirms it rather than discovering it.
-Two more things the measurement handed over: the required fallback ("source emitted, labelled, not
-blank") is what already happens to an untouched `<pre class="mermaid">`, so it is the absence of an
-action rather than a path to invent; and the bundle is **3.5 MB**, which is 7× `inline_max_bytes` —
+Two more things the measurement handed over. Of the required fallback, only the **"source emitted,
+not blank"** half is free — an untouched `<pre class="mermaid">` stays visible in the PDF — and the
+**label and the `Degradation(:mermaid_unsupported)` are still yours to write**; nothing in the
+measurement produces either, so do not read this as "the fallback already works". And the bundle is
+**3,566,058 bytes**, nearly 7× `inline_max_bytes` —
 §6 says a bundled library is always inline and unaffected by `asset_policy`, and that is the answer,
 but decide it deliberately rather than discovering it in a degradation list.
 *Touches:* `liquid/tags/mermaid_tag.rb`; `render/svg_sanitizer.rb`; vendored Mermaid 11.x.

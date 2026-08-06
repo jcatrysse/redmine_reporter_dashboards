@@ -192,10 +192,13 @@ of them is the engine.** This entry used to say the package "is gone from Ubuntu
 only exists as a release `.deb`", concluding `:wkhtmltopdf` was CI-only. The premise is nearly right
 and the conclusion is wrong.
 
-| build | how you get it | headers/footers |
+| build | how you get it | footers (what was MEASURED) |
 |---|---|---|
 | `wkhtmltopdf 0.12.6` | `apt install wkhtmltopdf` (noble/universe) | **NO** — built against unpatched Qt |
 | `wkhtmltopdf 0.12.6.1 (with patched qt)` | the release `.deb` — what `ci.yml:750` installs | yes |
+
+Footers only. Upstream documents unpatched Qt as lacking headers too, but the corpus has no header
+fixture, so do not widen that row without one.
 
 **Install the release `.deb`. The jammy asset works on noble, and there is no noble asset:**
 
@@ -206,8 +209,8 @@ and the conclusion is wrong.
 **THE TRAP, and it cost a wrong finding in a pushed commit.** `apt install wkhtmltopdf` succeeds and
 gives you a binary that passes **17 of 20** conformance fixtures. The one failure is the footer
 fixture, and it looks exactly like a defect in `wkhtmltopdf.rb` — page 1 with no footer. It is not:
-that build silently discards every `--footer-*` flag and says so on stderr ("is not support using
-unpatched qt, and will be ignored"). A plausible result from the wrong binary is this repository's
+that build discards every `--footer-*` flag and says so on stderr ("is not support using unpatched
+qt, and will be ignored") — loud enough to read, quiet enough to miss in a corpus run. A plausible result from the wrong binary is this repository's
 favourite failure mode; **check `wkhtmltopdf --version` says `(with patched qt)` before attributing
 anything to the code.**
 
@@ -426,7 +429,10 @@ record as of the last local run.
 | **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
 | **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1832 rspec examples, 0 failures** (was 1562), 116 pending — 265 new, of which 39 exist because the review found four blockers (§Findings E-17): the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
 | **T-13: the conformance corpus, BOTH engines, LOCALLY** | **yes (2026-08-06) — first time for wkhtmltopdf outside CI** | On the build CI uses (`0.12.6.1`, **patched qt**): `chromium_cdp` Chrome/141.0.7390.37 **20 pass / 0 fail / 0 skip**, `wkhtmltopdf` **18 pass / 0 fail / 2 skip** — 67 examples, 0 failures, and the two skips are `:readiness_expression`, which E-5 accounted for. **Nothing is unexplained, so E-5's promotion condition is met and the decision is the curator's** (§Findings E-18). G9 green, committed matrix unmoved. Run as the non-root `rrd` user with `RRD_CONFORMANCE=1`. **On the DISTRO build it is 17/1/2 and the failure is the footer fixture — that build cannot do footers at all**; see §1 |
-| **OQ-L settled by measurement — Mermaid 11.16.1 through both engines** | **yes, locally (2026-08-06)** | One probe document, both engines. Chromium 141: `mermaid.run()` resolves and both node labels extract from the PDF as SVG text. wkhtmltopdf 0.12.6.1 patched: **`PROBE-NO-MERMAID-GLOBAL`** — the bundle never defines its global, because Mermaid 11 is an esbuild IIFE opening with `\|\|=` (ES2021) that Qt WebKit cannot parse — established by a DISCRIMINATOR, not inferred: two three-line documents differing only in `x.a = x.a \|\| 1` versus `x.a \|\|= 1` print `ES5-OK-1` and `INIT` respectively, and `INIT` means the statement BEFORE the assignment never ran, so the whole script block failed to parse. That rules out a timeout, the 3.5 MB size and the probe's own JS. **So `:mermaid` is absent for wkhtmltopdf despite `:javascript` being present**, which is the answer T-35's acceptance list expected and now has. Probe kept out of the repo deliberately — vendoring Mermaid is T-35's job, with `THIRD_PARTY.md` and the digest gate |
+| **OQ-L settled by measurement — Mermaid 11.16.1 through both engines** | **yes, locally (2026-08-06)** | One probe document, both engines. Chromium 141: `mermaid.run()` resolves and both node labels extract from the PDF as SVG text. wkhtmltopdf 0.12.6.1 patched: **`PROBE-NO-MERMAID-GLOBAL`** — the bundle never defines its global, because Mermaid 11 is an esbuild IIFE opening with `\|\|=` (ES2021) that Qt WebKit cannot parse (`--debug-javascript` names it: `SyntaxError: Parse error`, once, at
+the bundle's script line) — established by a DISCRIMINATOR, not inferred: two three-line documents differing only in `x.a = x.a \|\| 1` versus `x.a \|\|= 1` print `ES5-OK-1` and `INIT` respectively, and `INIT` means the statement BEFORE the assignment never ran, so the whole script block failed to parse. That rules out a timeout, the 3.5 MB size (a same-size ES5-only script runs fine) and the probe's
+own JS. **`||=` is not the only blocker**: this build also lacks `globalThis`, which the bundle's
+final line uses to publish the global — so "transpile the `||=`" is not a route back. **So `:mermaid` is absent for wkhtmltopdf despite `:javascript` being present**, which is the answer T-35's acceptance list expected and now has. Probe kept out of the repo deliberately — vendoring Mermaid is T-35's job, with `THIRD_PARTY.md` and the digest gate |
 | **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |

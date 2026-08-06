@@ -953,16 +953,27 @@ each setting a probe div BEFORE the statement under test:
 | `x.a \|\|= 1;` | `INIT` |
 
 The second never reached the assignment *before* it, so the whole `<script>` block failed to
-**parse** — not to run. That is why a 3.5 MB bundle whose first statement uses `||=` leaves
-`mermaid` undefined, and it rules out the timeout, the document size and the probe's own JavaScript
-as explanations. There is no shim short of transpiling somebody else's bundle, which is not a thing
-this plugin will do.
+**parse** — not to run. `wkhtmltopdf --debug-javascript` names it outright, once, at the bundle's
+own `<script>` line: `SyntaxError: Parse error`. And the alternatives are excluded by measurement
+rather than by argument: a document of the same 3.5 MB with an **ES5-only** script of the same size
+runs fine under the same 8 s delay, so size is not it; the bundle is a synchronous IIFE reported at
+parse time, so "hadn't finished" is not available; the probe's own JavaScript is ES5 and
+demonstrably ran, since it printed its own verdict.
 
-**Two facts for T-35 that fell out of the same measurement.** The required fallback shape — "on an
+**`||=` is sufficient but not the only barrier, and that matters more than it looks.** This build
+also has no `globalThis`, and the bundle's *final* line is
+`globalThis["mermaid"] = globalThis.__esbuild_esm_mermaid_nm["mermaid"].default;`. So a reader must
+not conclude "transpile the `||=` and it works": there are at least two independent blockers, and
+the honest position is that Mermaid 11 is not a target for this engine. There is no shim short of
+transpiling somebody else's bundle, which is not a thing this plugin will do.
+
+**Two facts for T-35 that fell out of the same measurement.** Of the required fallback — "on an
 engine without `:javascript` the source is emitted, labelled, with `Degradation(:mermaid_unsupported)`,
-and the output is not blank" — is what already happens: a `<pre class="mermaid">` body that Mermaid
-never touched stays visible, so the fallback is the *absence* of an action rather than a code path
-to invent. And **the bundle is 3.5 MB**, seven times `inline_max_bytes` (512 KiB) and inside
+and the output is not blank" — the **"emitted and not blank" half is free**: `pdftotext` returns the
+`<pre class="mermaid">` body verbatim, because Mermaid never touched it. The **label and the
+`Degradation` are still T-35's to write**; nothing in this measurement produces either, and reading
+this paragraph as "the fallback already works" would skip them. And **the bundle is 3,566,058
+bytes**, nearly seven times `inline_max_bytes` (512 KiB) and inside
 `asset_max_bytes` (8 MiB), so under T-33's resolver it inlines with
 `Degradation(:asset_inline_oversize)` on any engine with no upload model — which is both shipped
 engines. T-35 should decide deliberately whether Mermaid is an asset-policy asset at all or a
