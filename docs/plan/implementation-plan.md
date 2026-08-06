@@ -821,6 +821,79 @@ security property is unchanged either way: any `| inline` must go through
 `Assets::Policy`/`LocalStore`, or it is the second embedding path this finding exists to
 prevent.
 
+**F-17 · T-35's "one sanitiser, two producers" CANNOT hold as written, and the measurements to
+settle it are done. CURATOR DECISION NEEDED before the task is built.**
+
+Started T-35 on 2026-08-06 and stopped at its foundation, because the first decision determines the
+whole task and §6.1 contradicts itself about it. Everything below is measured, so the decision is a
+choice between named options rather than an investigation.
+
+**THE CONTRADICTION.** §6.1 says *"the rendered SVG is sanitised by the plugin after Mermaid produces
+it, not trusted because Mermaid was configured"*, and T-35's `Accept:` says *"one sanitiser shared
+with `SvgRenderer`"*. But the same section's own design has **Mermaid running inside the browser** —
+`startOnLoad: false`, rendered by the chart shell, on both the `:html` and the `:pdf` path. So:
+
+* on the **`:html`** path the SVG exists only in the viewer's browser. The plugin never sees it, and
+  there is no server-side moment in which to sanitise anything. This is also the path where the
+  threat is worst: a `<script>` in the SVG runs with the *viewer's* session, which is XSS.
+* on the **`:pdf`** path the SVG exists inside the render engine. The plugin could fetch it back
+  (`Runtime.evaluate` → `outerHTML`), sanitise in Ruby, write it back, then print — one extra round
+  trip per diagram, and only on engines it drives over CDP. Not Gotenberg, which is handed a document.
+* `SvgRenderer`'s output is the only one that is genuinely server-side.
+
+So "one sanitiser" is satisfiable for two of the three producers and impossible for the one that
+needs it most. Same shape as F-13: three statements, all reasonable, that cannot all hold.
+
+**THE OPTIONS, with what each costs.**
+
+| | shape | cost |
+|---|---|---|
+| **A** | One **allowlist** in Ruby as the single source of truth, emitted into the page as a `<script type="application/json">` data block (the mechanism `{% chart %}` already uses); one Ruby sanitiser for `SvgRenderer` and the PDF round trip; one JS enforcer reading the same allowlist for the live page. Shared test set runs the same payloads through both, Ruby directly and JS under node (T-19 already runs node) | two enforcers. `ScriptSafeJson` exists precisely because "two copies of a security-bearing escaper" is bad — mitigated by there being one allowlist and one test set, not one of each |
+| **B** | Ruby only. Accept that the live HTML page is unsanitised and rely on `securityLevel: 'strict'` there | §6.1's own rule is "not trusted because Mermaid was configured", and this is exactly that. Leaves XSS on the path where a viewer's session is present |
+| **C** | Sanitise nothing client-side and drop the `:html` path for Mermaid — diagrams in PDFs only | loses the authoring preview, which §9b.2 requires |
+
+**Recommendation: A**, and amend §6.1 from "one sanitiser" to *"one allowlist, enforced at every
+point where SVG the plugin did not compute reaches a document"*.
+
+**THE SECOND DECISION, smaller: what parses the SVG.** Nokogiri is a Rails dependency so it is
+present in every Redmine install, but it is **not** in the bare Ruby `spec/` runs under (mechanism
+E2) and this repository has deliberately avoided it before (`liquid/html_scanner.rb:22` explains
+why — no byte offsets). For a *sanitiser* byte offsets are irrelevant and parser correctness is the
+whole product, so Nokogiri is the safer choice and hand-rolling is the consistent one. My
+recommendation is **Nokogiri**, with the reason written down: T-33's `DocumentScanner` hand-rolls a
+tokenizer and the review still found three parsing defects in it, and that one only had to *find*
+references rather than decide what is safe.
+
+**WHAT IS ALREADY MEASURED, so neither decision needs new work to evaluate.** All figures from real
+renders on 2026-08-06 (Mermaid 11.16.1 through Chromium 141; `SvgRenderer` through its own path):
+
+* **Mermaid renders all six diagram families** — flowchart, sequence, gantt, pie, class, state — with
+  `securityLevel: 'strict'`, `htmlLabels: false`, `flowchart.htmlLabels: false`, and **no errors**.
+* Its output uses **15 distinct elements** (`circle defs feDropShadow filter g line marker path
+  polygon rect style svg symbol text tspan`) and **61 distinct attributes**.
+* **Zero `<foreignObject>` and zero `<script>`** in any of the six. So the two constructs §6.1 names
+  are not things Mermaid emits in this configuration — dropping them costs nothing and is pure
+  defence against a configuration that stops being honoured, which is the point.
+* **Every diagram emits exactly one `<style>` element**, 5.5 KB of it. **Dropping `<style>` would
+  strip all diagram styling**, so the allowlist has to keep it — and its content was checked for
+  every CSS vector: `@import`, `url(`, `expression(`, `javascript:`, `behavior:`, `-moz-binding`,
+  `@font-face` are **all absent**. So "keep `<style>`, refuse any CSS containing those" costs
+  legitimate output nothing. Inline `style` attributes are only `stroke-width`/`stroke-dasharray`.
+* Mermaid emits **no `href` or `xlink:href` at all** (only `xmlns:xlink`), so the drill-through
+  exception in §6.1's rule is `SvgRenderer`'s alone.
+* **`SvgRenderer` emits 10 elements** (`a circle desc line path polyline rect svg text title`) and
+  **33 attributes**, including `href`, `xlink:href` and `target`. The union of the two producers is
+  **19 elements**, which is the allowlist's real size — and note that routing `SvgRenderer` through a
+  sanitiser is NEW: it does not pass through one today, so the allowlist must be proven not to mangle
+  our own charts, which is a test the acceptance list implies and does not name.
+
+**Also worth knowing before the task starts:** `:mermaid` has to join `Render::Capabilities::ALL`,
+which is a CLOSED vocabulary — and it qualifies under F-14's test where `:responsive_canvas` did not:
+an engine either runs Mermaid or it does not (measured: Chromium yes, wkhtmltopdf no), absence
+produces `Degradation(:mermaid_unsupported)`, and that is a real three-outcome negotiation. It costs
+`config/capabilities.yml` for three engines, the adapters' `CAPABILITIES` constants, and a G9 matrix
+regeneration — all of which can now be run locally (§Findings E-18).
+
 **F-16 · nothing consumes `DocumentRequest#assets` yet, so T-33's upload model is proven at the
 resolver and NOT end to end.** §5.1 says "the CDP interceptor makes the reference engine
 implement it too" — `Fetch.enable` request interception serving `request.assets` from memory.
@@ -1807,7 +1880,18 @@ measurement produces either, so do not read this as "the fallback already works"
 **3,566,058 bytes**, nearly 7× `inline_max_bytes` —
 §6 says a bundled library is always inline and unaffected by `asset_policy`, and that is the answer,
 but decide it deliberately rather than discovering it in a degradation list.
-*Touches:* `liquid/tags/mermaid_tag.rb`; `render/svg_sanitizer.rb`; vendored Mermaid 11.x.
+**STARTED AND STOPPED AT ITS FOUNDATION, 2026-08-06 — see §Findings F-17.** "One sanitiser shared
+with `SvgRenderer`" cannot hold as written: Mermaid runs in the BROWSER on both bindings, so on the
+`:html` path the plugin never sees the SVG at all — and that is the path where a `<script>` would run
+with the viewer's session. Three options are written up with costs, a recommendation, and every
+measurement needed to choose (all six diagram families render clean; 15 elements / 61 attributes;
+zero `<foreignObject>`, zero `<script>`; one 5.5 KB `<style>` per diagram carrying none of the CSS
+vectors; `SvgRenderer`'s own 10 elements / 33 attributes, and the fact that it does not pass through
+a sanitiser today). Nothing was built, so the tree is clean.
+*Touches (as specified — and `render/svg_sanitizer.rb` is the wrong address for the same reason
+F-13b moved `asset_resolver.rb`: `charts/svg_renderer.rb` must use it, and `charts/**` may not name
+`Dashboards::Render`. The precedent is `script_safe_json.rb`, top-level, belonging to no layer):*
+`liquid/tags/mermaid_tag.rb`; `render/svg_sanitizer.rb`; vendored Mermaid 11.x.
 *Accept:* block tag, body **not** Liquid-interpolated unless `interpolate: true`; readiness covered
 by the existing `begin()`/`end()` contract with **no new handshake**; **one sanitiser shared with
 `SvgRenderer`** — asserted by both producers running the same allowlist test set, including
