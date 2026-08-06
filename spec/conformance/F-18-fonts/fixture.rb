@@ -32,10 +32,25 @@ RedmineReporterDashboards::Conformance.fixture(
     v.expect_includes(v.flat_text, 'FONT-PUNCT — “quoted” … ±3 °C', 'extracted punctuation')
   end
 
-  # Extraction alone cannot tell drawn text from invisible text: a document with the
-  # glyphs and a white fill extracts perfectly and prints blank. One pixel closes that.
-  f.check('the text was actually inked') do |v|
-    dark = v.pixel(x: 0.5, y: 0.5, dpi: 72)
-    v.expect_true(dark.sum < 600, "the text band is blank (rgb#{dark.inspect})")
-  end
+  # --- ONE CHECK WAS REMOVED HERE, AND THIS IS WHAT IT WAS (finding E-5) ---
+  #
+  # `the text was actually inked`: a single pixel sampled from the middle of a large
+  # glyph band, asserting it was dark. It exists because extraction alone CANNOT tell
+  # drawn text from invisible text — a document with the right glyphs and a white fill
+  # extracts perfectly and prints blank, and every check above it would pass.
+  #
+  # wkhtmltopdf returned white there. Whether that is missing glyphs, different line
+  # metrics putting the band somewhere else, or genuinely unpainted text was never
+  # established, because the engine cannot be run in the container this was developed
+  # in. Removed by curator decision on 2026-08-06 rather than guessed at: the closed
+  # capability vocabulary (`technical-spec.md` §5) has nothing to say about text
+  # rendering, so the three-state rule had no capability to skip it on.
+  #
+  # **THE INVISIBLE-TEXT FAILURE MODE IS NOW UNCOVERED**, and that is the cost. It is
+  # narrower than it sounds — the four extraction checks above still fail on missing
+  # glyphs, wrong encodings and mangled punctuation, which is most of what goes wrong
+  # with fonts — but a report drawn in white on white would pass this suite. The
+  # preflight probe (T-14) is the right place for it to come back, because that runs
+  # against ONE engine an operator has actually installed rather than against every
+  # engine in the matrix.
 end

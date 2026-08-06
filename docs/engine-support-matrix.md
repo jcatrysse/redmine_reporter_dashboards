@@ -74,7 +74,7 @@ same fact written where an operator can read it (`config/capabilities.yml`).
 | `F-04-page-furniture` | per-page footer with page numbers | PASS | not verified | not verified |
 | `F-05-page-breaks` | three explicit breaks make four pages | PASS | not verified | not verified |
 | `F-06-background-printing` | backgrounds print by default | PASS | not verified | not verified |
-| `F-07-flexbox` | a flex row lays out side by side | PASS | not verified | not verified |
+| `F-07-column-layout` | a two-column layout stays side by side | PASS | not verified | not verified |
 | `F-08-readiness-none` | a chart-free document is ready immediately | PASS | not verified | not verified |
 | `F-09-readiness-charts` | three charts that finish, and the wait is theirs | PASS | not verified | not verified |
 | `F-10-readiness-watchdog` | a chart that never ends is cut short by the page, not the engine | PASS | not verified | not verified |

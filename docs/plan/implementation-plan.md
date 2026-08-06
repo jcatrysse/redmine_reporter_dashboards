@@ -379,28 +379,40 @@ network: `F-15` watched three subresources arrive at the harness's socket. Fixed
 nowhere, the same shape as the Chromium fix. Worth noting how much cheaper the second instance was —
 the corpus found it in one run, where the first had needed the fixture to be invented.
 
-**TWO ARE UNRESOLVED AND ARE THE CURATOR'S** (CLAUDE.md §11.1, §11.3):
+**TWO WERE THE CURATOR'S, AND WERE DECIDED ON 2026-08-06: WEAKEN THE FIXTURES.** The
+two differences, and what each cost:
 
 * `F-07-flexbox` — wkhtmltopdf's 2011 WebKit stacks a flex row instead of laying it out. Correct
   behaviour for that engine and a genuine capability difference.
 * `F-18-fonts` — the text band renders blank under the pixel probe, where Chromium inks it.
 
-**Neither difference can be expressed.** `technical-spec.md` §5 defines the capability vocabulary as
-CLOSED, and it contains no `:flexbox` and nothing about font rendering. So the three-state rule has
-no capability to skip on, and the honest options are three, none of which should be taken silently:
+**Neither difference could be expressed.** `technical-spec.md` §5 defines the capability vocabulary
+as CLOSED, and it contains no `:flexbox` and nothing about font rendering — so the three-state rule
+had no capability to skip on. Three options were put to the curator: open the vocabulary (a spec
+change, and the closure is deliberate), weaken the fixtures, or leave wkhtmltopdf unpromotable
+forever. **Decision: weaken the fixtures.**
 
-1. **Open the vocabulary** by two entries (a spec change, and the closure is deliberate);
-2. **Drop the two fixtures** to what every engine can do — which throws away the two clearest
-   demonstrations of *why* the reference engine is the default;
-3. **Leave wkhtmltopdf at `verification: pending` indefinitely**, so its cells stay informational and
-   never enter the matrix as a contract.
+As built, with the cost of each written into the fixture itself so it is found by whoever next
+reads the file rather than by whoever next trusts it:
 
-Pending that decision, option 3 is what the code does, and `pending` is given the meaning it should
-always have had: **a non-`corpus` engine's results are REPORTED, not enforced.** Each failure is
-printed, the summary line carries the counts, and promotion to `corpus` is the moment somebody has to
-account for every one of them. That is not a way to keep a red engine green — it is the difference
-between "this is what it did" and "this is what it must do", and only a human can move a result from
-the first to the second.
+* `F-07-flexbox` becomes `F-07-column-layout` and draws its two columns with a TABLE, which every
+  engine in the matrix does including the 2011 one. It still catches a layout engine that stacks
+  what should sit side by side, and it is now a floor rather than a frontier. **Nothing in the
+  corpus covers flexbox any more** — an engine that cannot lay out a flex row passes this suite.
+* `F-18-fonts` loses its single pixel-inking check. The four extraction checks stay, and between
+  them they still catch missing glyphs, wrong encodings and mangled punctuation, which is most of
+  what goes wrong with fonts. **What is now uncovered is white-on-white**: a report whose text
+  extracts perfectly and prints blank passes this suite. T-14's preflight probe is the right home
+  for that check, because it runs against ONE engine an operator actually installed rather than
+  against every engine in the matrix.
+
+If the vocabulary is ever opened, both belong back as they were; `git log` has them and this entry
+has the reasoning.
+
+**`pending` was given a precise meaning along the way, and keeps it:** a non-`corpus` engine's
+results are REPORTED, not enforced. Each failure is printed and the summary line carries the counts.
+Promotion to `corpus` is the moment somebody accounts for every one of them — which is exactly what
+just happened here.
 
 **E-4 · `Registry.reset!` with no restore is a random-seed defect.** Two adapter examples failed on
 one seed and passed on the next. T-10's contract spec resets the registry; the adapters register
