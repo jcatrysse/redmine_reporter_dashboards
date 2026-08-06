@@ -31,6 +31,11 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight_
 # binary, so a host without either boots exactly as before and finds out at preflight.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/chromium_cdp'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/wkhtmltopdf'
+# The asset layer (T-33) and the seam that binds it to the render layer. It sits UPSTREAM
+# of render/ — see `assets.rb` for why it cannot live inside it (F-13b) — and like the
+# render layer, nothing calls it yet: T-23 onward build the producer that does.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/assets'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/asset_binding'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards
@@ -62,10 +67,61 @@ module RedmineReporterDashboards
     redmine_reporter_dashboards/glue/legacy/wk_legacy_shims
   ].freeze
 
+  # The plugin id, spelled once. `Setting.plugin_<id>` and the settings partial both need
+  # it, and two spellings of one identifier is how a settings read silently answers `{}`.
+  PLUGIN_ID = :redmine_reporter_dashboards
+
   module_function
 
   def lib_root
     File.dirname(__FILE__)
+  end
+
+  # --- The Redmine-facing half of the asset layer (T-33) ---
+  #
+  # `Assets::Policy` and `Assets::Origin` are pure value objects that read no settings
+  # and know nothing about Redmine (mechanism E5: config arrives as a port). These two
+  # methods are the ONLY place the two Redmine reads happen, and they are here rather
+  # than in `assets/` for that reason.
+  #
+  # NOT MEMOISED, deliberately. `Setting` is already cached by Redmine, and a memo here
+  # would hold a stale asset policy for the lifetime of the process — so an administrator
+  # who turns egress OFF would keep the old policy until a restart, which is the wrong
+  # direction for a security setting to be slow in.
+  def asset_policy(logger: nil)
+    Assets::Policy.from_settings(plugin_settings, logger: logger || safe_logger)
+  end
+
+  # `Setting.protocol` + `Setting.host_name` — Redmine's own answer to "what is our base
+  # URL" wherever there is no request to ask, which is every scheduled or queued render.
+  # `Liquid::Drops::AbsoluteUrl` wraps the same pair for the drop layer; this parses it,
+  # because the asset layer has to COMPARE hosts rather than concatenate them (F-15).
+  def asset_origin
+    Assets::Origin.from_settings(::Setting.protocol, ::Setting.host_name)
+  rescue StandardError => e
+    # An unconfigured or half-booted install. The fail-closed answer is an origin that
+    # matches nothing, which makes every absolute URL third-party — refused under the
+    # default policy rather than fetched by accident.
+    safe_logger&.warn("[reporter_dashboards] asset origin unavailable (#{e.class}); " \
+                      'no URL will be treated as same-origin')
+    Assets::Origin.new
+  end
+
+  # The store a production resolver reads from. `mappers` is the port through which the
+  # caller supplies anything Redmine owns — an attachment's `diskfile`, which needs a
+  # visibility decision this layer must not make (INV-1).
+  def asset_store(mappers: [])
+    Assets::LocalStore.new(roots: Assets::BundledAssets.roots, mappers: mappers)
+  end
+
+  def plugin_settings
+    ::Setting.send(:"plugin_#{PLUGIN_ID}") || {}
+  rescue StandardError
+    {}
+  end
+
+  def safe_logger
+    defined?(::Rails) && ::Rails.respond_to?(:logger) ? ::Rails.logger : nil
   end
 
   # Whether the optional redmine_reporter plugin is installed. One memo, owned by

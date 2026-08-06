@@ -44,6 +44,44 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **Asset policy — a new administration setting, defaulting to no network access at all.**
+  *Administration → Plugins → Redmine Reporter Dashboards.*
+
+  When a report is turned into a PDF, something has to obtain the images, stylesheets,
+  fonts and scripts it points at. The default — **Bundled** — reads them off this server's
+  own disk and embeds them in the document, so the PDF engine never touches the network.
+  A report that names something it cannot get that way is **refused, and the refusal names
+  the URL**; it is not rendered with a blank space where the picture was, because a gap in
+  a report is something a reader cannot tell from a report that never had a picture.
+
+  Two other values exist for installs that need them, and both are **allowlist-only**:
+
+  | Value | What it fetches |
+  |---|---|
+  | **Bundled** (default) | nothing. Local files are embedded; a URL elsewhere is refused |
+  | **Redmine** | URLs on this install, from hosts you list |
+  | **External** | as above, plus third-party hosts you list |
+
+  Three things about them are worth knowing before you change the setting:
+
+  - **Leaving the host allowlist empty makes every value behave exactly as Bundled.** A
+    half-finished configuration cannot open network access by accident, and the settings
+    page says so rather than showing you the value you picked and letting you assume it took
+    effect.
+  - **It is a setting for this install, never for a template.** There is no project setting
+    and no template field, because writing a report template is already permission to run
+    code on the server, and it must not additionally become permission to make the server
+    fetch things.
+  - **When a fetch is permitted, this plugin performs it and hands the engine the bytes** —
+    the PDF engine is never given the network. Fetches are HTTPS only, carry **no** cookie,
+    session, API key or `Authorization` header, follow no redirects, are size- and
+    time-capped, and are refused if the host name resolves to a private, loopback or
+    link-local address. An asset that needs your credentials to load is an asset a report may
+    not contain.
+
+  Charts, diagrams and fonts that ship with the plugin are unaffected by any of this and are
+  always embedded. No value of this setting can make a chart depend on network access.
+
 - **`{% chart %}` — one line per chart, and the plugin does the rest.** Compare it with
   what a chart costs in a template today: a `<canvas>` with a hand-picked width and
   height, a `<script>` that loads Chart.js 2.8 from a CDN, a Chart.js config, a data array

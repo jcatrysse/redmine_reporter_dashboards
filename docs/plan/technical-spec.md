@@ -80,9 +80,12 @@ lib/reporter_dashboards/
                  tags/{aggregate,version_rollup,chart}_tag.rb
   render/        document_request.rb page_furniture.rb result.rb failure.rb
                  capabilities.rb registry.rb renderer.rb
-                 asset_resolver.rb readiness.rb preflight.rb
-                 charts/{chart_spec,chart_layout,svg_renderer,chartjs_emitter}.rb
+                 asset_binding.rb readiness.rb preflight.rb
                  engines/{chromium_cdp,wkhtmltopdf}.rb
+  charts/        chart_spec.rb chart_layout.rb svg_renderer.rb chartjs_emitter.rb
+                 palette.rb collector.rb                       ← names NEITHER layer
+  assets/        policy.rb origin.rb reference.rb local_store.rb fetcher.rb
+                 document_scanner.rb resolver.rb resolution.rb  ← names NEITHER layer
   glue/          project_page.rb row_layout.rb block_settings.rb positioned.rb
                  legacy/  ← loaded ONLY when reporter is present; deleted at 1.0
 spec/            L1–L3 only. Never boots Redmine.
@@ -90,13 +93,35 @@ test/            L4 only. Boots the full app.
 script/gates/    layer_purity.sh zero_reporter.sh no_html_safe.sh compat_size.sh support_matrix.rb
 ```
 
+**`charts/` and `assets/` were inside `render/` in this tree until 2026-08-06, and could not
+be — findings F-13 and F-13b, settled by the curator rather than per task.** Both are named by
+the Liquid layer *and* by the render layer, and mechanism E3 keeps those two apart:
+
+* `{% chart %}` has to build a `ChartSpec`. Under `render/` it could not, because E3 forbids
+  `liquid/**` from naming `…Dashboards::Render`.
+* an asset resolver is made of `Net::HTTP`, and E3 forbids that under `render/**` — not as a
+  wording accident but because §5.1 requires resolution to happen "in the plugin, never in the
+  engine", and `document_request.rb`'s own contract says `body` arrives "already
+  asset-resolved". Resolution is *finished* before anything in `render/` runs.
+
+So both sit between the two layers, naming neither, and `layer_purity.sh` grew an arm for each
+so that "a neutral namespace" is enforced rather than asserted — otherwise the boundary would
+hold only until somebody followed the two hops `liquid/` → `charts/` → `Render`. What remains at
+the address this tree used to give `asset_resolver.rb` is **`render/asset_binding.rb`**: the
+render layer's statement of how a `Assets::Resolution` becomes a `DocumentRequest` or a
+`Failure(:asset_unresolved)`. It constructs render types and does no resolving.
+
+The general rule this settles: **when the tree and a mechanism disagree, the mechanism wins and
+the tree is corrected.** The mechanism is the half with a test, and relaxing E3's `Net::HTTP` or
+`Liquid` pattern to satisfy a directory listing is exactly what CLAUDE.md §7 forbids.
+
 ### 1.2 Boundary enforcement — five mechanisms, one CI job
 
 | # | Mechanism |
 |---|---|
 | E1 | `spec/` may not `require` from `app/` or `config/` |
 | E2 | `spec_helper.rb` **aborts** if `::Rails.application` or `::Redmine::Plugin` is defined at load |
-| E3 | `layer_purity.sh`: `render/**` must contain zero `Rails\.`, `ActiveRecord`, `Liquid`, `Issue`, `Net::HTTP`, `Faraday`, `cookie`, `session`; `aggregation/**` and `liquid/**` zero `ReporterDashboards::Render` |
+| E3 | `layer_purity.sh`: `render/**` must contain zero `Rails\.`, `ActiveRecord`, `Liquid`, `Issue`, `Net::HTTP`, `Faraday`, `cookie`, `session`; `aggregation/**` and `liquid/**` zero `ReporterDashboards::Render`; **`charts/**` and `assets/**` zero `ReporterDashboards::Render` AND zero `ReporterDashboards::Liquid`** — they are named by both, so they may name neither (§1.1, findings F-13/F-13b). `assets/**` is deliberately **not** forbidden `Net::HTTP`: being the one place in the plugin that holds a socket is its whole job |
 | E4 | `Rails::VERSION` / `Redmine::VERSION` only under `compat/`. The job **prints `compat/` LOC as a PR comment** — compatibility debt as a visible number is the only real defence against the "temporary adapter ossifies" fate ADR-004 names |
 | E5 | L3 takes `logger:` and `config:` as constructor ports |
 
@@ -684,6 +709,36 @@ plugin (§6) and are always inline. No asset policy value can make a chart depen
 separation is deliberate: the thing that must never break offline is not the thing an author points
 at.
 
+**AS BUILT (T-33, 2026-08-06) — two places where the implementation is stronger than the text, and
+one where it is narrower.**
+
+1. **`:asset_http` is never selected, in any mode, by any engine.** The table above gives
+   `:redmine`/`:external` as "fetched … over `:asset_http`". `Assets::Resolver` does not do that:
+   wherever a fetch is permitted, the PLUGIN fetches under the `Fetcher`'s caps and the engine
+   receives bytes — inline if it can, upload if it declares it. The paragraph above already
+   demands this ("Resolution happens in the plugin, never in the engine … so `:asset_http` stays
+   off even in `:external` mode wherever the engine supports upload"); the implementation drops
+   the qualifier, because an engine that supports only `asset_inline` can be handed a `data:` URI
+   just as easily and there is no case left where giving the renderer the network buys anything.
+   The capability stays in the vocabulary — an engine may still declare it, and an operator has
+   to be able to read that the model exists.
+2. **An empty allowlist collapses `:redmine` as well as `:external`.** The text says it of
+   `:external`. Extending it costs nothing: under `:bundled` a same-origin reference is rewritten
+   to the file on disk, which is better than fetching it. `Policy#collapsed?` exists so the
+   settings page can say the switch did nothing, rather than leaving an operator to believe it.
+3. **Structural inlining falls back to a `data:` URI when the bytes contain the element
+   terminator.** "CSS, JS and SVG inlined into the single document body" is done as a `<style>` /
+   `<script>` block — the form a 2011 WebKit certainly accepts — except where the file contains
+   `</style` or `</script`, which would close the block early and have everything after it parsed
+   as markup. That is an injection, not a rendering bug, so those fall back to base64, which
+   contains no `<`. Recorded as `Degradation(:asset_structural_fallback)`.
+
+**What T-33 did NOT do:** no shipped adapter consumes `DocumentRequest#assets` yet, because
+neither `:chromium_cdp` nor `:wkhtmltopdf` declares `:asset_upload` — the CDP `Fetch.enable`
+interceptor §5.1 describes is unbuilt. The upload branch is therefore proven at the resolver and
+not end to end, and the honest place for the interceptor is with the engine whose only model is
+upload (T-34) or a task of its own. Finding **F-16**.
+
 ### 5.2 Gotenberg becomes a shipped adapter *(OQ-3 closed 2026-08-04 by curator decision)*
 
 **Curator decision:** *"zeker, als een van de opties, goed gedocumenteerd en veilig"* — an
@@ -796,6 +851,28 @@ auto-scale. Testing: SVG goldens are **deterministic diffable text**; the Chart.
 `responsive: false` + a fixed canvas is still needed **on the wkhtmltopdf path**, so `{% chart %}`
 emits it from the **engine's capabilities**, not the author's choice — that is the concrete
 mechanism for G3.
+
+**F-14, DECIDED (2026-08-06): read "from the engine's capabilities" as "not from the author", and
+add no `:responsive_canvas` capability.** The clause's job is that the author cannot set it, and
+`ChartjsEmitter` derives it from the OUTPUT BINDING instead (`:html` → responsive, `:pdf` → fixed
+canvas, `devicePixelRatio: 1`, no animation). Three reasons a formal capability is the wrong shape
+rather than merely a cost:
+
+* a capability in this design answers *can the engine do X?* and feeds `Capabilities.negotiate`,
+  which has three outcomes — refuse, degrade-and-record, proceed. Responsiveness has none of them.
+  There is no engine that "cannot do responsive": every engine in the matrix draws a fixed page,
+  and reflowing is a property of a live browser window, not of an adapter.
+* **the `:html` binding has no engine at all.** `{% chart %}` renders into a live Redmine page with
+  no `DocumentRequest` and no adapter, and that is precisely the path where `responsive: true` is
+  the right answer. A capability whose value must be known where no engine exists is not a
+  capability.
+* the cost is not one matrix regeneration: it is a row in `capabilities.yml` for all three engines,
+  the per-adapter equality assertion the conformance suite makes, and a G9 matrix change — to add a
+  column that reads "no" three times and "n/a" for the binding that wants it.
+
+Hardened instead: `spec/charts/charts_spec.rb` asserts that `ChartSpec` has no `responsive`,
+`animation` or `devicePixelRatio` parameter and that the derived values do not move for anything an
+author can write. That makes G3's clause mechanical, which is what it was asking for.
 
 ### 6.1 Mermaid — R10's third library, previously analysed but never specified
 

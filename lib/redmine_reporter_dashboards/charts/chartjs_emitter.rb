@@ -48,11 +48,21 @@ module RedmineReporterDashboards
     # this emitter derives it: a print target gets a fixed canvas, deterministic
     # `devicePixelRatio` and no animation; a screen target gets a responsive one.
     #
-    # A formal `:responsive_canvas` capability in `Render::Capabilities` would be one
-    # notch better and is deliberately not added here: the vocabulary is closed, adding
-    # to it changes `config/capabilities.yml` for every engine, and gate G9 then requires
-    # the generated support matrix to move in the same PR. Recorded in
-    # `implementation-plan.md` §Findings F-14 rather than done quietly on the way past.
+    # A formal `:responsive_canvas` capability in `Render::Capabilities` is **not** added,
+    # and F-14 is CLOSED (2026-08-06) on the reason rather than on the cost. A capability
+    # answers "can the engine do X?" and feeds a negotiation with three outcomes — refuse,
+    # degrade-and-record, proceed. Responsiveness has none of them: no engine "cannot do
+    # responsive", because every engine draws a fixed page and reflowing is a property of a
+    # live browser window. And the `:html` binding — the one where the answer is yes — has
+    # **no engine at all**: `{% chart %}` renders into a Redmine page with no
+    # `DocumentRequest` and no adapter, so there is nothing to ask. A capability whose value
+    # must be known where no engine exists is not a capability.
+    #
+    # The clause's job (G3/FR-34) is that the AUTHOR cannot set it, and that is now
+    # mechanical: `spec/charts/charts_spec.rb` asserts `ChartSpec` has no `responsive`,
+    # `animation` or `devicePixelRatio` parameter, so a future field with one of those names
+    # breaks a test. If this is ever revisited, the honest shape is an explicit render
+    # binding (`:screen` / `:print`) — which is what `output` already is — not a capability.
     class ChartjsEmitter
       OUTPUTS = %i[html pdf].freeze
 

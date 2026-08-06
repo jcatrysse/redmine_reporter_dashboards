@@ -314,6 +314,39 @@ RSpec.describe RedmineReporterDashboards::Charts do
       [html, pdf].each { |options| expect(options['animation']).to be(false) }
     end
 
+    # F-14, DECIDED (T-33): the derivation stays and no `:responsive_canvas` capability is
+    # added. The reasoning, so this is reviewable rather than merely settled:
+    #
+    #   * a capability answers "can the engine do X?" and feeds a NEGOTIATION with three
+    #     outcomes — refuse, degrade-and-record, proceed. Responsiveness has none of them.
+    #     No engine "cannot do responsive": it is a property of the OUTPUT BINDING, because
+    #     a live page reflows and a PDF page is a fixed canvas of a known size
+    #   * the `:html` binding has NO ENGINE AT ALL. `{% chart %}` renders into a live
+    #     Redmine page with no `DocumentRequest` and no adapter — so a capability set, which
+    #     is a property of an engine adapter, cannot be consulted on the very path where
+    #     `responsive: true` is the right answer. A capability whose value must be known when
+    #     no engine exists is not a capability
+    #   * it would cost a row in `capabilities.yml` for all three engines, an equality
+    #     assertion per adapter, and a matrix regeneration under G9 — to add a column that
+    #     says "no" three times and "n/a" for the binding that wants it
+    #
+    # What the clause in §6 is FOR — "from the engine's capabilities, not the author's
+    # choice" — is that the author cannot set it. That is what this example makes mechanical.
+    it 'ignores an author who writes `responsive`, `animation` or `devicePixelRatio`' do
+      # `ChartSpec` has no parameter for any of them, so the emitter cannot be reached; the
+      # point of asserting it is that a future `ChartSpec` field named `responsive` would
+      # have to break this line rather than quietly winning.
+      %i[responsive animation devicePixelRatio device_pixel_ratio].each do |forbidden|
+        expect(C::ChartSpec.instance_methods).not_to include(forbidden), forbidden.to_s
+        expect { spec_for(forbidden => true) }.to raise_error(ArgumentError), forbidden.to_s
+      end
+
+      # And the derived values are unchanged by anything an author could put in the spec.
+      expect(config_for(title: 'responsive: true')['options']['responsive']).to be(true)
+      expect(config_for(output: :pdf, title: 'responsive: true')['options']['responsive'])
+        .to be(false)
+    end
+
     it 'performs the Chart.js 2→4 renames so no template has to' do
       horizontal = config_for(orientation: :horizontal)
 

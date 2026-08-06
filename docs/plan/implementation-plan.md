@@ -71,6 +71,7 @@ fact that CI has not yet run on this work at all.
 | T-19 | **done** — `liquid/filters.rb` + six registered modules, `liquid/html_scanner.rb`, four new lint rules, and the examples and README fixed. **21 owned filters**, registered PER RENDER (the default of `TemplateRenderer#render`, never `Template.register_filter`), with `OWNED`/`INHERITED`/`REMOVED`/`DEFERRED` as asserted constants so a security removal cannot come back as a convenience. **`| json` and `| js`** escape `< > & \ ' " ` $` and U+2028/9, in `\uXXXX` form so the output stays valid JSON for §6's `<script type="application/json">` block. **OQ-C is closed by measurement**: `where` and `sort_natural` inherited, `sum` owned for cross-major parity, and the `StandardFilters` name list **pinned per version so an unpinned Liquid fails the build**. The FR-19 lint now **parses** rather than regexes — `HtmlScanner` walks the document's states, and its spec is the argument: a commented-out script, a `>` inside an attribute, a `>` inside a Liquid expression and `<style>` were each answered wrongly before. **E-8's two rules shipped, which was the condition the curator's decision rested on**, plus a warning for `.all` and one error per removed filter carrying §3.6's reason. **The copy-paste surface is fixed and pinned**: both examples and all 25 README snippets are FR-19-clean, the frozen reference copies are asserted STILL defective because the verification cites them, and the other findings are held at a ratchet owned by T-16/T-11. The escaping regression table asserts the assembled block **PARSES** under node — 43 examples, because a "nothing executed" test would have passed the defect. Green on Liquid **4.0.4 and 5.13.0** (276 examples each), 1433 DB-less, 187 adapter, corpus byte-identical. **It found two defects in itself** (§Findings **E-14**) and left **F-10** for the curator |
 | T-20 | **done** — `{% geo_version_map %}` is a **deprecation shim**: same behaviour, same map shape, one log line per process (locked, so once means once under Puma), and `Version.visible` was already the scope. The addon's `VersionDrop` (108), `issue_drop_patch.rb` (43) and `custom_field_value_drop.rb` (32) are **deleted**, `register_issue_target_version_drop` with them, and **two `zero_reporter.allowlist` entries went with the files** — the ratchet shrank 18 → 16 rather than going stale. The linter gained `deprecated.geo_version_map` as a **warning, not an error**: the template still works, and `import:plan`'s "which templates need rework" is `errors.any?`. It also gained a counted usage marker, because the finding says *this breaks next minor* and the count says *this many templates must be touched first*. **It found two defects in itself and one gap in its own task definition** — §Findings **E-15** — and left **F-11** (the `issue.target_version` window before T-23) and **F-12** (`TagContext` reading `User.current`) for the curator. Green DB-less (1460, was 1433), Liquid **4.0.4 and 5.13.0** (278 each), and all six gates |
 | T-16 | **done** — `charts/` (palette, spec, layout, SVG renderer, Chart.js emitter, collector), `liquid/tags/chart_tag.rb`, `assets/javascripts/chart_boot.js`, **Chart.js 4.5.0 vendored** with its digest in `THIRD_PARTY.md` and a `vendor_integrity` gate that recomputes it. `{% chart %}` **emits no markup** — a placeholder and a `ChartSpec`, and the output binding decides: `<canvas>` + `<script type="application/json">` for HTML, inline `<svg>` for PDF with `<a xlink:href>` per element and no JavaScript at all. **One `ChartLayout` for both paths**, and the claim is MEASURED rather than argued: the falsifier renders a horizontal bar with twelve long labels in a real Chromium and compares `chart.chartArea` with `ChartLayout#plot` — worst edge **1.17%** against T-16's 2% tolerance, with Chart.js using exactly the ticks, min and max it was handed. **It found two defects doing so** (§Findings **E-16**), neither findable in Ruby. Ten SVG goldens as deterministic text; `responsive`/`animation`/`devicePixelRatio` derived from the output binding, never from the author (G3). Left for the curator: **F-13** (where the chart layer lives), **F-14** (a `:responsive_canvas` capability), **F-15** (the two legacy examples' CDN reference) |
+| T-33 | **done** — `assets/` (policy, origin, reference, content types, bundled assets, local store, fetcher, document scanner, resolver, resolution) plus `render/asset_binding.rb`, the plugin's first `settings` block and its admin partial, and two new `layer_purity` arms. **`:bundled` is the default and `:asset_http` is never selected** — not "off wherever the engine supports upload", but off in every mode for every capability shape, asserted against an engine declaring all three. An **empty allowlist collapses any upgraded mode to `:bundled`** and the collapse is asserted as an equality of body, refusals, counts and models — the fail-closed clause T-33 flags as most likely to be got wrong. The fetcher's closed header set is proven by a **recording double**, not by reading the file; the resolved-IP check runs **after** DNS and the connection is made to the checked address via `ipaddr=`, which is the only version that closes the rebinding window; size, time, redirect and inline caps each have an AT-and-one-past test. Containment is `realpath`, tested against a literal `..`, a percent-encoded one, a **double**-encoded one and a **symlink** inside the root pointing out of it. **Structural inlining falls back to base64 on `</style` / `</script`**, which is an injection rather than a rendering bug. 201 new DB-less examples; **1768 total, 0 failures**; all seven gates green, `layer_purity` strict, and both new arms **negative-tested**. It settled **F-13, F-13b, F-14** and answered **F-15**, and left **F-16** and **T-39** |
 | T-22 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -604,61 +605,142 @@ test would have compared a number with itself and passed for ever. The bottom ed
 1.17% is the legend box, which is NOT pinned — inside tolerance today, and the reason the
 falsifier is wired into the `render-smoke` job rather than run once.
 
-**F-13 · the spec's own tree and its own boundary mechanism disagree about where the chart
-layer can live.** §1.1 puts `charts/{chart_spec,chart_layout,svg_renderer,chartjs_emitter}.rb`
-under `render/`. §3.5 puts `charts` on `RenderContext`, which is the **Liquid** layer. And
-mechanism E3 (`layer_purity.sh`) forbids `liquid/**` from naming `…Dashboards::Render`.
-All three cannot hold: `{% chart %}` has to build a `ChartSpec`, and under `render/` it
-could not name one.
+**F-13 / F-13b · CLOSED 2026-08-06 by the curator, in T-33. The tree was wrong; the mechanism
+is right; both files stay in neutral namespaces and the gate now enforces it.**
 
-Built as `lib/redmine_reporter_dashboards/charts/`, naming neither layer, so both may name
-it and the gate is untouched. The mechanism won over the directory listing because the
-mechanism is the half with a test. Recorded rather than resolved: moving the files is a
-`git mv` plus a namespace change if the curator prefers the tree as written, and the
-alternative — two value objects and a converter with no home — was rejected because the
-converter's only possible owner is T-23.
+The conflict, restated once so nobody re-derives it. §1.1's tree put `charts/**` and
+`asset_resolver.rb` under `render/`. §3.5 puts `charts` on `RenderContext`, which is the
+**Liquid** layer. §5.1 requires that "resolution happens **in the plugin, never in the
+engine**". And mechanism E3 (`layer_purity.sh`) forbids `liquid/**` from naming
+`…Dashboards::Render` and forbids `render/**` from naming `Net::HTTP`, `Faraday`, `cookie`
+and `session`. Those cannot all hold: `{% chart %}` has to build a `ChartSpec`, and an asset
+resolver is made of the four things `render/` may not contain.
 
-**F-13b · the same conflict is waiting for T-33, and it is worse there.** §1.1's tree puts
-`asset_resolver.rb` under `render/`. §5.1 requires that "resolution happens **in the plugin,
-never in the engine**: the plugin fetches, validates and hands over bytes via
-`:asset_upload`". And E3's `render/**` pattern forbids `Net::HTTP`, `Faraday`, `cookie` and
-`session` — the four things an asset fetcher is made of.
+**The decision, and the reasoning rather than the verdict:**
 
-That is not an accident of the gate's wording; it is the gate agreeing with §5.1. The whole
-point of the inversion is that **the renderer is never the thing holding the network**, so a
-fetcher inside `render/` would contradict the invariant the directory exists to protect. The
-resolver belongs upstream of the render layer, where it builds the `DocumentRequest` whose
-`body` is already "a COMPLETE, already-asset-resolved document" — `document_request.rb`'s
-own comment says exactly that.
+1. **E3 is not an accident of wording; it is §5.1 and INV-8 in executable form.** The whole
+   content of the asset inversion is that *the renderer is never the thing holding the
+   network*. A fetcher inside `render/` would contradict the invariant that directory exists
+   to protect. This is not a gate being awkward about a file's address — it is the gate
+   agreeing with the specification against the tree.
+2. **The render layer's own contract already places resolution upstream of it.**
+   `document_request.rb` says `body` is "a COMPLETE, already-asset-resolved document
+   precisely so the engine never fetches anything on the viewer's behalf". By the time
+   anything in `render/` runs, resolution is *over*. So the resolver is not merely allowed to
+   live outside `render/`; it is required to, or that sentence is false.
+3. **When a listing and a mechanism disagree, the mechanism wins — and the listing gets
+   corrected.** The mechanism has a test and a negative test. §1.1 has neither. The tree is
+   now amended (`charts/` and `assets/` as siblings of `render/`), so the next task reads a
+   tree that matches the repository.
+4. **A neutral namespace says something true rather than dodging the question.** `ChartSpec`
+   is a value object the Liquid layer builds and the render layer draws; `AssetResolver`
+   produces the render layer's *input*. Both are upstream of, or shared between, the two
+   layers E3 separates. Putting a shared value object inside one of the two is what created
+   the conflict.
+5. **The cost of the alternative is the reason it was rejected.** Moving both under `render/`
+   requires deleting E3's `Liquid` pattern and its `Net::HTTP` pattern — the two with the most
+   security weight in the gate. CLAUDE.md §7: "never make a hard gate advisory to get to
+   green".
 
-Recorded here so T-33 does not spend a round discovering it: the neutral-namespace answer
-F-13 took for `charts/` applies unchanged, and `assets/` is the obvious home. Noted rather
-than decided, because it is the second file the tree and the mechanism disagree about, and
-two is the point at which the curator should settle the tree rather than have each task
-settle it again.
+**And a hole was closed while settling it.** "Names neither layer" was, until now, a property
+nothing checked, so the boundary held only until somebody followed two hops — `liquid/` names
+`charts/`, `charts/` names `Render`, and a per-file grep sees no violation in either file.
+`layer_purity.sh` now has an arm for `charts/**` and one for `assets/**`, each forbidding
+**both** `…Dashboards::Render` and `…Dashboards::Liquid`, and both were **negative-tested**
+(a planted constant in each direction fails the gate; a comment naming the same constant does
+not, which is the gate's existing comment-stripping rule). `assets/**` is deliberately *not*
+forbidden `Net::HTTP`: being the one place in the plugin that holds a socket is its whole job.
 
-**F-14 · `responsive` is derived from the output binding, and a capability would be one
-notch better.** §6 says `{% chart %}` emits it "from the **engine's capabilities**, not the
-author's choice". `Render::Capabilities::ALL` is a CLOSED vocabulary with no entry for it,
-and adding one changes `config/capabilities.yml` for every engine — at which point gate G9
-requires the generated support matrix to move in the same PR. So the emitter derives it
-from `output` (`:html` → responsive, `:pdf` → fixed canvas, `devicePixelRatio: 1`, no
-animation), which satisfies the clause that matters (the AUTHOR cannot set it, G3/FR-34)
-and not the letter of "capabilities". A `:responsive_canvas` capability is the tidier
-answer and is a curator call, not one to take on the way past.
+What sits at the address the tree used to give `asset_resolver.rb` is
+**`render/asset_binding.rb`** — the render layer's statement of how an `Assets::Resolution`
+becomes a `DocumentRequest` or a `Failure(:asset_unresolved)`. It constructs render types and
+does no resolving: no socket, no file, no model. A spec asserts that by reading the file's own
+non-comment lines, so the claim is not only a grep in CI.
 
-**F-15 · the two legacy examples still load Chart.js 2.8 from a CDN, and T-16 did not fix
-them.** `vendor_integrity.sh` finds both and runs in **warn** mode for that reason. They are
-Reporter report templates rendered by the HOST plugin, and migrating them needs two things
-this task cannot supply: a Chart.js 4 rewrite of hand-written 2.x configs (which would break
-the charts if the loader changed and the config did not), and an ABSOLUTE URL to the plugin
-asset — `/plugin_assets/…` is root-relative, and wkhtmltopdf resolves it against nothing,
-which is the same problem `Drops::AbsoluteUrl` exists to solve on the owned path. T-19's
-ratchet note assigned "the examples' Chart.js 2 idioms" to T-16 on the assumption that T-16
-would rewrite them with `{% chart %}`; it cannot, for F-11's reason. `examples/chart_tag_showcase.liquid`
-is the additive answer — a third example, held at ZERO findings, that writes no markup at
-all. The ratchets on the other two are unchanged, and flipping `VENDOR_INTEGRITY_MODE` to
-strict belongs with whoever retires them.
+**F-14 · CLOSED 2026-08-06 by the curator, in T-33: the derivation stays, and NO
+`:responsive_canvas` capability is added. The clause means "not from the author".**
+
+The question was whether §6's "emits it from the **engine's capabilities**, not the author's
+choice" requires a formal entry in `Render::Capabilities::ALL`. It does not, and the reason is
+not that adding one is expensive — it is that responsiveness is not the kind of fact a
+capability can hold.
+
+1. **A capability answers "can the engine do X?" and feeds a negotiation with three
+   outcomes** — refuse (essential and missing), degrade-and-record, proceed
+   (`Capabilities.negotiate`). Responsiveness has none of them. There is no engine that
+   "cannot do responsive": every engine in the matrix draws a fixed page of known size, and
+   reflowing is a property of a live browser window rather than of an adapter. A capability
+   nobody can fail is a capability that does nothing.
+2. **The `:html` binding has no engine at all — and that is the binding that wants
+   `responsive: true`.** `{% chart %}` renders into a live Redmine page with no
+   `DocumentRequest` and no adapter. A capability set is a property of an engine adapter, so
+   on the very path where the answer is "yes", there is nothing to ask. **A capability whose
+   value must be known where no engine exists is not a capability.** This is the argument that
+   settles it; the rest is cost.
+3. **The cost, for completeness.** Not one matrix regeneration: a row in `capabilities.yml`
+   for all three engines, the per-adapter equality assertion `conformance_spec.rb` makes
+   between `CAPABILITIES` and the YAML, and a G9 matrix change — to add a column reading "no"
+   three times and "n/a" for the binding that wanted it. An operator learns nothing from that
+   cell.
+
+**What the clause is FOR was hardened instead.** G3/FR-34 wants a template to need no
+engine-specific workaround, i.e. the author cannot set it. That was true only because nothing
+happened to read a `responsive:` parameter. `spec/charts/charts_spec.rb` now asserts that
+`ChartSpec` has no `responsive`, `animation`, `devicePixelRatio` or `device_pixel_ratio`
+parameter — a future field with one of those names has to break a test — and that the derived
+values do not move for anything an author can write into a spec. The mechanism is in the
+emitter's own comment and in §6.
+
+**If it is ever revisited:** the honest shape is not a capability but an explicit `binding:`
+on the render request (`:screen` / `:print`), which is what `output` already is. The
+`ChartjsEmitter` comment says so.
+
+**F-15 · ANSWERED 2026-08-06 in T-33. The absolute URL exists; it is the WRONG TOOL; and the
+blocker is not the URL. Split out as T-39, which is the only honest disposition.**
+
+The curator asked where the absolute plugin-asset URL should come from. Checked, and there are
+three separate answers, of which only the third matters.
+
+**1. Where it comes from, for the record.** `Setting.protocol` + `Setting.host_name` — which is
+what Redmine itself uses everywhere it must build a URL with no request to hang one off (mail,
+notifications). `Liquid::Drops::AbsoluteUrl` already wraps that pair for the drop layer;
+`Assets::Origin.from_settings` now parses it for the asset layer, which has to COMPARE hosts
+rather than concatenate them. Both preserve a sub-path prefix, which is the install a hand-built
+URL goes wrong on. So there was never a missing mechanism.
+
+**2. Why it must not be used here.** `<script src="https://redmine.example/plugin_assets/…">`
+turns a file sitting on the same disk as the renderer into an **egress requirement**. It fails
+on every install where the application cannot reach itself by its public name — internal DNS, a
+reverse proxy terminating TLS, a container with no route back — and it is precisely what
+`asset_policy: :bundled` exists to refuse. T-33's resolver runs the opposite direction: a
+same-origin URL is mapped BACK to the file on disk and inlined (§5.1's `:bundled` row). Building
+the URL would be work whose only purpose is to be undone.
+
+**3. The actual blocker, which is NOT the URL.** `{% chart %}` returns
+`placeholder(refused: 'no_render_context')` when there is no owned `RenderContext`
+(`chart_tag.rb:63`), and a Reporter-rendered template has none — so the two legacy examples
+cannot migrate to `{% chart %}` at all until the owned render path exists (T-23 onward). That is
+the real reason T-16 could not touch them, and it is deeper than the sentence this finding used
+to carry.
+
+**What that leaves, and why it is a task and not a line in this one.** The correct fix for the
+two examples is to stop naming the library by URL and let the plugin put the vendored bytes in
+the document — for which T-33 supplies the reader (`Assets::BundledAssets` +
+`Assets::LocalStore`, digest-checked against `THIRD_PARTY.md` by a spec). But inlining Chart.js
+**4** under configs written for **2.8** breaks the charts, so the migration is inseparable from
+the 2→4 config rewrite §6 enumerates (`scales.xAxes[]`→`scales.x`, `options.legend`→
+`options.plugins.legend`, `horizontalBar`→`bar`+`indexAxis:'y'`, `getElementAtEvent`→
+`getElementsAtEventForMode`, `ticks.fontSize`→`ticks.font.size`). And verifying THAT needs a
+host-plugin render of those templates in a browser, which this repository cannot perform — the
+host plugin is private (CLAUDE.md §11.6, "something you cannot reach").
+
+So: **T-39**, with its verification obligation stated rather than assumed.
+`VENDOR_INTEGRITY_MODE` stays **warn** for exactly the two lines
+(`sample_report_template.liquid:82`, `version_status_dashboard.liquid:147`), the gate's own
+comment now names T-39 instead of "whoever retires them", and the ratchets in
+`shipped_templates_lint_spec.rb` are unchanged. Flipping to strict is T-39's deliverable, and
+it is 2 lines of gate configuration behind a real body of verified work — not the other way
+round.
 
 **F-11 · `issue.target_version` has a WINDOW with no implementation, and it is T-20's doing.**
 The prepend into the host plugin's issue drop is deleted, as T-20 requires. The accessor did
@@ -676,6 +758,13 @@ the entry states it plainly, and the deprecated `{% geo_version_map %}` reaches 
 version metadata meanwhile), or hold the deletion until T-23 lands. The second costs an
 allowlist entry and a monkey-patch for one more release; the first costs a feature gap in
 templates that use it.
+
+**CLOSED 2026-08-06 by the curator: ship the window.** The first option, which is what T-20
+already did — so nothing changes in the code. What the decision buys is that the CHANGELOG
+entry is now the AGREED disposition rather than an implementer's default, and T-23 inherits
+the obligation to close the window rather than the option of noticing it. The deprecated
+`{% geo_version_map %}` remains the interim route to the same version metadata, and that is
+the sentence a template author needs; it is in the CHANGELOG in those words.
 
 **F-12 · `Liquid::TagContext` reads `User.current`, and whether that is INV-1 kept or INV-1
 bent is a curator call.** F-11's consumer needed answering: `{% version_rollup %}` must hand
@@ -713,6 +802,56 @@ gem's, and the gem is what this plan removes. Recorded rather than decided becau
 scope call: if a real template needs to embed an attachment before T-33 lands, that is worth
 knowing. `Filters::DEFERRED` names the task, and a spec asserts the filter is absent so it
 cannot be added here by accident.
+
+**STILL DEFERRED after T-33, and the reason has changed — so it is worth reading rather than
+assuming.** T-33 built `asset_policy`, which was the stated blocker, and did **not** add
+`| inline`. What T-33 also established is that the filter is no longer needed for the case it
+was wanted for: `Assets::Resolver` walks the finished document and inlines every local
+reference, so an author writing `<img src="/attachments/download/7/plan.png">` on the owned
+path gets the bytes embedded **without any filter at all** — provided the caller supplies the
+attachment mapper (`LocalStore#mappers`, the port that keeps the visibility decision with the
+actor, INV-1).
+
+So `| inline` has narrowed from "the embedding mechanism" to "an explicit override of it", and
+the remaining question is whether a template needs one. That is a real question and it belongs
+with the producer that first has a document to resolve — **T-23** — not with the layer
+underneath it. `Filters::DEFERRED` should be repointed from T-33 to T-23 when that lands; it is
+left naming T-33 today because moving it now would claim a decision T-23 has not made. The
+security property is unchanged either way: any `| inline` must go through
+`Assets::Policy`/`LocalStore`, or it is the second embedding path this finding exists to
+prevent.
+
+**F-16 · nothing consumes `DocumentRequest#assets` yet, so T-33's upload model is proven at the
+resolver and NOT end to end.** §5.1 says "the CDP interceptor makes the reference engine
+implement it too" — `Fetch.enable` request interception serving `request.assets` from memory.
+That interceptor is unbuilt, and neither `:chromium_cdp` nor `:wkhtmltopdf` declares
+`:asset_upload` in `config/capabilities.yml`. The resolver therefore always chooses `:inline`
+for both shipped engines, which is correct and fully exercised; the upload branch is tested
+against a capability set that declares it.
+
+**It was NOT added in T-33, deliberately.** Declaring `:asset_upload` on `:chromium_cdp` is a
+capability change, and a capability this project declares and does not deliver is INV-7's exact
+sin — G12's three-state rule turns it from a skip into a hard failure. Honouring it means a CDP
+interceptor, a conformance fixture that proves an intercepted request is actually served, and a
+matrix regeneration under G9. The natural owner is **T-34**, whose engine's only asset model IS
+upload, and which therefore cannot be written without it. Until then `DocumentRequest#assets` is
+carried and unread — the same status it has had since T-10, now with a producer that can fill
+it.
+
+**T-39 · migrate the two legacy examples off the CDN, and flip `vendor_integrity` to strict.**
+The work F-15 could not do, with the verification obligation it needs, kept as a task so it is
+schedulable rather than a sentence in a finding. *Touches:* `examples/sample_report_template.liquid`,
+`examples/version_status_dashboard.liquid`, `script/gates/vendor_integrity.sh`,
+`spec/shipped_templates_lint_spec.rb`. *Accept:* both examples load Chart.js from the plugin's
+vendored copy with **no network reference of any kind** — asserted by `vendor_integrity.sh` in
+**strict** mode, which is the gate this task exists to flip; the 2→4 config rewrite §6 enumerates
+is complete in both files; **each example is rendered in a real browser and the charts are
+asserted to have drawn**, because inlining Chart.js 4 under a 2.8 config produces a document that
+looks fine and contains no charts; and the per-file ratchets in `shipped_templates_lint_spec.rb`
+are **lowered**, never raised. *Blocked on:* a host-plugin render, which needs the private
+`redmine_reporter` plugin (CLAUDE.md §11.6) — so the browser assertion has to run either against
+a checkout that has it or against the owned render path once T-23 lands. State that choice in the
+PR rather than skipping the assertion.
 
 **E-12 · `@context` belongs to `Liquid::Drop`, and a drop that stores its own there breaks
 Liquid's internals.** Found by T-18's first spec run, three frames from the cause. `RecordDrop`
@@ -1498,7 +1637,12 @@ from warn to **hard gate**; `glue/legacy/` deleted; the secret-gated job deleted
 `scope_resolution.rb` deleted.
 
 **T-33 · The asset-resolution triple + `asset_policy`** *(deps: T-12; blocks nothing after T-13)*
-*Touches:* `render/asset_resolver.rb`; `render/engines/*` capability sets; settings.
+**DONE 2026-08-06.** *Touches (as built, and the address moved — findings F-13/F-13b):*
+`assets/{policy,origin,reference,content_types,bundled_assets,local_store,fetcher,document_scanner,resolver,resolution}.rb`;
+`render/asset_binding.rb`; `script/gates/layer_purity.sh` (two new arms); `init.rb` +
+`app/views/settings/_reporter_dashboards.html.erb` + nine locale files. **No engine capability set
+changed** — see finding **F-16** for why declaring `:asset_upload` on `:chromium_cdp` is T-34's
+work and not a line here.
 *Accept:* one `AssetResolver` walk choosing the **most restrictive model the engine declares**;
 `:bundled` default proves a correct PDF with the engine's name resolution denied; a third-party URL
 under `:bundled` yields `Failure(:asset_unresolved)` **naming the URL**, not a blank image; an empty

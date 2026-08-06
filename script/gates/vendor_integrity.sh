@@ -25,6 +25,27 @@ set -euo pipefail
 #   VENDOR_INTEGRITY_MODE=warn    (default) report, exit 0 on an egress finding
 #   VENDOR_INTEGRITY_MODE=strict  any finding fails. What CI runs.
 #
+# --- WARN MODE HAS EXACTLY TWO KNOWN FINDINGS, AND ONE OWNER: T-39 ---
+#
+# `examples/sample_report_template.liquid:82` and
+# `examples/version_status_dashboard.liquid:147` assign a cdnjs Chart.js 2.8 URL to
+# `window.GEO_CHARTJS_SRC`. Both are Reporter report templates rendered by the HOST plugin,
+# and migrating them is NOT a matter of writing a different URL — finding **F-15**, answered
+# in T-33:
+#
+#   * an absolute plugin-asset URL turns a file on the renderer's own disk into an EGRESS
+#     REQUIREMENT, which is what `asset_policy: :bundled` exists to refuse. The URL exists
+#     (`Setting.protocol` + `Setting.host_name`, via `Assets::Origin`) and is the wrong tool
+#   * `{% chart %}` is INERT without an owned `RenderContext`, which a host-plugin render has
+#     none of, so they cannot migrate to the tag until T-23
+#   * inlining the vendored Chart.js **4** under configs written for **2.8** produces a
+#     document that looks fine and contains no charts, so the 2->4 rewrite is inseparable
+#     from it — and verifying that needs a browser render of those templates
+#
+# So this stays warn until **T-39** does that work, and flipping it to strict is T-39's
+# deliverable rather than a cleanup somebody can take on the way past. Do not flip it to
+# silence the two lines; they are the finding.
+#
 # A DIGEST MISMATCH FAILS IN BOTH MODES. There is no reading of a changed vendored
 # library that is a warning.
 

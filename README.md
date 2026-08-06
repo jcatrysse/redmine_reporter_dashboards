@@ -298,6 +298,72 @@ Three things worth knowing about the output:
   `RRD_ENGINE=<id>` limits it to one engine; `RRD_FORMAT=json` prints the report as
   JSON for an issue or a log.
 
+## Where a report's images and stylesheets come from
+
+**Administration → Plugins → Redmine Reporter Dashboards.**
+
+A PDF is produced by handing a document to a rendering engine. Something has to obtain the
+images, stylesheets, fonts and scripts that document points at, and there are only three ways
+to do it: embed them in the document, send them alongside it, or let the engine go and fetch
+them. Only the third needs network access, and by default this plugin does not use it.
+
+| Asset policy | Local files | URLs on this Redmine | URLs anywhere else |
+|---|---|---|---|
+| **Bundled** (default) | embedded | mapped back to the file on disk and embedded | **refused, naming the URL** |
+| **Redmine** | embedded | fetched, from hosts you list | refused |
+| **External** | embedded | as above | fetched, from hosts you list |
+
+### The default refuses rather than leaving a gap
+
+Under **Bundled**, a report that references something not on this server's disk is **not
+rendered**. You get a failure that names the URL, a correlation id, and the reason. That is
+deliberate: a PDF with an empty rectangle where a chart used to be is indistinguishable from a
+PDF that never had one, and if the report is an audit record that difference matters.
+
+### Three properties that are not preferences
+
+- **An empty host allowlist makes every value behave exactly as Bundled.** If you select
+  *External* and save without adding a host, nothing is fetched — and the settings page tells
+  you so, rather than showing you the value you chose and letting you assume it took effect.
+  A half-finished configuration cannot open network access by accident.
+- **It is a setting for this install, never for a report.** There is no project setting and no
+  template field. Writing a report template is already permission to run code on this server;
+  it must not additionally be permission to make the server fetch things. Nothing a template
+  contains — a `<meta>` tag, a comment, a query string — changes this setting.
+- **When a fetch is allowed, the plugin fetches and the engine gets bytes.** The rendering
+  engine is never given network access, in any mode. Fetches are HTTPS only; carry **no**
+  cookie, session, API key or `Authorization` header; follow **no** redirects; are size-capped
+  and time-capped; and are refused when the host name resolves to a private, loopback or
+  link-local address — checked *after* the name is resolved, and the connection is then made to
+  the address that was checked. An asset that needs your credentials in order to load is an
+  asset a report may not contain.
+
+### Host names, not patterns
+
+One host name per line. No scheme, no port, no path, and **no wildcards** — `*.example.com` is
+rejected rather than interpreted, because `*.example.com` matching
+`evil.example.com.attacker.net` is the classic way an allowlist turns out not to have been one.
+A listed host does not authorise its subdomains.
+
+### The two size settings
+
+- **Embed assets up to (bytes)** — default 512 KiB. Above this an asset travels alongside the
+  document rather than inside it, on engines that support that. This is a cost setting: base64
+  encoding grows a file by a third, and past some size a second round trip is cheaper. Neither
+  shipped engine supports the alongside model yet, so today a larger asset is embedded anyway
+  and the render records that it did.
+- **Refuse assets above (bytes)** — default 8 MiB. A hard limit. A larger asset is refused and
+  named.
+
+Values outside the supported range are not stored: they are replaced by the default, written to
+the log, and listed on the settings page under *Some saved values could not be used*.
+
+### Charts and fonts are never affected
+
+Chart.js and the fonts this plugin ships are always embedded, whatever the asset policy says.
+No value of this setting can make a chart depend on network access — the thing that must keep
+working offline is not the thing a report author points at.
+
 ## Enabling the dashboard for a project
 
 1. Open **Project → Settings → Modules** and enable **Project dashboard**.

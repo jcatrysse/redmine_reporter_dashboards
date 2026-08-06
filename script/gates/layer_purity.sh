@@ -53,10 +53,31 @@ BASE='lib/redmine_reporter_dashboards'
 # this gate failed on each; `sessionId` alone passed.
 #
 # Layer, path, forbidden pattern, and the reason in one line for the failure message.
+# --- THE TWO NEUTRAL LAYERS, AND WHY THEY ARE CHECKED AT ALL (T-33, findings F-13/F-13b) ---
+#
+# `charts/` and `assets/` sit BETWEEN the Liquid layer and the render layer, naming
+# neither, so that both may name them. §1.1's tree put both inside `render/` and neither
+# can go there: `{% chart %}` has to build a `ChartSpec`, and an asset resolver is made of
+# `Net::HTTP` — the first would need `liquid/**` to name the render layer and the second
+# would need `render/**` to hold the network. Those are the two patterns above with the
+# most security weight, and relaxing either to satisfy a directory listing is exactly what
+# CLAUDE.md §7 forbids ("never make a hard gate advisory to get to green").
+#
+# The curator settled the tree rather than having each task settle it again, and these two
+# arms are what stop "a namespace that names neither layer" from decaying into "the place
+# where anything is allowed". Without them the boundary would hold TRANSITIVELY only by
+# luck: `liquid/` naming `charts/` naming `Render` reaches the render layer in two hops,
+# and a per-file grep sees neither hop as a violation.
+#
+# `assets/**` deliberately does NOT forbid `Net::HTTP` — it is the fetcher, and being the
+# one place in the plugin that holds a socket is its entire job. What it may not do is be
+# reachable from, or reach into, the render layer.
 LAYERS=(
   "render|$BASE/render|Rails\.|ActiveRecord|Liquid|Issue|Net::HTTP|Faraday|cookie|session([^I]|$)|the render path is L3: given a DocumentRequest it returns bytes, and it must not be able to reach a model, a session or the network"
   "aggregation|$BASE/aggregation|(Reporter|RedmineReporter)Dashboards::Render|the aggregation kernel answers numbers; it must not know how they are drawn"
   "liquid|$BASE/liquid|(Reporter|RedmineReporter)Dashboards::Render|the Liquid layer binds a scope and renders tags; it must not reach into the render path"
+  "charts|$BASE/charts|(Reporter|RedmineReporter)Dashboards::(Render|Liquid)|the chart layer is named by BOTH the Liquid and the render layer, so it must name neither — or the boundary between them holds only until somebody follows the two hops"
+  "assets|$BASE/assets|(Reporter|RedmineReporter)Dashboards::(Render|Liquid)|the asset layer holds the network and runs UPSTREAM of the render layer; Render::AssetBinding is the seam, and it lives in render/ precisely so this directory does not have to name it"
 )
 
 # Search, and DIE if the search itself failed.

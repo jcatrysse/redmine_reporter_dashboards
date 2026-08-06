@@ -264,6 +264,20 @@ harness boots ActiveRecord *without* Rails and defines a stub `Rails` module car
 so `Rails::VERSION::STRING` genuinely does not exist in that process. `active_record` is the
 load-bearing figure there.
 
+**A SHALLOW CLONE makes gate G7's baseline specs FAIL, and the failure reads as a real
+G7 violation.** Cost 20 minutes on 2026-08-06. A cloud session starts from
+`git clone --depth 1` with no tags, so `Baseline::COMMIT` (`eddb8fa…`) is unreachable and
+nine examples in `spec/golden/` go red with *"lib/sql_aggregation/drill_through.rb is
+unreadable at the baseline commit"* — which is precisely what a genuine byte-identity
+breach would say. The fix is one command, and it should be the FIRST thing tried:
+
+    git fetch --unshallow origin
+
+Note the difference from the mirror case above: inside `redmine/plugins/<name>/` there is
+no `.git` at all and the examples *skip*. Here `.git` exists and is incomplete, so they
+FAIL. Two environments, two symptoms, one cause. Do **not** "fix" it by editing the SHA —
+`baseline.rb` says why in as many words.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
@@ -381,6 +395,8 @@ record as of the last local run.
 | **T-20: the retirement, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | **1460 DB-less examples** (was 1433), 0 failures, 114 pending — the deprecation shim's log-once, both `TagContext` branches, the retired-surface guard and the six inert-block lint cases. **278 spec_liquid under each major** (was 276), including the two version-project spellings `{% version_rollup %}` templates read. All six gates green, `LAYER_PURITY_MODE=strict` included, and `zero_reporter` down to **16 files / 16 entries** from 18. The retired-surface guard was **negative-tested**: a planted `Object.const_get('RedmineReporter::Liquid::Drops::IssueDrop')` fails it, a comment naming the class does not. **NOT RUN HERE: adapter, corpus, minitest** — no database and no Redmine checkout in this container, so CI is their first execution |
 | **T-16: the chart layer, DB-less** | **yes, locally (2026-08-06)** | **1562 rspec examples, 0 failures** (was 1462), including 10 SVG goldens as deterministic text, the six families through both emitters, and the escaping payload set through the JSON data block. All seven gates green, `vendor_integrity` new and **negative-tested on all three arms** — a corrupted vendored byte, an unmanifested vendored file, and a planted CDN reference each fail it |
 | **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
+| **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1768 rspec examples, 0 failures** (was 1562), 116 pending — 201 new: the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
+| **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -598,6 +614,53 @@ of a CI that runs on fork pull requests.
    `Liquid::Filters::Escaping` keeps the constants as aliases. Two copies of a
    security-bearing escaper was the alternative, and the copy that drifts is always the one
    without a test.
+
+16. **T-33 is done — the asset triple, one policy, and the plugin's first settings block.**
+   `assets/` (ten files) + `render/asset_binding.rb`. Six things a later session should know, and
+   the first two will cost time if they are not known.
+
+   **THE TREE IN §1.1 IS NOW CORRECT, AND IT WAS NOT BEFORE.** F-13 and F-13b are **closed by
+   the curator**: `charts/` and `assets/` are siblings of `render/`, naming neither the render
+   layer nor the Liquid layer, and `layer_purity.sh` has an arm for each. Do not "tidy" either
+   into `render/` — the gate will stop you, and the gate is right: a fetcher inside `render/`
+   contradicts the invariant that directory exists to protect. The two arms were
+   **negative-tested** (a planted constant in each direction fails; a comment naming the same
+   constant does not).
+
+   **`:asset_http` IS NEVER SELECTED — read that before "fixing" the `:redmine`/`:external`
+   rows of §5.1's table.** The table says those modes fetch "over `:asset_http`". The resolver
+   does not: wherever a fetch is permitted the PLUGIN fetches and the engine receives bytes.
+   That is stronger than T-33's acceptance clause ("off wherever the engine supports upload")
+   and it is deliberate — §5.1's own inversion paragraph demands it. §5.1 now carries an
+   AS BUILT section saying so. A spec drives an engine declaring all three models in
+   `:external` mode and asserts `:inline` comes back.
+
+   **A FROZEN VALUE OBJECT AND A LAZY MEMO CANNOT COEXIST, and it cost the first smoke run.**
+   `Reference` memoised `url` and `classification` on first use and every accessor raised
+   `FrozenError`. Everything derived is now computed in the constructor before `freeze`. The
+   code READ correctly; only running it found this. The same shape is waiting in any value
+   object in this repository that grows a memo.
+
+   **THE SCANNER'S NEGATIVES ARE THE WHOLE POINT, and they are E-14 one layer further in.** A
+   URL in an HTML comment is never fetched (refusing the document over it is wrong); a URL in a
+   `<script>` BODY is a string in a program (rewriting it corrupts the program); a URL in a
+   `<textarea>` is text a reader is meant to see. All three are skipped by tracking element
+   state. And `<style>` bodies are the opposite case — `url()` in there IS a subresource. Every
+   one of those has a spec, because each is a HOLE rather than a false positive.
+
+   **`srcset` IS ONE REFERENCE, NOT N, AND THE REASON IS A COMMA.** A `data:` URI contains one
+   (`data:image/png;base64,…`) and `srcset` is comma-separated, so splicing a replacement per
+   candidate produces an attribute that no longer parses. The first candidate is resolved, the
+   whole attribute value is replaced, and the rest are dropped with
+   `Degradation(:asset_srcset_collapsed)` — visibly, because a PDF page has one pixel density
+   and silently dropping alternatives is still dropping them.
+
+   **NOTHING CONSUMES `DocumentRequest#assets` YET.** Neither shipped adapter declares
+   `:asset_upload`, so the resolver always chooses `:inline` for both — correct and fully
+   exercised — and the upload branch is proven at the resolver against a capability set that
+   declares it. Declaring the capability without building the CDP `Fetch.enable` interceptor
+   would be INV-7's exact sin, and G12 turns it from a skip into a hard failure. Finding
+   **F-16**; the owner is T-34, whose engine's only model IS upload.
 
 12. **T-18 is done — the owned drop layer.** `liquid/drops/` (12 classes + 3 bases),
    `liquid/batch.rb`, `liquid/diagnostics.rb`, and `RenderContext` grown a `batch`, a

@@ -35,6 +35,26 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
   # make Redmine refuse to load this plugin without it.
   requires_redmine version_or_higher: '5.1'
 
+  # --- Asset policy (T-33; technical-spec.md §5.1, FR-64) ---
+  #
+  # `:bundled` is the default and it is the whole security posture: no egress, third-party
+  # URLs refused with the URL named. The two upgraded modes are PER INSTALL and never per
+  # template — there is deliberately no project setting and no template field for them,
+  # because template authoring is already a code-execution privilege (INV-9) and must not
+  # additionally become a network privilege.
+  #
+  # Redmine performs NO validation on plugin settings, so every value here is coerced and
+  # bounded on the way OUT, in `Assets::Policy.from_settings`, which drops an out-of-range
+  # value with a log line rather than storing it (FR-15). The defaults below are therefore
+  # the documented ones and not the enforcement.
+  settings default: {
+             'asset_policy' => 'bundled',
+             'asset_allowlist' => '',
+             'inline_max_bytes' => RedmineReporterDashboards::Assets::Policy::DEFAULT_INLINE_MAX_BYTES.to_s,
+             'asset_max_bytes' => RedmineReporterDashboards::Assets::Policy::DEFAULT_ASSET_MAX_BYTES.to_s
+           },
+           partial: 'settings/reporter_dashboards'
+
   project_module :reporter_project_dashboards do
     permission :view_reporter_project_page, { reporter_project_pages: [:show, :report_pdf] }, read: true
     permission :manage_reporter_project_page, {

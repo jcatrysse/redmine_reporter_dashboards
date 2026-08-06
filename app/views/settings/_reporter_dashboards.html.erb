@@ -1,0 +1,89 @@
+<%#
+  T-33 — the asset policy, for an administrator (technical-spec.md §5.1, FR-64).
+
+  Redmine's own chrome only: `.box.tabular`, `p`, `em.info`, `.warning`. CLAUDE.md §4
+  forbids plugin-local design tokens in chrome, and this partial has none — Redmine
+  renders it inside its own settings `<form>`, so there is no form tag and no submit
+  button here either.
+
+  --- THE ONE THING THIS PAGE MUST NOT DO IS LOOK LIKE IT WORKED WHEN IT DID NOT ---
+
+  §5.1 makes an empty allowlist collapse `:redmine` and `:external` back to `:bundled`,
+  so misconfiguration fails closed. That is the right behaviour and an invisible one: an
+  administrator who selects "external" and saves would otherwise see the dropdown they
+  chose and conclude egress is on. `Policy#collapsed?` is why the warning below exists,
+  and `Policy#dropped` is why the second one does — a value that was silently clamped is
+  a value somebody will later swear they set.
+%>
+<%
+  # THE `settings` LOCAL, not `Setting.plugin_…`. Redmine's settings controller renders this
+  # partial with `locals: { settings: …, plugin: @plugin }`, and that local is what the
+  # administrator just posted. Reading the stored value instead would show them the saved
+  # settings after a save that did not take, which is the one moment they need to see their own
+  # input.
+  #
+  # `local_assigns[:settings]` rather than `defined?(settings)`: `defined?` on a bare name in a
+  # view answers "method" as readily as "local-variable", so a helper named `settings` on any
+  # Redmine branch — present or added later — would silently be called instead. `local_assigns`
+  # asks the only question that is actually being asked.
+  raw = local_assigns[:settings] || RedmineReporterDashboards.plugin_settings
+  policy = RedmineReporterDashboards::Assets::Policy.from_settings(raw)
+
+  # THE RAW ALLOWLIST IS WHAT GOES BACK IN THE TEXTAREA, not `policy.allowlist`. Showing the
+  # normalised list would silently delete the operator's rejected line — they would reload,
+  # see a tidy list, and never connect it to the warning below. The warning names what was
+  # dropped; the field still holds what they typed, so they can fix it.
+  raw_allowlist = raw['asset_allowlist'] || raw[:asset_allowlist] || policy.allowlist.join("\n")
+%>
+<div class="box tabular">
+  <p>
+    <label for="settings_asset_policy"><%= l(:label_reporter_asset_policy) %></label>
+    <%= select_tag('settings[asset_policy]',
+                   options_for_select(
+                     RedmineReporterDashboards::Assets::Policy::MODES.map { |mode|
+                       [l(:"label_reporter_asset_policy_#{mode}"), mode.to_s]
+                     },
+                     policy.mode.to_s
+                   ),
+                   id: 'settings_asset_policy') %>
+    <em class="info"><%= l(:text_reporter_asset_policy_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_asset_allowlist"><%= l(:label_reporter_asset_allowlist) %></label>
+    <%= text_area_tag('settings[asset_allowlist]', raw_allowlist,
+                      rows: 4, cols: 40, id: 'settings_asset_allowlist') %>
+    <em class="info"><%= l(:text_reporter_asset_allowlist_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_inline_max_bytes"><%= l(:label_reporter_asset_inline_max_bytes) %></label>
+    <%= text_field_tag('settings[inline_max_bytes]', policy.inline_max_bytes,
+                       size: 12, id: 'settings_inline_max_bytes') %>
+    <em class="info"><%= l(:text_reporter_asset_inline_max_bytes_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_asset_max_bytes"><%= l(:label_reporter_asset_max_bytes) %></label>
+    <%= text_field_tag('settings[asset_max_bytes]', policy.asset_max_bytes,
+                       size: 12, id: 'settings_asset_max_bytes') %>
+    <em class="info"><%= l(:text_reporter_asset_max_bytes_info) %></em>
+  </p>
+</div>
+
+<% if policy.collapsed? %>
+  <div class="warning">
+    <%= l(:text_reporter_asset_policy_collapsed, mode: l(:"label_reporter_asset_policy_#{policy.mode}")) %>
+  </div>
+<% end %>
+
+<% if policy.dropped.any? %>
+  <div class="warning">
+    <p><%= l(:text_reporter_asset_settings_dropped) %></p>
+    <ul>
+      <% policy.dropped.each do |entry| %>
+        <li><%= "#{entry[:key]}: #{entry[:value].inspect} — #{entry[:reason]}" %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
