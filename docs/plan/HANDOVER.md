@@ -187,10 +187,26 @@ happened to be on PATH. Reproduce the CI environment before pushing:
 The rule is CLAUDE.md §6: an example about a check's *reasoning* stubs `PdfInspector.available?`
 rather than inheriting it. Only examples that genuinely need real probes may skip on their absence.
 
-**wkhtmltopdf cannot be installed here.** Its package is gone from Ubuntu 24.04's archive and only
-exists as a release `.deb`. So `:wkhtmltopdf` is CI-only, exactly like MariaDB and MySQL, and its
-`verification: pending` in `config/capabilities.yml` is what keeps twenty unmeasured cells out of
-the support matrix. **Promote it in the commit that reads a green CI run, not before.**
+**CORRECTED 2026-08-06 — wkhtmltopdf IS installable here, and this entry said the opposite for
+three sessions.** The claim was that its package "is gone from Ubuntu 24.04's archive and only
+exists as a release `.deb`", which made `:wkhtmltopdf` CI-only like MariaDB and MySQL. It is in
+**noble/universe as `0.12.6-2build2`** and installs cleanly:
+
+    sudo apt-get update && sudo apt-get install -y wkhtmltopdf     # 0.12.6
+    sudo apt-get install -y poppler-utils                           # the corpus needs the probes
+
+The trap behind the wrong conclusion is worth more than the correction: the container's apt index
+is STALE, so the first `apt-get install` fails with a wall of `404 Not Found` on unrelated
+dependencies (`libinput10`, `udev`, `avahi`). That reads as "the archive no longer carries this",
+and it means "run `apt-get update` first". CLAUDE.md §4 has the same lesson about a different
+stale premise; this is the second one.
+
+**What that unlocks:** the corpus can be run against BOTH engines locally, so `:wkhtmltopdf`'s
+results are reproducible rather than one CI cell — and OQ-L (Mermaid under its 2011 WebKit) becomes
+measurable here as soon as T-35 vendors Mermaid. Its `verification: pending` in
+`config/capabilities.yml` is still what keeps unmeasured cells out of the matrix, and **promotion
+remains a curator decision**: see §Findings E-5 for what `pending` means and E-18 for the one
+failure that is now the only thing standing in its way.
 
 **MySQL 8 evaluates `projects.<col> IN (SELECT …)` inside a LEFT JOIN's ON clause as
 TRUE.** Measured on 8.0.46 (E-1 in §Findings). An entitlement check written that way
@@ -396,6 +412,7 @@ record as of the last local run.
 | **T-16: the chart layer, DB-less** | **yes, locally (2026-08-06)** | **1562 rspec examples, 0 failures** (was 1462), including 10 SVG goldens as deterministic text, the six families through both emitters, and the escaping payload set through the JSON data block. All seven gates green, `vendor_integrity` new and **negative-tested on all three arms** — a corrupted vendored byte, an unmanifested vendored file, and a planted CDN reference each fail it |
 | **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
 | **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1832 rspec examples, 0 failures** (was 1562), 116 pending — 265 new, of which 39 exist because the review found four blockers (§Findings E-17): the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
+| **T-13/T-33: the conformance corpus, BOTH engines, LOCALLY** | **yes (2026-08-06) — first time for wkhtmltopdf outside CI** | `chromium_cdp` Chrome/141.0.7390.37: **20 pass, 0 fail, 0 skip**. `wkhtmltopdf` 0.12.6: **17 pass, 1 fail, 2 skip** — the two skips are `:readiness_expression`, correctly undeclared, and the one failure is `F-04-page-furniture`, which is **new and unaccounted-for** (§Findings **E-18**). 67 examples, 0 failures, 3 pending; G9 green, so the committed matrix is unmoved. Run as the non-root `rrd` user with `RRD_CONFORMANCE=1`. **This is what corrected the "cannot be installed here" entry in §1** |
 | **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |

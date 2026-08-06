@@ -909,6 +909,49 @@ RUNNING a document through the layer. None was visible in review of the source, 
 (the CSS hole and the `<style/>` slash) were in code whose comments explained at length why the
 opposite hazard had been closed. A comment describing a defence is not the defence.
 
+**E-18 · wkhtmltopdf runs locally after all, and the first full local run found ONE failure that
+nobody has accounted for.** Discovered while looking for the next task after T-33.
+
+**The premise that was wrong.** HANDOVER §1 said wkhtmltopdf "cannot be installed here — its
+package is gone from Ubuntu 24.04's archive". It is in **noble/universe as `0.12.6-2build2`**. What
+produced the wrong conclusion is worth knowing: the container's apt index is stale, so the first
+`apt-get install` fails with a wall of `404 Not Found` on unrelated dependencies, which reads as
+"the archive no longer carries this" and means "run `apt-get update`". Two commands, and
+`:wkhtmltopdf` stops being CI-only.
+
+**The measurement, both engines, run as the non-root user:**
+
+| engine | result |
+|---|---|
+| `chromium_cdp` Chrome/141.0.7390.37 | **20 pass, 0 fail, 0 skip** |
+| `wkhtmltopdf` 0.12.6 | **17 pass, 1 fail, 2 skip** |
+
+The two skips are `F-11`/`F-12` on `:readiness_expression`, which E-5 already accounted for. **The
+one failure did not exist in E-5's arithmetic.** E-5 accounted for all seven of CI run
+31059574558's failures — four fixture bugs fixed, one egress defect fixed, two weakened by curator
+decision — so the expected result after those landed was 18 pass, 2 skip, **0 fail**. It is not:
+
+    F-04-page-furniture: every page carries the footer, numbered for that page —
+    page 1 footer: "Page 1 of 3" is absent from "FOOTER-PAGE-ONE"
+
+Page 1 carries neither the compiled tokens nor the literal `FOOT-LEFT` slot, so this reads as *the
+footer did not render on that page at all* rather than as a token-compilation bug —
+`wkhtmltopdf.rb:397` maps `{{page}}`/`{{pages}}` to `[page]`/`[topage]` and F-04 asserts pages 1, 2
+AND 3 precisely because "renders the footer once" and "stamps the same number everywhere" both pass
+a one-page check. **Not diagnosed further here, deliberately:** it belongs to whoever owns
+`:wkhtmltopdf`'s promotion, and diagnosing it inside T-33 would be a second purpose (§11.5).
+
+**What this changes for the curator, and it is the useful part.** `pending` means "reported, not
+enforced", and promotion to `corpus` is "the moment somebody accounts for every failure". That list
+was seven and is now **one**, and the engine is now reproducible on a developer machine rather than
+in a single CI cell. Two consequences: promotion is a much smaller decision than it was, and it is
+gated on exactly one named failure. `config/capabilities.yml` is **unchanged** — promoting it would
+put twenty cells in the matrix and change a documented support claim, which is G9's business and
+the curator's, not something to take on the way past.
+
+**And OQ-L is now measurable here**, which is why this matters to T-35: "does Mermaid 11.x render
+under wkhtmltopdf's 2011 WebKit" no longer needs a CI round trip.
+
 **E-12 · `@context` belongs to `Liquid::Drop`, and a drop that stores its own there breaks
 Liquid's internals.** Found by T-18's first spec run, three frames from the cause. `RecordDrop`
 stored the `RenderContext` in `@context`; `Liquid::Drop` declares `attr_writer :context` and
