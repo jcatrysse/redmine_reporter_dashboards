@@ -771,6 +771,13 @@ jobs:
           if ! diff -u /tmp/committed-matrix.md docs/engine-support-matrix.md; then
             echo "::error::docs/engine-support-matrix.md disagrees with this run. A PR that"
             echo "::error::changes a capability or a cap must carry the regenerated matrix."
+            # The WHOLE regenerated file, not just the diff. The matrix can only be
+            # generated where every `corpus` engine actually runs, which for
+            # wkhtmltopdf is here and nowhere else — so when it moves, the content a
+            # developer has to commit has to be readable straight out of this log.
+            echo "----- BEGIN REGENERATED MATRIX -----"
+            cat docs/engine-support-matrix.md
+            echo "----- END REGENERATED MATRIX -----"
             exit 1
           fi
           echo "support matrix: OK — the committed file is what this run produced"

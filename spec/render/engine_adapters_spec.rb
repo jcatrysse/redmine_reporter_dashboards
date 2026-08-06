@@ -268,6 +268,39 @@ module RedmineReporterDashboards
             expect(result.code).to eq(:engine_unavailable)
             expect { result.bytes }.to raise_error(NoMethodError)
           end
+
+          # --- REGRESSION, and the corpus in CI is what found it ---
+          #
+          # Rewriting `run` to use `IO.select` replaced a block that also contained
+          # `engine_failure`, so every NON-ZERO EXIT raised `NoMethodError` instead of
+          # producing a typed Failure — an exception reaching the caller, which is the
+          # exact defect `Result` exists to prevent, reintroduced by a refactor that
+          # looked local. Nothing here noticed because this path needs the engine to run
+          # AND fail, and only conformance fixture F-15 makes it do that.
+          #
+          # `/bin/false` is a binary that exists, starts, reads nothing and exits 1 —
+          # which is the shape of the failure path without needing wkhtmltopdf, an
+          # engine this container cannot install at all.
+          it 'answers a typed Failure when the engine runs and exits non-zero' do
+            result = described_class.new(binary: '/bin/false').render(request)
+
+            expect(result).to be_a(Failure)
+            expect(Failure::CODES).to include(result.code)
+            expect(result.detail).to match(/exit 1/)
+            expect { result.bytes }.to raise_error(NoMethodError)
+          end
+
+          it 'reads the reason out of stderr rather than guessing from the exit code' do
+            # wkhtmltopdf exits 1 both for "an asset failed to load" and for a broken
+            # install, so the code comes from what stderr said.
+            missing_lib = described_class.new(binary: '/bin/sh')
+            allow(missing_lib).to receive(:build_argv)
+              .and_return(['/bin/sh', '-c', 'echo "cannot open shared object file" >&2; exit 1'])
+
+            result = missing_lib.render(request)
+
+            expect(result.code).to eq(:engine_unavailable)
+          end
         end
       end
     end

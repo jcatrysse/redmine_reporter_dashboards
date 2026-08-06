@@ -265,6 +265,29 @@ module RedmineReporterDashboards
           nil
         end
 
+        # wkhtmltopdf's exit codes are famously approximate: it exits 1 for "some assets
+        # could not be loaded" as well as for real failures, and its stderr is where the
+        # difference actually lives. Rather than guess, the code is chosen from what the
+        # stderr says, and the raw text travels in `detail` so nothing is lost.
+        #
+        # THIS METHOD WAS DELETED BY ACCIDENT and the corpus caught it in CI. Rewriting
+        # `run` to use `IO.select` replaced a block that happened to contain this too, so
+        # every non-zero exit raised `NoMethodError` instead of producing a typed
+        # Failure — the exact "an exception reaches the caller" defect the Result type
+        # exists to prevent, reintroduced by a refactor that looked local. It is only
+        # reachable on the failure path, which is why nothing else noticed: F-15 is the
+        # one fixture that makes this engine exit non-zero.
+        def engine_failure(request, stderr, status, started)
+          text = stderr.to_s
+          code = if text.match?(/timed? ?out/i) then :timeout
+                 elsif text.match?(/cannot open shared object|not found|No such file/i)
+                   :engine_unavailable
+                 else :engine_crashed
+                 end
+          failure(request, code, 'the report could not be produced',
+                  detail: "exit #{status.exitstatus}: #{text.strip[0, 500]}", started: started)
+        end
+
         def build_argv(request, output_path)
           argv = [@binary, '--quiet', '--encoding', 'UTF-8']
 
