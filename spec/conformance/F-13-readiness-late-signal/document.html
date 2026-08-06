@@ -4,7 +4,6 @@
 <script>window.__rdOptions = { clientTimeoutMs: 18000 };</script>
 @@CHART_SHELL@@
 <p id="c1">chart pending</p>
-<p id="state">RD-STATE pending</p>
 <script>
   (function () {
     window.__rd.begin();
@@ -14,14 +13,33 @@
       document.getElementById('c1').textContent = 'POST-READINESS-MARKER';
       window.__rd.end();
     }, 6000);
+  }());
+</script>
+<p id="state">RD-STATE pending</p>
+<script>
+  /* The readiness state, MIRRORED into the DOM so the PDF can be asked what the page
+     believed. Nothing here participates in the protocol — the shell owns it.
 
+     Driven by a MutationObserver on `data-rd-ready` and not by the interval alone, and
+     that is not a refinement. The shell sets `ready`, the attribute and `window.status`
+     in one synchronous step, so an interval-only mirror is still showing the previous
+     state when the engine's very next poll sees ready and prints. F-08 failed exactly
+     that way: a chart-free document printed at 42 ms carrying `ready=false`, which is
+     the mirror being stale rather than the protocol being wrong. An observer callback
+     is a microtask and runs before any CDP evaluation can observe the change, so this
+     is an ordering guarantee rather than a shorter race. */
+  (function () {
+    var el = document.getElementById('state');
     function mirror() {
       var rd = window.__rd;
-      document.getElementById('state').textContent =
-        'RD-STATE ready=' + rd.ready + ' pending=' + rd.pending +
+      el.textContent = 'RD-STATE ready=' + rd.ready + ' pending=' + rd.pending +
         ' degraded=[' + rd.degraded.join(',') + ']';
     }
-    setInterval(mirror, 100);
+    if (window.MutationObserver) {
+      new MutationObserver(mirror).observe(document.documentElement,
+        { attributes: true, attributeFilter: ['data-rd-ready'] });
+    }
+    setInterval(mirror, 25);
     mirror();
   }());
 </script>

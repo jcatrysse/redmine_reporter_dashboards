@@ -62,15 +62,10 @@ engines:
     label: Headless Chromium over CDP
     role: reference
     default: true
-    # `pending` until T-13 registers the adapter. Deliberately not `corpus` yet: the
-    # matrix generator REFUSES to print a column for an engine that claims to have been
-    # conformance-run and was not, and that refusal is the only thing standing between
-    # this file and a support claim nobody measured (INV-7).
-    verification: pending
-    verification_note: >-
-      the corpus and the contract exist (T-12); the adapter does not yet (T-13). This
-      column carries no measurements and says so rather than being left out — an absent
-      column reads as "nothing to report" and means "nobody checked".
+    # MEASURED. T-13's adapter exists and the whole corpus runs against it — 20 of 20
+    # green on Chromium 141. The matrix generator now REFUSES to emit this column
+    # without a run, which is what promoting an engine to `corpus` buys.
+    verification: corpus
     needs_service: false
     renders_offline: true
     install: one documented package install (chromium), not provided by bundle install
@@ -106,12 +101,19 @@ engines:
     label: wkhtmltopdf (compatibility)
     role: compatibility
     default: false
+    # THE ADAPTER EXISTS AND ITS CELLS DO NOT, and the distinction is the point.
+    # `render/engines/wkhtmltopdf.rb` is written and registered; wkhtmltopdf itself
+    # cannot be installed in the container this was developed in, so nothing here has
+    # been measured. Marking it `corpus` would put twenty cells in the matrix that
+    # nobody has run — INV-7's exact sin, and the one this project has already paid for
+    # once with a four-version Redmine 5.1 claim.
     verification: pending
     verification_note: >-
-      as above — the adapter arrives with T-13. wkhtmltopdf is additionally the engine
-      this container cannot install, so its cells will come from CI rather than from a
-      developer machine, which is the normal case for this project and not a weakness
-      of the result.
+      the adapter is written and registered; the engine has never been run. The
+      render-smoke job installs wkhtmltopdf and executes the corpus against it, so the
+      first real cells will come from CI — the normal case for this project, where
+      MariaDB and MySQL are likewise CI-only. Promote this to `corpus` and regenerate
+      the matrix in the commit that reads a green run, not before.
     needs_service: false
     renders_offline: true
     install: provided by bundle install; no service, no configuration

@@ -176,8 +176,10 @@ module RedmineReporterDashboards
       # ----------------------------------------------------------------
 
       describe Registry do
-        before { described_class.reset! }
-        after  { described_class.reset! }
+        # `isolated` rather than `reset!`, because the adapters register themselves when
+        # their files are required and a bare reset here empties the map for whatever
+        # example RSpec's random order runs next.
+        around { |example| described_class.isolated { example.run } }
 
         it 'resolves only what was explicitly registered' do
           adapter = Object.new

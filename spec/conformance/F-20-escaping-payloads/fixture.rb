@@ -44,29 +44,29 @@ RedmineReporterDashboards::Conformance.fixture(
   # was written. If the page agrees, twelve strings survived the engine's parser
   # unchanged; if it does not, the fingerprint says which way it moved.
   f.check('every payload survives the parse byte for byte') do |v|
-    v.expect_includes(v.text, 'PAYLOAD-COUNT 12', 'parsed payload count')
-    v.expect_includes(v.text, 'PAYLOAD-LENGTHS 2,11,9,4,3,5,2,11,10,10,19,34', 'per-payload lengths')
-    v.expect_includes(v.text, 'PAYLOAD-CHECKSUM f13c6e5', 'checksum over the parsed values')
+    v.expect_includes(v.flat_text, 'PAYLOAD-COUNT 12', 'parsed payload count')
+    v.expect_includes(v.flat_text, 'PAYLOAD-LENGTHS 2,11,9,4,3,5,2,11,10,10,19,34', 'per-payload lengths')
+    v.expect_includes(v.flat_text, 'PAYLOAD-CHECKSUM f13c6e5', 'checksum over the parsed values')
   end
 
   f.check('the dangerous payloads reach the page as text, not as markup') do |v|
     ['-alert(1)//', '</script>', '<!--', ']]>', '${alert(1)}',
      '&lt;img src=x onerror=alert(1)&gt;'].each do |payload|
-      v.expect_includes(v.text, payload, 'rendered payload')
+      v.expect_includes(v.flat_text, payload, 'rendered payload')
     end
   end
 
   # The canary. If ANY payload executed, the handler below sets it, and the page
   # reports it — so a passing fingerprint with an executed payload still fails here.
   f.check('nothing in the payload set executed') do |v|
-    v.expect_includes(v.text, 'CANARY-CLEAN', 'the execution canary')
-    v.expect_excludes(v.text, 'CANARY-TRIPPED', 'the execution canary')
+    v.expect_includes(v.flat_text, 'CANARY-CLEAN', 'the execution canary')
+    v.expect_excludes(v.flat_text, 'CANARY-TRIPPED', 'the execution canary')
   end
 
   # A parse error in the data block is silent by default: `JSON.parse` throws, the
   # handler never runs, and the page renders with the placeholder text still in it.
   # That would pass "nothing executed" while proving nothing at all.
   f.check('the data block was actually parsed') do |v|
-    v.expect_excludes(v.text, 'PAYLOAD-UNPARSED', 'the pre-parse placeholder')
+    v.expect_excludes(v.flat_text, 'PAYLOAD-UNPARSED', 'the pre-parse placeholder')
   end
 end

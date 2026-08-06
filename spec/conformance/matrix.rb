@@ -119,7 +119,7 @@ module RedmineReporterDashboards
 
       def corpus_section(engines, fixtures, reports)
         rows = fixtures.map do |fixture|
-          cells = engines.map { |e| cell(reports[e.id], fixture) }
+          cells = engines.map { |e| cell(e, reports[e.id], fixture) }
           "| `#{fixture.id}` | #{fixture.title} | #{cells.join(' | ')} |"
         end
 
@@ -132,7 +132,15 @@ module RedmineReporterDashboards
         MD
       end
 
-      def cell(report, fixture)
+      # ONLY A `corpus` ENGINE GETS MEASURED CELLS, even when a report happens to be in
+      # hand. That is what makes this file reproducible: the committed matrix must be
+      # the same document wherever it is generated, and an engine whose binary is
+      # present on one machine and absent on another would otherwise move every cell in
+      # its column depending on who ran it. Promoting an engine to `corpus` is therefore
+      # a deliberate act — it says "this is measured in the environment that generates
+      # the matrix", and the generator refuses to proceed without the run.
+      def cell(engine, report, fixture)
+        return 'not verified' unless engine.corpus_verified?
         return 'no adapter' if report.nil?
 
         outcome = report[fixture.id]

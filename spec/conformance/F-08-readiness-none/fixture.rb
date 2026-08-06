@@ -30,7 +30,7 @@ RedmineReporterDashboards::Conformance.fixture(
   end
 
   f.check('the page reported itself ready, not timed out') do |v|
-    v.expect_includes(v.text, 'RD-STATE ready=true', 'the readiness state mirrored into the DOM')
-    v.expect_includes(v.text, 'degraded=[]', 'the page-side degradation list')
+    v.expect_includes(v.flat_text, 'RD-STATE ready=true', 'the readiness state mirrored into the DOM')
+    v.expect_includes(v.flat_text, 'degraded=[]', 'the page-side degradation list')
   end
 end

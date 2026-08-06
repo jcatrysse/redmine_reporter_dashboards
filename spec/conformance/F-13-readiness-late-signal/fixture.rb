@@ -34,11 +34,11 @@ RedmineReporterDashboards::Conformance.fixture(
   end
 
   f.check('the post-readiness marker is in the document') do |v|
-    v.expect_includes(v.text, 'POST-READINESS-MARKER', 'the text written just before end()')
+    v.expect_includes(v.flat_text, 'POST-READINESS-MARKER', 'the text written just before end()')
   end
 
   f.check('nothing timed out and nothing was degraded') do |v|
     v.expect_equal(v.degradations, [], 'degradations')
-    v.expect_excludes(v.text, 'client_watchdog', 'the page-side degradation list')
+    v.expect_excludes(v.flat_text, 'client_watchdog', 'the page-side degradation list')
   end
 end

@@ -89,6 +89,18 @@ module RedmineReporterDashboards
         PdfProbe.text(pdf!, page: page)
       end
 
+      # The same text with every run of whitespace collapsed to one space.
+      #
+      # A PDF has lines, not sentences. `PAYLOAD-CHECKSUM f13c6e5` is one phrase to a
+      # reader and two lines to the extractor whenever the column happens to break
+      # there, so a phrase assertion against the raw text fails on a layout accident
+      # rather than on anything about the engine. Where the assertion is about WHAT the
+      # document says, use this; where it is about WHERE the text sits on the page —
+      # F-04's per-page footer — use `text`, because there the line matters.
+      def flat_text(page: nil)
+        text(page: page).gsub(/\s+/, ' ').strip
+      end
+
       def pixel(page: 1, x: 0.5, y: 0.5, dpi: 24)
         PdfProbe.pixel(pdf!, page: page, x: x, y: y, dpi: dpi)
       end

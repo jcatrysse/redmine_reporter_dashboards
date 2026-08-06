@@ -18,7 +18,7 @@ RedmineReporterDashboards::Conformance.fixture(
   f.request!(
     page_size: 'A4',
     footer: RedmineReporterDashboards::Render::PageFurniture.new(
-      left: 'FOOT-LEFT', right: '{{page}} / {{pages}}', font_size_pt: 9
+      left: 'FOOT-LEFT', right: 'Page {{page}} of {{pages}}', font_size_pt: 9
     )
   )
 
@@ -26,10 +26,15 @@ RedmineReporterDashboards::Conformance.fixture(
     v.expect_equal(v.page_count, 3, 'page count')
   end
 
+  # Words rather than `{{page}} / {{pages}}`, and the reason is a real property of PDF
+  # text extraction rather than a preference: the whitespace BETWEEN two inline spans
+  # does not reach the text layer, so a slash-separated footer extracts as "1/3" and an
+  # assertion on "1 / 3" fails for a reason that has nothing to do with the engine. The
+  # words survive, and "Page 1 of 3" is what a real footer says anyway.
   f.check('every page carries the footer, numbered for that page') do |v|
-    v.expect_includes(v.text(page: 1), '1 / 3', 'page 1 footer')
-    v.expect_includes(v.text(page: 2), '2 / 3', 'page 2 footer')
-    v.expect_includes(v.text(page: 3), '3 / 3', 'page 3 footer')
+    v.expect_includes(v.flat_text(page: 1), 'Page 1 of 3', 'page 1 footer')
+    v.expect_includes(v.flat_text(page: 2), 'Page 2 of 3', 'page 2 footer')
+    v.expect_includes(v.flat_text(page: 3), 'Page 3 of 3', 'page 3 footer')
   end
 
   f.check('the literal slot text survives beside the tokens') do |v|

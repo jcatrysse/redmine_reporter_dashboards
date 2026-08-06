@@ -20,16 +20,16 @@ RedmineReporterDashboards::Conformance.fixture(
   f.request!(page_size: 'A4')
 
   f.check('plain Latin text round-trips exactly') do |v|
-    v.expect_includes(v.text, 'FONT-LATIN quick brown fox', 'extracted text')
+    v.expect_includes(v.flat_text, 'FONT-LATIN quick brown fox', 'extracted text')
   end
 
   f.check('non-ASCII survives the trip in both directions') do |v|
-    v.expect_includes(v.text, 'FONT-CYRILLIC Проект', 'extracted Cyrillic')
-    v.expect_includes(v.text, 'FONT-GREEK Δοκιμή', 'extracted Greek')
+    v.expect_includes(v.flat_text, 'FONT-CYRILLIC Проект', 'extracted Cyrillic')
+    v.expect_includes(v.flat_text, 'FONT-GREEK Δοκιμή', 'extracted Greek')
   end
 
   f.check('punctuation a report actually uses is not mangled') do |v|
-    v.expect_includes(v.text, 'FONT-PUNCT — “quoted” … ±3 °C', 'extracted punctuation')
+    v.expect_includes(v.flat_text, 'FONT-PUNCT — “quoted” … ±3 °C', 'extracted punctuation')
   end
 
   # Extraction alone cannot tell drawn text from invisible text: a document with the

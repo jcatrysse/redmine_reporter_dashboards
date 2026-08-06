@@ -68,32 +68,31 @@ same fact written where an operator can read it (`config/capabilities.yml`).
 
 | Fixture | What it asserts | `chromium_cdp` | `gotenberg` | `wkhtmltopdf` |
 |---|---|---|---|---|
-| `F-01-page-geometry` | A4 portrait is 595 x 842 pt | no adapter | no adapter | no adapter |
-| `F-02-custom-page-size` | Letter is honoured over the engine default | no adapter | no adapter | no adapter |
-| `F-03-orientation-margins` | landscape A4 with 25 mm margins | no adapter | no adapter | no adapter |
-| `F-04-page-furniture` | per-page footer with page numbers | no adapter | no adapter | no adapter |
-| `F-05-page-breaks` | three explicit breaks make four pages | no adapter | no adapter | no adapter |
-| `F-06-background-printing` | backgrounds print by default | no adapter | no adapter | no adapter |
-| `F-07-flexbox` | a flex row lays out side by side | no adapter | no adapter | no adapter |
-| `F-08-readiness-none` | a chart-free document is ready immediately | no adapter | no adapter | no adapter |
-| `F-09-readiness-charts` | three charts that finish, and the wait is theirs | no adapter | no adapter | no adapter |
-| `F-10-readiness-watchdog` | a chart that never ends is cut short by the page, not the engine | no adapter | no adapter | no adapter |
-| `F-11-readiness-timeout` | a page that never signals is rendered anyway, and degraded | no adapter | no adapter | no adapter |
-| `F-12-readiness-strict` | strict turns the same timeout into a typed failure | no adapter | no adapter | no adapter |
-| `F-13-readiness-late-signal` | a chart signalling at 6 s is waited for, and only for that | no adapter | no adapter | no adapter |
-| `F-14-asset-inline` | a data: URI image resolves without any fetch | no adapter | no adapter | no adapter |
-| `F-15-egress-denial` | the engine reaches nothing on the network | no adapter | no adapter | no adapter |
-| `F-16-failure-semantics` | an unsupported capability is refused, in type | no adapter | no adapter | no adapter |
-| `F-17-resource-envelope` | 2 000 rows render inside a stated envelope | no adapter | no adapter | no adapter |
-| `F-18-fonts` | text goes onto the page and comes back off it | no adapter | no adapter | no adapter |
-| `F-19-pathological-input` | malformed and oversized input is bounded, either way | no adapter | no adapter | no adapter |
-| `F-20-escaping-payloads` | the escaping payload set under this engine's JS parser | no adapter | no adapter | no adapter |
+| `F-01-page-geometry` | A4 portrait is 595 x 842 pt | PASS | not verified | not verified |
+| `F-02-custom-page-size` | Letter is honoured over the engine default | PASS | not verified | not verified |
+| `F-03-orientation-margins` | landscape A4 with 25 mm margins | PASS | not verified | not verified |
+| `F-04-page-furniture` | per-page footer with page numbers | PASS | not verified | not verified |
+| `F-05-page-breaks` | three explicit breaks make four pages | PASS | not verified | not verified |
+| `F-06-background-printing` | backgrounds print by default | PASS | not verified | not verified |
+| `F-07-flexbox` | a flex row lays out side by side | PASS | not verified | not verified |
+| `F-08-readiness-none` | a chart-free document is ready immediately | PASS | not verified | not verified |
+| `F-09-readiness-charts` | three charts that finish, and the wait is theirs | PASS | not verified | not verified |
+| `F-10-readiness-watchdog` | a chart that never ends is cut short by the page, not the engine | PASS | not verified | not verified |
+| `F-11-readiness-timeout` | a page that never signals is rendered anyway, and degraded | PASS | not verified | not verified |
+| `F-12-readiness-strict` | strict turns the same timeout into a typed failure | PASS | not verified | not verified |
+| `F-13-readiness-late-signal` | a chart signalling at 6 s is waited for, and only for that | PASS | not verified | not verified |
+| `F-14-asset-inline` | a data: URI image resolves without any fetch | PASS | not verified | not verified |
+| `F-15-egress-denial` | the engine reaches nothing on the network | PASS | not verified | not verified |
+| `F-16-failure-semantics` | an unsupported capability is refused, in type | PASS | not verified | not verified |
+| `F-17-resource-envelope` | 2 000 rows render inside a stated envelope | PASS | not verified | not verified |
+| `F-18-fonts` | text goes onto the page and comes back off it | PASS | not verified | not verified |
+| `F-19-pathological-input` | malformed and oversized input is bounded, either way | PASS | not verified | not verified |
+| `F-20-escaping-payloads` | the escaping payload set under this engine's JS parser | PASS | not verified | not verified |
 
 ## Columns that are not measurements
 
 INV-7's rule, applied to engines: a configuration nobody ran is unsupported, and
 saying so is cheaper than finding out from a user.
 
-* **`chromium_cdp`** — the corpus and the contract exist (T-12); the adapter does not yet (T-13). This column carries no measurements and says so rather than being left out — an absent column reads as "nothing to report" and means "nobody checked".
 * **`gotenberg`** — no adapter in the tree yet (T-34). Declared here because the capability shape and the security conditions were decided with it in view — `/forms/chromium/convert/url` is a forbidden code path (SSRF), only `convert/html` with the upload model, and a Gotenberg reachable without its configured credential is a preflight FAILURE with a named remediation rather than a warning.
-* **`wkhtmltopdf`** — as above — the adapter arrives with T-13. wkhtmltopdf is additionally the engine this container cannot install, so its cells will come from CI rather than from a developer machine, which is the normal case for this project and not a weakness of the result.
+* **`wkhtmltopdf`** — the adapter is written and registered; the engine has never been run. The render-smoke job installs wkhtmltopdf and executes the corpus against it, so the first real cells will come from CI — the normal case for this project, where MariaDB and MySQL are likewise CI-only. Promote this to `corpus` and regenerate the matrix in the commit that reads a green run, not before.

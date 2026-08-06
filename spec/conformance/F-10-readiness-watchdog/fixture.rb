@@ -27,8 +27,8 @@ RedmineReporterDashboards::Conformance.fixture(
   end
 
   f.check('the document says why it gave up') do |v|
-    v.expect_includes(v.text, 'client_watchdog', 'the page-side degradation list')
-    v.expect_includes(v.text, 'RD-STATE ready=true pending=1',
+    v.expect_includes(v.flat_text, 'client_watchdog', 'the page-side degradation list')
+    v.expect_includes(v.flat_text, 'RD-STATE ready=true pending=1',
                       'ready by watchdog, with the unfinished chart still counted')
   end
 
@@ -36,7 +36,7 @@ RedmineReporterDashboards::Conformance.fixture(
   # whole readiness design is built on: a chart-less-but-otherwise-correct document
   # beats no document.
   f.check('the rest of the document survived') do |v|
-    v.expect_includes(v.text, 'READINESS-WATCHDOG', 'body text')
-    v.expect_includes(v.text, 'TABLE-ROW-7', 'content that had nothing to do with the chart')
+    v.expect_includes(v.flat_text, 'READINESS-WATCHDOG', 'body text')
+    v.expect_includes(v.flat_text, 'TABLE-ROW-7', 'content that had nothing to do with the chart')
   end
 end

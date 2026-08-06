@@ -33,9 +33,28 @@ cd "$ROOT"
 
 BASE='lib/redmine_reporter_dashboards'
 
+# --- ONE NARROWING, ARGUED (T-13) ---
+#
+# The render layer's pattern says `session([^I]|$)` and not a bare `session`, which
+# exempts exactly one spelling: `sessionId`, the Chrome DevTools Protocol's field for
+# multiplexing several attached targets down one pipe. It is not an HTTP session and
+# has nothing to do with the thing this boundary exists to keep out — a render layer
+# that can read a Rack session can make a visibility decision, and visibility decisions
+# belong upstream of it (INV-1/INV-3).
+#
+# Everything that spelling could hide is still caught: `session_id`, `session[`,
+# `request.session`, `sessions`, and a bare `session` at end of line all match, because
+# the exempted character class is a single `I` immediately after the word. The Ruby side
+# of the adapter avoids the collision anyway — `CdpClient` calls it `channel` — so the
+# exemption covers only the two lines that have to spell the wire format.
+#
+# NEGATIVE-TESTED before being trusted, which is this file's own rule: each of
+# `session_id`, `request.session` and `cookies` was planted under render/ in turn and
+# this gate failed on each; `sessionId` alone passed.
+#
 # Layer, path, forbidden pattern, and the reason in one line for the failure message.
 LAYERS=(
-  "render|$BASE/render|Rails\.|ActiveRecord|Liquid|Issue|Net::HTTP|Faraday|cookie|session|the render path is L3: given a DocumentRequest it returns bytes, and it must not be able to reach a model, a session or the network"
+  "render|$BASE/render|Rails\.|ActiveRecord|Liquid|Issue|Net::HTTP|Faraday|cookie|session([^I]|$)|the render path is L3: given a DocumentRequest it returns bytes, and it must not be able to reach a model, a session or the network"
   "aggregation|$BASE/aggregation|(Reporter|RedmineReporter)Dashboards::Render|the aggregation kernel answers numbers; it must not know how they are drawn"
   "liquid|$BASE/liquid|(Reporter|RedmineReporter)Dashboards::Render|the Liquid layer binds a scope and renders tags; it must not reach into the render path"
 )

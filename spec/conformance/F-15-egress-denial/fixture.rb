@@ -32,6 +32,6 @@ RedmineReporterDashboards::Conformance.fixture(
   end
 
   f.check('the document rendered anyway, without the assets it could not have') do |v|
-    v.expect_includes(v.text, 'EGRESS-MARKER', 'body text')
+    v.expect_includes(v.flat_text, 'EGRESS-MARKER', 'body text')
   end
 end

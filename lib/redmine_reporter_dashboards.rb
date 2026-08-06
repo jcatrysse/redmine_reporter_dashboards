@@ -5,7 +5,6 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/row_layout'
-require File.dirname(__FILE__) + '/redmine_reporter_dashboards/pdf_polyfills'
 
 # The render layer (T-10). Loaded here rather than autoloaded because a plugin's lib/
 # is not on Redmine's autoload paths, and required at boot rather than lazily so a
@@ -19,6 +18,12 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/document_r
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/registry'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/renderer'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/readiness'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/process_pool'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engine_catalogue'
+# The adapters. Requiring them REGISTERS them; it does not start a browser or run a
+# binary, so a host without either boots exactly as before and finds out at preflight.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/chromium_cdp'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/wkhtmltopdf'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards
@@ -47,6 +52,7 @@ module RedmineReporterDashboards
   # mean one failed patch silently costing a reporter install its scope resolution.
   REPORTER_GLUE_FILES = %w[
     redmine_reporter_dashboards/glue/legacy/scope_resolution
+    redmine_reporter_dashboards/glue/legacy/wk_legacy_shims
   ].freeze
 
   module_function

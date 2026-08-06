@@ -678,6 +678,24 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || \
             echo "::notice::no AppArmor userns restriction to lift on this image"
 
+      # THE COMPATIBILITY ENGINE, which cannot be installed in the container this was
+      # developed in — its package is gone from Ubuntu 24.04's archive and only exists
+      # as a release .deb. So CI is where `:wkhtmltopdf` gets measured for the first
+      # time, the same way MariaDB and MySQL are measured here and not locally. Until a
+      # green run has been read, `config/capabilities.yml` keeps it at
+      # `verification: pending` and the committed matrix carries no cells for it.
+      #
+      # `continue-on-error` on the INSTALL only: a release asset that 404s must not fail
+      # a job whose subject is the reference engine. A wkhtmltopdf that installs and then
+      # fails the corpus is a finding, and that failure is not suppressed.
+      - name: Install the compatibility engine
+        continue-on-error: true
+        run: |
+          url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb"
+          curl -fsSL -o /tmp/wkhtmltox.deb "$url" || exit 0
+          sudo apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb
+          wkhtmltopdf --version
+
       - name: Locate a browser
         id: browser
         run: |

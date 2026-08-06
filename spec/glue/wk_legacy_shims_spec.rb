@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require File.expand_path('../lib/redmine_reporter_dashboards/pdf_polyfills', __dir__)
+require File.expand_path('../../lib/redmine_reporter_dashboards/glue/legacy/wk_legacy_shims', __dir__)
 
-RSpec.describe RedmineReporterDashboards::PdfPolyfills do
+RSpec.describe RedmineReporterDashboards::Glue::Legacy::WkLegacyShims do
   describe '.charts?' do
     it 'detects a canvas element (chart)' do
       expect(described_class.charts?('<div><canvas id="c"></canvas></div>')).to be true

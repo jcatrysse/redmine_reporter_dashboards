@@ -34,7 +34,7 @@ RedmineReporterDashboards::Conformance.fixture(
   end
 
   f.check('the document is complete apart from what it was waiting for') do |v|
-    v.expect_includes(v.text, 'NEVER-SIGNALS', 'body text')
-    v.expect_includes(v.text, 'TABLE-ROW-7', 'content that did not depend on the signal')
+    v.expect_includes(v.flat_text, 'NEVER-SIGNALS', 'body text')
+    v.expect_includes(v.flat_text, 'TABLE-ROW-7', 'content that did not depend on the signal')
   end
 end

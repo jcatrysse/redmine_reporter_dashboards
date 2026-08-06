@@ -49,8 +49,8 @@ module RedmineReporterDashboards
           footer: { right: '[page]/[topage]' }
         }
 
-        if RedmineReporterDashboards::PdfPolyfills.charts?(content)
-          content = RedmineReporterDashboards::PdfPolyfills.inject(content)
+        if RedmineReporterDashboards::Glue::Legacy::WkLegacyShims.charts?(content)
+          content = RedmineReporterDashboards::Glue::Legacy::WkLegacyShims.inject(content)
           pdf_options[:javascript_delay] = 3000
           pdf_options[:no_stop_slow_scripts] = true
         end

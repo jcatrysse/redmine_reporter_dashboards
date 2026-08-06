@@ -47,8 +47,24 @@ module RedmineReporterDashboards
 
         # For tests and for a boot that re-registers. Deliberately explicit rather than
         # letting `register` overwrite: see DuplicateEngine above.
+        #
+        # `reset!` DESTROYS GLOBAL STATE, and in a suite with `config.order = :random`
+        # that is a defect waiting for a seed: the adapters register when their files are
+        # required, so a spec that resets the registry and does not put it back leaves
+        # every later example looking at an empty map. That happened — two adapter
+        # examples failed on one seed and passed on the next, which reads as a
+        # registration bug and is a test-isolation one. Prefer `isolated`, which is the
+        # same reset with the restore attached to it.
         def reset!
           @registry = {}
+        end
+
+        def isolated
+          saved = registry.dup
+          @registry = {}
+          yield
+        ensure
+          @registry = saved
         end
 
         private

@@ -88,8 +88,20 @@ module RedmineReporterDashboards
       let(:committed) { File.expand_path('../../docs/engine-support-matrix.md', __dir__) }
 
       it 'matches a fresh generation' do
+        # G9 HAS ONE HOME, and it is the job with the engines in it. Checked anywhere
+        # else this example asks a machine with no browser whether a browser's cells are
+        # right, and the only truthful answer is "cannot tell" — which is a skip with a
+        # reason, not a red build and not a quiet pass.
+        unless RedmineReporterDashboards::Conformance.corpus_enabled?
+          skip 'G9 is checked in the render-smoke job (RRD_CONFORMANCE=1), which is the ' \
+               'one place every engine the catalogue calls `corpus` can actually run'
+        end
+
         fixtures = Fixtures.load_all
-        generated = Matrix.render(reports: RenderedReports.all, fixtures: fixtures)
+        Render::EngineCatalogue.load.engines.select(&:corpus_verified?).each do |engine|
+          RenderedReports.for(engine.id)
+        end
+        generated = Matrix.render(reports: RenderedReports.measured, fixtures: fixtures)
 
         if ENV['RRD_MATRIX_WRITE'] == '1'
           File.write(committed, generated)
@@ -103,17 +115,68 @@ module RedmineReporterDashboards
       end
     end
 
-    # Where the per-engine reports are parked so the matrix example can read them
-    # whatever order RSpec chose. `config.order = :random` is on in this project, so an
-    # example that depends on another having run first is a defect waiting for a seed.
+    # ONE RUN PER ENGINE, whoever asks for it first.
+    #
+    # `config.order = :random` is on in this project, so the matrix example and the
+    # per-engine suite can execute in either order — and the first draft of this file
+    # assumed one of them. When the matrix went first it found no reports and refused to
+    # generate, which is the generator behaving correctly and the caller being wrong. A
+    # memo shared by both is the fix; a `before(:all)` that another example depends on
+    # is a defect waiting for a seed.
     module RenderedReports
+      Unavailable = Struct.new(:engine_id, :reason, :claimed) do
+        def available?
+          false
+        end
+      end
+
       class << self
         def all
           @all ||= {}
         end
 
-        def store(id, report)
-          all[id.to_s] = report
+        # Reports for engines the catalogue says are conformance-verified. This is what
+        # the matrix is generated from, and an unavailable engine is deliberately NOT in
+        # it — the generator then refuses, rather than printing an empty column.
+        def measured
+          all.reject { |_id, report| report.respond_to?(:available?) }
+        end
+
+        def for(engine_id)
+          all[engine_id.to_s] ||= execute(engine_id.to_s)
+        end
+
+        private
+
+        def execute(engine_id)
+          engine = Render::Registry.fetch(engine_id).new
+          begin
+            # PREFLIGHT IS A ROUND TRIP, never `File.exist?` (technical-spec.md §5). It
+            # is also what warms the engine: the first render of a process pool pays for
+            # a browser launch, and charging that to the first fixture would make the
+            # readiness bounds a measurement of startup cost.
+            preflight = engine.preflight
+            return unavailable(engine_id, preflight) unless preflight.success?
+
+            report = Runner.new(engine: engine).run(Fixtures.load_all)
+            warn "\n[conformance] #{report.summary_line}"
+            report
+          ensure
+            engine.shutdown if engine.respond_to?(:shutdown)
+          end
+        end
+
+        # THE THREE-STATE RULE, APPLIED ONE LEVEL UP. A dead preflight means one of two
+        # entirely different things, and collapsing them is how a support matrix starts
+        # lying. An engine the catalogue calls `verification: corpus` is supposed to be
+        # measured here, so a dead preflight is a FAILURE. One it does not is simply
+        # absent from this environment — wkhtmltopdf on a container that cannot install
+        # it — and the honest outcome is a skip naming the engine.
+        def unavailable(engine_id, preflight)
+          entry = Render::EngineCatalogue.load[engine_id]
+          Unavailable.new(engine_id,
+                          "#{preflight.code}: #{preflight.detail}",
+                          entry&.corpus_verified? ? true : false)
         end
       end
     end
@@ -138,22 +201,18 @@ RedmineReporterDashboards::Conformance.selected_engine_ids.each do |engine_id|
     before(:all) do
       skip 'set RRD_CONFORMANCE=1 to run the corpus' unless conformance.corpus_enabled?
 
+      @report = conformance::RenderedReports.for(engine_id)
+      if @report.respond_to?(:available?)
+        if @report.claimed
+          raise "#{engine_id} claims `verification: corpus` in config/capabilities.yml " \
+                "and its preflight failed: #{@report.reason}"
+        end
+
+        skip "#{engine_id} is not available here (#{@report.reason}); the catalogue does " \
+             'not claim a conformance run for it'
+      end
       @engine = RedmineReporterDashboards::Render::Registry.fetch(engine_id).new
-      @fixtures = conformance::Fixtures.load_all
-
-      # PREFLIGHT IS A ROUND TRIP, never `File.exist?` (technical-spec.md §5). It is
-      # also what warms the engine: the first render of a process pool pays for a
-      # browser launch, and charging that to the first fixture would make the
-      # readiness bounds a measurement of startup cost.
-      preflight = @engine.preflight
-      raise "#{engine_id} preflight failed: #{preflight.inspect}" unless preflight.success?
-
-      @report = conformance::Runner.new(engine: @engine).run(@fixtures)
-      conformance::RenderedReports.store(engine_id, @report)
-      warn "\n[conformance] #{@report.summary_line}"
     end
-
-    after(:all) { @engine.shutdown if @engine.respond_to?(:shutdown) }
 
     it 'declares exactly what config/capabilities.yml says it declares' do
       declared = RedmineReporterDashboards::Render::EngineCatalogue.load[engine_id].capabilities

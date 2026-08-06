@@ -25,12 +25,12 @@ RedmineReporterDashboards::Conformance.fixture(
 
   f.check('all three charts drew before the page was printed') do |v|
     %w[CHART-DONE-1 CHART-DONE-2 CHART-DONE-3].each do |marker|
-      v.expect_includes(v.text, marker, 'chart output')
+      v.expect_includes(v.flat_text, marker, 'chart output')
     end
   end
 
   f.check('the page reached zero pending without the watchdog') do |v|
-    v.expect_includes(v.text, 'RD-STATE ready=true pending=0', 'readiness state')
-    v.expect_excludes(v.text, 'client_watchdog', 'degradation list')
+    v.expect_includes(v.flat_text, 'RD-STATE ready=true pending=0', 'readiness state')
+    v.expect_excludes(v.flat_text, 'client_watchdog', 'degradation list')
   end
 end
