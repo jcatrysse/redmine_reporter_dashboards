@@ -61,8 +61,10 @@ fact that CI has not yet run on this work at all.
 | T-09 | **done** — the secret, the probe job and the private checkout were removed earlier (which is what let 5.1 run at all and exposed D-2/D-3); this session added the two gates its `Accept:` list still named, `layer_purity.sh` (E3) and `compat_size.sh` (E4), and moved the one scattered version check into `Compat`. **One item is a human artefact and is NOT done: the dated fork-PR run per release** — see §Findings F-5 |
 | T-21 | **done** — `test/unit/multi_actor_visibility_test.rb`: five actors (`all`/`default`/`own`, an outsider, anonymous) over a private project with a private issue, a role-restricted custom field and a private `IssueQuery`; exact totals AND strict inequality; the restricted field's NAME asserted absent from every entry point, not just its values; the two fail-closed `1=0` branches as DB-less unit tests; ordering in both directions plus A/B/A; the monotonicity property with both its limits written into the file. **Mutation-tested**: dropping `Issue.visible` from the scope fails 4 of its 13 tests |
 | T-10 | **done** — `render/{capabilities,page_furniture,failure,result,document_request,registry,renderer}.rb`: a frozen `DocumentRequest` with **no field a credential could travel in** (asserted against the constructor's signature, so a future `headers:` has to be argued), `print_backgrounds` defaulting to `true` rather than to Chromium's `false`, `PageFurniture` as slots plus a closed token set, `Result = Success \| Failure` with closed code sets, and `Renderer` enforcing the `%PDF-`/`%%EOF` and minimum-size post-conditions **above every adapter**. 29 DB-less examples; `layer_purity` flipped to **strict** in the same PR, as its own comment asked |
-| T-11 | **partly done** — `render/readiness.rb` and `assets/javascripts/chart_shell.js`: one DOM contract (`window.__rd` with `pending/ready/begin/end/fail`, plus `data-rd-ready` and `window.status`, all set at the same instant), an in-page watchdog firing BEFORE the engine timeout, `Degradation(:readiness_timeout, pending: n)` unless `strict`, and `begin`/`end` owned by the shell. The JS is **executed in node**, not mocked. **The three-fixture timing falsifier is NOT done — it needs an engine and is F-7** |
-| T-12 onward | not started |
+| T-11 | **done** — `render/readiness.rb` and `assets/javascripts/chart_shell.js`: one DOM contract (`window.__rd` with `pending/ready/begin/end/fail`, plus `data-rd-ready` and `window.status`, all set at the same instant), an in-page watchdog firing BEFORE the engine timeout, `Degradation(:readiness_timeout, pending: n)` unless `strict`, and `begin`/`end` owned by the shell. The JS is **executed in node**, not mocked. **F-7 IS CLOSED**: the wall-clock falsifier runs through the real Chromium adapter as conformance fixture `F-13`, 3 of 3 attempts inside 5.9–12 s with the post-readiness marker present, alongside five more (`F-08`…`F-12`) covering the chart-free case, three finishing charts, the page watchdog, the engine timeout and `strict` |
+| T-12 | **done** — `spec/conformance/`: 20 fixtures, the harness that applies the three-state rule (G12), the generator that turns a run into `docs/engine-support-matrix.md` (G9), `config/capabilities.yml` (DoR-5) with `Render::EngineCatalogue` validating it, and the `render-smoke` CI job. **Negative-tested**: 23 DB-less examples drive the harness with engines that decline capabilities, that DECLARE one and do not deliver it, that return bytes which are not a PDF, and that raise. Probes are `pdfinfo`/`pdftotext`/`pdftoppm`, and a missing one is an ERROR rather than a skip |
+| T-13 | **done for `:chromium_cdp`, written-but-unrun for `:wkhtmltopdf`** — `render/engines/{cdp_client,chromium_cdp,wkhtmltopdf}.rb` and `render/process_pool.rb`; `pdf_polyfills.rb` → `glue/legacy/wk_legacy_shims.rb` with the payload asserted byte-identical. CDP over a **pipe, not a port**; `--no-sandbox` never set (so the browser itself enforces non-root); pool of 1 with a bounded queue answering `Failure(:engine_unavailable)`. **20 of 20 conformance fixtures green on Chromium 141.** wkhtmltopdf is registered and has **never been executed** — its package is gone from Ubuntu 24.04 — so it stays `verification: pending` and the matrix prints "not verified" rather than cells nobody measured. **The corpus found three defects on its first run** — see §Findings E-2, E-3, E-4 |
+| T-14 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -318,25 +320,52 @@ examples because they sit in the *frozen kernel's* unit suite, and rewriting 11 
 2 800-line file at the end of a session is how a suite starts lying — see §1b: local red is fixed or
 reverted, only an engine that cannot be run here is left to CI.
 
-**F-7 · T-11's falsifier cannot be run until an engine exists, and that is the honest half of
-"partly done".** T-11's `Accept:` ends with a deliberately hard test: three fixtures — 0 charts,
-3 charts that finish, 1 chart that never calls `end()` — with expected durations <1 s / <3 s /
-≈timeout, "a fixture signalling at ~6 s must produce a document containing the post-readiness
-marker, and the harness's own monotonic measurement must be ≥5.9 s and ≤12 s", run 3/3 attempts.
-That is a statement about WALL CLOCK THROUGH A REAL ENGINE. It exists to falsify exactly the
-implementation this task replaces — "an implementation using today's fixed 3-second delay fails
-this by construction; one that just waits out the timeout fails the upper bound."
+**F-7 · CLOSED 2026-08-06 by T-13.** T-11's falsifier was owed because it is a statement about
+WALL CLOCK THROUGH A REAL ENGINE and no engine existed. It now runs as conformance fixture
+`F-13-readiness-late-signal`: one chart signals at 6 s and writes a marker into the DOM immediately
+before calling `end()`, and the harness measures monotonically. **3 of 3 attempts, 5.9–12 s, marker
+present, on Chromium 141.** The three implementations it exists to tell apart are told apart: a
+fixed 3-second delay prints before the marker exists; waiting out the timeout costs 20 s and fails
+the upper bound (the timeout is 20 s and not the default 10 for exactly this reason — at 10 both
+wrong implementations land inside a 12 s bound and the fixture stops discriminating); honouring the
+signal costs about 6.3 s.
 
-What landed is the protocol and its logic, with the JS **executed in node** rather than described:
-the chart-free case, the pending/ready arithmetic, all three signals set together, a failed chart
-still counting as finished, and a late chart reopening readiness. What did not land is the timing,
-because there is no engine to time it through — `Render::Registry` has no adapter registered, and
-building one is T-13.
+Five more fixtures came with it and are worth naming, because between them they cover the arms the
+original three could not: `F-08` the chart-free document (under 2.5 s), `F-09` three finishing
+charts (0.55–2.9 s), `F-10` a never-ending chart cut short by the PAGE's watchdog at 2 s carrying
+`client_watchdog`, `F-11` a page with **no readiness component at all** rendered anyway with
+`Degradation(:readiness_timeout)`, and `F-12` that same page under `strict` refused with
+`Failure(:readiness_timeout)` and no bytes anywhere. F-10 and F-11 are different arms and the
+distinction is easy to miss: when the page CAN answer, the in-page watchdog is what answers, and the
+engine's timeout is only ever reached by a page whose readiness component is broken or absent.
 
-**Do not mark T-11 done without it.** The three durations are the whole point: every one of the
-logic assertions above passes on an implementation that sleeps for three seconds and ignores the
-contract entirely. Chromium 141 is in this container (see P-2's correction), so the fixture is
-runnable the moment T-13's adapter exists — it is blocked on the adapter, not on the engine.
+**E-2 · egress denial was half a control, and only an outside observer could see it.** Found by
+`F-15` on the first real conformance run. `--host-resolver-rules=MAP * 0.0.0.0` rewrites **name
+resolution**, and a URL carrying a literal IP address never asks the resolver anything — so a
+stylesheet, an image, an XHR and a `fetch` at `http://127.0.0.1:<port>/` all reached the harness's
+own listening socket. Four hits, from an engine documented as having no network.
+
+Two things follow. The fix: every network scheme is also pointed at a proxy that does not exist, and
+the implicit localhost bypass is removed (`--proxy-bypass-list=<-loopback>`) — because localhost is
+where a Redmine host keeps everything worth stealing. Four hits became zero. And the method: the
+fixture asserts what arrived **at the harness**, not what the page reported. A page reporting an
+error about a connection the engine happily opened is precisely the posture INV-8 forbids, and every
+version of this check that asks the page instead would have passed.
+
+**E-3 · Chromium prints "Page1of3", and the pixels agree with the extractor.** Found by `F-04`.
+Header and footer are their own document in Chromium, and a whitespace-only text node next to an
+inline element is collapsed away there — so `Page {{page}} of {{pages}}` loses every space. Fixed
+with non-breaking spaces in the literal segments. The rewrite exposed a second defect nobody had
+asked about: slot text was being interpolated into that document **raw**, so an unescaped `<` from a
+template author would silently break the footer on every page of every report. Authoring is already
+a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
+
+**E-4 · `Registry.reset!` with no restore is a random-seed defect.** Two adapter examples failed on
+one seed and passed on the next. T-10's contract spec resets the registry; the adapters register
+when their files are required; `config.order = :random` decides which fact wins. It reads as a
+registration bug and is a test-isolation one. `Registry.isolated` is the same reset with the restore
+attached, and the lesson is the one CLAUDE.md §6 already states — a spec that depends on another
+spec's global state is a defect waiting for a seed, not a flake.
 
 **One thing the protocol work already found**, which the falsifier's first fixture would have
 caught later and more expensively: the shell as first written never signalled ready for a

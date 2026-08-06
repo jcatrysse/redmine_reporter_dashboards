@@ -1197,6 +1197,20 @@ Under the hood it reads `Issue#custom_field_value(id)` (Redmine's `Acts::Customi
 
 Report widgets show an **Export as PDF** link in their header. It opens the same report the widget renders — for the widget's configured query — as a PDF in a new tab, reusing the Reporter plugin's own PDF generation. (PDF output requires wkhtmltopdf to be configured for Reporter, the same as Reporter's own report preview.)
 
+### What is replacing this, and what is not ready yet
+
+The section above describes how PDF export works **today**: through Reporter's own
+wkhtmltopdf call, with a fixed delay and injected polyfills. An owned render path now
+exists in the plugin alongside it — two engines behind one interface, a readiness
+protocol instead of the fixed delay, and a conformance corpus that measures what each
+engine actually does. [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md)
+is that measurement, generated from the run rather than written by hand.
+
+**None of it is wired to a button yet, and the rules below still apply to your
+templates.** When the export path moves over, the flexbox and `responsive: false`
+constraints become a property of the engine you chose rather than a rule you have to
+remember — but that is a later release, and until it ships this section is the truth.
+
 ## Charts in report templates (Chart.js in the PDF)
 
 Reporter renders report PDFs through **wkhtmltopdf**, whose WebKit engine is from

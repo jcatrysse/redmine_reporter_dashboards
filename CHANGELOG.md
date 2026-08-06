@@ -4,6 +4,35 @@ All notable changes to this plugin are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **An owned PDF render path, with two engines and a conformance corpus that judges
+  them.** Nothing user-facing changes yet — no button, no menu item and no report
+  currently goes through it (the widget export still uses Reporter's own path). What
+  exists is the interface, the engines and the evidence, and it is being landed before
+  it is wired up so that the wiring has something proven underneath it.
+
+  - `:chromium_cdp`, the reference engine and the default: headless Chromium driven
+    over the DevTools protocol **through a pipe rather than a debugging port**, in a
+    separate process, with name resolution and network egress denied, and with
+    `--no-sandbox` deliberately **not** set — so Chromium itself enforces that the
+    render process is not root. One browser at a time by default, behind a bounded
+    queue that **refuses** rather than hanging when it is full.
+  - `:wkhtmltopdf`, the compatibility engine: the same interface over the engine
+    `bundle install` already provides, so existing installs keep rendering. Deprecated
+    on arrival with a stated removal condition. **It is not yet verified** — its package
+    no longer exists in Ubuntu 24.04 and CI is where its first real results will come
+    from. Until then `docs/engine-support-matrix.md` shows its cells as *not verified*
+    rather than guessing at them.
+  - A **readiness protocol** replacing the fixed three-second wait: the page tells the
+    engine when its charts are finished, an in-page watchdog explains itself if they
+    never are, and a document that runs out of time is still produced — with what it is
+    missing recorded — rather than lost. A chart-free report no longer waits three
+    seconds for nothing, and three slow charts are no longer cut off at three.
+  - [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md): what each engine
+    **did**, generated from an actual run of 20 conformance fixtures. It cannot be
+    edited by hand — the build compares it with a fresh run.
+
 ### Fixed
 
 - **`group_by: age` reported every issue as `(none)` on MariaDB, silently, with the

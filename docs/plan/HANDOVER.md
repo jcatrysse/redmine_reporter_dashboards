@@ -110,6 +110,35 @@ gate knows nothing**, which must be loud. `layer_purity.sh`'s `search()` does th
 are valid so they do not fail today, but the hazard is the same shape and is worth
 closing the next time either is touched.
 
+**Ruby's `IO.pipe` hands the CHILD a non-blocking descriptor, and Chromium hangs up on it.**
+`O_NONBLOCK` lives on the open file description, so a child inherits it — and Chromium's
+`--remote-debugging-pipe` reader treats the resulting `EAGAIN` as a closed connection. It answers
+**exactly one command**, logs "Connection terminated while reading from pipe", and exits. The
+symptom is a browser that replies to `Browser.getVersion` and dies on whatever you send second,
+which reads as a CDP protocol error, a version incompatibility, or a message-framing bug — it is
+none of those. Clear the flag on both child-facing ends before `Process.spawn`
+(`CdpClient#blocking!`). Cost: about an hour, most of it spent suspecting the protocol.
+
+**Chromium will not run as root, and that is the design working.** `--no-sandbox` is deliberately
+never set, so the browser itself enforces "render as a non-root user". In this container you ARE
+root, so the conformance corpus and anything else that draws a PDF has to be run as somebody else:
+
+    useradd -m rrd && chmod -R a+rX . && su rrd -s /bin/bash -c '… rspec spec/conformance'
+
+Two consequences worth knowing before you lose ten minutes to each. The repository must be
+world-readable (`chmod -R a+rX`) or the run fails on a file it cannot open, and **`RRD_MATRIX_WRITE=1`
+needs `docs/` writable by that user** — otherwise the matrix regeneration fails with `EACCES` from
+inside an rspec example, which reads as a spec bug.
+
+**The conformance harness needs poppler, and says so rather than skipping.** `pdfinfo`,
+`pdftotext` and `pdftoppm` (`apt-get install -y poppler-utils`). A missing probe is an ERROR: a
+matrix generated without them would still print PASS for every check that never ran.
+
+**wkhtmltopdf cannot be installed here.** Its package is gone from Ubuntu 24.04's archive and only
+exists as a release `.deb`. So `:wkhtmltopdf` is CI-only, exactly like MariaDB and MySQL, and its
+`verification: pending` in `config/capabilities.yml` is what keeps twenty unmeasured cells out of
+the support matrix. **Promote it in the commit that reads a green CI run, not before.**
+
 **MySQL 8 evaluates `projects.<col> IN (SELECT …)` inside a LEFT JOIN's ON clause as
 TRUE.** Measured on 8.0.46 (E-1 in §Findings). An entitlement check written that way
 passes for everyone, silently, on that engine only. `issues.project_id IN (SELECT …)` and
@@ -284,6 +313,9 @@ record as of the last local run.
 | **D-1's fix on MariaDB (CI run 31036305443)** | **YES — 17 of 17 jobs green** | `adapter (MariaDB 11)` green in **4 m 16 s** of specs against **5 m 39 s** before the fix, and `corpus (MariaDB 11)` green with the overlay EMPTY and its exhaustiveness assertion live. Correctness AND performance confirmed on the engine the defect lives on. **The wall clock is half the measurement here** — the first attempt was green on the corpus too |
 | Redmine 6.1-stable, standalone, **MariaDB 10.11** | **yes, locally** | 313 adapter+corpus, 0 failures. **The run that found defect D-1** |
 | Redmine 6.1-stable, standalone, **MySQL 8.0.46** | **yes, locally** | 97 adapter + 214 corpus, 0 failures (before the last two cases were added). **The run that refuted D-1's scope** and exposed E-1 |
+| **T-12/T-13: the engine conformance corpus, Chromium 141** | **yes, locally (2026-08-06)** | 20 of 20 fixtures pass — geometry, orientation+margins, footer tokens, page breaks, backgrounds, flexbox, the readiness six, inline assets, egress denial, typed refusal, a 2 000-row envelope, fonts, pathological input and the escaping payload set. Run as a **non-root user**, sandbox on, `--no-sandbox` never passed. **It found three defects on its first run** (§Findings E-2, E-3, E-4) |
+| **T-12/T-13 DB-less half** | **yes, locally (2026-08-06)** | 155 examples green as root with no browser (45 pending), and 155 green as `rrd` with Chromium (22 pending — wkhtmltopdf, skipping with its reason). Includes the harness's own negative tests and 30 browser-less adapter examples |
+| **`:wkhtmltopdf`** | **NO, and cannot be here** | the adapter is written and registered; the binary is not installable on Ubuntu 24.04. CI-only, like MariaDB and MySQL. Nothing about it has been measured, and the matrix says so |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -357,6 +389,21 @@ of a CI that runs on fork pull requests.
    The trap it exists for is ORDERING: a memoised `User.current` or a cached visibility
    condition gives the second actor in a process the first one's answer, and every
    per-actor assertion still passes because each asserts one actor at a time.
+10. **T-11, T-12 and T-13 are done, with one honest gap.** `render/engines/` holds a CDP client, a
+   Chromium adapter and a wkhtmltopdf adapter; `spec/conformance/` holds 20 fixtures and the harness
+   that applies the three-state rule; `docs/engine-support-matrix.md` is generated from the run and
+   gate G9 compares it. **Chromium 141: 20 of 20.** Four things a later session should know.
+   **F-7 is closed** — T-11's wall-clock falsifier is `F-13`, 3/3 attempts, and it discriminates
+   because its timeout is 20 s rather than the default 10. **The corpus earned its keep on day one**,
+   finding a half-built egress control, a footer that printed `Page1of3`, and a registry reset with
+   no restore (§Findings E-2, E-3, E-4). **`:wkhtmltopdf` has never been run** and its
+   `verification: pending` is load-bearing: promoting it puts twenty unmeasured cells in the matrix,
+   which is INV-7's exact sin. And **the browser must not run as root** — see §1; that is the
+   sandbox working, not an obstacle to route around with `--no-sandbox`.
+   Next: **T-14** (preflight/diagnostics) and **T-15** (render-path containment), both of which
+   depend on T-13 and are now unblocked. **T-33** (the asset-resolution triple) depends on T-12 and
+   is likewise open.
+
 9. **T-10 is done — `render/` exists and `layer_purity` is STRICT.** The document-request
    interface only: types, a sum type, and the wrapper that makes INV-5 mechanical.
    Nothing renders yet. Two things a later session should know. **`DocumentRequest`'s
@@ -370,7 +417,8 @@ of a CI that runs on fork pull requests.
    VALID PDF whose content is wrong. Do not let it stand in for the whole invariant.
    **P-2's second premise is now half false** — Chromium 141 IS in this container, so
    T-11/T-13 can be exercised rather than written blind. A local Chromium is still not a
-   CI-verified engine; that is T-12's job.
+   CI-verified engine; that is T-12's job, and the `render-smoke` job it added is where
+   that becomes true. **Both were exercised, 2026-08-06** — see entry 10.
 4. **T-02 is done.** `rake reporter_dashboards:import:plan` is the repeatable form of the
    R-15 measurement, and `RedmineReporterDashboards::TemplateLinter` is the linter FR-71
    later puts behind the editor's lint panel — so extend that one rule table rather than
