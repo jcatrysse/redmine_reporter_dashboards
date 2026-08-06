@@ -375,16 +375,26 @@ The sampled pixel is the PAGE BACKGROUND where the plate should be. **The previo
 check would have reported PASS**, because the probe image was that same colour — which is E-10's
 tautology, caught in review, going straight on to earn its keep.
 
-**What is NOT yet known, and must not be written down as if it were.** Two explanations fit the one
-pixel: wkhtmltopdf does not decode the `data:` URI at all, or it lays the plate out somewhere other
-than `y: 0.12` (it is an old engine and `height: 20mm` on an `<img>` is exactly the kind of thing it
-handles differently). One pixel cannot tell them apart, and the engine **cannot be installed in this
-container** — its package is gone from Ubuntu 24.04 — so the discrimination is CI's to do, by
-someone who can read a rendered page rather than a single sample.
+**What was not known at first, and what the NEXT run settled.** Two explanations fit one pixel:
+wkhtmltopdf does not decode the `data:` URI at all, or it lays the plate out somewhere other than
+`y: 0.12` — it is an old engine and `display: block; height: 20mm` in flow lands wherever its
+default `<h1>` margins happen to end. One sample could not tell them apart, and the engine
+**cannot be installed in this container**, so guessing at a repair was refused.
 
-Deliberately NOT fixed by guessing. Sweeping several y positions, or scanning the whole bitmap for
-the plate colour, would be inventing a repair for an engine that cannot be run here, and the repair
-would itself be unverified. The honest record is this entry.
+**The full report, once the per-check three-state rule made it visible, supplied the discriminator
+for free.** wkhtmltopdf passes 8 of 9: `page_breaks` 2 pages, `footer` `Page 1 of 2`, and crucially
+`background` reading `page rgb[0, 170, 255], badge rgb[204, 0, 0]` — the badge is
+`position: absolute; top: 55%`, sampled at `y: 0.60`, and it is exactly right. So backgrounds print
+and absolute positioning works on that engine, in that document.
+
+That is not an argument, it is a technique that is already proven there. The plate is now
+positioned the same way — `position: absolute; top: 8%; height: 8%`, sampled at `y: 0.12` — so the
+check asks about DECODING and no longer about flow layout. If it still fails on the next CI run,
+the answer is unambiguous and worth writing in the support matrix: **wkhtmltopdf does not render
+inline `data:` images**. If it passes, the original failure was layout and the finding closes.
+
+The general point: the fix was not to sweep more pixels until something matched. It was to change
+the document so one sample can only mean one thing.
 
 **So the three-state rule now applies per check, not just per engine.** `spec/render/preflight_spec.rb`
 matches what `conformance_spec.rb` has always done per fixture: an engine the catalogue calls

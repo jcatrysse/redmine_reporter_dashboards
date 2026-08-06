@@ -177,7 +177,15 @@ module RedmineReporterDashboards
             body { background: #00aaff; font-family: sans-serif; }
             .badge { position: absolute; top: 55%; left: 0; width: 100%; height: 15%;
                      background: #cc0000; color: #ffffff; }
-            img.plate { display: block; width: 100%; height: 20mm; }
+            /* ABSOLUTELY POSITIONED, LIKE THE BADGE, SO THE SAMPLE POINT IS NOT A
+               GUESS ABOUT FLOW LAYOUT. It was `display: block; height: 20mm` in flow,
+               which put it wherever the engine's default <h1> margins happened to end
+               — fine on Chromium and unfalsifiable anywhere else. wkhtmltopdf then
+               reported the page background at the sample point, and there was no way
+               to tell "the data: URI did not decode" from "the plate is 4mm lower".
+               The badge proves this positioning works on both engines in this very
+               document, so using it here makes the check answer ONE question. */
+            img.plate { position: absolute; top: 8%; left: 0; width: 100%; height: 8%; }
             .brk { page-break-before: always; break-before: page; }
           </style>
           <!-- THE SHIPPED READINESS SHELL, in <head> so that anything below can call
@@ -410,8 +418,11 @@ module RedmineReporterDashboards
            # SAMPLED AGAINST `PLATE_RGB`, WHICH IS NOT THE PAGE BACKGROUND. Compared
            # against the background — as the first version did, because the probe image
            # happened to be that same colour — this passes when the image does not
-           # decode at all, because the `<img>` has a fixed height and the page shows
-           # through it. See `PROBE_PNG`.
+           # decode at all, because the page shows through where the plate should be.
+           # See `PROBE_PNG`.
+           #
+           # `y: 0.12` is the middle of the plate's absolutely-positioned band (8%–16%),
+           # so this asks about DECODING and not about layout. See the CSS.
            sample = PdfInspector.pixel(bytes, x: 0.5, y: 0.12)
            [PdfInspector.colour_matches?(sample, PLATE_RGB),
             "rgb#{sample.inspect}, wanted rgb#{PLATE_RGB.inspect}"]
