@@ -43,12 +43,36 @@ EXEMPT=(
 
 cd "$ROOT"
 
+# --- TWO REPAIRS, BOTH ASKED FOR BY HANDOVER §1, MADE THE FIRST TIME THIS WAS TOUCHED
+#
+# 1. WHOLE-LINE COMMENTS ARE STRIPPED, as `layer_purity.sh` and `compat_size.sh` already
+#    do. The first version failed on this file's own successor — a comment in the
+#    wkhtmltopdf adapter explaining WHY it uses `IO.select` rather than a thread per
+#    stream. A gate that punishes writing down its own rationale teaches people to
+#    delete the rationale, so it damages the codebase in exactly the dimension it exists
+#    to protect. A trailing comment on a line of code still counts; that line is code.
+#
+# 2. `|| true` IS GONE. It cannot tell "no matches" from "the search crashed", and one
+#    of those is a lie — the same defect that made `layer_purity.sh` report every layer
+#    clean while checking nothing. A search's exit status is three-valued here:
+#    0 = matches, 1 = no matches, anything else = the tool failed and this gate knows
+#    nothing, which must be loud.
 matches() {
-  if command -v rg >/dev/null 2>&1; then
-    rg -l "$PATTERN" "${SEARCH_PATHS[@]}" 2>/dev/null || true
-  else
-    grep -rlE "$PATTERN" "${SEARCH_PATHS[@]}" 2>/dev/null || true
-  fi
+  local file rc
+  while IFS= read -r file; do
+    # `if` rather than a bare assignment: under `set -e` a failing simple command ends
+    # the script, and "grep found nothing" is a failing command with exit 1. Putting the
+    # search in a condition is what lets the three-valued check below run at all.
+    if sed 's/^[[:space:]]*#.*$//' "$file" | grep -qE "$PATTERN"; then
+      echo "$file"
+    else
+      rc=$?
+      if [ "$rc" -gt 1 ]; then
+        echo "no_thread_local: FAIL — the search itself failed (exit $rc) on $file" >&2
+        exit 2
+      fi
+    fi
+  done < <(find "${SEARCH_PATHS[@]}" -name '*.rb' -type f 2>/dev/null | sort)
 }
 
 FOUND="$(matches | sort -u)"

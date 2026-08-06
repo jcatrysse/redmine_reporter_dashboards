@@ -160,40 +160,38 @@ module RedmineReporterDashboards
         # thread with it. This adapter declares `:timeout`, and a declaration is a
         # promise: the deadline is enforced here, with SIGKILL rather than SIGTERM
         # because a wedged QtWebKit does not always answer the polite one.
+        #
+        # --- WHY `IO.select` AND NOT THREE READER THREADS ---
+        #
+        # The obvious shape is a thread per stream. `script/gates/no_thread_local.sh`
+        # forbids `Thread.new` outside the legacy glue and was right to fail the first
+        # version of this method — but the gate is not the reason this is written the way
+        # it is, it is only what prompted looking again. Threads here would need to be
+        # joined on every exit path including the timeout one, and a reader thread
+        # blocked on a pipe that nobody will ever write to again is a leak that outlives
+        # the render. One select loop over all three descriptors has no such path: when
+        # the deadline passes, the loop stops and the process is killed, and there is
+        # nothing left running.
+        #
+        # DRAINING IS NOT OPTIONAL. A child that fills the 64 KiB pipe buffer blocks in
+        # `write` and never exits, so "read the output afterwards" deadlocks against
+        # "wait for it to finish" — and wkhtmltopdf is chatty on stderr.
         def run(argv, request, started)
           Open3.popen3(*argv) do |stdin, stdout, stderr, wait_thread|
             stdin.binmode
-            feeder = Thread.new do
-              begin
-                stdin.write(request.body)
-              rescue StandardError
-                nil
-              ensure
-                begin
-                  stdin.close
-                rescue StandardError
-                  nil
-                end
-              end
-            end
-            drain_out = Thread.new { stdout.read }
-            drain_err = Thread.new { stderr.read }
+            deadline = monotonic_ms + request.timeout_ms
+            captured = pump(stdin, stdout, stderr, request.body.dup.b, deadline)
 
-            unless wait_thread.join(request.timeout_ms / 1000.0)
+            remaining = [(deadline - monotonic_ms) / 1000.0, 0].max
+            unless wait_thread.join(remaining)
               kill(wait_thread.pid)
-              [feeder, drain_out, drain_err].each(&:kill)
+              wait_thread.join
               next [nil, failure(request, :timeout, 'the report took too long to draw',
                                  detail: "killed after #{request.timeout_ms}ms", started: started)]
             end
 
-            feeder.join
             status = wait_thread.value
-            stderr_text = drain_err.value.to_s
-            drain_out.join
-
-            unless status.success?
-              next [nil, engine_failure(request, stderr_text, status, started)]
-            end
+            next [nil, engine_failure(request, captured, status, started)] unless status.success?
 
             [File.binread(argv.last), nil]
           end
@@ -201,6 +199,64 @@ module RedmineReporterDashboards
           [nil, failure(request, :engine_unavailable,
                         'the render engine is not installed or cannot be started',
                         detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
+        end
+
+        # Feeds the document in and drains both output streams until the child closes
+        # them or the deadline passes. Returns whatever stderr said, which is where
+        # wkhtmltopdf keeps the reason for anything it did.
+        def pump(stdin, stdout, stderr, body, deadline)
+          offset = 0
+          collected = +''
+          readers = [stdout, stderr]
+
+          until readers.empty? || monotonic_ms >= deadline
+            writers = stdin.closed? ? [] : [stdin]
+            ready = IO.select(readers, writers, nil, 0.1)
+            next unless ready
+
+            ready[1].each { offset = feed(stdin, body, offset) }
+            ready[0].each do |io|
+              chunk = drain(io)
+              if chunk.nil?
+                readers.delete(io)
+              elsif io.equal?(stderr)
+                # Bounded: a runaway engine can produce megabytes of warnings, and none
+                # of it belongs in a Failure's detail.
+                collected << chunk if collected.bytesize < 64 * 1024
+              end
+            end
+          end
+
+          close_quietly(stdin)
+          collected
+        end
+
+        def feed(stdin, body, offset)
+          written = stdin.write_nonblock(body.byteslice(offset..) || '', exception: false)
+          return offset if written == :wait_writable
+
+          offset += written
+          close_quietly(stdin) if offset >= body.bytesize
+          offset
+        rescue Errno::EPIPE, IOError
+          # The engine stopped reading — it has either finished or failed, and either
+          # way there is nothing useful left to send it.
+          close_quietly(stdin)
+          body.bytesize
+        end
+
+        def drain(io)
+          io.read_nonblock(16_384, exception: false).then do |chunk|
+            chunk == :wait_readable ? '' : chunk
+          end
+        rescue EOFError, IOError
+          nil
+        end
+
+        def close_quietly(io)
+          io.close unless io.closed?
+        rescue IOError
+          nil
         end
 
         def kill(pid)
