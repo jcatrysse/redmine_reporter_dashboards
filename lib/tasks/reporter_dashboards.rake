@@ -19,4 +19,32 @@ namespace :reporter_dashboards do
       puts RedmineReporterDashboards::Import::PlanReport.render(result)
     end
   end
+
+  namespace :render do
+    # T-14. Same shape as `import:plan` and for the same reason: the decisions —
+    # which engines, what the exit code means, what happens when there are none —
+    # are in `Render::PreflightCommand`, which has a spec. This is glue.
+    #
+    # It EXITS NON-ZERO when a check failed, so it can be a deploy step rather than
+    # something an operator reads and interprets. `PreflightCommand` documents the
+    # three codes; 2 ("nothing was verified") is deliberately not 0.
+    desc 'Render a probe document through each engine and report what actually worked ' \
+         '(exit 1 on failure, 2 if no engine is registered; RRD_ENGINE=id, RRD_FORMAT=json)'
+    task preflight: :environment do
+      engines_dir = File.expand_path('../redmine_reporter_dashboards/render/engines', __dir__)
+      Dir[File.join(engines_dir, '*.rb')].sort.each { |path| require path }
+      require File.expand_path('../redmine_reporter_dashboards/render/preflight_command', __dir__)
+
+      # The port `render/**` may not reach for itself: this is the one line that knows
+      # Redmine has a Setting table. See PreflightCommand's note on mechanism E5.
+      base_url = Setting.host_name.present? ? "#{Setting.protocol}://#{Setting.host_name}" : nil
+
+      exit RedmineReporterDashboards::Render::PreflightCommand.new(
+        engine_ids: ENV['RRD_ENGINE'],
+        redmine_base_url: base_url,
+        format: (ENV['RRD_FORMAT'] || 'text').to_sym,
+        logger: Rails.logger
+      ).call
+    end
+  end
 end

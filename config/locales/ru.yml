@@ -20,3 +20,32 @@ ru:
   permission_view_reporter_project_page: Просмотр панели проекта
   permission_manage_reporter_project_page: Управление виджетами панели проекта
   permission_manage_reporter_project_tabs: Управление вкладками панели проекта
+  # T-14 - the render preflight (admin page). Keyed on Check#id, never on the
+  # English title the render layer carries: the id is a contract, the title is prose.
+  label_reporter_preflight: "Предварительная проверка рендеринга"
+  text_reporter_preflight_intro: "Формирует тестовый документ каждым установленным механизмом рендеринга и сообщает, что действительно попало в PDF: разрывы страниц, нижний колонтитул с номером страницы, цвета фона, встроенное изображение и работу JavaScript. Именно на эти вопросы установленный и внешне исправный механизм всё ещё может ответить неверно."
+  text_reporter_preflight_takes_a_moment: "При этом запускается настоящий механизм и ожидается настоящий документ, поэтому проверка занимает несколько секунд на каждый механизм."
+  button_reporter_preflight_run: "Выполнить проверку"
+  text_reporter_preflight_no_engine: "Ни один механизм рендеринга не зарегистрирован, поэтому ничего не проверено. В таком состоянии отчёт создать невозможно."
+  text_reporter_preflight_ok: "Все проверки пройдены."
+  text_reporter_preflight_problems: "Не пройдено проверок: %{count}."
+  text_reporter_preflight_incomplete: "Ошибок нет, но не удалось выполнить проверок: %{count}. Подробности ниже."
+  label_reporter_preflight_engine_version: "Версия механизма"
+  label_reporter_preflight_duration: "Длительность"
+  label_reporter_preflight_state: "Состояние"
+  label_reporter_preflight_check: "Проверка"
+  label_reporter_preflight_detail: "Подробности"
+  label_reporter_preflight_state_pass: "Пройдена"
+  label_reporter_preflight_state_fail: "Не пройдена"
+  label_reporter_preflight_state_skip: "Не удалось выполнить"
+  label_reporter_preflight_state_expected_failure: "Ожидаемая ошибка"
+  label_reporter_preflight_check_engine: "Механизм рендеринга создал документ"
+  label_reporter_preflight_check_degradations: "Ничего не было незаметно отключено"
+  label_reporter_preflight_check_document: "Документ был проверен"
+  label_reporter_preflight_check_page_breaks: "Разрывы страниц дают более одной страницы"
+  label_reporter_preflight_check_footer: "Нижний колонтитул с номером страницы формируется и нумеруется"
+  label_reporter_preflight_check_background: "Фон печатается, поэтому метки сохраняют свой цвет"
+  label_reporter_preflight_check_inline_asset: "Встроенное изображение декодируется в правильный цвет"
+  label_reporter_preflight_check_javascript: "JavaScript выполняется, поэтому диаграммы могут отрисовываться"
+  label_reporter_preflight_check_readiness: "Скрипт готовности загружается, поэтому страница без диаграмм не ждёт"
+  label_reporter_preflight_check_hosted_asset: "Изображение, размещённое в Redmine, заблокировано (ожидаемо: у рендерера нет доступа к сети)"

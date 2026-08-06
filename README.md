@@ -249,6 +249,45 @@ It also says what it could **not** answer. If `redmine_reporter` is not installe
 the database you run it against, it says so plainly rather than reporting an empty
 result as a clean bill of health.
 
+## Checking that PDF rendering actually works
+
+```bash
+bundle exec rake reporter_dashboards:render:preflight RAILS_ENV=production
+```
+
+The same diagnostic is at **Administration → Render preflight** for anyone without a
+shell on the box.
+
+It does not look at the filesystem. It renders a real probe document through every
+installed engine and then reads the result back out of the PDF: does a page break
+produce a second page, is the `Page 1 of 2` footer compiled and numbered, are
+backgrounds printed (so badges keep their colour), does an inline image decode to the
+colour it was, does JavaScript run (so charts can draw), and does the readiness shell
+load.
+
+That is the point. **The failure this catches is "the container is healthy but every
+PDF silently loses its assets"** — nothing is down, the binary is present, the bytes
+come back, the file opens, and the reports are just missing their images. `File.exist?`
+answers yes to all of it, and nobody notices until somebody reads a quarterly report a
+quarter later.
+
+Three things worth knowing about the output:
+
+- **A Redmine-hosted image is reported as an *expected* failure.** Under the default
+  asset policy the renderer has no network access at all, so a
+  `<img src="https://your-redmine/…">` in a template cannot load. That is deliberate,
+  and the preflight says so out loud rather than hiding it — an expected failure is its
+  own state and does not make the run red.
+- **`poppler-utils` is optional, and its absence is a skip, not a pass.** Without
+  `pdfinfo`/`pdftotext`/`pdftoppm` the preflight can only report that bytes came back —
+  which is the check that was already passing while every report lost its images. It
+  names the package, the run is reported as *incomplete*, and the summary never reads a
+  bare "OK".
+- **Exit codes**, so the task can be a deploy step: `0` everything that ran passed,
+  `1` at least one check failed, `2` no engine is registered — nothing was verified.
+  `RRD_ENGINE=<id>` limits it to one engine; `RRD_FORMAT=json` prints the report as
+  JSON for an issue or a log.
+
 ## Enabling the dashboard for a project
 
 1. Open **Project → Settings → Modules** and enable **Project dashboard**.

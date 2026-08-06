@@ -67,7 +67,8 @@ fact that CI has not yet run on this work at all.
 | T-15 | **partly done** — `render/batch_guard.rb` plus `spec/render/chromium_containment_spec.rb`. The cap OWNS the render loop rather than sitting beside it, so "refuse before any render" is a property of the object and not of the caller's discipline; asserted with a double that counts calls (**zero** over the cap), at the cap and one past it. Batch deadline keeps what is finished and refuses the rest, typed, with each undrawn document's own correlation id. Against a real browser: a wedged renderer times out bounded-and-monotonic **and the browser is gone from the process table**, the next render is served from a fresh one, shutdown leaves nothing behind, and concurrency never exceeds one browser. **Two Accept items are blocked on an entry point that does not exist** — see §Findings E-6 |
 | T-17 | **done** — `liquid/{execution_policy,template_renderer}.rb` plus gate `single_parse.sh`. **Both mechanisms, because neither alone suffices**: per-CLASS resource limits (widget/report/preview, preview deliberately on the widget's numbers so an author feels the limit at the keyboard) handed to the `Liquid::Context` — the only per-render channel either Liquid 4 or 5 offers, verified on 4.0.4 and 5.13.0 — and a **cooperative monotonic deadline** wired into all three own tags, a no-op where no budget is bound. `Timeout.timeout` is not used and the file says why. **Errors never enter the document**: the spec first DEMONSTRATES Liquid's default of writing `Liquid error:` into the output, then shows the same template becoming a typed failure with no body at all. 36 examples against the real gem; the gate negative-tested |
 | T-18 | **begun — the prerequisite only.** T-18's Accept list names a *"Required spec before this task is done"*, and that is what landed: `liquid/drops/named_ref_drop.rb` and its proof, green on Liquid **4.0.4 and 5.13.0**, 28 examples each, every one comparing the drop's rendering against the **String's**. It found a protocol-breaking defect (`key?` made every accessor render empty) and **two gaps in §3.3's own table** which are E-8 and the curator's. **The other 12 drop classes and `liquid/batch.rb` are not started** — deliberately, rather than left as stubs |
-| T-14, T-16 onward | not started |
+| T-14 | **done** — `render/preflight.rb`, `render/pdf_inspector.rb`, `render/preflight_command.rb`, plus the admin page (`ReporterPreflightController` + helper + view, `require_admin` **per action**) and `rake reporter_dashboards:render:preflight` **exiting 0/1/2** (2 = nothing was registered, so nothing was verified — deliberately not 0). Nine document checks, each a ROUND TRIP read back out of the PDF, `:expected_failure` a distinct state from `:fail` so the INV-8 containment result cannot be confused with a defect, and a missing `poppler-utils` a **skip naming the package** with `complete?` false and the headline never a bare OK. `spec/conformance/pdf_probe.rb` is now a **policy over `PdfInspector`**, not a second implementation — same mechanism, opposite policy (hard error there, skip here) — so the corpus and the operator's diagnostic cannot drift apart. **Negative-tested**: the canned single-page PDF drives every one of the six document checks red, one at a time. **Measured against real Chromium 141: 9/9 in 943 ms**, hosted image `expected_failure`. It found three defects in its own first run — see §Findings E-10 |
+| T-16 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -363,6 +364,43 @@ asked about: slot text was being interpolated into that document **raw**, so an 
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
 
+**E-10 · the preflight's FIRST REAL RUN found three defects, and all three were in the
+diagnostic rather than in the engine.** Chromium 141, non-root so the sandbox initialises.
+
+**One: the probe document waited out the readiness watchdog.** 17.5 s, and a degradation reading
+`readiness_timeout: 0 chart(s) had not finished after 8000ms`. The probe carried no
+`chart_shell.js`, so nothing ever set the ready signal and the engine sat out its full timeout —
+the chart-free case, which is precisely the failure `settle()` exists to prevent and which the
+shell's own comment calls out ("a page with nothing to draw would be the SLOWEST one to render").
+Fixed by inlining the **shipped** shell into `<head>`, so the preflight exercises the file every
+real report gets rather than a signal invented for the occasion. **943 ms afterwards**, and the
+`readiness` check now reads a `SHELL present` marker back out of the PDF, so the shell failing to
+load is a named check rather than a mysterious eight-second pause.
+
+**Two: `File.read` on a host with a POSIX locale killed the whole diagnostic.** The shell came back
+tagged US-ASCII — the default external encoding when `LANG` is unset — and interpolating it into a
+UTF-8 heredoc raised `Encoding::CompatibilityError`. So the preflight would have died on exactly the
+hosts most likely to need one. `spec/conformance/fixture.rb` had already learned this and reads with
+`encoding: 'UTF-8'` everywhere; the lesson is now in both places. `PdfInspector.run` was fixed for
+the same class of bug in the other direction: `pdftotext` emits UTF-8, and left at the default
+external encoding the first accented character in a French report turns a regexp match into
+`ArgumentError: invalid byte sequence`.
+
+**Three: two checks reported details that contradicted their own verdict.** The `readiness` check
+had two branches for three outcomes, so a document with no marker at all FAILED while its detail
+said `loaded`. The hosted-asset check had the same shape and it was worse: a fetch that had not
+resolved yet was reported as *"the renderer REACHED <url> — it has network access it is not supposed
+to have (INV-8)"*, which would send an operator hunting for a firewall hole that does not exist.
+Both now enumerate all three outcomes and say what they actually saw. The underlying race is closed
+too — the hosted image is wrapped in `__rd.begin()`/`end()`, which is the shell's documented idiom
+and the only place the probe exercises that half of the contract.
+
+**What this says about the preflight rather than about these three bugs:** every one of them
+produced a diagnostic that still *looked* like a working diagnostic. Bytes came back, the PDF
+opened, the run went green in the places nobody was reading. That is the same shape as the failure
+T-14 exists to catch, one level up, and it is why the spec drives all six document checks RED
+against a canned single-page PDF before anything is believed about a run where they pass.
+
 **E-9 · the two engines disagreed about whether a blocked asset destroys a report, and the
 abstraction is the thing that must not.** Measured across two CI runs on fixture F-15.
 
@@ -422,18 +460,27 @@ attributes. **You cannot have both in one Liquid value:** Drop buys you the new 
 buys you substitutability, and §3.3 chose Drop without recording that the choice costs these two
 idioms.
 
-So this is the curator's, and the options are honest ones:
+**DECIDED by the curator, 2026-08-06: keep the Drop, and have the linter flag the two idioms.**
+The class stays as §3.3 specifies, `{{ status.id }}` and `{{ status.url }}` are kept, and the path
+that dissolves `{% geo_version_map %}`'s 295 lines stays open. The two gaps stay pinned by tests
+that fail if the behaviour moves in either direction.
 
-* **accept the two gaps** and have T-19's linter flag `"literal" == x` and `| size` on a reference,
-  turning a silent wrong branch into an authoring error — probably the best of the three, since the
-  linter already exists;
-* **ship a String subclass instead** and give up `{{ status.id }}`, which reopens ADR-004's rejected
-  "keep Strings, add `*_id` only" and leaves `{% geo_version_map %}`'s 295 lines alive;
-* **ship both shapes** and let the caller choose, which doubles the vocabulary a template author has
-  to hold.
+**This puts an obligation on T-19, and it is not optional — it is the other half of this decision.**
+The linter must flag both idioms, at authoring time, on any expression that resolves to a reference:
 
-Pending that, the class is as §3.3 specifies and the two gaps are pinned by tests that fail if the
-behaviour changes in either direction.
+* `{% if "literal" == x %}` — the reversed comparison. Suggest the working order, `x == "literal"`.
+* `{{ x | size }}` — suggest `{{ x.name | size }}`, which is what the author meant.
+
+Without those two rules the decision is only half taken: a template that uses either one gets a
+silently wrong branch instead of an error, and the whole reason for choosing the Drop was that a
+visible authoring error beats a silent wrong answer. Whoever builds T-19 should treat these as
+acceptance criteria for T-19, not as a nice-to-have inherited from another task.
+
+The rejected alternatives, recorded so the reasoning survives: a **String subclass** would be
+substitutable everywhere and forfeits the Drop protocol, reopening ADR-004's rejected "keep Strings,
+add `*_id` only" and leaving those 295 lines alive; **shipping both shapes** loses nothing
+technically and doubles the vocabulary every template author has to hold, which is a cost paid by
+people rather than by code.
 
 **E-7 · the Liquid stub and the real gem cannot share a process, and 200+ specs are written
 against the stub.** Found while building T-17, by trying it. The plugin has never loaded Liquid

@@ -1,58 +1,66 @@
 # frozen_string_literal: true
 
-require 'open3'
-require 'tmpdir'
+require_relative '../../lib/redmine_reporter_dashboards/render/pdf_inspector'
 
 module RedmineReporterDashboards
   module Conformance
     # What the harness is allowed to know about a PDF.
     #
-    # --- WHY THIS IS NOT A PDF PARSER ---
+    # --- THIS FILE IS A POLICY, NOT AN IMPLEMENTATION ---
     #
-    # Every conformance question here is answerable from three external tools, and the
-    # alternative — a hand-rolled reader for object streams, Flate, subset fonts and
-    # ToUnicode CMaps — would be several hundred lines of code that is itself untested
-    # and whose bugs look exactly like engine defects. A wrong answer from OUR reader
-    # would be indistinguishable from a wrong answer from the engine, which is the one
-    # thing a conformance harness must never be.
+    # The reading itself — pdfinfo, pdftotext, pdftoppm, the P6 pixel parse — moved to
+    # `Render::PdfInspector` when `Preflight` (T-14) needed exactly the same three
+    # answers on a real install. Keeping a second copy here would be a second way of
+    # doing something that already has a way (CLAUDE.md §6), and worse: the copy the
+    # conformance corpus trusts and the copy an operator's diagnostic trusts could drift
+    # apart, so a green matrix would stop meaning the diagnostic is right.
     #
-    #   pdfinfo    page count, page geometry in points
-    #   pdftotext  the text the reader can actually select
-    #   pdftoppm   the pixels, as a raw P6 bitmap
+    # What stays here is the ONE thing the two callers genuinely disagree about.
     #
-    # --- AND WHY A MISSING TOOL IS A HARD ERROR, NEVER A SKIP ---
+    # --- A MISSING TOOL IS A HARD ERROR HERE, AND A SKIP THERE ---
     #
-    # This repository keeps rediscovering one failure mode: a check that did not run
-    # looks exactly like a check that passed (`HANDOVER.md` §1 — the mirrored plugin
-    # with no git history, the corpus without a reference date, `|| true` on a gate's
-    # search). So `require_tools!` raises, the run stops, and the reason names the
-    # package. A conformance suite that quietly stopped verifying geometry because
-    # poppler was not installed is worse than no conformance suite, because the matrix
-    # it generates still says PASS.
+    # `Preflight` runs on somebody's install, where poppler is an optional package and a
+    # named skip is the honest answer. This harness GENERATES THE SUPPORT MATRIX, and
+    # this repository keeps rediscovering one failure mode: a check that did not run
+    # looks exactly like a check that passed (`HANDOVER.md` §1 — the mirrored plugin with
+    # no git history, the corpus without a reference date, `|| true` on a gate's search).
+    # A matrix generated without the probes would still print PASS for geometry, colour
+    # and text — checks that never executed. So `require_tools!` raises, the run stops,
+    # and the reason names the package.
+    #
+    # Same mechanism, opposite policy, and the policy is what this file is for.
     module PdfProbe
-      TOOLS = %w[pdfinfo pdftotext pdftoppm].freeze
+      Inspector = Render::PdfInspector
+
+      TOOLS = Inspector::TOOLS
       INSTALL_HINT = 'apt-get install -y poppler-utils'
 
       class ToolMissing < StandardError; end
-      class ProbeFailed < StandardError; end
 
-      # A colour comparison tolerance, per channel. Deliberately small: this is an
-      # EXACT assertion about a flat fill, not a perceptual diff. Chromium renders
-      # `#00aaff` as (0, 170, 255) exactly; the tolerance absorbs a rasteriser's
-      # rounding, not a design change. CLAUDE.md §7 makes perceptual diffs advisory —
-      # this is not one, and the difference is that a flat fill has a right answer.
-      COLOUR_TOLERANCE = 8
+      # The inspector's failure, under the name the harness has always used for it.
+      # Aliased rather than wrapped: a probe failure means the same thing on both sides,
+      # and two classes for one condition is how a rescue ends up catching neither.
+      ProbeFailed = Inspector::InspectionFailed
+
+      COLOUR_TOLERANCE = Inspector::COLOUR_TOLERANCE
 
       module_function
 
       def available?
-        TOOLS.all? { |tool| which(tool) }
+        Inspector.available?
       end
 
       def missing_tools
-        TOOLS.reject { |tool| which(tool) }
+        Inspector.missing_tools
       end
 
+      def which(tool)
+        Inspector.which(tool)
+      end
+
+      # THE POLICY. Note it consults *this* module's `missing_tools` rather than the
+      # inspector's: the harness's own spec plants a missing tool by stubbing it here,
+      # and a call that reached past it would test the real PATH instead of the case.
       def require_tools!
         missing = missing_tools
         return true if missing.empty?
@@ -63,100 +71,34 @@ module RedmineReporterDashboards
               'a matrix generated without the probes would report PASS for checks that never ran.'
       end
 
-      def which(tool)
-        ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).any? do |dir|
-          path = File.join(dir, tool)
-          File.executable?(path) && !File.directory?(path)
-        end
-      end
-
-      # ---- the three probes -------------------------------------------------
+      # ---- the three probes, delegated --------------------------------------
+      #
+      # Path-based: a fixture has already written its document to the work directory,
+      # and the inspector's byte-based spellings would copy it back out to a second
+      # temporary file for nothing.
 
       def page_count(pdf_path)
-        info(pdf_path).fetch('Pages').to_i
+        Inspector.page_count_at(pdf_path)
       end
 
-      # Points, as the PDF itself carries them — 1 pt = 1/72 in, so A4 portrait is
-      # 595 x 842. Returned as floats because engines disagree in the first decimal
-      # and a conformance check should be about the page size, not about rounding.
       def page_size_pt(pdf_path)
-        raw = info(pdf_path).fetch('Page size')
-        match = raw.match(/([\d.]+)\s*x\s*([\d.]+)\s*pts/)
-        raise ProbeFailed, "cannot read a page size out of #{raw.inspect}" unless match
-
-        [match[1].to_f, match[2].to_f]
+        Inspector.page_size_pt_at(pdf_path)
       end
 
-      # `-layout` keeps columns roughly where they were, which is what makes a footer
-      # assertion ("the page number is on the right") mean anything at all.
       def text(pdf_path, page: nil)
-        args = ['pdftotext', '-layout']
-        args += ['-f', page.to_s, '-l', page.to_s] if page
-        run(*args, pdf_path, '-')
+        Inspector.text_at(pdf_path, page: page)
       end
 
-      # One pixel, addressed as a FRACTION of the page rather than in device units,
-      # so a check reads "the middle of the page" and does not silently change meaning
-      # when the fixture's page size does.
       def pixel(pdf_path, page: 1, x: 0.5, y: 0.5, dpi: 24)
-        Dir.mktmpdir('rrd-ppm') do |dir|
-          prefix = File.join(dir, 'page')
-          run('pdftoppm', '-r', dpi.to_s, '-f', page.to_s, '-l', page.to_s, pdf_path, prefix)
-          ppm = Dir[File.join(dir, 'page*.ppm')].sort.first
-          raise ProbeFailed, "pdftoppm produced no bitmap for page #{page}" unless ppm
-
-          read_ppm_pixel(File.binread(ppm), x, y)
-        end
+        Inspector.pixel_at(pdf_path, page: page, x: x, y: y, dpi: dpi)
       end
 
       def colour_matches?(actual, expected, tolerance: COLOUR_TOLERANCE)
-        actual.length == expected.length &&
-          actual.each_with_index.all? { |value, i| (value - expected[i]).abs <= tolerance }
+        Inspector.colour_matches?(actual, expected, tolerance: tolerance)
       end
 
-      # ---- plumbing ---------------------------------------------------------
-
-      # P6: a text header (magic, width, height, maxval) followed by raw RGB triples.
-      # Parsed here rather than shelled out to, because this part genuinely is trivial
-      # and adding an image library for it would be the tail wagging the dog.
       def read_ppm_pixel(bytes, x_fraction, y_fraction)
-        header = bytes.match(/\AP6\s+(\d+)\s+(\d+)\s+(\d+)\s/m)
-        raise ProbeFailed, 'not a P6 bitmap' unless header
-        raise ProbeFailed, "unsupported maxval #{header[3]}" unless header[3] == '255'
-
-        width = header[1].to_i
-        height = header[2].to_i
-        x = (x_fraction * width).to_i.clamp(0, width - 1)
-        y = (y_fraction * height).to_i.clamp(0, height - 1)
-        offset = header.end(0) + ((y * width) + x) * 3
-        bytes.byteslice(offset, 3).unpack('C3')
-      end
-
-      def info(pdf_path)
-        @info ||= {}
-        @info[cache_key(pdf_path)] ||= parse_info(run('pdfinfo', pdf_path))
-      end
-
-      def parse_info(output)
-        output.each_line.with_object({}) do |line, out|
-          key, _, value = line.partition(':')
-          out[key.strip] = value.strip unless value.empty?
-        end
-      end
-
-      # The path alone is not a key: a fixture may render twice to the same temporary
-      # file, and a cached page count from the previous render is a silent lie.
-      def cache_key(pdf_path)
-        stat = File.stat(pdf_path)
-        [pdf_path, stat.size, stat.mtime.to_f].join('|')
-      end
-
-      def run(*command)
-        require_tools!
-        out, err, status = Open3.capture3(*command)
-        return out if status.success?
-
-        raise ProbeFailed, "#{command.first} failed (#{status.exitstatus}): #{err.strip}"
+        Inspector.read_ppm_pixel(bytes, x_fraction, y_fraction)
       end
     end
   end

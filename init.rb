@@ -45,6 +45,14 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
     }
   end
 
+  # T-14. No icon class: the admin menu's icon mechanism changed between Redmine 5.1
+  # and 6.x (`icon icon-*` versus `sprite_icon`), and a one-item diagnostic link is not
+  # worth a `compat/` entry or a divergence the LOC budget has to carry. A plain link
+  # renders correctly on all four supported branches.
+  menu :admin_menu, :reporter_dashboards_preflight,
+       { controller: 'reporter_preflight', action: 'show' },
+       caption: :label_reporter_preflight
+
   menu :project_menu, :reporter_project_page,
        { controller: 'reporter_project_pages', action: 'show' },
        caption: :label_reporter_project_page,

@@ -17,6 +17,12 @@ match 'projects/:project_id/reporter/tabs/:id', to: 'reporter_project_tabs#updat
 match 'projects/:project_id/reporter/tabs/:id', to: 'reporter_project_tabs#destroy', via: :delete, as: 'delete_reporter_project_tab'
 post 'projects/:project_id/reporter/tabs/:id/order', to: 'reporter_project_tabs#order', as: 'order_reporter_project_tab'
 
+# T-14 — the render preflight, admin only (the controller requires it per action).
+# GET shows the page and runs NOTHING; POST is what starts a browser. A GET with an
+# engine launch behind it is a GET a crawler or a prefetching proxy can fire.
+get 'admin/reporter_dashboards/preflight', to: 'reporter_preflight#show', as: 'reporter_preflight'
+post 'admin/reporter_dashboards/preflight', to: 'reporter_preflight#run', as: 'run_reporter_preflight'
+
 # SQL aggregation statistics JSON endpoint — no format default; the controller
 # always renders JSON via render json: so no .json suffix needed, and omitting
 # the default keeps params[:format] nil so Redmine's session auth is not bypassed.

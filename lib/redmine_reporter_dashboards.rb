@@ -20,6 +20,12 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/renderer'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/readiness'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/process_pool'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engine_catalogue'
+# The diagnostic (T-14). Required at boot for the same reason as the rest: the admin
+# controller and the rake task both reach it, and a load error should surface on the
+# branch that broke it rather than the first time an administrator asks whether their
+# render path works.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/pdf_inspector'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight'
 # The adapters. Requiring them REGISTERS them; it does not start a browser or run a
 # binary, so a host without either boots exactly as before and finds out at preflight.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/chromium_cdp'

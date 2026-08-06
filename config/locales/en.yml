@@ -20,3 +20,32 @@ en:
   permission_view_reporter_project_page: View project dashboard
   permission_manage_reporter_project_page: Manage project dashboard widgets
   permission_manage_reporter_project_tabs: Manage project dashboard tabs
+  # T-14 - the render preflight (admin page). Keyed on Check#id, never on the
+  # English title the render layer carries: the id is a contract, the title is prose.
+  label_reporter_preflight: "Render preflight"
+  text_reporter_preflight_intro: "Renders a probe document through every installed render engine and reports what actually arrived in the PDF: page breaks, the page-number footer, background colours, an inline image and the JavaScript path. These are the questions that a present, healthy engine can still answer wrongly."
+  text_reporter_preflight_takes_a_moment: "This starts a real engine and waits for a real document, so it takes a few seconds per engine."
+  button_reporter_preflight_run: "Run preflight"
+  text_reporter_preflight_no_engine: "No render engine is registered, so nothing was verified. No report can be produced in this state."
+  text_reporter_preflight_ok: "Every check passed."
+  text_reporter_preflight_problems: "%{count} check(s) failed."
+  text_reporter_preflight_incomplete: "Nothing failed, but %{count} check(s) could not run. See the details below."
+  label_reporter_preflight_engine_version: "Engine version"
+  label_reporter_preflight_duration: "Duration"
+  label_reporter_preflight_state: "State"
+  label_reporter_preflight_check: "Check"
+  label_reporter_preflight_detail: "Details"
+  label_reporter_preflight_state_pass: "Passed"
+  label_reporter_preflight_state_fail: "Failed"
+  label_reporter_preflight_state_skip: "Could not run"
+  label_reporter_preflight_state_expected_failure: "Expected failure"
+  label_reporter_preflight_check_engine: "The render engine produced a document"
+  label_reporter_preflight_check_degradations: "Nothing was silently degraded"
+  label_reporter_preflight_check_document: "The document was inspected"
+  label_reporter_preflight_check_page_breaks: "Page breaks produce more than one page"
+  label_reporter_preflight_check_footer: "The page-number footer is compiled and numbered"
+  label_reporter_preflight_check_background: "Backgrounds are printed, so badges keep their colour"
+  label_reporter_preflight_check_inline_asset: "An inline image decodes to the right colour"
+  label_reporter_preflight_check_javascript: "The JavaScript path runs, so charts can draw"
+  label_reporter_preflight_check_readiness: "The readiness shell loads, so a chart-free page does not wait"
+  label_reporter_preflight_check_hosted_asset: "A Redmine-hosted image is blocked (expected: the renderer has no network access)"

@@ -20,3 +20,32 @@ es:
   permission_view_reporter_project_page: Ver panel del proyecto
   permission_manage_reporter_project_page: Gestionar widgets del panel del proyecto
   permission_manage_reporter_project_tabs: Gestionar pestañas del panel del proyecto
+  # T-14 - the render preflight (admin page). Keyed on Check#id, never on the
+  # English title the render layer carries: the id is a contract, the title is prose.
+  label_reporter_preflight: "Comprobación previa de renderizado"
+  text_reporter_preflight_intro: "Renderiza un documento de prueba con cada motor de renderizado instalado e informa de lo que realmente llegó al PDF: saltos de página, el pie de página con el número de página, los colores de fondo, una imagen incrustada y la ruta de JavaScript. Son precisamente las preguntas que un motor presente y aparentemente sano puede seguir respondiendo mal."
+  text_reporter_preflight_takes_a_moment: "Esto inicia un motor real y espera a un documento real, por lo que tarda unos segundos por motor."
+  button_reporter_preflight_run: "Ejecutar la comprobación"
+  text_reporter_preflight_no_engine: "No hay ningún motor de renderizado registrado, por lo que no se ha verificado nada. En este estado no se puede generar ningún informe."
+  text_reporter_preflight_ok: "Todas las comprobaciones se han superado."
+  text_reporter_preflight_problems: "%{count} comprobación(es) han fallado."
+  text_reporter_preflight_incomplete: "No ha fallado nada, pero %{count} comprobación(es) no se han podido ejecutar. Consulte los detalles a continuación."
+  label_reporter_preflight_engine_version: "Versión del motor"
+  label_reporter_preflight_duration: "Duración"
+  label_reporter_preflight_state: "Estado"
+  label_reporter_preflight_check: "Comprobación"
+  label_reporter_preflight_detail: "Detalles"
+  label_reporter_preflight_state_pass: "Superada"
+  label_reporter_preflight_state_fail: "Fallida"
+  label_reporter_preflight_state_skip: "No se pudo ejecutar"
+  label_reporter_preflight_state_expected_failure: "Fallo esperado"
+  label_reporter_preflight_check_engine: "El motor de renderizado ha producido un documento"
+  label_reporter_preflight_check_degradations: "No se ha degradado nada de forma silenciosa"
+  label_reporter_preflight_check_document: "Se ha inspeccionado el documento"
+  label_reporter_preflight_check_page_breaks: "Los saltos de página producen más de una página"
+  label_reporter_preflight_check_footer: "El pie de página con el número de página se genera y se numera"
+  label_reporter_preflight_check_background: "Los fondos se imprimen, de modo que las etiquetas conservan su color"
+  label_reporter_preflight_check_inline_asset: "Una imagen incrustada se descodifica con el color correcto"
+  label_reporter_preflight_check_javascript: "La ruta de JavaScript se ejecuta, de modo que los gráficos pueden dibujarse"
+  label_reporter_preflight_check_readiness: "El script de preparación se carga, de modo que una página sin gráficos no espera"
+  label_reporter_preflight_check_hosted_asset: "Una imagen alojada en Redmine queda bloqueada (esperado: el renderizador no tiene acceso a la red)"

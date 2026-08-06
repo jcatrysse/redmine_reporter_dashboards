@@ -20,3 +20,32 @@ it:
   permission_view_reporter_project_page: Visualizza dashboard del progetto
   permission_manage_reporter_project_page: Gestisci i widget del dashboard del progetto
   permission_manage_reporter_project_tabs: Gestisci le schede del dashboard del progetto
+  # T-14 - the render preflight (admin page). Keyed on Check#id, never on the
+  # English title the render layer carries: the id is a contract, the title is prose.
+  label_reporter_preflight: "Verifica preliminare del rendering"
+  text_reporter_preflight_intro: "Genera un documento di prova con ogni motore di rendering installato e riporta ciò che è realmente arrivato nel PDF: interruzioni di pagina, il piè di pagina con il numero di pagina, i colori di sfondo, un'immagine incorporata e il percorso JavaScript. Sono proprio le domande a cui un motore presente e apparentemente sano può comunque rispondere in modo errato."
+  text_reporter_preflight_takes_a_moment: "Viene avviato un motore reale e atteso un documento reale, quindi richiede alcuni secondi per motore."
+  button_reporter_preflight_run: "Esegui la verifica"
+  text_reporter_preflight_no_engine: "Nessun motore di rendering è registrato, quindi non è stato verificato nulla. In questo stato non è possibile produrre alcun report."
+  text_reporter_preflight_ok: "Tutti i controlli sono stati superati."
+  text_reporter_preflight_problems: "%{count} controllo/i non superato/i."
+  text_reporter_preflight_incomplete: "Nulla è fallito, ma %{count} controllo/i non è stato possibile eseguirlo. Vedere i dettagli qui sotto."
+  label_reporter_preflight_engine_version: "Versione del motore"
+  label_reporter_preflight_duration: "Durata"
+  label_reporter_preflight_state: "Stato"
+  label_reporter_preflight_check: "Controllo"
+  label_reporter_preflight_detail: "Dettagli"
+  label_reporter_preflight_state_pass: "Superato"
+  label_reporter_preflight_state_fail: "Non superato"
+  label_reporter_preflight_state_skip: "Non eseguibile"
+  label_reporter_preflight_state_expected_failure: "Errore previsto"
+  label_reporter_preflight_check_engine: "Il motore di rendering ha prodotto un documento"
+  label_reporter_preflight_check_degradations: "Nulla è stato ridotto in modo silenzioso"
+  label_reporter_preflight_check_document: "Il documento è stato ispezionato"
+  label_reporter_preflight_check_page_breaks: "Le interruzioni di pagina producono più di una pagina"
+  label_reporter_preflight_check_footer: "Il piè di pagina con il numero di pagina viene generato e numerato"
+  label_reporter_preflight_check_background: "Gli sfondi vengono stampati, così i badge mantengono il loro colore"
+  label_reporter_preflight_check_inline_asset: "Un'immagine incorporata viene decodificata con il colore corretto"
+  label_reporter_preflight_check_javascript: "Il percorso JavaScript viene eseguito, così i grafici possono essere disegnati"
+  label_reporter_preflight_check_readiness: "Lo script di prontezza viene caricato, così una pagina senza grafici non attende"
+  label_reporter_preflight_check_hosted_asset: "Un'immagine ospitata da Redmine viene bloccata (previsto: il renderer non ha accesso alla rete)"

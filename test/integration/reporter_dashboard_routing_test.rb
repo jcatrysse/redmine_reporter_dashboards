@@ -46,6 +46,15 @@ class ReporterDashboardRoutingTest < Redmine::RoutingTest
     should_route 'GET /sql/stats/monthly_flow' => 'sql_stats#monthly_flow'
   end
 
+  # T-14. GET shows the page and runs NOTHING; POST is what starts a browser. The verb
+  # is the control here, so it is pinned here — a GET that launched an engine is a GET a
+  # crawler or a prefetching proxy can fire, and a controller test would never notice
+  # the route drifting, because it generates the path from the parameters.
+  def test_render_preflight_routes
+    should_route 'GET /admin/reporter_dashboards/preflight' => 'reporter_preflight#show'
+    should_route 'POST /admin/reporter_dashboards/preflight' => 'reporter_preflight#run'
+  end
+
   # The negative half: each of these paths must be reachable by ONE verb. Read off the
   # route set rather than by issuing a request, so a catch-all route elsewhere in
   # Redmine cannot make the assertion pass for the wrong reason.
@@ -54,6 +63,7 @@ class ReporterDashboardRoutingTest < Redmine::RoutingTest
     assert_equal ['DELETE'], verbs_for('/projects/:project_id/reporter/remove_block')
     assert_equal ['PATCH'],  verbs_for('/projects/:project_id/reporter/move_block')
     assert_equal %w[GET PATCH].sort, verbs_for('/projects/:project_id/reporter').sort
+    assert_equal %w[GET POST].sort, verbs_for('/admin/reporter_dashboards/preflight').sort
   end
 
   private

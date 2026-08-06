@@ -20,3 +20,32 @@ pl:
   permission_view_reporter_project_page: Wyświetl panel projektu
   permission_manage_reporter_project_page: Zarządzaj widgetami panelu projektu
   permission_manage_reporter_project_tabs: Zarządzaj zakładkami panelu projektu
+  # T-14 - the render preflight (admin page). Keyed on Check#id, never on the
+  # English title the render layer carries: the id is a contract, the title is prose.
+  label_reporter_preflight: "Kontrola wstępna renderowania"
+  text_reporter_preflight_intro: "Renderuje dokument testowy w każdym zainstalowanym silniku renderującym i raportuje, co faktycznie trafiło do pliku PDF: podziały stron, stopkę z numerem strony, kolory tła, obraz osadzony w dokumencie oraz działanie JavaScriptu. To właśnie te pytania zainstalowany i pozornie sprawny silnik może nadal rozstrzygnąć błędnie."
+  text_reporter_preflight_takes_a_moment: "Uruchamia to prawdziwy silnik i czeka na prawdziwy dokument, dlatego trwa kilka sekund na każdy silnik."
+  button_reporter_preflight_run: "Uruchom kontrolę wstępną"
+  text_reporter_preflight_no_engine: "Nie zarejestrowano żadnego silnika renderującego, więc nic nie zostało zweryfikowane. W tym stanie nie można utworzyć żadnego raportu."
+  text_reporter_preflight_ok: "Wszystkie kontrole zakończone powodzeniem."
+  text_reporter_preflight_problems: "Nieudane kontrole: %{count}."
+  text_reporter_preflight_incomplete: "Nic nie zawiodło, ale nie udało się wykonać kontroli: %{count}. Szczegóły poniżej."
+  label_reporter_preflight_engine_version: "Wersja silnika"
+  label_reporter_preflight_duration: "Czas trwania"
+  label_reporter_preflight_state: "Stan"
+  label_reporter_preflight_check: "Kontrola"
+  label_reporter_preflight_detail: "Szczegóły"
+  label_reporter_preflight_state_pass: "Powodzenie"
+  label_reporter_preflight_state_fail: "Niepowodzenie"
+  label_reporter_preflight_state_skip: "Nie można wykonać"
+  label_reporter_preflight_state_expected_failure: "Oczekiwane niepowodzenie"
+  label_reporter_preflight_check_engine: "Silnik renderujący utworzył dokument"
+  label_reporter_preflight_check_degradations: "Nic nie zostało po cichu ograniczone"
+  label_reporter_preflight_check_document: "Dokument został sprawdzony"
+  label_reporter_preflight_check_page_breaks: "Podziały stron dają więcej niż jedną stronę"
+  label_reporter_preflight_check_footer: "Stopka z numerem strony jest tworzona i numerowana"
+  label_reporter_preflight_check_background: "Tła są drukowane, dzięki czemu plakietki zachowują swój kolor"
+  label_reporter_preflight_check_inline_asset: "Obraz osadzony jest dekodowany we właściwym kolorze"
+  label_reporter_preflight_check_javascript: "JavaScript jest wykonywany, dzięki czemu wykresy mogą zostać narysowane"
+  label_reporter_preflight_check_readiness: "Skrypt gotowości jest ładowany, dzięki czemu strona bez wykresów nie czeka"
+  label_reporter_preflight_check_hosted_asset: "Obraz hostowany przez Redmine jest blokowany (oczekiwane: renderer nie ma dostępu do sieci)"

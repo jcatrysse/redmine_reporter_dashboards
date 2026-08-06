@@ -20,3 +20,32 @@ hu:
   permission_view_reporter_project_page: Projekt irányítópult megtekintése
   permission_manage_reporter_project_page: Projekt irányítópult widgetek kezelése
   permission_manage_reporter_project_tabs: Projekt irányítópult lapok kezelése
+  # T-14 - the render preflight (admin page). Keyed on Check#id, never on the
+  # English title the render layer carries: the id is a contract, the title is prose.
+  label_reporter_preflight: "Renderelési előellenőrzés"
+  text_reporter_preflight_intro: "Egy próbadokumentumot renderel minden telepített renderelő motorral, és jelenti, mi került ténylegesen a PDF-be: oldaltörések, az oldalszámot tartalmazó élőláb, a háttérszínek, egy beágyazott kép és a JavaScript futása. Pontosan ezekre a kérdésekre adhat rossz választ egy telepített és látszólag hibátlan motor is."
+  text_reporter_preflight_takes_a_moment: "Ez valódi motort indít és valódi dokumentumra vár, ezért motoronként néhány másodpercet vesz igénybe."
+  button_reporter_preflight_run: "Előellenőrzés futtatása"
+  text_reporter_preflight_no_engine: "Nincs regisztrált renderelő motor, ezért semmi sem lett ellenőrizve. Ebben az állapotban nem készíthető jelentés."
+  text_reporter_preflight_ok: "Minden ellenőrzés sikeres."
+  text_reporter_preflight_problems: "%{count} ellenőrzés sikertelen."
+  text_reporter_preflight_incomplete: "Semmi sem hiúsult meg, de %{count} ellenőrzést nem lehetett lefuttatni. A részleteket lásd alább."
+  label_reporter_preflight_engine_version: "Motor verziója"
+  label_reporter_preflight_duration: "Időtartam"
+  label_reporter_preflight_state: "Állapot"
+  label_reporter_preflight_check: "Ellenőrzés"
+  label_reporter_preflight_detail: "Részletek"
+  label_reporter_preflight_state_pass: "Sikeres"
+  label_reporter_preflight_state_fail: "Sikertelen"
+  label_reporter_preflight_state_skip: "Nem futtatható"
+  label_reporter_preflight_state_expected_failure: "Várt hiba"
+  label_reporter_preflight_check_engine: "A renderelő motor létrehozott egy dokumentumot"
+  label_reporter_preflight_check_degradations: "Semmi sem lett észrevétlenül lekorlátozva"
+  label_reporter_preflight_check_document: "A dokumentum vizsgálata megtörtént"
+  label_reporter_preflight_check_page_breaks: "Az oldaltörések egynél több oldalt eredményeznek"
+  label_reporter_preflight_check_footer: "Az oldalszámot tartalmazó élőláb elkészül és számozódik"
+  label_reporter_preflight_check_background: "A hátterek nyomtatásra kerülnek, így a jelvények megtartják a színüket"
+  label_reporter_preflight_check_inline_asset: "A beágyazott kép a helyes színnel dekódolódik"
+  label_reporter_preflight_check_javascript: "A JavaScript lefut, így a diagramok kirajzolódhatnak"
+  label_reporter_preflight_check_readiness: "A készenléti szkript betöltődik, így a diagram nélküli oldal nem vár"
+  label_reporter_preflight_check_hosted_asset: "A Redmine által kiszolgált kép blokkolva van (várt: a renderelőnek nincs hálózati hozzáférése)"

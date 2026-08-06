@@ -20,3 +20,32 @@ pt-BR:
   permission_view_reporter_project_page: Ver painel do projeto
   permission_manage_reporter_project_page: Gerenciar widgets do painel do projeto
   permission_manage_reporter_project_tabs: Gerenciar abas do painel do projeto
+  # T-14 - the render preflight (admin page). Keyed on Check#id, never on the
+  # English title the render layer carries: the id is a contract, the title is prose.
+  label_reporter_preflight: "Verificação prévia de renderização"
+  text_reporter_preflight_intro: "Renderiza um documento de teste em cada mecanismo de renderização instalado e informa o que realmente chegou ao PDF: quebras de página, o rodapé com o número da página, as cores de fundo, uma imagem incorporada e o caminho do JavaScript. São justamente as perguntas que um mecanismo presente e aparentemente saudável ainda pode responder de forma errada."
+  text_reporter_preflight_takes_a_moment: "Isso inicia um mecanismo real e aguarda um documento real, portanto leva alguns segundos por mecanismo."
+  button_reporter_preflight_run: "Executar verificação"
+  text_reporter_preflight_no_engine: "Nenhum mecanismo de renderização está registrado, portanto nada foi verificado. Nesse estado nenhum relatório pode ser produzido."
+  text_reporter_preflight_ok: "Todas as verificações passaram."
+  text_reporter_preflight_problems: "%{count} verificação(ões) falhou(aram)."
+  text_reporter_preflight_incomplete: "Nada falhou, mas %{count} verificação(ões) não pôde(puderam) ser executada(s). Veja os detalhes abaixo."
+  label_reporter_preflight_engine_version: "Versão do mecanismo"
+  label_reporter_preflight_duration: "Duração"
+  label_reporter_preflight_state: "Estado"
+  label_reporter_preflight_check: "Verificação"
+  label_reporter_preflight_detail: "Detalhes"
+  label_reporter_preflight_state_pass: "Aprovada"
+  label_reporter_preflight_state_fail: "Falhou"
+  label_reporter_preflight_state_skip: "Não pôde ser executada"
+  label_reporter_preflight_state_expected_failure: "Falha esperada"
+  label_reporter_preflight_check_engine: "O mecanismo de renderização produziu um documento"
+  label_reporter_preflight_check_degradations: "Nada foi degradado silenciosamente"
+  label_reporter_preflight_check_document: "O documento foi inspecionado"
+  label_reporter_preflight_check_page_breaks: "As quebras de página produzem mais de uma página"
+  label_reporter_preflight_check_footer: "O rodapé com o número da página é gerado e numerado"
+  label_reporter_preflight_check_background: "Os fundos são impressos, para que os selos mantenham sua cor"
+  label_reporter_preflight_check_inline_asset: "Uma imagem incorporada é decodificada com a cor correta"
+  label_reporter_preflight_check_javascript: "O caminho do JavaScript é executado, para que os gráficos possam ser desenhados"
+  label_reporter_preflight_check_readiness: "O script de prontidão é carregado, de modo que uma página sem gráficos não espera"
+  label_reporter_preflight_check_hosted_asset: "Uma imagem hospedada no Redmine é bloqueada (esperado: o renderizador não tem acesso à rede)"

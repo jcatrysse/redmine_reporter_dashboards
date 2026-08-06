@@ -52,6 +52,16 @@ file in this repo that contains an em-dash raises `invalid byte sequence in US-A
 It passes on a developer machine and fails in a minimal container. Name the encoding:
 `File.read(path, encoding: 'UTF-8')`.
 
+**And it has a SECOND symptom that does not look like an encoding bug at all.** Hit
+again in T-14: `Preflight` interpolated `File.read(chart_shell.js)` into a UTF-8 heredoc
+and got `Encoding::CompatibilityError: incompatible character encodings: UTF-8 and
+US-ASCII` — a different exception class, from a line that does no reading. **The same
+applies to subprocess output**: `Open3.capture3` tags stdout with the default external
+encoding too, so `pdftotext` output on a POSIX-locale host is US-ASCII and the first
+accented character in a French document turns a regexp match into `ArgumentError`.
+`PdfInspector.run` force-encodes to UTF-8 for exactly that reason. Rule: anything
+crossing into this process from a file or a pipe gets its encoding named.
+
 **Rails inserts every fixture set ANY test class in the process declares.** A class
 that declares no `:issues` still finds Redmine's fixture issues in the database,
 because another plugin test class declared them — and whether it does depends on the
@@ -316,6 +326,8 @@ record as of the last local run.
 | **T-12/T-13: the engine conformance corpus, Chromium 141** | **yes, locally (2026-08-06)** | 20 of 20 fixtures pass — geometry, orientation+margins, footer tokens, page breaks, backgrounds, flexbox, the readiness six, inline assets, egress denial, typed refusal, a 2 000-row envelope, fonts, pathological input and the escaping payload set. Run as a **non-root user**, sandbox on, `--no-sandbox` never passed. **It found three defects on its first run** (§Findings E-2, E-3, E-4) |
 | **T-12/T-13 DB-less half** | **yes, locally (2026-08-06)** | 155 examples green as root with no browser (45 pending), and 155 green as `rrd` with Chromium (22 pending — wkhtmltopdf, skipping with its reason). Includes the harness's own negative tests and 30 browser-less adapter examples |
 | **`:wkhtmltopdf`** | **YES, once, in CI (run 31059574558)** | 13 of 20. Not installable here at all — the package is gone from Ubuntu 24.04 — so CI is the only place it runs, like MariaDB and MySQL. Four failures were fixture bugs (fixed), one was a real egress defect (fixed), **two are a curator decision** and are §Findings E-5. It stays `verification: pending`, which now means its results are REPORTED AND NOT ENFORCED, and the matrix carries no cells for it |
+| **T-14: the render preflight, Chromium 141** | **yes, locally (2026-08-06)** | 9 of 9 checks pass in **943 ms**, run as the non-root user (see the Chromium note in §1): page breaks → 2 pages, `Page 1 of 2` compiled, page rgb[0,170,255] and badge rgb[204,0,0], the inline data: image decoding to its own colour, `CANVAS-STATE drawn`, `SHELL present`, and the Redmine-hosted image `EXPECTED_FAILURE` — INV-8 containment confirmed against a real browser rather than argued. **The first run took 17.5 s and was red**; the three defects it found were all in the diagnostic, not the engine (§Findings E-10) |
+| **T-14 DB-less half** | **yes, locally (2026-08-06)** | 41 examples green with no browser (`spec/render/preflight_spec.rb`, `preflight_command_spec.rb`), including every one of the six document checks driven RED against a canned single-page PDF. `spec/render` + `spec/conformance` together: 205 examples, 0 failures, 49 pending. The Minitest half (`test/functional/reporter_preflight_controller_test.rb`, `test/unit/render_preflight_rake_test.rb`) **has not been executed** — it needs a booted Redmine, so the `standalone` CI job is its first run |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -400,9 +412,39 @@ of a CI that runs on fork pull requests.
    `verification: pending` is load-bearing: promoting it puts twenty unmeasured cells in the matrix,
    which is INV-7's exact sin. And **the browser must not run as root** — see §1; that is the
    sandbox working, not an obstacle to route around with `--no-sandbox`.
-   Next: **T-14** (preflight/diagnostics) and **T-15** (render-path containment), both of which
-   depend on T-13 and are now unblocked. **T-33** (the asset-resolution triple) depends on T-12 and
-   is likewise open.
+   Next after T-13 was **T-14**, now done — see entry 11. **T-15** (render-path containment) is
+   partly done and blocked on an entry point (§Findings E-6). **T-33** (the asset-resolution triple)
+   depends on T-12 and is likewise open.
+
+11. **T-14 is done — the render preflight, in three places that share one implementation.**
+   `render/preflight.rb` builds the probe document and the checks, `render/pdf_inspector.rb` reads
+   the PDF back, `render/preflight_command.rb` owns the exit codes; the rake task and
+   `ReporterPreflightController` are glue over them. Four things a later session should know.
+
+   **`spec/conformance/pdf_probe.rb` is now a POLICY over `PdfInspector`, not an implementation.**
+   The one thing it still decides is the one thing the two callers genuinely disagree about: a
+   missing poppler is a hard ERROR for the corpus (a matrix generated without the probes prints PASS
+   for checks that never ran) and a named SKIP for an operator (it is an optional package). Keep new
+   reading code in `PdfInspector`; keep policy in its caller. The harness spec plants a missing tool
+   by stubbing `PdfProbe.missing_tools`, so `PdfProbe.require_tools!` must keep consulting its OWN
+   `missing_tools` rather than reaching past it.
+
+   **`:skip` does not make the run red, and `complete?` is why that is honest.** `ok?` means nothing
+   failed; `complete?` means nothing was left unanswered; the headline never prints a bare "OK" when
+   a check was skipped, and the exit code is 0/1/2 with **2 = no engine registered, so nothing was
+   verified** — deliberately not 0. If you add a check, add its id to
+   `ReporterPreflightHelper::CHECK_LABELS` and to all nine locale files, or a Russian UI silently
+   renders the English title.
+
+   **The probe document inlines the SHIPPED `chart_shell.js`, in `<head>`.** Not a copy of it, and
+   not at the end of the body: the hosted-image probe calls `__rd.begin()`/`end()` inline so the
+   document stays open until that fetch resolves, which is what makes `HOSTED-IMAGE blocked` a fact
+   rather than a race. Without the shell the probe waited out the full watchdog — 17.5 s and a
+   spurious `readiness_timeout` — which is §Findings E-10's first defect.
+
+   **The Minitest half has never run.** `test/functional/reporter_preflight_controller_test.rb` and
+   `test/unit/render_preflight_rake_test.rb` need a booted Redmine, so the `standalone` CI job is
+   their first execution. Read that job's output before believing the admin page works.
 
 9. **T-10 is done — `render/` exists and `layer_purity` is STRICT.** The document-request
    interface only: types, a sum type, and the wrapper that makes INV-5 mechanical.
