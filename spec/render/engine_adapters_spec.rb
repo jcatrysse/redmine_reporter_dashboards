@@ -197,8 +197,13 @@ module RedmineReporterDashboards
 
           # INV-8 in this engine's vocabulary: it cannot fetch, so it cannot be made
           # into an SSRF by a template that names a URL.
-          it 'denies local file access, which is also how it is denied the network' do
+          # Both halves, for the same reason they are asserted together for Chromium:
+          # the first CI run of this adapter watched three subresources reach the
+          # harness's socket with only the file-access flag set.
+          it 'denies the filesystem AND the network' do
             expect(argv).to include('--disable-local-file-access')
+            expect(argv.join(' ')).to include('--proxy 127.0.0.1:1'),
+                                      'file-access denial does not stop it reaching the network — F-15 measured that'
           end
 
           it 'carries margins in millimetres, per edge' do

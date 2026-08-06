@@ -268,13 +268,21 @@ module RedmineReporterDashboards
         def build_argv(request, output_path)
           argv = [@binary, '--quiet', '--encoding', 'UTF-8']
 
-          # NO LOCAL FILE ACCESS, AND THEREFORE NO NETWORK EITHER. The document arrives
-          # complete with its assets inlined, so there is nothing for the engine to
-          # fetch — and an engine that cannot fetch cannot be turned into an SSRF by a
-          # template that names a URL. This is the wkhtmltopdf spelling of the reference
-          # engine's resolver denial, and it is the same posture: INV-8, the renderer is
-          # never the thing holding the network.
-          argv += ['--disable-local-file-access']
+          # --- EGRESS DENIAL, IN TWO PARTS, AND THE FIRST PART IS NOT ENOUGH ---
+          #
+          # `--disable-local-file-access` stops it reading the filesystem. It does NOT
+          # stop it reaching the network, and the first CI run of this adapter proved it:
+          # conformance fixture F-15 watched three subresources — a stylesheet, an image
+          # and an XHR — arrive at the harness's own listening socket. Exactly the same
+          # defect as the reference engine's, found the same way, one engine later. That
+          # repetition is the argument for having the corpus at all: the second instance
+          # cost minutes rather than a security review.
+          #
+          # So every request is also pointed at a proxy that does not exist. There is
+          # nothing to connect to at 127.0.0.1:1, so a fetch fails at connect — before
+          # DNS, before any real target. INV-8: the renderer is never the thing holding
+          # the network.
+          argv += ['--disable-local-file-access', '--proxy', '127.0.0.1:1']
 
           # A subresource that cannot be loaded is the EXPECTED case under that policy,
           # not an error worth abandoning a report over. Without these, a single

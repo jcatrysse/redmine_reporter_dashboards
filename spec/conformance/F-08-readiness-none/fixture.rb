@@ -25,8 +25,13 @@ RedmineReporterDashboards::Conformance.fixture(
                      'render duration (ms) for a document with nothing to wait for')
   end
 
-  f.check('nothing was recorded as degraded') do |v|
-    v.expect_equal(v.degradations, [], 'degradations')
+  # NOT "no degradations at all" — that was engine-specific without meaning to be. A
+  # compatibility engine stamps `:legacy_engine` on every result it produces, by design,
+  # and a fixture about READINESS has no business failing over it. What must be absent
+  # is a readiness degradation: this page had nothing to wait for.
+  f.check('nothing about readiness was recorded as degraded') do |v|
+    v.expect_true(!v.degradations.include?(:readiness_timeout),
+                  "expected no readiness degradation, got #{v.degradations.inspect}")
   end
 
   f.check('the page reported itself ready, not timed out') do |v|

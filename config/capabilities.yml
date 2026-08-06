@@ -109,11 +109,14 @@ engines:
     # once with a four-version Redmine 5.1 claim.
     verification: pending
     verification_note: >-
-      the adapter is written and registered; the engine has never been run. The
-      render-smoke job installs wkhtmltopdf and executes the corpus against it, so the
-      first real cells will come from CI — the normal case for this project, where
-      MariaDB and MySQL are likewise CI-only. Promote this to `corpus` and regenerate
-      the matrix in the commit that reads a green run, not before.
+      RUN ONCE, IN CI, AND NOT YET PROMOTED. Run 31059574558 executed the corpus
+      against it for the first time: 13 of 20 passed. Four failures were fixture bugs
+      and are fixed; one was a real egress defect and is fixed; TWO REMAIN AND ARE A
+      CURATOR DECISION — flexbox and font inking are genuine differences that the
+      CLOSED capability vocabulary has no way to express, so the three-state rule has
+      nothing to skip on (implementation-plan.md §Findings E-5). Until that is decided
+      this engine stays `pending`, which means its results are reported and not
+      enforced, and the matrix carries no cells for it.
     needs_service: false
     renders_offline: true
     install: provided by bundle install; no service, no configuration

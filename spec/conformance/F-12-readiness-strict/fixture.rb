@@ -10,7 +10,15 @@
 RedmineReporterDashboards::Conformance.fixture(
   'F-12-readiness-strict', 'strict turns the same timeout into a typed failure', dir: __dir__
 ) do |f|
-  f.requires!(:javascript)
+  # `:readiness_expression` and not merely `:javascript`, and the distinction is the
+  # whole content of these two fixtures. An engine that can be POLLED can be told to
+  # stop waiting and print what it has — which is the contract: on timeout the engine
+  # STILL RENDERS. An engine that can only be handed a status to wait for has no such
+  # move; it waits or it is killed, and a killed process has no document to hand back.
+  # So this is a capability difference rather than a defect, and the three-state rule
+  # skips it with the capability named. Measured: wkhtmltopdf held the page for the
+  # full process deadline and came back with Failure(:timeout) and nothing else.
+  f.requires!(:javascript, :readiness_expression)
   f.request!(page_size: 'A4')
   f.readiness!(timeout_ms: 3_000, client_timeout_ms: 2_900, strict: true)
   f.expect_failure!(:readiness_timeout)

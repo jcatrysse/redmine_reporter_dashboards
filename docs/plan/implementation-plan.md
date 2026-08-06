@@ -360,6 +360,48 @@ asked about: slot text was being interpolated into that document **raw**, so an 
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
 
+**E-5 · wkhtmltopdf's first CI run, and TWO DIFFERENCES THE CLOSED VOCABULARY CANNOT SAY.
+CURATOR DECISION NEEDED.** CI run 31059574558 executed the corpus against wkhtmltopdf for the first
+time: 13 of 20 pass, and the 7 failures split three ways.
+
+**Four were mine and are fixed.** Two fixtures asserted "no degradations at all" when what they
+meant was "no READINESS degradation" — a compatibility engine stamps `:legacy_engine` on everything
+it draws, by design, and a readiness fixture has no business failing over it. Two more (`F-11`,
+`F-12`) asked for a behaviour only a POLLABLE engine can perform: "on timeout, give up waiting and
+render anyway" needs an engine you can ask "are you ready?" and then tell to stop. wkhtmltopdf takes
+a status to wait for and has no such move — it waits, or it is killed, and a killed process has no
+document. That is a capability difference with a name already in the vocabulary, so both fixtures now
+require `:readiness_expression` and skip with it named.
+
+**One was a real defect, and it is the same defect as E-2 one engine later.**
+`--disable-local-file-access` stops wkhtmltopdf reading the filesystem and does nothing about the
+network: `F-15` watched three subresources arrive at the harness's socket. Fixed with a proxy to
+nowhere, the same shape as the Chromium fix. Worth noting how much cheaper the second instance was —
+the corpus found it in one run, where the first had needed the fixture to be invented.
+
+**TWO ARE UNRESOLVED AND ARE THE CURATOR'S** (CLAUDE.md §11.1, §11.3):
+
+* `F-07-flexbox` — wkhtmltopdf's 2011 WebKit stacks a flex row instead of laying it out. Correct
+  behaviour for that engine and a genuine capability difference.
+* `F-18-fonts` — the text band renders blank under the pixel probe, where Chromium inks it.
+
+**Neither difference can be expressed.** `technical-spec.md` §5 defines the capability vocabulary as
+CLOSED, and it contains no `:flexbox` and nothing about font rendering. So the three-state rule has
+no capability to skip on, and the honest options are three, none of which should be taken silently:
+
+1. **Open the vocabulary** by two entries (a spec change, and the closure is deliberate);
+2. **Drop the two fixtures** to what every engine can do — which throws away the two clearest
+   demonstrations of *why* the reference engine is the default;
+3. **Leave wkhtmltopdf at `verification: pending` indefinitely**, so its cells stay informational and
+   never enter the matrix as a contract.
+
+Pending that decision, option 3 is what the code does, and `pending` is given the meaning it should
+always have had: **a non-`corpus` engine's results are REPORTED, not enforced.** Each failure is
+printed, the summary line carries the counts, and promotion to `corpus` is the moment somebody has to
+account for every one of them. That is not a way to keep a red engine green — it is the difference
+between "this is what it did" and "this is what it must do", and only a human can move a result from
+the first to the second.
+
 **E-4 · `Registry.reset!` with no restore is a random-seed defect.** Two adapter examples failed on
 one seed and passed on the next. T-10's contract spec resets the registry; the adapters register
 when their files are required; `config.order = :random` decides which fact wins. It reads as a

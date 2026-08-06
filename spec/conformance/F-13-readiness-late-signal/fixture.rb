@@ -37,8 +37,11 @@ RedmineReporterDashboards::Conformance.fixture(
     v.expect_includes(v.flat_text, 'POST-READINESS-MARKER', 'the text written just before end()')
   end
 
-  f.check('nothing timed out and nothing was degraded') do |v|
-    v.expect_equal(v.degradations, [], 'degradations')
+  # See F-08: a compatibility engine stamps `:legacy_engine` on everything it draws,
+  # and a readiness fixture must not fail over an unrelated degradation.
+  f.check('nothing timed out — neither the engine nor the page gave up') do |v|
+    v.expect_true(!v.degradations.include?(:readiness_timeout),
+                  "expected no readiness degradation, got #{v.degradations.inspect}")
     v.expect_excludes(v.flat_text, 'client_watchdog', 'the page-side degradation list')
   end
 end
