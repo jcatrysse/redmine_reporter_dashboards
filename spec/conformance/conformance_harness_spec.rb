@@ -39,7 +39,25 @@ module RedmineReporterDashboards
         Runner.new(engine: engine, work_dir: work_dir).run([fixture])[fixture.id]
       end
 
-      before { PdfProbe.require_tools! }
+      # THE PROBES ARE A HARD REQUIREMENT OF THIS SUITE AND AN OPTIONAL PACKAGE ON MOST
+      # MACHINES, and those two facts have to be reconciled somewhere.
+      #
+      # `render-smoke` asserts poppler is installed in a step of its own and then runs
+      # everything here for real. The four `rspec` jobs have no browser and no poppler
+      # by design — they stub Redmine away and run on four branches, and this file has
+      # nothing to do with Redmine. So the reconciliation is: where the probes exist,
+      # run; where they do not, skip with the package named.
+      #
+      # That is a skip with a reason rather than a silent one, and the thing it must not
+      # become — a check nobody runs — is answered by render-smoke running it on every
+      # push. If that job ever stops asserting the probes are present, this becomes the
+      # failure mode this repository keeps rediscovering, so the two belong together.
+      before do
+        if PdfProbe.missing_tools.any?
+          skip "#{PdfProbe.missing_tools.join(', ')} not installed (#{PdfProbe::INSTALL_HINT}); " \
+               'the render-smoke job runs this suite with them present'
+        end
+      end
 
       # ---- G12, arm by arm --------------------------------------------------
 

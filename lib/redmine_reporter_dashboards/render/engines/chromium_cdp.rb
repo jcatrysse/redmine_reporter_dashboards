@@ -314,7 +314,13 @@ module RedmineReporterDashboards
 
         def failure(request, code, message, detail:, started:)
           Failure.new(code: code, message: message, detail: detail, engine: ID,
-                      engine_version: @version, duration_ms: (monotonic_ms - started).round,
+                      # `@version` and not `version`: probing here would start the very
+                      # engine that just failed to start. `'unknown'` rather than nil
+                      # because a Failure that cannot say which build produced it
+                      # defeats the stamp — and a COLD adapter, one that fails before
+                      # any successful probe, is exactly the case that hits this.
+                      engine_version: @version || 'unknown',
+                      duration_ms: (monotonic_ms - started).round,
                       correlation_id: request.correlation_id)
         end
 

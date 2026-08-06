@@ -3,6 +3,7 @@
 require 'json'
 require 'base64'
 require 'fcntl'
+require 'fileutils'
 require 'securerandom'
 require 'tmpdir'
 
