@@ -139,6 +139,15 @@ jobs:
             echo "--- Liquid $constraint"
             rspec -r /tmp/pin.rb spec_liquid --format progress
           done
+        # THE PLUGIN CHECKOUT, and it needs saying every time. This job checks out into
+        # `plugin/` and every other step runs in `redmine/`; without this the step runs
+        # in the runner's default directory, finds no `spec_liquid`, and reports
+        # "0 examples, 0 failures" — which is a PASS-shaped message from a step that
+        # checked nothing. It failed here only because rspec exits non-zero on an
+        # unmatched path. HANDOVER §1 names this exact trap: "a CI step that needs the
+        # plugin checkout needs `working-directory` EVERY TIME. It is per step, not per
+        # job." That entry is there because the corpus job lost a step to it once.
+        working-directory: plugin
 
       # A SECOND INVOCATION, and it has to be second rather than part of the first.
       # `spec/spec_helper.rb` stubs Liquid so the tag specs can run without the gem, and

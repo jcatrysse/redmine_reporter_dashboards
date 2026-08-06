@@ -130,6 +130,10 @@ module RedmineReporterDashboards
 
         def render(request)
           started = monotonic_ms
+          # Per render, and reset here rather than in `run`, because `run` has several
+          # exits and a flag that survives one document into the next would report an
+          # asset problem the second report never had.
+          @asset_degradation = false
           Tempfile.create(['rrd-render', '.pdf']) do |output|
             output.close
             argv = build_argv(request, output.path)
@@ -191,9 +195,33 @@ module RedmineReporterDashboards
             end
 
             status = wait_thread.value
-            next [nil, engine_failure(request, captured, status, started)] unless status.success?
+            bytes = File.size?(argv.last) ? File.binread(argv.last) : nil
+            next [bytes, nil] if status.success?
 
-            [File.binread(argv.last), nil]
+            # --- A NON-ZERO EXIT THAT STILL PRODUCED A DOCUMENT ---
+            #
+            # wkhtmltopdf exits 1 for "a subresource could not be loaded" as readily as
+            # for a broken install, and under this adapter's egress denial the FORMER IS
+            # THE EXPECTED CASE: every http reference is pointed at a proxy that does not
+            # exist, so a document naming one produces
+            # `Exit with code 1 due to network error: ConnectionRefusedError` — and a
+            # perfectly good PDF beside it. Measured in CI, on the one fixture that makes
+            # this engine reach for the network (F-15).
+            #
+            # Chromium treats the same situation as ordinary: the image is missing, the
+            # report renders. Making the two engines disagree about whether a blocked
+            # asset destroys a report would be the abstraction failing at exactly the
+            # point it exists for, so the rule is the same on both — A BLOCKED ASSET IS A
+            # DEGRADATION, NOT A FAILURE.
+            #
+            # The guard is the OUTPUT, not the stderr text. If the bytes are a plausible
+            # PDF the render happened and something it referenced did not arrive; if they
+            # are not, the engine genuinely failed and the typed Failure stands. Parsing
+            # stderr to decide would be guessing at message strings across builds.
+            next [nil, engine_failure(request, captured, status, started)] unless plausible_pdf?(bytes)
+
+            @asset_degradation = true
+            [bytes, nil]
           end
         rescue Errno::ENOENT, Errno::EACCES => e
           [nil, failure(request, :engine_unavailable,
@@ -257,6 +285,13 @@ module RedmineReporterDashboards
           io.close unless io.closed?
         rescue IOError
           nil
+        end
+
+        # Deliberately weaker than `Render::Renderer`'s post-condition, which is the
+        # authority and runs above every adapter. This only has to answer "did a render
+        # happen at all", so that a non-zero exit can be told apart from a broken engine.
+        def plausible_pdf?(bytes)
+          !bytes.nil? && bytes.start_with?('%PDF-') && bytes.bytesize > 1_024
         end
 
         def kill(pid)
@@ -405,6 +440,14 @@ module RedmineReporterDashboards
           list = [Degradation.new(capability: :legacy_engine,
                                   detail: 'drawn by wkhtmltopdf, a compatibility engine ' \
                                           'scheduled for removal; modern CSS is not supported')]
+          if @asset_degradation
+            list << Degradation.new(
+              capability: :asset_unresolved,
+              detail: 'one or more referenced assets could not be loaded; under the ' \
+                      'default policy the renderer has no network, so an absolute URL ' \
+                      'in the document resolves to nothing'
+            )
+          end
           missing = Capabilities.negotiate(required: request.required_capabilities,
                                            essential: [], available: CAPABILITIES)[:missing]
           list + missing.map do |capability|

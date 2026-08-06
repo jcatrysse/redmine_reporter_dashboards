@@ -363,6 +363,32 @@ asked about: slot text was being interpolated into that document **raw**, so an 
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
 
+**E-9 · the two engines disagreed about whether a blocked asset destroys a report, and the
+abstraction is the thing that must not.** Measured across two CI runs on fixture F-15.
+
+Chromium treats a subresource it cannot fetch as ordinary: the image is missing, the report renders.
+wkhtmltopdf exits **1** with `Exit with code 1 due to network error: ConnectionRefusedError` — and
+writes a perfectly good PDF beside it. Under this adapter's egress denial that is not an edge case,
+it is THE EXPECTED CASE: every http reference is pointed at a proxy that does not exist, so any
+document naming one takes that path.
+
+Left alone, the two engines would have disagreed about whether a missing image is a failure, which
+is the abstraction failing at exactly the point it exists for. So the rule is now the same on both:
+**a blocked asset is a Degradation, not a Failure** — `Degradation(:asset_unresolved)`, recorded,
+logged and stamped, with the document delivered.
+
+**The guard is the OUTPUT, not the stderr text.** If the bytes are a plausible PDF then a render
+happened and something it referenced did not arrive; if they are not, the engine genuinely failed
+and the typed Failure stands. Deciding from stderr would be guessing at message strings across
+builds, and wkhtmltopdf's exit codes are approximate enough already — it exits 1 for a broken
+install and for a missing image alike, which is why the adapter's own comment says the difference
+lives in stderr and this one does not use it.
+
+Three DB-less regression tests cover it without the engine, using `/bin/sh` stubs that honour
+`build_argv`'s contract (argv.last is the output path): a non-zero exit with a plausible PDF is a
+Success carrying the degradation, a non-zero exit with nothing usable is still a Failure, and the
+flag does not leak from one render into the next.
+
 **E-8 · `NamedRefDrop` is proven, and the proof found TWO gaps in §3.3's table plus one defect the
 table could not have predicted. CURATOR DECISION on the first two.** `technical-spec.md` §3.3 marks
 the class `[UNVERIFIED]` until its five substitutability claims are proven "under both Liquid 4.0.x

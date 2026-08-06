@@ -290,6 +290,59 @@ module RedmineReporterDashboards
             expect { result.bytes }.to raise_error(NoMethodError)
           end
 
+          # A blocked asset is a DEGRADATION, not a failure — the same rule as the
+          # reference engine, because making the two disagree about whether a missing
+          # image destroys a report is the abstraction failing at the point it exists
+          # for. Under egress denial this is the EXPECTED case: every http reference is
+          # pointed at a proxy that does not exist, so wkhtmltopdf exits 1 with
+          # `ConnectionRefusedError` and a perfectly good PDF beside it. Measured in CI
+          # on fixture F-15.
+          it 'keeps a document the engine produced despite exiting non-zero' do
+            pdf = "%PDF-1.4\n#{'x' * 2000}\n%%EOF"
+            adapter = described_class.new(binary: '/bin/sh')
+            allow(adapter).to receive(:build_argv) do |_req, path|
+              File.binwrite(path, pdf)
+              # argv.last is the output path — that is `build_argv`'s contract and
+              # `run` reads the document from it.
+              ['/bin/sh', '-c',
+               'echo "Exit with code 1 due to network error: ConnectionRefusedError" >&2; exit 1',
+               path]
+            end
+
+            result = adapter.render(request)
+
+            expect(result).to be_a(Success)
+            expect(result.degradations.map(&:capability)).to include(:asset_unresolved)
+          end
+
+          # …and the guard is the OUTPUT, not the stderr text: no plausible PDF means the
+          # engine genuinely failed, and the typed Failure stands.
+          it 'still fails when a non-zero exit produced nothing usable' do
+            adapter = described_class.new(binary: '/bin/sh')
+            allow(adapter).to receive(:build_argv)
+              .and_return(['/bin/sh', '-c', 'echo "boom" >&2; exit 1'])
+
+            expect(adapter.render(request)).to be_a(Failure)
+          end
+
+          it 'does not carry an asset degradation into the next render' do
+            pdf = "%PDF-1.4\n#{'x' * 2000}\n%%EOF"
+            adapter = described_class.new(binary: '/bin/sh')
+            call = 0
+            allow(adapter).to receive(:build_argv) do |_req, path|
+              call += 1
+              File.binwrite(path, pdf)
+              script = call == 1 ? 'exit 1' : 'exit 0'
+              ['/bin/sh', '-c', script, path]
+            end
+
+            first = adapter.render(request)
+            second = adapter.render(request)
+
+            expect(first.degradations.map(&:capability)).to include(:asset_unresolved)
+            expect(second.degradations.map(&:capability)).not_to include(:asset_unresolved)
+          end
+
           it 'reads the reason out of stderr rather than guessing from the exit code' do
             # wkhtmltopdf exits 1 both for "an asset failed to load" and for a broken
             # install, so the code comes from what stderr said.
