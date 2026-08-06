@@ -18,6 +18,39 @@ assets or examples. Run it before trusting this table.
 
 ---
 
+## Mermaid
+
+| | |
+|---|---|
+| **Version** | 11.16.1 |
+| **File** | `assets/javascripts/vendor/mermaid.min.js` |
+| **sha256** | `18327bef70d96fb505fe7287d9f6a7362ebf07ff6576ddfaffb1a06f3e1a2954` |
+| **Bytes** | 3 566 058 |
+| **Licence** | MIT — `assets/javascripts/vendor/mermaid.LICENSE.md` |
+| **Upstream** | <https://mermaid.js.org> · <https://github.com/mermaid-js/mermaid> |
+| **Obtained from** | `https://registry.npmjs.org/mermaid/-/mermaid-11.16.1.tgz` → `package/dist/mermaid.min.js` |
+| **Verified against** | `https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js` **and** `https://unpkg.com/mermaid@11.16.1/dist/mermaid.min.js` — all three byte-identical |
+
+**Three origins rather than two**, for one reason: this file is 3.5 MB, seventeen times the
+size of Chart.js, and it is the largest single artefact in the repository. The npm tarball,
+jsdelivr and unpkg are independently operated and all three agree on the digest above.
+
+**It is big, and that is a real cost stated rather than buried.** §6 requires bundling
+("no network fetch, ever"), and Mermaid 11 has no smaller distribution that keeps the
+no-build-step rule: the modular build needs a loader and several files, which is exactly the
+pipeline §6 avoids. So a report with a diagram carries 3.5 MB of library. Two consequences
+worth knowing: it is 6.8× `Assets::Policy::DEFAULT_INLINE_MAX_BYTES`, so on the owned render
+path it inlines with `Degradation(:asset_inline_oversize)` recorded on an engine with no
+upload model; and it is `<script src>`-referenced rather than inlined by the tag, so a
+document with no diagram pays nothing.
+
+**`mermaid.min.js` is an esbuild IIFE and requires post-ES5 JavaScript.** It opens with
+`(__esbuild_esm_mermaid_nm||={})` and closes by assigning `globalThis["mermaid"]`. That is
+why `:modern_javascript` exists as a capability and why wkhtmltopdf declares `:javascript`
+without it — measured, with the discriminator, in `technical-spec.md` §6.1.
+
+---
+
 ## Chart.js
 
 | | |

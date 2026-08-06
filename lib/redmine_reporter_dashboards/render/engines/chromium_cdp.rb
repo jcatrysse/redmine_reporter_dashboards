@@ -47,7 +47,7 @@ module RedmineReporterDashboards
         # equal rather than trusting that they look it. Two spellings of one fact is a
         # drift waiting to happen unless something compares them.
         CAPABILITIES = %i[
-          javascript readiness_expression print_backgrounds header footer
+          javascript modern_javascript readiness_expression print_backgrounds header footer
           page_furniture_tokens custom_page_size landscape margins scale
           page_break_css media_print outline tagged_pdf pdf_metadata
           asset_inline timeout

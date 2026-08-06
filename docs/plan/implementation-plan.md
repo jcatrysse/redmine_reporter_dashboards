@@ -72,6 +72,7 @@ fact that CI has not yet run on this work at all.
 | T-20 | **done** — `{% geo_version_map %}` is a **deprecation shim**: same behaviour, same map shape, one log line per process (locked, so once means once under Puma), and `Version.visible` was already the scope. The addon's `VersionDrop` (108), `issue_drop_patch.rb` (43) and `custom_field_value_drop.rb` (32) are **deleted**, `register_issue_target_version_drop` with them, and **two `zero_reporter.allowlist` entries went with the files** — the ratchet shrank 18 → 16 rather than going stale. The linter gained `deprecated.geo_version_map` as a **warning, not an error**: the template still works, and `import:plan`'s "which templates need rework" is `errors.any?`. It also gained a counted usage marker, because the finding says *this breaks next minor* and the count says *this many templates must be touched first*. **It found two defects in itself and one gap in its own task definition** — §Findings **E-15** — and left **F-11** (the `issue.target_version` window before T-23) and **F-12** (`TagContext` reading `User.current`) for the curator. Green DB-less (1460, was 1433), Liquid **4.0.4 and 5.13.0** (278 each), and all six gates |
 | T-16 | **done** — `charts/` (palette, spec, layout, SVG renderer, Chart.js emitter, collector), `liquid/tags/chart_tag.rb`, `assets/javascripts/chart_boot.js`, **Chart.js 4.5.0 vendored** with its digest in `THIRD_PARTY.md` and a `vendor_integrity` gate that recomputes it. `{% chart %}` **emits no markup** — a placeholder and a `ChartSpec`, and the output binding decides: `<canvas>` + `<script type="application/json">` for HTML, inline `<svg>` for PDF with `<a xlink:href>` per element and no JavaScript at all. **One `ChartLayout` for both paths**, and the claim is MEASURED rather than argued: the falsifier renders a horizontal bar with twelve long labels in a real Chromium and compares `chart.chartArea` with `ChartLayout#plot` — worst edge **1.17%** against T-16's 2% tolerance, with Chart.js using exactly the ticks, min and max it was handed. **It found two defects doing so** (§Findings **E-16**), neither findable in Ruby. Ten SVG goldens as deterministic text; `responsive`/`animation`/`devicePixelRatio` derived from the output binding, never from the author (G3). Left for the curator: **F-13** (where the chart layer lives), **F-14** (a `:responsive_canvas` capability), **F-15** (the two legacy examples' CDN reference) |
 | T-33 | **done** — `assets/` (policy, origin, reference, content types, bundled assets, local store, fetcher, document scanner, resolver, resolution) plus `render/asset_binding.rb`, the plugin's first `settings` block and its admin partial, and two new `layer_purity` arms. **Its review found four blockers and they are fixed** — a stylesheet's own `url()`/`@import` reaching the engine live (which made the whole `:bundled` promise false), an `ArgumentError` out of a method documented never to raise, `<style/>` hiding an entire stylesheet from the scanner, and a production transport with no test at all. §Findings **E-17**. **`:bundled` is the default and `:asset_http` is never selected** — not "off wherever the engine supports upload", but off in every mode for every capability shape, asserted against an engine declaring all three. An **empty allowlist collapses any upgraded mode to `:bundled`** and the collapse is asserted as an equality of body, refusals, counts and models — the fail-closed clause T-33 flags as most likely to be got wrong. The fetcher's closed header set is proven by a **recording double**, not by reading the file; the resolved-IP check runs **after** DNS and the connection is made to the checked address via `ipaddr=`, which is the only version that closes the rebinding window; size, time, redirect and inline caps each have an AT-and-one-past test. Containment is `realpath`, tested against a literal `..`, a percent-encoded one, a **double**-encoded one and a **symlink** inside the root pointing out of it. **Structural inlining falls back to base64 on `</style` / `</script`**, which is an injection rather than a rendering bug. 201 new DB-less examples; **1768 total, 0 failures**; all seven gates green, `layer_purity` strict, and both new arms **negative-tested**. It settled **F-13, F-13b, F-14** and answered **F-15**, and left **F-16** and **T-39** |
+| T-35 | **done, re-scoped** — vendored Mermaid 11.16.1 (3.5 MB, digest in `THIRD_PARTY.md`, byte-identical across THREE independent origins), `liquid/tags/mermaid_tag.rb`, `assets/javascripts/mermaid_boot.js`, `:modern_javascript` in the closed vocabulary, and the regenerated support matrix. **No sanitiser, no `MermaidSpec`, no collector, no `:mermaid` capability** — §Findings F-17 is why, and the tag is 210 lines against `{% chart %}`'s 324 as a result. `{% mermaid %}` inherits `Liquid::Raw` so `B{Choice}` and `-->|yes|` survive; `interpolate: true` substitutes VALUES and escapes them, with no second `Template.parse` (the gate forbids one) and no `{% %}` execution. **The boot script is ES5 and that is load-bearing** — one arrow function and it dies at parse time on the very engine whose fallback it exists to produce, so it is asserted by a real ES5 parse plus 14 node-driven behaviour examples. **MEASURED end to end on both engines**: Chromium draws the diagram (labels present, source gone, interpolated value present, no degradations); wkhtmltopdf leaves the source visible and marks it unsupported. **Three cross-major defects found by running it under both Liquid majors** — §Findings **E-19** |
 | T-22 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -1056,6 +1057,39 @@ falls back to a `data:` URI, which keeps the element intact.
 RUNNING a document through the layer. None was visible in review of the source, and two of them
 (the CSS hole and the `<style/>` slash) were in code whose comments explained at length why the
 opposite hazard had been closed. A comment describing a defence is not the defence.
+
+**E-19 · T-35's three defects were all cross-major, and none was visible by reading.** Found by
+`spec_liquid/mermaid_tag_spec.rb`, which runs the same 23 examples under Liquid 4.0.4 and 5.13.0 —
+the reason that directory exists.
+
+**1. The second render of a cached template emitted NO library.** `context.registers` belongs to
+the **Template** on Liquid 4 and survives every render; on 5.13.0 it does not. So a boolean
+"already emitted" flag meant that on 4.0.4 the first report got its 3.5 MB Mermaid and every
+subsequent report rendered from the same parsed template got none — every diagram silently
+undrawn, nothing in any log. Fixed by keying the register on the **Context's identity**: a
+`Context` is fresh per render on both majors, so it is the one thing that reliably answers "same
+render". A boolean read correctly and was wrong on half the supported versions.
+
+**2. An empty diagram rendered to NOTHING on Liquid 4.** Liquid 4 skips a tag whose `blank?` is
+true, and `Raw#blank?` answers *"is the body empty"* — so `{% mermaid %}{% endmermaid %}` produced
+a refusal element on 5.13.0 and an empty string on 4.0.4. A refused diagram has to stay an element
+(INV-4): a reader looking at a gap cannot tell one from a diagram nobody wrote. Fixed by overriding
+`blank?` to `false`.
+
+**3. `mermaid_max_bytes` meant a different number for every diagram.** The cap was applied to the
+ESCAPED source, and escaping costs three bytes for every `>` — so a diagram made of arrows, which
+is what Mermaid diagrams are, got a smaller allowance than one without. Caught by the AT-the-limit
+example, which is what those are for; fixed by capping the author's source before escaping.
+
+**And one more the specs caught in themselves.** The ES5 scan started with a "shorthand method"
+pattern, `/^\s*\w+\s*\([^)]*\)\s*\{/`, which cannot tell `{ foo() {} }` from `if (x) {` and
+flagged nine lines of ordinary ES5. Deleted, with the reason in the file: the `vm.Script` example
+asks a real ES5 parser the same question, and §Findings E-14 is the third instance of this lesson.
+
+**Worth keeping generally:** every one of the three was a difference between two versions of a
+dependency, not a mistake in logic. `spec_liquid/` running twice is the only thing that could have
+found any of them, and the register-lifetime one is the kind of defect that would have reached a
+user as "diagrams work in the first report of the day".
 
 **E-18 · wkhtmltopdf runs locally, there are TWO builds of it, and the first version of this
 finding blamed the plugin for something the build was doing. Corrected 2026-08-06, same day.**

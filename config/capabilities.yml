@@ -80,6 +80,7 @@ engines:
       operator finds out at the wrong moment.
     capabilities:
       - javascript
+      - modern_javascript
       - readiness_expression
       - print_backgrounds
       - header
@@ -134,6 +135,12 @@ engines:
       shared hosting and air-gapped, with zero configuration. The cost is a 2011
       WebKit: no flexbox, no grid, a JavaScript engine old enough to need shims, and no
       tagged PDF. Choose it to migrate, not to build on.
+    # `:modern_javascript` IS DELIBERATELY ABSENT while `:javascript` is present, and that
+    # pair is the whole point of the two capabilities being separate. MEASURED 2026-08-06:
+    # this engine cannot PARSE `x.a ||= 1` — the statement before the assignment never runs,
+    # so the failure is at parse time and takes the whole `<script>` block — and `globalThis`
+    # is undefined too. It therefore runs no library published in the last several years:
+    # not Mermaid 11, not Chart.js 4. technical-spec.md §6.1 has the discriminator.
     capabilities:
       - javascript
       - print_backgrounds
@@ -174,6 +181,7 @@ engines:
       and a default configuration that is unauthenticated.
     capabilities:
       - javascript
+      - modern_javascript
       - readiness_expression
       - print_backgrounds
       - header

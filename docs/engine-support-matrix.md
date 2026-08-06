@@ -45,6 +45,7 @@ same fact written where an operator can read it (`config/capabilities.yml`).
 | Capability | `chromium_cdp` | `gotenberg` | `wkhtmltopdf` |
 |---|---|---|---|
 | `:javascript` | yes | yes | yes |
+| `:modern_javascript` | yes | yes | — |
 | `:readiness_expression` | yes | yes | — |
 | `:print_backgrounds` | yes | yes | yes |
 | `:header` | yes | yes | yes |

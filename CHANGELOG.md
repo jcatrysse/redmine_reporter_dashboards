@@ -44,6 +44,45 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **`{% mermaid %}` — flowcharts, sequence diagrams, gantt charts and four more, from text.**
+
+  ```liquid
+  {% mermaid id: approval %}
+  graph LR
+    A[Submitted] --> B{Approved?}
+    B -->|yes| C[Scheduled]
+    B -->|no| A
+  {% endmermaid %}
+  ```
+
+  Mermaid 11 ships **inside the plugin**, so nothing is fetched from the internet when a report
+  is drawn — the same rule the charts follow. A diagram becomes real vector graphics in the PDF,
+  selectable and searchable rather than a picture.
+
+  - **The diagram text is left exactly as you write it.** Mermaid's syntax is full of braces and
+    pipes that a template language would normally try to interpret; this tag hands the body
+    through untouched, so you write ordinary Mermaid and nothing else.
+  - **`interpolate: true`** lets you put a value from the report into a diagram —
+    `A[{{ version.name }}]`. Values only, and they are escaped on the way in: a diagram is not a
+    place to run template logic, and text that came from an issue cannot become markup.
+  - **On an engine that cannot draw it, you get the diagram source rather than a blank space**,
+    marked as undrawn so it is clear the report is not broken. That is the old wkhtmltopdf
+    engine: it cannot run any modern JavaScript library at all, which is now stated in the
+    engine comparison instead of being discovered.
+  - **A diagram larger than 16 KB of source is refused** rather than spending the whole render
+    budget on a drawing nobody can read.
+
+  **Any JavaScript library works this way, not just these two.** Chart.js and Mermaid ship with
+  the plugin because they are the common cases, but a report can use any modern library: include
+  it like any other file and tell the renderer to wait for it. There is no per-library
+  configuration to maintain.
+
+- **The engine comparison now says whether an engine runs modern JavaScript**, not whether it
+  runs one named library. Measured rather than assumed: the compatibility engine reports having
+  JavaScript and cannot read code written in the last several years, so it draws neither Mermaid
+  diagrams nor current Chart.js. One line in the comparison tells you that once, instead of
+  answering about one library and staying silent about the rest.
+
 - **Asset policy — a new administration setting, defaulting to no network access at all.**
   *Administration → Plugins → Redmine Reporter Dashboards.*
 

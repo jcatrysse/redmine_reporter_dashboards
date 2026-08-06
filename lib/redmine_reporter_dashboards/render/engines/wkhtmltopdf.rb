@@ -58,6 +58,13 @@ module RedmineReporterDashboards
         #   :scale                 --zoom is not the same thing and rounds differently
         #   :outline, :tagged_pdf  no accessible-PDF support at all
         #   :asset_upload/:http    inline only, by policy as well as by capability
+        # `:javascript` WITHOUT `:modern_javascript`, and that pair is the reason the two
+        # capabilities exist separately (T-35, FR-68b). This engine has a script engine and
+        # cannot run anything written this decade: MEASURED 2026-08-06, it fails to **parse**
+        # `x.a ||= 1` — the statement before the assignment never executes, so the whole
+        # `<script>` block dies at parse time — and `globalThis` is undefined as well. So
+        # Mermaid 11 leaves no global behind, and Chart.js 4 would fare no better.
+        # technical-spec.md §6.1 carries the discriminator that established it.
         CAPABILITIES = %i[
           javascript print_backgrounds header footer page_furniture_tokens
           custom_page_size landscape margins media_print page_break_css

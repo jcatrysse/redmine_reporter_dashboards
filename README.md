@@ -1349,6 +1349,71 @@ Charts are readable without being seen (FR-76). Every SVG carries a `<title>` an
 deficiencies; and every fill has a darker outline, so two adjacent bars stay two bars in a
 greyscale print. Meaning is never carried by colour alone.
 
+## Using the `{% mermaid %}` tag
+
+```liquid
+{% mermaid id: approval %}
+graph LR
+  A[Submitted] --> B{Approved?}
+  B -->|yes| C[Scheduled]
+  B -->|no| A
+{% endmermaid %}
+```
+
+Mermaid 11 ships inside the plugin — nothing is fetched from the internet when a report is drawn.
+In a PDF the diagram is real vector graphics: selectable, searchable, and printable at any size.
+
+**The body is not interpreted.** Mermaid syntax is full of `{`, `}` and `|`, which a template
+language would otherwise try to read as its own markup. Write ordinary Mermaid; nothing is done to
+it.
+
+### Parameters
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `id` | `mermaid` | Identifies the diagram in the page. Letters, digits, `_` and `-` |
+| `interpolate` | `false` | Allows `{{ value }}` in the diagram — see below |
+
+### Putting report data into a diagram
+
+```liquid
+{% mermaid id: release interpolate: true %}
+graph LR
+  A[{{ version.name }}] --> B[{{ version.status }}]
+{% endmermaid %}
+```
+
+Two limits, both deliberate:
+
+- **Values, not template logic.** `{{ something }}` is substituted; `{% if %}` and `{% for %}` are
+  not run, and filters are not applied. A diagram is not a place for control flow — build the text
+  above the tag and interpolate one variable if you need to.
+- **Substituted values are escaped.** An issue subject is written by whoever wrote the issue, not
+  by you, so it goes in as text and cannot become markup. This is the one place in a diagram where
+  content you did not write ends up in the output, which is why it is the one place with a rule.
+
+### When a diagram cannot be drawn
+
+You get **the diagram source, marked as undrawn** — never a blank space. A reader can see that
+something was meant to be there and what it said.
+
+That happens on the old wkhtmltopdf engine, which reports having JavaScript and cannot run any
+library written in the last several years. The engine comparison at
+[`docs/engine-support-matrix.md`](docs/engine-support-matrix.md) has a **modern JavaScript** row
+that says so; if it reads `—` for your engine, diagrams and current Chart.js will not draw and the
+fix is to switch engines rather than to change the template.
+
+A diagram larger than **16 KB of source** is refused rather than spending the render budget on a
+drawing nobody can read. The refusal leaves a marked, empty block so the gap is visible.
+
+### Using other JavaScript libraries
+
+Nothing about the above is specific to Mermaid. A report can use any modern JavaScript library:
+reference it like any other asset and it is embedded in the document, and tell the renderer to wait
+for it with `window.__rd.begin()` and `window.__rd.end()` around your own drawing code. Chart.js and
+Mermaid ship with the plugin because they are the common cases — not because they are the only ones
+supported.
+
 ## Using the `{% version_rollup %}` tag
 
 Aggregates the report's issues per target version in SQL and assigns a ready-to-render Array. Use it instead of a nested `{% for version %}{% for issue %}` loop when you build a per-version dashboard.

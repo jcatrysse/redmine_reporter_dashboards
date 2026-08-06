@@ -24,3 +24,50 @@
 
 .reporter-dashboard-tab-order { margin-left: 6px; }
 .reporter-dashboard-tab-order a { margin-left: 4px; }
+
+/* --- Mermaid (T-35) -------------------------------------------------------------------
+ *
+ * A diagram is a `<pre>` holding its own source until Mermaid replaces it, so these rules
+ * are about the two states where it does NOT get replaced. FR-68 asks for the source to be
+ * "emitted, labelled, never a blank space": the source is there by construction, and this is
+ * the labelling.
+ *
+ * NO TEXT IN THE CSS, deliberately. `content:` cannot be localised and this plugin ships nine
+ * locales (CLAUDE.md §10), so a hardcoded English sentence here would read as a bug to a
+ * Russian or Dutch reader and be invisible to review in English. The treatment is therefore
+ * typographic — a dashed border and a muted monospace source — which says "this is source, not
+ * a drawing" in every language. A worded explanation belongs with FR-58's diagnostics surface,
+ * which is where the render's degradation list is already shown.
+ */
+.rrd-mermaid {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+
+/* Drawn: the SVG has replaced the source, so the <pre>'s own formatting must not fight it. */
+.rrd-mermaid[data-rd-mermaid-state="drawn"] {
+  white-space: normal;
+  font-family: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+/* Not drawn: the engine could not run the library, the diagram was refused, or it failed.
+ * Same treatment for all three — to a reader they are one situation: this is the source. */
+.rrd-mermaid[data-rd-mermaid-state="unsupported"],
+.rrd-mermaid[data-rd-mermaid-state="failed"],
+.rrd-mermaid[data-rd-mermaid-state="refused"] {
+  border: 1px dashed #bbb;
+  border-radius: 3px;
+  padding: 8px 10px;
+  color: #555;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+/* A refused diagram has an EMPTY body, so without a minimum it would be an invisible element
+ * and the gap INV-4 objects to would be back. */
+.rrd-mermaid[data-rd-mermaid-state="refused"] {
+  min-height: 1.5em;
+}

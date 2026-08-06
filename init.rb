@@ -123,6 +123,7 @@ class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
     RedmineReporterDashboards.register_version_rollup_tag
     RedmineReporterDashboards.register_geo_version_map_tag
     RedmineReporterDashboards.register_chart_tag
+    RedmineReporterDashboards.register_mermaid_tag
     RedmineReporterDashboards.load_patches
 
     return unless reporter

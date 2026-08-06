@@ -433,6 +433,8 @@ record as of the last local run.
 the bundle's script line) — established by a DISCRIMINATOR, not inferred: two three-line documents differing only in `x.a = x.a \|\| 1` versus `x.a \|\|= 1` print `ES5-OK-1` and `INIT` respectively, and `INIT` means the statement BEFORE the assignment never ran, so the whole script block failed to parse. That rules out a timeout, the 3.5 MB size (a same-size ES5-only script runs fine) and the probe's
 own JS. **`||=` is not the only blocker**: this build also lacks `globalThis`, which the bundle's
 final line uses to publish the global — so "transpile the `||=`" is not a route back. **So `:mermaid` is absent for wkhtmltopdf despite `:javascript` being present**, which is the answer T-35's acceptance list expected and now has. Probe kept out of the repo deliberately — vendoring Mermaid is T-35's job, with `THIRD_PARTY.md` and the digest gate |
+| **T-35: Mermaid, DB-less** | **yes, locally (2026-08-06)** | **1852 rspec examples, 0 failures** (was 1832), 92 pending — 20 new for `mermaid_boot.js` including a real `vm.Script` ES5 parse. **301 `spec_liquid` under each major** (was 278): the 23 tag examples found **three cross-major defects** (§Findings E-19). All seven gates green, `vendor_integrity` with two vendored files |
+| **T-35 end to end, both engines** | **yes, locally (2026-08-06)** | One document through the tag, the T-33 resolver and both adapters. `chromium_cdp` Chrome/141: diagram **drawn** — node labels and the interpolated value extract from the PDF, the literal source is gone, no degradations. `wkhtmltopdf` 0.12.6.1 patched: **source still visible** and marked unsupported, only the expected `legacy_engine` degradation. The resolver inlined all three scripts, the 3.5 MB bundle via its `data:` fallback. Support matrix REGENERATED from a real run: one new row, `:modern_javascript` yes/yes/— |
 | **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
@@ -651,6 +653,33 @@ of a CI that runs on fork pull requests.
    `Liquid::Filters::Escaping` keeps the constants as aliases. Two copies of a
    security-bearing escaper was the alternative, and the copy that drifts is always the one
    without a test.
+
+17. **T-35 is done and was RE-SCOPED — read §Findings F-17 before touching it.** Vendored Mermaid,
+   a thin block tag, `:modern_javascript`, and deliberately **no** sanitiser, no `MermaidSpec`, no
+   collector and no `:mermaid` capability. Four things a later session should know.
+
+   **`registers` DOES NOT HAVE THE SAME LIFETIME ON THE TWO LIQUID MAJORS, and it cost a real
+   defect.** On Liquid 4 `context.registers` belongs to the TEMPLATE and survives every render; on
+   5.13.0 it does not. A boolean "already emitted the library" flag therefore gave the first report
+   its 3.5 MB Mermaid and every later render of the same parsed template none — diagrams silently
+   undrawn. Key per-render state on the **Context's object identity**, which is fresh on both.
+   Anything else you put in `registers` has this hazard.
+
+   **LIQUID 4 SKIPS A TAG WHOSE `blank?` IS TRUE, and `Raw#blank?` means "empty body".** So an
+   empty `{% mermaid %}` rendered to nothing on 4.0.4 and to a refusal element on 5.13.0. Any
+   `Raw` subclass that must always emit needs `blank?` overridden to `false`.
+
+   **`mermaid_boot.js` IS ES5 AND MUST STAY ES5.** Its whole job on wkhtmltopdf is to produce the
+   fallback, and one arrow function kills the entire script at parse time on exactly that engine —
+   so the fallback would silently not happen where it is needed. `spec/charts/mermaid_boot_spec.rb`
+   asserts it with a real `vm.Script` ES5 parse plus a per-construct scan over CODE ONLY (the file's
+   own comments name `||=` and arrow functions, so scanning comments is the E-14 mistake again).
+
+   **THE 3.5 MB BUNDLE TAKES T-33's `data:` FALLBACK, and that is not a bug.** Measured end to end:
+   the resolver inlines it with `Degradation(:asset_structural_fallback)` because the minified
+   bundle contains an element terminator, so it becomes a `data:text/javascript;base64,…` rather
+   than a `<script>` block — and Chromium draws the diagram from it perfectly. Two T-33 code paths
+   proven by a real document rather than by a spec.
 
 16. **T-33 is done — the asset triple, one policy, and the plugin's first settings block.**
    `assets/` (ten files) + `render/asset_binding.rb`. Six things a later session should know, and

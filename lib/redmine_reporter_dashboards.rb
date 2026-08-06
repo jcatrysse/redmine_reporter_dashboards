@@ -208,6 +208,7 @@ module RedmineReporterDashboards
   # becomes a `<canvas>` or an inline `<svg>`. The tag emits NO markup — see
   # `Liquid::Tags::ChartTag` for why that is the whole design rather than a detail.
   CHART_TAG_NAME = 'chart'
+  MERMAID_TAG_NAME = 'mermaid'
 
   def register_chart_tag
     return unless defined?(::Liquid::Tag)
@@ -217,6 +218,17 @@ module RedmineReporterDashboards
                                     RedmineReporterDashboards::Liquid::Tags::ChartTag)
   rescue => e
     Rails.logger.warn("[reporter_dashboards] chart tag registration failed: #{e.message}")
+  end
+
+  # T-35. A BLOCK tag, so registration is the same call — Liquid does not distinguish.
+  def register_mermaid_tag
+    return unless defined?(::Liquid::Tag)
+
+    require File.join(lib_root, 'redmine_reporter_dashboards/liquid/tags/mermaid_tag')
+    ::Liquid::Template.register_tag(MERMAID_TAG_NAME,
+                                    RedmineReporterDashboards::Liquid::Tags::MermaidTag)
+  rescue => e
+    Rails.logger.warn("[reporter_dashboards] mermaid tag registration failed: #{e.message}")
   end
 
   # RETIRED IN T-20: `register_issue_target_version_drop`.
