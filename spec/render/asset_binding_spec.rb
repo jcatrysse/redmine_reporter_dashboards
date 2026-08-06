@@ -128,9 +128,12 @@ module RedmineReporterDashboards
           expect(result.message.scan('https://x/y.png').length).to eq(1)
         end
 
-        it 'carries a SAFE message: the URLs and the policy, no exception and no path' do
-          # `Failure#message` is shown to a user. `detail` is where the per-reference reasons
-          # live, because the caller is responsible for what it puts there.
+        it 'carries a SAFE message: the URLs and no reason prose' do
+          # `Failure#message` is shown to a user and "must never carry a raw exception". One of
+          # the reasons the resolver can record is the fetcher's `:transport` reason, which
+          # carries an exception class and message verbatim — so a message that relayed reasons
+          # would trade a false cause for an information leak. The reasons live in `detail`,
+          # which is what FR-58's diagnostics view reads.
           result = described_class.apply(
             resolution: resolution(refusals: [refusal('https://x/y.png',
                                                       reason: 'RuntimeError at /srv/app/lib/x.rb:12')]),
@@ -140,6 +143,57 @@ module RedmineReporterDashboards
           expect(result.message).not_to include('RuntimeError')
           expect(result.message).not_to include('/srv/app')
           expect(result.detail.first['reason']).to include('RuntimeError')
+        end
+
+        # THE CAUSE IS NOT ALWAYS THE POLICY, and the first version said it always was — telling
+        # an administrator to change a setting that provably would not help.
+        it 'asserts the policy as the cause ONLY when every refusal is a policy one' do
+          policy_only = described_class.apply(
+            resolution: resolution(refusals: [refusal('https://third.example/a.png')]),
+            correlation_id: 'c'
+          )
+
+          expect(policy_only.message).to include('asset policy does not permit')
+        end
+
+        it 'does NOT blame the policy for a relative reference, which never consults it' do
+          relative = Assets::Resolution::Refusal.new(
+            url: 'logo.png', usage: :image, classification: :unresolvable,
+            reason: 'is not resolvable: a render has no document URL'
+          )
+
+          result = described_class.apply(resolution: resolution(refusals: [relative]),
+                                        correlation_id: 'c')
+
+          expect(result.message).not_to include('asset policy does not permit')
+          expect(result.message).to include('could not be resolved')
+          expect(result.message).to include('logo.png')
+        end
+
+        it 'does NOT blame the policy for an oversize or wrongly-typed asset' do
+          [['is 9000000 bytes, above the 8388608-byte asset_max_bytes cap', :local_path],
+           ['is on disk, but its type is not usable for the way the document references it',
+            :local_path]].each do |reason, classification|
+            refused = Assets::Resolution::Refusal.new(url: '/plugin_assets/x/a.png', usage: :image,
+                                                      classification: classification, reason: reason)
+            result = described_class.apply(resolution: resolution(refusals: [refused]),
+                                          correlation_id: 'c')
+
+            expect(result.message).not_to include('asset policy does not permit'), reason
+          end
+        end
+
+        it 'falls back to the neutral message when the refusals are MIXED' do
+          mixed = [refusal('https://third.example/a.png'),
+                   Assets::Resolution::Refusal.new(url: 'logo.png', usage: :image,
+                                                   classification: :unresolvable,
+                                                   reason: 'is not resolvable')]
+
+          result = described_class.apply(resolution: resolution(refusals: mixed),
+                                        correlation_id: 'c')
+
+          expect(result.message).not_to include('asset policy does not permit')
+          expect(result.message).to include('2 assets')
         end
 
         it 'builds no DocumentRequest at all, so no engine can be handed the document' do

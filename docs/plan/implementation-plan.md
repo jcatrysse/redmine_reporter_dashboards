@@ -71,7 +71,7 @@ fact that CI has not yet run on this work at all.
 | T-19 | **done** — `liquid/filters.rb` + six registered modules, `liquid/html_scanner.rb`, four new lint rules, and the examples and README fixed. **21 owned filters**, registered PER RENDER (the default of `TemplateRenderer#render`, never `Template.register_filter`), with `OWNED`/`INHERITED`/`REMOVED`/`DEFERRED` as asserted constants so a security removal cannot come back as a convenience. **`| json` and `| js`** escape `< > & \ ' " ` $` and U+2028/9, in `\uXXXX` form so the output stays valid JSON for §6's `<script type="application/json">` block. **OQ-C is closed by measurement**: `where` and `sort_natural` inherited, `sum` owned for cross-major parity, and the `StandardFilters` name list **pinned per version so an unpinned Liquid fails the build**. The FR-19 lint now **parses** rather than regexes — `HtmlScanner` walks the document's states, and its spec is the argument: a commented-out script, a `>` inside an attribute, a `>` inside a Liquid expression and `<style>` were each answered wrongly before. **E-8's two rules shipped, which was the condition the curator's decision rested on**, plus a warning for `.all` and one error per removed filter carrying §3.6's reason. **The copy-paste surface is fixed and pinned**: both examples and all 25 README snippets are FR-19-clean, the frozen reference copies are asserted STILL defective because the verification cites them, and the other findings are held at a ratchet owned by T-16/T-11. The escaping regression table asserts the assembled block **PARSES** under node — 43 examples, because a "nothing executed" test would have passed the defect. Green on Liquid **4.0.4 and 5.13.0** (276 examples each), 1433 DB-less, 187 adapter, corpus byte-identical. **It found two defects in itself** (§Findings **E-14**) and left **F-10** for the curator |
 | T-20 | **done** — `{% geo_version_map %}` is a **deprecation shim**: same behaviour, same map shape, one log line per process (locked, so once means once under Puma), and `Version.visible` was already the scope. The addon's `VersionDrop` (108), `issue_drop_patch.rb` (43) and `custom_field_value_drop.rb` (32) are **deleted**, `register_issue_target_version_drop` with them, and **two `zero_reporter.allowlist` entries went with the files** — the ratchet shrank 18 → 16 rather than going stale. The linter gained `deprecated.geo_version_map` as a **warning, not an error**: the template still works, and `import:plan`'s "which templates need rework" is `errors.any?`. It also gained a counted usage marker, because the finding says *this breaks next minor* and the count says *this many templates must be touched first*. **It found two defects in itself and one gap in its own task definition** — §Findings **E-15** — and left **F-11** (the `issue.target_version` window before T-23) and **F-12** (`TagContext` reading `User.current`) for the curator. Green DB-less (1460, was 1433), Liquid **4.0.4 and 5.13.0** (278 each), and all six gates |
 | T-16 | **done** — `charts/` (palette, spec, layout, SVG renderer, Chart.js emitter, collector), `liquid/tags/chart_tag.rb`, `assets/javascripts/chart_boot.js`, **Chart.js 4.5.0 vendored** with its digest in `THIRD_PARTY.md` and a `vendor_integrity` gate that recomputes it. `{% chart %}` **emits no markup** — a placeholder and a `ChartSpec`, and the output binding decides: `<canvas>` + `<script type="application/json">` for HTML, inline `<svg>` for PDF with `<a xlink:href>` per element and no JavaScript at all. **One `ChartLayout` for both paths**, and the claim is MEASURED rather than argued: the falsifier renders a horizontal bar with twelve long labels in a real Chromium and compares `chart.chartArea` with `ChartLayout#plot` — worst edge **1.17%** against T-16's 2% tolerance, with Chart.js using exactly the ticks, min and max it was handed. **It found two defects doing so** (§Findings **E-16**), neither findable in Ruby. Ten SVG goldens as deterministic text; `responsive`/`animation`/`devicePixelRatio` derived from the output binding, never from the author (G3). Left for the curator: **F-13** (where the chart layer lives), **F-14** (a `:responsive_canvas` capability), **F-15** (the two legacy examples' CDN reference) |
-| T-33 | **done** — `assets/` (policy, origin, reference, content types, bundled assets, local store, fetcher, document scanner, resolver, resolution) plus `render/asset_binding.rb`, the plugin's first `settings` block and its admin partial, and two new `layer_purity` arms. **`:bundled` is the default and `:asset_http` is never selected** — not "off wherever the engine supports upload", but off in every mode for every capability shape, asserted against an engine declaring all three. An **empty allowlist collapses any upgraded mode to `:bundled`** and the collapse is asserted as an equality of body, refusals, counts and models — the fail-closed clause T-33 flags as most likely to be got wrong. The fetcher's closed header set is proven by a **recording double**, not by reading the file; the resolved-IP check runs **after** DNS and the connection is made to the checked address via `ipaddr=`, which is the only version that closes the rebinding window; size, time, redirect and inline caps each have an AT-and-one-past test. Containment is `realpath`, tested against a literal `..`, a percent-encoded one, a **double**-encoded one and a **symlink** inside the root pointing out of it. **Structural inlining falls back to base64 on `</style` / `</script`**, which is an injection rather than a rendering bug. 201 new DB-less examples; **1768 total, 0 failures**; all seven gates green, `layer_purity` strict, and both new arms **negative-tested**. It settled **F-13, F-13b, F-14** and answered **F-15**, and left **F-16** and **T-39** |
+| T-33 | **done** — `assets/` (policy, origin, reference, content types, bundled assets, local store, fetcher, document scanner, resolver, resolution) plus `render/asset_binding.rb`, the plugin's first `settings` block and its admin partial, and two new `layer_purity` arms. **Its review found four blockers and they are fixed** — a stylesheet's own `url()`/`@import` reaching the engine live (which made the whole `:bundled` promise false), an `ArgumentError` out of a method documented never to raise, `<style/>` hiding an entire stylesheet from the scanner, and a production transport with no test at all. §Findings **E-17**. **`:bundled` is the default and `:asset_http` is never selected** — not "off wherever the engine supports upload", but off in every mode for every capability shape, asserted against an engine declaring all three. An **empty allowlist collapses any upgraded mode to `:bundled`** and the collapse is asserted as an equality of body, refusals, counts and models — the fail-closed clause T-33 flags as most likely to be got wrong. The fetcher's closed header set is proven by a **recording double**, not by reading the file; the resolved-IP check runs **after** DNS and the connection is made to the checked address via `ipaddr=`, which is the only version that closes the rebinding window; size, time, redirect and inline caps each have an AT-and-one-past test. Containment is `realpath`, tested against a literal `..`, a percent-encoded one, a **double**-encoded one and a **symlink** inside the root pointing out of it. **Structural inlining falls back to base64 on `</style` / `</script`**, which is an injection rather than a rendering bug. 201 new DB-less examples; **1768 total, 0 failures**; all seven gates green, `layer_purity` strict, and both new arms **negative-tested**. It settled **F-13, F-13b, F-14** and answered **F-15**, and left **F-16** and **T-39** |
 | T-22 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -852,6 +852,62 @@ are **lowered**, never raised. *Blocked on:* a host-plugin render, which needs t
 `redmine_reporter` plugin (CLAUDE.md §11.6) — so the browser assertion has to run either against
 a checkout that has it or against the owned render path once T-23 lands. State that choice in the
 PR rather than skipping the assertion.
+
+**E-17 · T-33's review found four blockers, and the worst of them made the whole `:bundled`
+promise false.** Twenty-eight agents over the diff — four independent lenses, then one skeptic per
+finding told to refute it, each required to REPRODUCE the failure rather than reason about it. 44
+raw findings, 20 confirmed, 4 refuted, and the confirmations came with running scripts. The four
+that mattered, and what each says about the shape of the mistake:
+
+**1. A STYLESHEET IS A DOCUMENT, and inlining one embedded its own references verbatim.** CSS
+carries `url()` and `@import`. `<link rel=stylesheet href="/plugin_assets/…/b.css">` where `b.css`
+contains `url(https://evil.example/track.png)` produced `ok? == true`, no refusal, and both
+`evil.example` URLs live in the body for the engine to fetch. Under `:bundled` that is exactly the
+egress §5.1 refuses; under `:external` it is a **complete allowlist bypass**, because one
+allowlisted host then chooses arbitrary further egress. The resolver walked the DOCUMENT and never
+the content of what it embedded. Fixed by resolving CSS before embedding it, by the same rules, to
+a bounded depth — and JavaScript deliberately NOT, because a URL in a program is a string rather
+than a subresource, a script can mint one at runtime, and only the engine's own egress denial
+closes that (which is what `F-15-egress-denial` is for). Rewriting URLs inside JS would corrupt
+programs while closing nothing.
+
+**2. `Resolver#call` raised `ArgumentError` on ordinary author markup.** `<link rel=stylesheet
+href="/a.css" style="background:url(/logo.png)">` — two references with disjoint VALUE spans, but
+the `url()` span sits inside the `<link>`'s element span, so the structural replacement contained
+the attribute one and `assert_disjoint!` fired. Out of a method documented "never raises for
+anything a document can do". Fixed by suppressing the element span when anything is nested inside
+it, so the assertion is now about this file's own arithmetic — which is what it should always have
+been. Its message no longer blames `DocumentScanner`, whose spans were provably disjoint in every
+reproducing case: pointing a maintainer at the wrong file is its own defect.
+
+**3. `<style/>` MADE AN ENTIRE STYLESHEET INVISIBLE TO THE SCANNER.** HTML has no self-closing
+syntax: `<style/>` is an OPEN style element and every engine applies the CSS after it. The scanner
+honoured the slash, skipped the body, and every `url()` in it went unseen — an egress hole. The
+same test made a `<script/>` body get scanned as markup, which is the corruption the class comment
+claims to have closed. Fixed, with foreign content (`<svg>`/`<math>`) tracked as the one real
+exception rather than ignored in either direction, because this plugin emits inline SVG itself.
+
+**4. THE PRODUCTION TRANSPORT HAD NO TEST AT ALL.** `NetHttpTransport` is where every
+security-bearing line lives — `ipaddr=` (the whole rebinding fix), `use_ssl`, the two timeouts, the
+streamed size cap — and deleting any of them was invisible to the suite. Now driven against a
+`Net::HTTP` instance double: no socket, and the setters are asserted. The same pass found that
+§5.1's "5 s total" was **not enforced**: the deadline seeded a per-read timeout, which every chunk
+resets, so a server dripping one byte at a time held the connection for as long as `asset_max_bytes`
+allowed — measured at 16 s against a 5 s documented cap. The deadline is now checked inside the read
+loop.
+
+**Two more worth naming, because both are shapes rather than instances.** A CR or LF in a path
+reached `Net::HTTP`, which answers with a bare `ArgumentError` — refused now at classification AND
+at the fetcher, because a fetcher must not depend on its caller having checked. And a structural
+rewrite DISCARDED the element's attributes: `media=print` silently became all-media, `type=module`
+became a classic script, `disabled` started applying. Rather than replicate HTML's semantics, the
+rewrite is now allowed only for a closed safe set (with `media` carried through) and everything else
+falls back to a `data:` URI, which keeps the element intact.
+
+**And the generalisation that is worth more than any of them:** every one of the four was found by
+RUNNING a document through the layer. None was visible in review of the source, and two of them
+(the CSS hole and the `<style/>` slash) were in code whose comments explained at length why the
+opposite hazard had been closed. A comment describing a defence is not the defence.
 
 **E-12 · `@context` belongs to `Liquid::Drop`, and a drop that stores its own there breaks
 Liquid's internals.** Found by T-18's first spec run, three frames from the cause. `RecordDrop`

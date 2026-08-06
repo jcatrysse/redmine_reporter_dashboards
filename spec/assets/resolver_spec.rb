@@ -560,6 +560,280 @@ module RedmineReporterDashboards
         end
       end
 
+      # ------------------------------------------------------------------
+      # THE HOLE THE REVIEW FOUND, and the most serious one in T-33 as first written.
+      #
+      # A stylesheet is a document: CSS carries `url()` and `@import`. Embedding one verbatim
+      # handed every reference inside it to the engine as a LIVE URL — egress under `:bundled`,
+      # and under `:external` a complete allowlist bypass, because one allowlisted host then
+      # chose arbitrary further egress. Reproduced before the fix and asserted here after it.
+      describe 'references INSIDE an inlined stylesheet' do
+        before do
+          File.binwrite(File.join(@tmp, 'evil.css'),
+                        'body{background:url(https://evil.example/track.png)} ' \
+                        '@import url("https://evil.example/more.css");')
+          File.binwrite(File.join(@tmp, 'local.css'),
+                        %(body{background:url("#{local('logo.png')}")}))
+        end
+
+        it 'REFUSES a third-party url() inside it under :bundled, naming the inner URL' do
+          result = resolver.call(%(<link rel="stylesheet" href="#{local('evil.css')}">))
+
+          expect(result).to be_refused
+          expect(result.refused_urls).to include('https://evil.example/track.png')
+          expect(result.body).not_to include('evil.example')
+        end
+
+        it 'refuses it through the data: URI path too, not only the structural one' do
+          # A `<link>` carrying `disabled` cannot be structurally rewritten, so it takes the
+          # `data:` branch — which embedded the same unresolved bytes.
+          result = resolver.call(%(<link rel="stylesheet" href="#{local('evil.css')}" disabled>))
+
+          expect(result).to be_refused
+          expect(result.refused_urls).to include('https://evil.example/track.png')
+        end
+
+        it 'refuses it inside a <style> body that was itself inlined from a file' do
+          File.binwrite(File.join(@tmp, 'nested.css'), %(@import url("#{local('evil.css')}");))
+          result = resolver.call(%(<link rel="stylesheet" href="#{local('nested.css')}">))
+
+          expect(result).to be_refused
+          expect(result.refused_urls).to include('https://evil.example/track.png')
+        end
+
+        it 'RESOLVES a local url() inside it, so an ordinary stylesheet still works' do
+          result = resolver.call(%(<link rel="stylesheet" href="#{local('local.css')}">))
+
+          expect(result).to be_ok
+          expect(result.body).to include('<style>')
+          expect(result.body).to include('data:image/png;base64,')
+          expect(result.body).not_to include('/plugin_assets/rrd')
+        end
+
+        it 'FETCHES it rather than passing it through when the policy permits' do
+          policy = Policy.new(mode: :external, allowlist: %w[evil.example])
+          fetcher = StubFetcher.new
+          result = resolver(policy: policy, fetcher: fetcher)
+                   .call(%(<link rel="stylesheet" href="#{local('evil.css')}">))
+
+          expect(result).to be_ok
+          # THE PLUGIN fetched both, and the engine gets bytes — the inversion, one level down.
+          expect(fetcher.asked).to eq(['https://evil.example/track.png',
+                                       'https://evil.example/more.css'])
+          expect(result.body).not_to include('evil.example')
+        end
+
+        it 'bounds the @import chain and degrades rather than recursing without limit' do
+          # A circular import must be a degradation, not a stack overflow.
+          File.binwrite(File.join(@tmp, 'loop.css'), %(@import url("#{local('loop.css')}");))
+
+          result = nil
+          expect { result = resolver.call(%(<link rel="stylesheet" href="#{local('loop.css')}">)) }
+            .not_to raise_error
+          expect(result.degradations.map { |d| d[:code] }).to include(:asset_nested_depth)
+        end
+
+        it 'does NOT rewrite URLs inside JavaScript, because a string is not a subresource' do
+          # The distinction is real rather than convenient: a script can mint a subresource at
+          # runtime and no scanner can close that — only the engine's own egress denial can,
+          # which is what conformance fixture F-15-egress-denial is for. Rewriting URLs in JS
+          # would corrupt programs while closing nothing.
+          File.binwrite(File.join(@tmp, 'app2.js'), 'var u = "https://evil.example/x.png";')
+          result = resolver.call(%(<script src="#{local('app2.js')}"></script>))
+
+          expect(result).to be_ok
+          expect(result.body).to include('https://evil.example/x.png')
+        end
+      end
+
+      # ------------------------------------------------------------------
+      # `Resolver#call` promises never to raise for anything a document can do, and it did:
+      # a `<link>` with a background image in its inline style produced an element-span
+      # replacement containing a value-span one and `assert_disjoint!` fired `ArgumentError`.
+      describe 'a reference nested inside a structurally-rewritable element' do
+        it 'does not raise, and resolves both' do
+          html = %(<html><link rel="stylesheet" href="#{local('app.css')}" ) +
+                 %(style="background:url(#{local('logo.png')})"></html>)
+
+          result = nil
+          expect { result = resolver.call(html) }.not_to raise_error
+          expect(result).to be_ok
+          # The element span is suppressed, so BOTH become attribute rewrites.
+          expect(result.body.scan('base64,').length).to eq(2)
+          expect(result.body).to include('<link')
+        end
+
+        it 'does not raise for the @import form, or on a <script>' do
+          [%(<link rel="stylesheet" href="#{local('app.css')}" style='@import "#{local('app.css')}"'>),
+           %(<script src="#{local('app.js')}" style="background:url(#{local('logo.png')})"></script>)]
+            .each do |html|
+            expect { resolver.call(html) }.not_to raise_error, html[0, 40]
+          end
+        end
+
+        it 'still uses the structural form when nothing is nested inside the element' do
+          result = resolver.call(%(<link rel="stylesheet" href="#{local('app.css')}">))
+
+          expect(result.body).to include('<style>')
+        end
+      end
+
+      # ------------------------------------------------------------------
+      # Replacing an element with a `<style>`/`<script>` block discards everything it carried,
+      # and some of that changes what the element MEANS.
+      describe 'what a structural rewrite may discard' do
+        it 'CARRIES media through, because a print-only stylesheet is what a report has' do
+          result = resolver.call(%(<link rel="stylesheet" media="print" href="#{local('app.css')}">))
+
+          expect(result.body).to include('<style media="print">')
+        end
+
+        it 'escapes the media value, which is author-controlled and goes in attribute position' do
+          result = resolver.call(
+            %(<link rel="stylesheet" media='print" onload="alert(1)' href="#{local('app.css')}">)
+          )
+
+          expect(result.body).not_to include('onload="alert(1)"')
+          expect(result.body).to include('&quot;')
+        end
+
+        it 'falls back rather than flattening a module script into a classic one' do
+          result = resolver.call(%(<script src="#{local('app.js')}" type="module"></script>))
+
+          expect(result.body).to include('type="module"')
+          expect(result.body).to include('data:text/javascript;base64,')
+          expect(result.degradations.map { |d| d[:code] }).to include(:asset_structural_fallback)
+        end
+
+        it 'falls back rather than enabling a disabled stylesheet' do
+          result = resolver.call(%(<link rel="stylesheet" href="#{local('app.css')}" disabled>))
+
+          expect(result.body).not_to include('<style')
+          expect(result.body).to include('data:text/css;base64,')
+        end
+
+        it 'falls back for defer, async, integrity and anything else it was not told about' do
+          %w[defer async integrity="sha384-x" crossorigin nomodule id="x" onload="alert(1)"]
+            .each do |extra|
+            result = resolver.call(%(<script src="#{local('app.js')}" #{extra}></script>))
+
+            expect(result.body).to include('data:text/javascript;base64,'), extra
+          end
+        end
+
+        it 'allows the attributes it was told about' do
+          result = resolver.call(%(<link rel="stylesheet" charset="utf-8" href="#{local('app.css')}">))
+
+          expect(result.body).to include('<style>')
+        end
+      end
+
+      # ------------------------------------------------------------------
+      # §5.1 caps ONE asset and says nothing about a document, which is the other half of G6's
+      # "no unbounded output". These caps are constants for the same reason the fetcher's
+      # timeouts are: each is a safety property, not a preference.
+      describe 'document-level bounds' do
+        it 'resolves AT the reference cap and refuses one past it' do
+          at = resolver.call((1..described_class::MAX_REFERENCES)
+                              .map { %(<img src="#{local('logo.png')}">) }.join)
+          expect(at).to be_ok
+          expect(at.counts[:inlined]).to eq(described_class::MAX_REFERENCES)
+
+          past = resolver.call((1..(described_class::MAX_REFERENCES + 1))
+                                .map { %(<img src="#{local('logo.png')}">) }.join)
+          expect(past).to be_refused
+          expect(past.refusals.first.reason).to include('reference cap')
+          expect(past.degradations.map { |d| d[:code] }).to include(:asset_document_cap)
+        end
+
+        it 'refuses past the aggregate embedded-byte budget, not only the per-asset cap' do
+          # Twenty assets each inside `asset_max_bytes` still make a document no engine will draw.
+          File.binwrite(File.join(@tmp, 'chunk.png'), "\x89PNG#{'x' * 3_000}")
+          policy = Policy.new(inline_max_bytes: 10_000, asset_max_bytes: 10_000)
+          stub_const("#{described_class}::MAX_TOTAL_BYTES", 5_000)
+
+          result = resolver(policy: policy)
+                   .call((1..3).map { %(<img src="#{local('chunk.png')}">) }.join)
+
+          expect(result).to be_refused
+          expect(result.refusals.first.reason).to include('total')
+        end
+      end
+
+      # ------------------------------------------------------------------
+      # The AT-and-one-past the plan claims for the model-choice threshold. The review measured
+      # that flipping `<=` to `<` left the entire suite green.
+      describe 'the inline threshold, AT and one past' do
+        it 'inlines a file of EXACTLY inline_max_bytes and uploads one byte more' do
+          exact = 400
+          File.binwrite(File.join(@tmp, 'exact.png'), "\x89PNG#{'x' * (exact - 4)}")
+          File.binwrite(File.join(@tmp, 'over.png'), "\x89PNG#{'x' * (exact - 3)}")
+          policy = Policy.new(inline_max_bytes: exact, asset_max_bytes: 1_000_000)
+          capable = %i[asset_inline asset_upload]
+
+          at = resolver(policy: policy, capabilities: capable)
+               .call(%(<img src="#{local('exact.png')}">))
+          expect(at.models_used).to eq([:inline])
+          expect(at.degradations).to be_empty
+
+          past = resolver(policy: policy, capabilities: capable)
+                 .call(%(<img src="#{local('over.png')}">))
+          expect(past.models_used).to eq([:upload])
+        end
+      end
+
+      # ------------------------------------------------------------------
+      # The store refuses a type/usage mismatch and the resolver must carry that refusal rather
+      # than reaching past it. The review measured that removing the `usage:` argument entirely
+      # left the suite green.
+      describe 'a type that does not match the way the document uses it' do
+        it 'refuses a .css referenced by an <img>, naming the mismatch' do
+          result = resolver.call(%(<img src="#{local('app.css')}">))
+
+          expect(result).to be_refused
+          expect(result.refusals.first.reason).to include('not usable for the way')
+        end
+
+        it 'refuses a .png referenced by <link rel=stylesheet>' do
+          result = resolver.call(%(<link rel="stylesheet" href="#{local('logo.png')}">))
+
+          expect(result).to be_refused
+          expect(result.refusals.first.reason).to include('not usable for the way')
+        end
+
+        it 'refuses a .css referenced by <script src>, rather than inlining it as a program' do
+          result = resolver.call(%(<script src="#{local('app.css')}"></script>))
+
+          expect(result).to be_refused
+          expect(result.body).not_to include('color:red')
+        end
+      end
+
+      # ------------------------------------------------------------------
+      describe 'the refusal reason names what an operator configured' do
+        it 'announces the collapse rather than a mode nobody chose' do
+          # The first version returned early on the local reason and reported "asset_policy
+          # bundled" to an operator who had set `:external` — naming a mode they never
+          # configured and never mentioning the collapse, which is the one thing it exists to say.
+          result = resolver(policy: Policy.new(mode: :external, allowlist: []))
+                   .call(%(<img src="#{local('missing.png')}">))
+
+          reason = result.refusals.first.reason
+          expect(reason).to include('does not exist on disk')
+          expect(reason).to include('asset_allowlist is empty')
+          expect(reason).to include('External'.downcase)
+        end
+
+        it 'names the missing host when the mode permits the class' do
+          result = resolver(policy: Policy.new(mode: :external, allowlist: %w[other.example]),
+                            fetcher: StubFetcher.new)
+                   .call('<img src="https://cdn.example/a.png">')
+
+          expect(result.refusals.first.reason).to include('cdn.example')
+          expect(result.refusals.first.reason).to include('asset_allowlist')
+        end
+      end
+
       describe 'the result is data, not render types' do
         it 'refuses to name the render layer, so `spec/assets` needs none of it loaded' do
           # F-13b: this layer names neither the render layer nor the Liquid layer, and

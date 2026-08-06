@@ -1,10 +1,10 @@
 <%#
   T-33 — the asset policy, for an administrator (technical-spec.md §5.1, FR-64).
 
-  Redmine's own chrome only: `.box.tabular`, `p`, `em.info`, `.warning`. CLAUDE.md §4
-  forbids plugin-local design tokens in chrome, and this partial has none — Redmine
-  renders it inside its own settings `<form>`, so there is no form tag and no submit
-  button here either.
+  Redmine's own chrome only: `p`, `label`, `em.info`, `.warning`. CLAUDE.md §4 forbids
+  plugin-local design tokens in chrome, and this partial has none — Redmine renders it inside
+  its own settings `<form>` AND inside its own `<div class="box tabular settings">`, so there
+  is no form tag, no submit button and no box of our own here.
 
   --- THE ONE THING THIS PAGE MUST NOT DO IS LOOK LIKE IT WORKED WHEN IT DID NOT ---
 
@@ -35,7 +35,10 @@
   # dropped; the field still holds what they typed, so they can fix it.
   raw_allowlist = raw['asset_allowlist'] || raw[:asset_allowlist] || policy.allowlist.join("\n")
 %>
-<div class="box tabular">
+<%# NO WRAPPER. Redmine already renders this partial inside `<div class="box tabular settings">`
+    (`app/views/settings/plugin.html.erb`, identical on 5.1 through master), so a second box
+    draws a redundant bordered panel inset inside the first, with doubled padding on all four
+    sides. Redmine's own settings partials are bare `<p>` rows for exactly this reason. %>
   <p>
     <label for="settings_asset_policy"><%= l(:label_reporter_asset_policy) %></label>
     <%= select_tag('settings[asset_policy]',
@@ -69,7 +72,6 @@
                        size: 12, id: 'settings_asset_max_bytes') %>
     <em class="info"><%= l(:text_reporter_asset_max_bytes_info) %></em>
   </p>
-</div>
 
 <% if policy.collapsed? %>
   <div class="warning">

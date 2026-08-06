@@ -726,7 +726,21 @@ one where it is narrower.**
    `:external`. Extending it costs nothing: under `:bundled` a same-origin reference is rewritten
    to the file on disk, which is better than fetching it. `Policy#collapsed?` exists so the
    settings page can say the switch did nothing, rather than leaving an operator to believe it.
-3. **Structural inlining falls back to a `data:` URI when the bytes contain the element
+3. **A stylesheet's OWN references are resolved before it is embedded.** §5.1's table is about
+   references in the document; CSS carries its own (`url()`, `@import`), and embedding a
+   stylesheet verbatim hands every one of them to the engine as a live URL — which under
+   `:bundled` is the egress this section refuses and under `:external` is a complete allowlist
+   bypass. So CSS is resolved recursively, to a depth cap, and a refusal inside a stylesheet
+   fails the document closed naming the inner URL. **JavaScript deliberately is not**: a URL in a
+   program is a string rather than a subresource, a script can mint one at runtime, and only the
+   engine's own egress denial answers that — which is what INV-8's `--host-resolver-rules` and
+   conformance fixture `F-15-egress-denial` are for.
+4. **A structural rewrite is refused when it would change what the element means.** Replacing
+   `<link rel=stylesheet media=print href=…>` with a bare `<style>` block promotes a print-only
+   stylesheet to all media; `<script type=module src=…>` becomes a classic script. The rewrite is
+   allowed only for a closed safe attribute set, with `media` carried through, and anything else
+   keeps the element and takes a `data:` URI.
+5. **Structural inlining falls back to a `data:` URI when the bytes contain the element
    terminator.** "CSS, JS and SVG inlined into the single document body" is done as a `<style>` /
    `<script>` block — the form a 2011 WebKit certainly accepts — except where the file contains
    `</style` or `</script`, which would close the block early and have everything after it parsed

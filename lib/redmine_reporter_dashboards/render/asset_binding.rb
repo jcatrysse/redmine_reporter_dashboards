@@ -83,30 +83,61 @@ module RedmineReporterDashboards
         end
 
         def failure_for(resolution, correlation_id, engine)
-          urls = resolution.refused_urls
-          named = urls.first(MAX_NAMED_URLS)
-          remainder = urls.length - named.length
-
           Failure.new(
             code: :asset_unresolved,
-            message: message_for(named, remainder),
+            message: message_for(resolution),
             correlation_id: correlation_id,
             engine: engine,
             detail: resolution.refusals.map(&:to_h)
           )
         end
 
-        def message_for(named, remainder)
-          list = named.join(', ')
+        # THE CAUSE IS NOT ALWAYS THE POLICY, and the first version said it was.
+        #
+        # It emitted one fixed sentence — "cannot be resolved without fetching it over the
+        # network, which the current asset policy does not permit" — for every refusal. That is
+        # false for most of them, and for two it is actively misleading: a RELATIVE reference is
+        # refused before the policy is consulted at all, and an oversize or wrongly-typed asset
+        # is refused with the widest policy this plugin permits. An administrator told "the asset
+        # policy does not permit it" would go and enable egress, and the report would still fail.
+        # A remedy that provably does nothing is worse than no remedy (INV-4).
+        #
+        # So the causal sentence is used only when every refusal really is a policy one. Otherwise
+        # the message names the URLs and NO cause, and sends the reader to the diagnostics view.
+        #
+        # It does NOT relay `Resolution::Refusal#reason` — and the first attempt at this fix did,
+        # which the suite caught. Those reasons are correct and are for an operator: one of them
+        # is `Fetcher`'s `:transport` reason, which carries an exception class and message
+        # verbatim. `Failure#message` is user-facing and "must never carry a raw exception", so
+        # relaying them traded a false cause for an information leak. The reasons live in
+        # `detail`, which is where FR-58's diagnostics view reads from.
+        POLICY_CLASSIFICATIONS = %i[same_origin third_party local_path].freeze
+
+        def message_for(resolution)
+          urls = resolution.refused_urls
+          named = urls.first(MAX_NAMED_URLS)
+          remainder = urls.length - named.length
           tail = remainder.positive? ? " (and #{remainder} more)" : ''
-          if named.length == 1
-            "This report references an asset that cannot be resolved without fetching it " \
-              "over the network, which the current asset policy does not permit: #{list}."
-          else
-            "This report references #{named.length} assets that cannot be resolved without " \
-              "fetching them over the network, which the current asset policy does not " \
-              "permit: #{list}#{tail}."
+          subject = urls.length == 1 ? 'an asset' : "#{urls.length} assets"
+          list = "#{named.join(', ')}#{tail}"
+
+          if resolution.refusals.all? { |refusal| policy_refusal?(refusal) }
+            return "This report references #{subject} that cannot be resolved without fetching " \
+                   "them over the network, which the current asset policy does not permit: #{list}."
           end
+
+          "This report references #{subject} that could not be resolved: #{list}. The reason for " \
+            'each is in the render diagnostics for this correlation id.'
+        end
+
+        # A refusal the asset policy is genuinely responsible for. Keyed on the reason's own
+        # words rather than a code, because `Resolution::Refusal` carries prose — and the two
+        # phrases below are the ones `Assets::Resolver#policy_reason` produces, which is the only
+        # place a policy refusal is worded.
+        def policy_refusal?(refusal)
+          return false unless POLICY_CLASSIFICATIONS.include?(refusal.classification)
+
+          refusal.reason.to_s.include?('asset_policy') || refusal.reason.to_s.include?('allowlist')
         end
       end
     end

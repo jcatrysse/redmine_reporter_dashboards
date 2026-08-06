@@ -82,6 +82,19 @@ module RedmineReporterDashboards
           expect(file_for('/plugin_assets/rrd/%252e%252e/outside/secret.png')).to be_nil
         end
 
+        # DECODE-ONCE ASSERTED WHERE IT IS OBSERVABLE. The example above proves only that the
+        # traversal fails, which it also would under two passes; and `a%20b.png` is a fixed point
+        # after one pass, so it proves only "at least once". A file whose NAME contains a percent
+        # escape is the discriminator: one pass resolves it, two do not.
+        it 'decodes EXACTLY once, proven by a filename that is itself an escape' do
+          File.binwrite(File.join(root, '%2e%2e.png'), 'literally named %2e%2e')
+
+          # One pass turns `%252e%252e.png` into `%2e%2e.png`, which is the file.
+          expect(file_for('/plugin_assets/rrd/%252e%252e.png').bytes).to eq('literally named %2e%2e')
+          # And `%2e%2e.png` decodes to `...png` after one pass, which is not.
+          expect(file_for('/plugin_assets/rrd/%2e%2e.png')).to be_nil
+        end
+
         it 'refuses a SYMLINK inside the root that points outside it' do
           # No `..` anywhere in this path. This is the case a string check cannot see, and
           # the reason containment is `File.realpath` and not `start_with?`.
@@ -193,6 +206,35 @@ module RedmineReporterDashboards
           mapped.file_for('/attachments/download/7/a%20b.png')
 
           expect(seen).to eq(['/attachments/download/7/a b.png'])
+        end
+      end
+
+      # ------------------------------------------------------------------
+      # `File.binread` on a 4 GB file allocates 4 GB before anybody can compare it with a cap.
+      # The result is `NoMemoryError`, which the render layer deliberately does not rescue, so it
+      # takes the process rather than producing a named refusal. The fetcher already applies its
+      # cap while reading; this is the same rule for the local half.
+      describe 'the size cap, AT the limit and one past it' do
+        it 'reads a file AT max_bytes and refuses one byte past it' do
+          File.binwrite(File.join(root, 'ten.png'), 'a' * 10)
+
+          expect(file_for('/plugin_assets/rrd/ten.png', max_bytes: 10).size).to eq(10)
+          expect(file_for('/plugin_assets/rrd/ten.png', max_bytes: 9)).to be_nil
+          expect(store.reason).to eq(:too_large)
+        end
+
+        it 'checks the size BEFORE reading, not after' do
+          File.binwrite(File.join(root, 'big.png'), 'a' * 100)
+          allow(File).to receive(:binread).and_call_original
+
+          expect(file_for('/plugin_assets/rrd/big.png', max_bytes: 10)).to be_nil
+          expect(File).not_to have_received(:binread)
+        end
+
+        it 'reads without a cap when none is given, because the resolver is not the only caller' do
+          File.binwrite(File.join(root, 'uncapped.png'), 'a' * 100)
+
+          expect(file_for('/plugin_assets/rrd/uncapped.png').size).to eq(100)
         end
       end
 

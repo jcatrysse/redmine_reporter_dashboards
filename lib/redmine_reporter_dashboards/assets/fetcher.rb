@@ -75,8 +75,14 @@ module RedmineReporterDashboards
         other: '*/*'
       }.freeze
 
+      # RFC 3986's path-and-query character set. Anything outside it — a raw space, a control
+      # character, a byte above 0x7E — is refused rather than sent. A CR or LF in particular is a
+      # request-splitting primitive, and `Net::HTTP` answers it with a bare `ArgumentError`.
+      VALID_PATH = %r{\A[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*\z}.freeze
+
       REASONS = {
         scheme: 'is not https — §5.1 permits no other scheme for a fetch',
+        path: 'has a path containing characters a request may not carry (RFC 3986)',
         not_allowlisted: 'host is not in asset_allowlist',
         policy: 'asset_policy does not permit fetching this reference',
         dns: 'did not resolve',
@@ -136,15 +142,32 @@ module RedmineReporterDashboards
 
       def perform(reference, address)
         deadline = monotonic + Policy::TOTAL_TIMEOUT_S
+        path = request_path(reference)
+        # A CONTROL CHARACTER IN THE PATH is refused here rather than left to Net::HTTP, which
+        # raises `ArgumentError: path contains CR/LF` — an untyped exception escaping a method
+        # documented to answer a `Refusal`. `Reference` already classifies such a URL
+        # `:unresolvable`, so this is the second of two closed doors; a fetcher must not depend
+        # on its caller having checked.
+        return refuse(:path, reference) unless VALID_PATH.match?(path)
+
         response = @http.get(
-          host: reference.host, port: reference.port || 443, path: request_path(reference),
+          host: reference.host, port: reference.port || 443, path: path,
           address: address, headers: headers_for(reference),
           connect_timeout: Policy::CONNECT_TIMEOUT_S,
           read_timeout: remaining(deadline),
+          # THE DEADLINE, not only a per-read timeout. §5.1 says "5 s total", and a per-read
+          # timeout bounds each read rather than the exchange: a server that drips one byte every
+          # four seconds resets the clock on every chunk and holds the connection for as long as
+          # `asset_max_bytes` allows — measured at 16 s against a 5 s documented cap before this
+          # was threaded through.
+          deadline: deadline,
           max_bytes: policy.asset_max_bytes
         )
 
         return refuse(:timeout, reference) if response.timed_out
+        # And re-checked after the call, so a transport that ignores the deadline cannot spend
+        # more than the budget and still be believed.
+        return refuse(:timeout, reference) if monotonic > deadline
         return refuse(:too_large, reference) if response.too_large
         return refuse(:redirect, reference, response.status) if redirect?(response.status)
         return refuse(:status, reference, response.status) unless response.status == 200
@@ -218,7 +241,7 @@ module RedmineReporterDashboards
       # `ipaddr=`, `use_ssl`, `verify_mode`, the two timeouts and the streamed size cap.
       class NetHttpTransport
         def get(host:, port:, path:, address:, headers:, connect_timeout:, read_timeout:,
-                max_bytes:)
+                max_bytes:, deadline: nil)
           http = Net::HTTP.new(host, port)
           # The check and the connection see the same address. See the class comment.
           http.ipaddr = address
@@ -232,12 +255,18 @@ module RedmineReporterDashboards
           request = Net::HTTP::Get.new(path)
           headers.each { |name, value| request[name] = value }
 
-          collect(http, request, max_bytes)
+          collect(http, request, max_bytes, deadline)
         rescue Net::OpenTimeout, Net::ReadTimeout
           Transport::Response.new(status: 0, content_type: nil, body: '', timed_out: true,
                                   too_large: false)
         rescue OpenSSL::SSL::SSLError, SocketError, SystemCallError, Net::HTTPBadResponse,
                Net::ProtocolError, IOError, EOFError => e
+          raise Transport::Error, "#{e.class}: #{e.message}"
+        rescue ArgumentError, URI::Error => e
+          # `Net::HTTP` raises a bare `ArgumentError` for a path it will not send, and `URI`
+          # raises its own class. Translated rather than allowed out: everything this method can
+          # fail with has to arrive at the caller as a `Transport::Error`, or the fetcher's
+          # "never raises for anything the network can do to you" contract is only mostly true.
           raise Transport::Error, "#{e.class}: #{e.message}"
         end
 
@@ -246,11 +275,12 @@ module RedmineReporterDashboards
         # STREAMED, and aborted past the cap. `response.body` on a 4 GB answer is a
         # memory-exhaustion primitive against a renderer that has a wall-clock budget and
         # no memory budget at all — the cap has to be applied while reading, not after.
-        def collect(http, request, max_bytes)
+        def collect(http, request, max_bytes, deadline)
           status = nil
           content_type = nil
           buffer = String.new(capacity: 16_384, encoding: Encoding::BINARY)
           too_large = false
+          timed_out = false
 
           http.start do |session|
             session.request(request) do |response|
@@ -270,13 +300,21 @@ module RedmineReporterDashboards
                   too_large = true
                   break
                 end
+                # THE TOTAL BUDGET, checked per chunk. A per-read timeout is reset by every
+                # chunk, so a server that drips bytes holds the connection for as long as the
+                # size cap allows — effectively unbounded. This is the only place that can stop
+                # it, because it is the only place that sees each chunk arrive.
+                if deadline && Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+                  timed_out = true
+                  break
+                end
               end
             end
           end
 
           Transport::Response.new(status: status.to_i, content_type: content_type,
-                                  body: too_large ? '' : buffer, timed_out: false,
-                                  too_large: too_large)
+                                  body: too_large || timed_out ? '' : buffer,
+                                  timed_out: timed_out, too_large: too_large)
         end
       end
     end

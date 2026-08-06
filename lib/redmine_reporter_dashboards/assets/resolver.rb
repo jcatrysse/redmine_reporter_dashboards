@@ -61,10 +61,35 @@ module RedmineReporterDashboards
         asset_srcset_collapsed:
           'srcset alternatives dropped — a PDF page has one pixel density',
         asset_structural_fallback:
-          'inlined as a data: URI rather than into the body: the bytes contain the ' \
-          'element terminator, and inlining them structurally would close the block early',
+          'inlined as a data: URI rather than into the body: inlining it structurally ' \
+          'would either close the block early or change what the element means',
+        asset_nested_depth:
+          'a stylesheet imported another one past the nesting cap; the deepest import ' \
+          'was not resolved',
+        asset_document_cap:
+          'the document referenced more assets than max_references, and the rest were ' \
+          'not resolved',
         asset_none: 'the document referenced nothing that had to be resolved'
       }.freeze
+
+      # DOCUMENT-LEVEL BOUNDS, and they are constants rather than settings for the same reason
+      # the fetcher's timeouts are: each is a safety property, and a setting is a thing an
+      # operator can be talked into raising. §5.1 caps a single asset (`asset_max_bytes`) and
+      # says nothing about a document; a template with 5 000 `<img>` tags therefore had no bound
+      # at all, which is the "no unbounded output" half of G6.
+      #
+      # `MAX_REFERENCES` is generous — a 2 000-row report with a chart per section is nowhere
+      # near it — and past it the remaining references are REFUSED rather than passed through, so
+      # the overflow cannot become egress.
+      MAX_REFERENCES = 500
+
+      # The aggregate embedded size. Twenty 7 MiB images each pass `asset_max_bytes` and together
+      # make a 140 MiB document that no engine will draw and no mail server will carry.
+      MAX_TOTAL_BYTES = 32 * 1024 * 1024
+
+      # `@import` chains. Three is more than any real stylesheet and bounds the recursion so a
+      # circular import is a degradation rather than a stack overflow.
+      MAX_CSS_DEPTH = 3
 
       attr_reader :policy, :engine_capabilities
 
@@ -93,10 +118,23 @@ module RedmineReporterDashboards
         # The probe is what `structural_text` compares an asset's text against. Held for the
         # duration of one walk rather than passed through five frames.
         @document_encoding_probe = document
-        references = DocumentScanner.scan(document, origin: @origin)
+        references = suppress_nested_element_spans(DocumentScanner.scan(document, origin: @origin))
         state = State.new
 
-        references.each { |reference| resolve_one(reference, state) }
+        references.each_with_index do |reference, index|
+          if index >= MAX_REFERENCES
+            state.refuse(reference,
+                         "is past the #{MAX_REFERENCES}-reference cap for one document and was " \
+                         'not resolved')
+            next
+          end
+
+          resolve_one(reference, state)
+        end
+        if references.length > MAX_REFERENCES
+          state.degrade(:asset_document_cap,
+                        data: { 'references' => references.length, 'cap' => MAX_REFERENCES })
+        end
 
         Resolution.new(
           body: splice(document, state.replacements),
@@ -109,6 +147,42 @@ module RedmineReporterDashboards
       end
 
       private
+
+      # A STRUCTURAL REWRITE REPLACES A WHOLE ELEMENT, so it cannot be used when another
+      # reference lives inside that element — and one legitimately can:
+      #
+      #     <link rel="stylesheet" href="/a.css" style="background:url(/logo.png)">
+      #
+      # Two references, disjoint VALUE spans (the scanner keeps its promise), but the `url()`
+      # span sits inside the `<link>`'s element span. The first version noticed that only at
+      # splice time and RAISED `ArgumentError` out of a method documented never to raise, from a
+      # perfectly ordinary document. Found by the review's own repro, not by reading.
+      #
+      # Suppressing the element span downgrades that one reference to an attribute rewrite — a
+      # `data:` URI — and both then splice cleanly. `assert_disjoint!` stays as a last-resort
+      # assertion about this file's own arithmetic, which is what it should always have been.
+      def suppress_nested_element_spans(references)
+        spans = references.map(&:span)
+
+        references.map do |reference|
+          element = reference.element_span
+          next reference if element.nil? || element.first.nil? || element.last.nil?
+
+          from = element.first
+          to = element.first + element.last
+          nested = spans.any? do |start, length|
+            next false if start == reference.span.first && length == reference.span.last
+
+            start >= from && start + length <= to
+          end
+          next reference unless nested
+
+          Reference.new(raw: reference.raw, usage: reference.usage, span: reference.span,
+                        origin: reference.origin, element_span: nil,
+                        candidates: reference.candidates,
+                        element_attributes: reference.element_attributes)
+        end
+      end
 
       # NAME THE DOCUMENT'S ENCODING ONCE, at the entry point. HANDOVER §1: "anything crossing
       # into this process from a file or a pipe gets its encoding named" — and a report body has
@@ -132,7 +206,7 @@ module RedmineReporterDashboards
       # into the next, and a resolver is exactly the kind of object somebody will reuse.
       class State
         attr_reader :replacements, :assets, :degradations, :refusals, :models_used, :counts,
-                    :encoded
+                    :encoded, :embedded_bytes
 
         def initialize
           @replacements = []
@@ -142,6 +216,11 @@ module RedmineReporterDashboards
           @models_used = []
           @counts = { passthrough: 0, inlined: 0, uploaded: 0, fetched: 0, refused: 0 }
           @encoded = {}
+          @embedded_bytes = 0
+        end
+
+        def embed_bytes(size)
+          @embedded_bytes += size
         end
 
         def replace(span, text)
@@ -183,7 +262,69 @@ module RedmineReporterDashboards
         payload = obtain(reference, state)
         return if payload.nil?
 
+        # A STYLESHEET IS A DOCUMENT, and this is the hole the review found. CSS carries its own
+        # subresources — `url()` and `@import` — and embedding a stylesheet verbatim hands every
+        # one of them to the engine as a live URL. Under `:bundled` that is egress the policy
+        # exists to refuse; under `:external` it lets one allowlisted host choose arbitrary
+        # further egress, which is a complete allowlist bypass. So CSS is resolved BEFORE it is
+        # embedded, by the same rules, to a bounded depth.
+        #
+        # JavaScript is deliberately NOT treated this way, and the difference is real rather
+        # than convenient: a URL in a program is a string, not a subresource, and a script can
+        # always mint one at runtime. No scanner can close that; only the engine's own egress
+        # denial can, which is why INV-8 keeps `--host-resolver-rules` on the browser and why
+        # conformance fixture `F-15-egress-denial` exists. Rewriting URLs inside JS would
+        # corrupt programs while closing nothing.
+        if reference.usage == :stylesheet
+          payload = resolve_stylesheet(payload, reference, state, 1)
+          return if payload.nil?
+        end
+
         embed(reference, payload, state)
+      end
+
+      # `[bytes, content_type]` with every reference inside the CSS resolved, or nil if
+      # something in it was refused — a refusal inside a stylesheet fails the whole document
+      # closed, naming the inner URL, exactly as one in the document body does.
+      def resolve_stylesheet(payload, reference, state, depth)
+        bytes, content_type = payload
+        text = bytes.dup.force_encoding(Encoding::UTF_8)
+        return payload unless text.valid_encoding?
+
+        if depth > MAX_CSS_DEPTH
+          state.degrade(:asset_nested_depth, data: { 'url' => reference.display, 'depth' => depth })
+          return payload
+        end
+
+        inner = DocumentScanner.scan_css_text(text, origin: @origin)
+        return payload if inner.empty?
+
+        replacements = []
+        inner.each do |nested|
+          next state.count(:passthrough) if nested.passthrough?
+
+          nested_payload = obtain(nested, state)
+          return nil if nested_payload.nil?
+
+          if nested.usage == :stylesheet
+            nested_payload = resolve_stylesheet(nested_payload, nested, state, depth + 1)
+            return nil if nested_payload.nil?
+          end
+
+          nested_bytes, nested_type = nested_payload
+          if nested_bytes.bytesize > policy.asset_max_bytes
+            state.refuse(nested, "is #{nested_bytes.bytesize} bytes, above the " \
+                                 "#{policy.asset_max_bytes}-byte asset_max_bytes cap")
+            return nil
+          end
+
+          state.count(:inlined)
+          state.used(INLINE)
+          replacements << [nested.span.first, nested.span.last,
+                           data_uri(nested_bytes, nested_type, state)]
+        end
+
+        [splice(text, replacements), content_type]
       end
 
       # `[bytes, content_type]` or nil, having already recorded the refusal.
@@ -195,7 +336,8 @@ module RedmineReporterDashboards
                        'reference has no base and an unsupported scheme has no handler')
           nil
         when :local_path, :same_origin
-          file = @local_store.file_for(reference.path, usage: reference.usage)
+          file = @local_store.file_for(reference.path, usage: reference.usage,
+                                       max_bytes: policy.asset_max_bytes)
           next_step = file.nil?
           # THE REASON IS READ IMMEDIATELY, and passed along rather than asked for later.
           # `LocalStore#reason_text` describes its LAST lookup, so a caller that asks for
@@ -239,29 +381,38 @@ module RedmineReporterDashboards
       # Why THIS reference was refused, in the words an operator can act on. The three
       # cases read very differently and collapsing them into "asset unresolved" is what
       # makes a diagnostics page useless.
+      # COMPOSED, not a chain of early returns. The first version returned a fixed sentence as
+      # soon as a local reason existed, which swallowed the two things an operator most needs to
+      # be told: that the allowlist is empty and the mode therefore collapsed, and which host is
+      # missing from it. A refusal that names a mode the operator never configured — "asset_policy
+      # bundled" when they set `:external` — is worse than no reason at all (INV-4).
       def refusal_reason(reference, local_reason = nil)
-        # THE LOCAL REASON LEADS, when there is one. A `.css` referenced by an `<img>`
-        # resolves on disk perfectly well; saying "does not resolve to a file on disk"
-        # first would send an operator looking for a missing file that is right there.
+        parts = []
+        # THE LOCAL REASON LEADS, when there is one. A `.css` referenced by an `<img>` resolves on
+        # disk perfectly well; saying "does not resolve to a file on disk" first would send an
+        # operator looking for a missing file that is right there.
         if local_reason
-          return "#{local_reason}, and asset_policy #{policy.effective_mode} does not fetch " \
-                 'as a second attempt'
-        end
-        if policy.bundled? && reference.fetch_classification == :same_origin
-          return 'is a URL on this install that does not resolve to a file on disk, and ' \
-                 'asset_policy is bundled, which never fetches'
-        end
-        if policy.collapsed?
-          return "would need a fetch, and asset_allowlist is empty — asset_policy " \
-                 "#{policy.mode} therefore behaves as bundled (§5.1: misconfiguration " \
-                 'fails closed)'
-        end
-        if policy.may_fetch?(reference.fetch_classification)
-          return "host is not in asset_allowlist (#{reference.host})"
+          parts << local_reason
+        elsif policy.bundled? && reference.fetch_classification == :same_origin
+          parts << 'is a URL on this install that does not resolve to a file on disk'
         end
 
-        "asset_policy #{policy.effective_mode} does not fetch #{reference.fetch_classification} " \
-          'references'
+        parts << policy_reason(reference)
+        parts.join(', and ')
+      end
+
+      def policy_reason(reference)
+        if policy.collapsed?
+          return 'asset_allowlist is empty, so asset_policy ' \
+                 "#{policy.mode} behaves as bundled and nothing is fetched " \
+                 '(§5.1: misconfiguration fails closed)'
+        end
+        if policy.may_fetch?(reference.fetch_classification)
+          return "the host is not in asset_allowlist (#{reference.host})"
+        end
+
+        "asset_policy #{policy.effective_mode} does not fetch " \
+          "#{reference.fetch_classification} references"
       end
 
       # THE MODEL CHOICE. Inline first, because it is the most restrictive: one document,
@@ -276,6 +427,17 @@ module RedmineReporterDashboards
                        'asset_max_bytes cap')
           return
         end
+
+        # THE AGGREGATE, not just the individual. Twenty assets that each pass
+        # `asset_max_bytes` still make a document no engine will draw — §5.1 caps one asset and
+        # says nothing about a document, which is the other half of G6's "no unbounded output".
+        if state.embedded_bytes + size > MAX_TOTAL_BYTES
+          state.refuse(reference,
+                       "would take this document past the #{MAX_TOTAL_BYTES}-byte total " \
+                       "embedded-asset budget (#{state.embedded_bytes} bytes already embedded)")
+          return
+        end
+        state.embed_bytes(size)
 
         if inline? && size <= policy.inline_max_bytes
           inline!(reference, bytes, content_type, state)
@@ -308,10 +470,29 @@ module RedmineReporterDashboards
         end
       end
 
-      # nil when there is no structural form, or when the bytes make one unsafe.
+      # WHICH ATTRIBUTES A STRUCTURAL REWRITE MAY DISCARD. Replacing an element with a `<style>`
+      # or `<script>` block throws away everything the element carried, and some of it changes
+      # what the element MEANS:
+      #
+      #   <link rel=stylesheet media=print href=…>   a print-only sheet becomes all-media
+      #   <link rel=stylesheet disabled href=…>      a disabled sheet starts applying
+      #   <script type=module src=…>                 a module becomes a classic script
+      #   <script defer src=…>                       execution order changes
+      #
+      # Rather than replicate HTML's semantics for each, the rewrite is allowed only for
+      # elements carrying nothing but these — and `media` is carried THROUGH onto the `<style>`
+      # tag, because a print stylesheet is exactly what a report has. Anything else falls back to
+      # a `data:` URI, which keeps the element and every attribute on it.
+      STRUCTURAL_SAFE_ATTRIBUTES = {
+        stylesheet: %w[href rel media charset].freeze,
+        script: %w[src charset].freeze
+      }.freeze
+
+      # nil when there is no structural form, or when the bytes or the element make one unsafe.
       def structural_text(reference, bytes, content_type, state)
         span = reference.element_span
         return nil if span.nil? || span.first.nil? || span.last.nil?
+        return fallback(reference, state) unless structural_element?(reference)
 
         text = bytes.dup.force_encoding(Encoding::UTF_8)
         return nil unless text.valid_encoding?
@@ -327,12 +508,36 @@ module RedmineReporterDashboards
         when :stylesheet
           return fallback(reference, state) if terminator?(text, 'style')
 
-          "<style>\n#{text}\n</style>"
+          "<style#{media_attribute(reference)}>\n#{text}\n</style>"
         when :script
           return fallback(reference, state) if terminator?(text, 'script') || text.include?('<!--')
 
           "<script>\n#{text}\n</script>"
         end
+      end
+
+      # Every attribute the element carried has to be in the safe set, or the rewrite would
+      # silently change what it means. Compared as a SUBSET rather than by looking for known-bad
+      # names: an attribute nobody thought about is then a fallback rather than a surprise.
+      def structural_element?(reference)
+        allowed = STRUCTURAL_SAFE_ATTRIBUTES[reference.usage]
+        return false if allowed.nil?
+
+        (reference.element_attributes.keys - allowed).empty?
+      end
+
+      # `media` is the one attribute carried through, because a print-only stylesheet is exactly
+      # what a report has and promoting it to all-media is a visible layout change. The value is
+      # escaped: it is author-controlled and it is going into attribute position.
+      def media_attribute(reference)
+        media = reference.element_attributes['media']
+        return '' if media.nil? || media.to_s.strip.empty?
+
+        %( media="#{escape_attribute(media)}")
+      end
+
+      def escape_attribute(value)
+        value.to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;').gsub('>', '&gt;')
       end
 
       def fallback(reference, state)
@@ -391,17 +596,24 @@ module RedmineReporterDashboards
         out
       end
 
-      # Two replacements over the same bytes would make the output depend on their order,
-      # which is a defect in this file rather than in the document. Loud, because a silent
-      # one produces plausible output.
+      # Two replacements over the same bytes would make the output depend on their order, which
+      # would be a defect in THIS file's arithmetic. Loud, because a silent one produces
+      # plausible output.
+      #
+      # It must be unreachable from document content, and the first version was not: a
+      # `<link rel=stylesheet href=… style="background:url(…)">` produced an element-span
+      # replacement containing a value-span one, and this raised `ArgumentError` out of a method
+      # documented never to raise. `suppress_nested_element_spans` closes that case at the top of
+      # `call`; the message no longer blames `DocumentScanner`, whose value spans are disjoint in
+      # every case measured — pointing a maintainer at the wrong file is its own defect.
       def assert_disjoint!(ordered)
         ordered.each_cons(2) do |(later_start, _, _), (earlier_start, earlier_length, _)|
           next if earlier_start + earlier_length <= later_start
 
           raise ArgumentError,
-                "overlapping asset replacements at #{earlier_start} and #{later_start}: " \
-                'the scanner produced two spans over the same bytes, which is a bug in ' \
-                'DocumentScanner rather than in the document.'
+                "overlapping asset replacements at #{earlier_start} and #{later_start}: two " \
+                'replacements cover the same bytes, so the output would depend on their order. ' \
+                'This is a bug in Resolver — see suppress_nested_element_spans.'
         end
       end
     end

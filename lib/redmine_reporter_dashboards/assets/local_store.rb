@@ -49,6 +49,7 @@ module RedmineReporterDashboards
         unknown_type: 'has an extension this plugin will not type, so no data: URI can name it',
         wrong_type_for_usage: 'is on disk, but its type is not usable for the way the ' \
                               'document references it',
+        too_large: 'is larger than asset_max_bytes',
         no_root: 'matches no configured asset root'
       }.freeze
 
@@ -69,7 +70,13 @@ module RedmineReporterDashboards
       # a `<link rel=stylesheet href="/plugin_assets/…/logo.png">` is either a mistake or
       # a content-type confusion, and inlining it would make the engine draw nothing and
       # say nothing.
-      def file_for(path, usage: nil)
+      # `max_bytes` IS CHECKED BEFORE THE READ, and that is the point of it being here rather
+       # than only in the resolver. `File.binread` on a 4 GB file allocates 4 GB before anybody
+      # can compare it with a cap: the result is a `NoMemoryError`, which is deliberately
+      # un-rescued in the render layer (`renderer.rb`) and therefore takes the process with it
+      # instead of producing a named refusal. The fetcher already applies its cap while reading;
+      # this is the same rule for the local half.
+      def file_for(path, usage: nil, max_bytes: nil)
         @reason = nil
         decoded = decode(path)
         return refuse(:not_under_root) if decoded.nil?
@@ -88,6 +95,7 @@ module RedmineReporterDashboards
         # which is fine — the mismatch is the DOCUMENT's, not the file's.
         return refuse(:wrong_type_for_usage) if usage && !ContentTypes.acceptable?(content_type,
                                                                                    usage)
+        return refuse(:too_large) if max_bytes && File.size(real) > max_bytes
 
         bytes = File.binread(real)
         LocalFile.new(path: real, bytes: bytes, content_type: content_type, size: bytes.bytesize)

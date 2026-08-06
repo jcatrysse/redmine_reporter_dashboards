@@ -358,6 +358,18 @@ A listed host does not authorise its subdomains.
 Values outside the supported range are not stored: they are replaced by the default, written to
 the log, and listed on the settings page under *Some saved values could not be used*.
 
+### A stylesheet's own references count too
+
+A CSS file can point at images, fonts and further stylesheets. Those are resolved by the same rules
+**before** the stylesheet is embedded, so a Bundled install cannot be talked into fetching something
+by putting the URL one level down. A reference inside a stylesheet that the policy refuses fails the
+report and names that inner URL, not the stylesheet.
+
+JavaScript is different, and the difference is deliberate: a script can ask for anything at all
+while it runs, and no amount of reading it beforehand changes that. The answer there is not to
+inspect the script but to deny the rendering engine network access altogether — which is what
+happens in every mode, including the two that fetch.
+
 ### Charts and fonts are never affected
 
 Chart.js and the fonts this plugin ships are always embedded, whatever the asset policy says.

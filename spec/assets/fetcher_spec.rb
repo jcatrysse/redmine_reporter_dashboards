@@ -339,14 +339,217 @@ module RedmineReporterDashboards
         end
       end
 
+      # ------------------------------------------------------------------
+      # `NetHttpTransport` HAD NO TEST, and it is where every security-bearing line lives:
+      # `ipaddr=` (the rebinding fix), `use_ssl`, the two timeouts, and the streamed size cap.
+      # Removing any of them was invisible to the suite. Driven here against a `Net::HTTP`
+      # instance double, so no socket is opened and nothing depends on the network.
       describe 'the production transport' do
-        it 'exists and answers the port\'s one method' do
-          # Not exercised against a real socket here — that would be a test of the network.
-          # What is pinned is that the class the fetcher defaults to implements the port,
-          # so a rename cannot leave the default broken until the first real fetch.
+        # A `Net::HTTP` stand-in that records the setters and replays a canned response through
+        # the real streaming interface, which is what `collect` actually drives.
+        class FakeHttp
+          attr_reader :assigned
+          attr_accessor :ipaddr, :use_ssl, :verify_mode, :open_timeout, :read_timeout,
+                        :write_timeout, :max_retries
+
+          def initialize(chunks:, status: '200', content_type: 'image/png', content_length: nil)
+            @chunks = chunks
+            @status = status
+            @content_type = content_type
+            @content_length = content_length
+            @assigned = {}
+          end
+
+          # Ruby's `Net::HTTP` exposes these as writers; recording them is the point.
+          %i[ipaddr use_ssl verify_mode open_timeout read_timeout write_timeout max_retries]
+            .each do |name|
+            define_method(:"#{name}=") { |value| @assigned[name] = value }
+          end
+
+          def respond_to?(name, include_all = false)
+            name == :write_timeout= || super
+          end
+
+          def start
+            yield self
+          end
+
+          def request(_request)
+            yield FakeResponse.new(@status, @content_type, @content_length, @chunks)
+          end
+        end
+
+        class FakeResponse
+          def initialize(status, content_type, content_length, chunks)
+            @status = status
+            @headers = { 'content-type' => content_type }
+            @headers['content-length'] = content_length.to_s if content_length
+            @chunks = chunks
+          end
+
+          def code
+            @status
+          end
+
+          def [](name)
+            @headers[name]
+          end
+
+          def read_body(&block)
+            @chunks.each(&block)
+          end
+        end
+
+        def transport_get(fake, max_bytes: 1_000, deadline: nil)
+          allow(Net::HTTP).to receive(:new).and_return(fake)
+          Fetcher::NetHttpTransport.new.get(
+            host: 'cdn.example', port: 443, path: '/a.png', address: '93.184.216.34',
+            headers: { 'User-Agent' => 'x' }, connect_timeout: 2, read_timeout: 5,
+            max_bytes: max_bytes, deadline: deadline
+          )
+        end
+
+        it 'implements the port' do
           expect(Fetcher::NetHttpTransport.new).to respond_to(:get)
           expect(Fetcher::NetHttpTransport.instance_method(:get).parameters.map(&:last))
-            .to eq(%i[host port path address headers connect_timeout read_timeout max_bytes])
+            .to eq(%i[host port path address headers connect_timeout read_timeout max_bytes
+                      deadline])
+        end
+
+        it 'CONNECTS BY ADDRESS while keeping the host, which is the whole rebinding fix' do
+          fake = FakeHttp.new(chunks: ['PNG'])
+          transport_get(fake)
+
+          # `ipaddr=` fixes the socket's destination; `Net::HTTP.new(host, port)` keeps the
+          # hostname for SNI and the `Host` header. Resolve-check-then-connect-by-name would
+          # let the name resolve differently the second time, which IS the attack.
+          expect(fake.assigned[:ipaddr]).to eq('93.184.216.34')
+          expect(Net::HTTP).to have_received(:new).with('cdn.example', 443)
+        end
+
+        it 'turns TLS on and verifies the peer' do
+          fake = FakeHttp.new(chunks: ['PNG'])
+          transport_get(fake)
+
+          expect(fake.assigned[:use_ssl]).to be(true)
+          expect(fake.assigned[:verify_mode]).to eq(OpenSSL::SSL::VERIFY_PEER)
+        end
+
+        it 'carries both timeouts and disables retries' do
+          fake = FakeHttp.new(chunks: ['PNG'])
+          transport_get(fake)
+
+          expect(fake.assigned[:open_timeout]).to eq(2)
+          expect(fake.assigned[:read_timeout]).to eq(5)
+          expect(fake.assigned[:max_retries]).to eq(0)
+        end
+
+        it 'aborts the STREAM one byte past the cap, rather than after buffering it all' do
+          fake = FakeHttp.new(chunks: ['a' * 6, 'b' * 6])
+          response = transport_get(fake, max_bytes: 10)
+
+          expect(response.too_large).to be(true)
+          expect(response.body).to eq('')
+        end
+
+        it 'accepts a body exactly AT the cap' do
+          response = transport_get(FakeHttp.new(chunks: ['a' * 10]), max_bytes: 10)
+
+          expect(response.too_large).to be(false)
+          expect(response.body.bytesize).to eq(10)
+        end
+
+        it 'refuses on a Content-Length above the cap without reading the body' do
+          fake = FakeHttp.new(chunks: ['a'], content_length: 5_000)
+          response = transport_get(fake, max_bytes: 10)
+
+          expect(response.too_large).to be(true)
+        end
+
+        # A per-read timeout is RESET by every chunk, so a server that drips bytes holds the
+        # connection for as long as the size cap allows. Measured at 16 s against a 5 s cap
+        # before the deadline was threaded into the read loop.
+        it 'stops at the TOTAL deadline even while chunks keep arriving' do
+          fake = FakeHttp.new(chunks: (1..50).map { 'a' })
+          # A deadline already in the past: the first chunk trips it.
+          response = transport_get(fake, deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) - 1)
+
+          expect(response.timed_out).to be(true)
+          expect(response.body).to eq('')
+        end
+
+        it 'does not time out when the deadline is comfortably ahead' do
+          fake = FakeHttp.new(chunks: ['PNG'])
+          response = transport_get(fake, deadline: Process.clock_gettime(Process::CLOCK_MONOTONIC) + 60)
+
+          expect(response.timed_out).to be(false)
+          expect(response.body).to eq('PNG')
+        end
+
+        it 'translates a path Net::HTTP will not send into a Transport::Error' do
+          allow(Net::HTTP).to receive(:new).and_raise(ArgumentError, "path contains CR/LF")
+
+          expect do
+            Fetcher::NetHttpTransport.new.get(
+              host: 'cdn.example', port: 443, path: "/a\r\nX: 1", address: '93.184.216.34',
+              headers: {}, connect_timeout: 2, read_timeout: 5, max_bytes: 10, deadline: nil
+            )
+          end.to raise_error(Fetcher::Transport::Error, /ArgumentError/)
+        end
+      end
+
+      # ------------------------------------------------------------------
+      describe 'a path a request may not carry' do
+        # A HAND-BUILT REFERENCE, because `Reference` is frozen and cannot be stubbed — and that
+        # is the right shape anyway: the point is that the fetcher's own guard fires for a
+        # reference it was HANDED, without depending on its caller having classified it.
+        # `Reference` already answers `:unresolvable` for a control character, so this door is
+        # the second of two.
+        HostileReference = Struct.new(:url, :usage, keyword_init: true) do
+          def fetch_classification
+            :third_party
+          end
+
+          def host
+            'cdn.example'
+          end
+
+          def port
+            443
+          end
+
+          def scheme
+            'https'
+          end
+
+          def display
+            url
+          end
+        end
+
+        def hostile(url)
+          HostileReference.new(url: url, usage: :image)
+        end
+
+        it 'refuses a CR or LF before Net::HTTP can raise on it' do
+          result = fetcher.fetch(hostile("https://cdn.example/a\r\nX-Injected: 1/b.png"))
+
+          expect(result).to be_a(Fetcher::Refusal)
+          expect(result.code).to eq(:path)
+          expect(transport.calls).to be_empty
+        end
+
+        it 'refuses a raw space, a NUL and a byte above 0x7E' do
+          ["https://cdn.example/a b.png",
+           "https://cdn.example/a\u0000b.png",
+           "https://cdn.example/\u00e9.png"].each do |url|
+            expect(fetcher.fetch(hostile(url)).code).to eq(:path), url.inspect
+          end
+        end
+
+        it 'accepts an ordinary percent-encoded path' do
+          expect(fetcher.fetch(hostile('https://cdn.example/a%20b.png')))
+            .to be_a(Fetcher::Fetched)
         end
       end
     end

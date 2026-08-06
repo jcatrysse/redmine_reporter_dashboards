@@ -82,6 +82,13 @@ All notable changes to this plugin are documented in this file.
   Charts, diagrams and fonts that ship with the plugin are unaffected by any of this and are
   always embedded. No value of this setting can make a chart depend on network access.
 
+  One detail worth stating because it is easy to get wrong and easy to miss: **a stylesheet's own
+  references count too.** A CSS file can point at images and at further stylesheets, and those are
+  resolved by the same rules before the stylesheet is embedded — so a bundled install cannot be
+  talked into fetching something by putting the URL one level down. JavaScript is different and the
+  difference is deliberate: a script can ask for anything at all while it runs, which is why the
+  render engine is denied network access outright rather than only being handed resolved bytes.
+
 - **`{% chart %}` — one line per chart, and the plugin does the rest.** Compare it with
   what a chart costs in a template today: a `<canvas>` with a hand-picked width and
   height, a `<script>` that loads Chart.js 2.8 from a CDN, a Chart.js config, a data array

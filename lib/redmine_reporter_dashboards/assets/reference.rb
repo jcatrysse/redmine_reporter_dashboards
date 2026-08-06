@@ -37,14 +37,16 @@ module RedmineReporterDashboards
       IGNORED_SCHEMES = %w[mailto tel sms about javascript data cid blob ws wss file].freeze
       FETCHABLE_SCHEMES = %w[http https].freeze
 
-      attr_reader :raw, :usage, :span, :element_span, :origin, :candidates
+      attr_reader :raw, :usage, :span, :element_span, :origin, :candidates, :element_attributes
 
       # `span` is the byte range of the value this reference was read from, so the
       # resolver can splice a replacement in without re-parsing. `element_span` is the
       # range of the whole element, present only where a structural rewrite is possible
-      # (`<link rel=stylesheet>` and `<script src>` — see `Resolver`).
+      # (`<link rel=stylesheet>` and `<script src>` — see `Resolver`). `element_attributes`
+      # is what that element carried, so the resolver can refuse a structural rewrite that
+      # would change the element's meaning rather than replicate HTML semantics.
       def initialize(raw:, usage:, span:, origin: Origin.new, element_span: nil,
-                     candidates: 1)
+                     candidates: 1, element_attributes: nil)
         @raw = raw.to_s
         @usage = usage.to_sym
         raise ArgumentError, "#{usage.inspect} is not a usage: #{USAGES.inspect}" unless
@@ -52,6 +54,7 @@ module RedmineReporterDashboards
 
         @span = span
         @element_span = element_span
+        @element_attributes = (element_attributes || {}).freeze
         @origin = origin
         # >1 means an `srcset` with alternatives, only the first of which is resolved.
         # Recorded so the resolver can degrade VISIBLY rather than quietly dropping them.
@@ -118,6 +121,12 @@ module RedmineReporterDashboards
         return :ignored if @url.empty?
         return :data_uri if @url.downcase.start_with?('data:')
         return :ignored if @url.start_with?('#')
+        # A CONTROL CHARACTER MAKES A URL UNUSABLE, and one in particular makes it dangerous: a
+        # CR or LF in a path is a request-splitting primitive, and `Net::HTTP` answers it with a
+        # bare `ArgumentError` rather than a refusal. Refused here, at the earliest point, so
+        # nothing downstream has to remember. `.strip` does not cover it — it trims the ends, and
+        # `/a\nb.png` has a non-whitespace byte after the newline.
+        return :unresolvable if @url.match?(/[[:cntrl:]]/)
         return :ignored if @scheme_literal && IGNORED_SCHEMES.include?(@scheme_literal)
         return :unresolvable if @scheme_literal && !FETCHABLE_SCHEMES.include?(@scheme_literal)
 

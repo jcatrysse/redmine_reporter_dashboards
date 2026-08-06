@@ -74,6 +74,22 @@ module RedmineReporterDashboards
       # the class comment.
       OPAQUE_BODIES = %w[script textarea].freeze
 
+      # Elements whose bodies are raw text, and for which a trailing `/` MEANS NOTHING.
+      # HTML has no self-closing syntax outside foreign content: `<style/>` is an OPEN style
+      # element and every engine applies the CSS after it, `<script/>` is an open script and
+      # everything after it is program text. Honouring `/` for these was a defect — the first
+      # version skipped `scan_css` on a `<style/>` body (so an entire stylesheet became
+      # invisible to the scanner, which is an egress hole) and scanned a `<script/>` body as
+      # markup (which is the corruption this class exists to avoid).
+      #
+      # FOREIGN CONTENT IS THE ONE EXCEPTION and it is tracked rather than ignored, because
+      # this plugin emits inline `<svg>` on its own PDF path. Inside `<svg>`/`<math>`, XML
+      # rules apply and `<style/>` really is empty — treating it as open would search for a
+      # `</style>` that is not there, and the scanner would then stop and miss every reference
+      # in the rest of the document.
+      RAW_TEXT = %w[script textarea style].freeze
+      FOREIGN_ROOTS = %w[svg math].freeze
+
       TAG_NAME = /\A([A-Za-z][A-Za-z0-9:._-]*)/.freeze
       ATTRIBUTE = /
         \s+
@@ -96,11 +112,22 @@ module RedmineReporterDashboards
         new(html, origin: origin).scan
       end
 
+      # PURE CSS, not a document — for the stylesheet bytes the resolver is about to embed.
+      # Same two patterns as a `<style>` body, so `url()` and `@import` inside an inlined
+      # stylesheet cannot reach the engine as live URLs. Spans are relative to the CSS text.
+      def self.scan_css_text(css, origin: Origin.new)
+        new(css, origin: origin).scan_css_only
+      end
+
       # References in document order, with non-overlapping value spans.
       def scan
         references = []
         index = 0
         length = @html.length
+        # Depth inside `<svg>`/`<math>`, where XML rules apply and `/>` really closes an
+        # element. Zero everywhere else. See RAW_TEXT's comment for why this is tracked
+        # rather than assumed either way.
+        @foreign_depth = 0
 
         while (open = @html.index('<', index))
           index = handle(open, references)
@@ -115,6 +142,16 @@ module RedmineReporterDashboards
         references.sort_by { |reference| reference.span.first }
       end
 
+      # The whole subject treated as CSS. Public rather than reached with `send` from the
+      # resolver: a `send` past a private boundary is the same "resolve a name past its
+      # visibility" shape §3.6 removes `call_method` for, and it hides from a reader that this
+      # entry point exists at all.
+      def scan_css_only
+        references = []
+        scan_css(0, @html.length, references)
+        references.sort_by { |reference| reference.span.first }
+      end
+
       private
 
       # Returns the index to continue from. One method so every branch is forced to
@@ -123,7 +160,8 @@ module RedmineReporterDashboards
       # tests for with an unterminated comment and an unterminated tag.
       def handle(open, references)
         return skip_to(open, '-->', 3) if @html[open, 4] == '<!--'
-        return skip_to(open, '>', 1) if %w[! ?].include?(@html[open + 1]) || @html[open + 1] == '/'
+        return skip_to(open, '>', 1) if %w[! ?].include?(@html[open + 1])
+        return close_tag(open) if @html[open + 1] == '/'
 
         match = TAG_NAME.match(@html[open + 1, 64].to_s)
         return open + 1 if match.nil?
@@ -137,22 +175,40 @@ module RedmineReporterDashboards
 
         collect(name, attributes, open, tag_end, references)
 
-        if OPAQUE_BODIES.include?(name) && !self_closing
-          body_end, element_end = raw_text_bounds(name, tag_end + 1)
-          # ONLY when the element was actually closed. An unterminated `<script src=…>`
-          # would otherwise get an element span running to the end of the document, and
-          # the structural rewrite would delete everything after it.
-          patch_element_span(references, name, open, element_end) unless body_end.nil?
-          return body_end.nil? ? @html.length : element_end
+        # `<svg/>` closes immediately; `<svg>` opens a foreign-content region. Counted before
+        # the raw-text branches, so a `<style/>` inside it is honoured as empty.
+        if FOREIGN_ROOTS.include?(name)
+          @foreign_depth += 1 unless self_closing
+          return tag_end + 1
         end
 
-        if name == 'style' && !self_closing
+        # A trailing `/` is honoured ONLY inside foreign content. In HTML it means nothing,
+        # and treating `<style/>` as empty made an entire stylesheet invisible to this
+        # scanner — see RAW_TEXT.
+        if RAW_TEXT.include?(name) && !(self_closing && @foreign_depth.positive?)
           body_end, element_end = raw_text_bounds(name, tag_end + 1)
-          scan_css(tag_end + 1, body_end || @html.length, references)
+
+          if name == 'style'
+            scan_css(tag_end + 1, body_end || @html.length, references)
+          elsif !body_end.nil?
+            # ONLY when the element was actually closed. An unterminated `<script src=…>`
+            # would otherwise get an element span running to the end of the document, and
+            # the structural rewrite would delete everything after it.
+            patch_element_span(references, name, open, element_end)
+          end
+
           return body_end.nil? ? @html.length : element_end
         end
 
         tag_end + 1
+      end
+
+      # A closing tag is skipped, except that leaving `</svg>` leaves foreign content.
+      def close_tag(open)
+        match = TAG_NAME.match(@html[open + 2, 64].to_s)
+        @foreign_depth -= 1 if match && FOREIGN_ROOTS.include?(match[1].downcase) &&
+                               @foreign_depth.positive?
+        skip_to(open, '>', 1)
       end
 
       def skip_to(open, terminator, terminator_length)
@@ -214,9 +270,21 @@ module RedmineReporterDashboards
           usage = usage_for(name, attribute[:name], attributes)
           next if usage.nil?
 
-          references.concat(build(attribute, usage, element_span_for(name, attribute[:name], open,
-                                                                    tag_end)))
+          references.concat(
+            build(attribute, usage,
+                  element_span_for(name, attribute[:name], open, tag_end),
+                  element_attributes(attributes))
+          )
         end
+      end
+
+      # The element's own attributes, as `{ name => value }`. The resolver needs them to
+      # decide whether a STRUCTURAL rewrite is safe: replacing `<link rel=stylesheet media=print
+      # href=…>` with a bare `<style>` block silently promotes a print-only stylesheet to all
+      # media, and replacing `<script type=module src=…>` with `<script>` turns a module into a
+      # classic script. Passing the names lets it fall back rather than replicate HTML semantics.
+      def element_attributes(attributes)
+        attributes.each_with_object({}) { |attribute, out| out[attribute[:name]] = attribute[:value] }
       end
 
       def usage_for(tag, attribute, attributes)
@@ -248,20 +316,27 @@ module RedmineReporterDashboards
       # rest are dropped — VISIBLY, through `candidates`, which the resolver turns into a
       # degradation. Resolving them all and splicing each in place is not an option: a
       # `data:` URI contains a comma, and `srcset` is comma-separated.
-      def build(attribute, usage, element_span)
+      def build(attribute, usage, element_span, element_attributes = nil)
         return [] if attribute[:value].to_s.strip.empty?
 
         if attribute[:name] == 'srcset'
-          segments = attribute[:value].split(',')
-          first = segments.first.to_s.strip.split(/\s+/).first.to_s
-          return [] if first.empty?
+          # EVERY segment, not `segments.first`. `srcset=",/x.png 1x"` is legal — a leading or
+          # doubled comma produces an empty first segment, which a browser skips and the first
+          # version of this code treated as "no candidates at all": the attribute produced NO
+          # reference, so a third-party URL travelled through unrewritten, unrefused, with
+          # `ok?` true. One comma defeated the hostile-document test.
+          candidates = attribute[:value].split(',')
+                                        .map { |segment| segment.strip.split(/\s+/).first.to_s }
+                                        .reject(&:empty?)
+          return [] if candidates.empty?
 
-          return [Reference.new(raw: first, usage: usage, span: attribute[:span],
-                                origin: origin, candidates: segments.length)]
+          return [Reference.new(raw: candidates.first, usage: usage, span: attribute[:span],
+                                origin: origin, candidates: candidates.length)]
         end
 
         [Reference.new(raw: attribute[:value], usage: usage, span: attribute[:span],
-                       origin: origin, element_span: element_span)]
+                       origin: origin, element_span: element_span,
+                       element_attributes: element_attributes)]
       end
 
       # `<script src>`'s element span cannot be known until the closing tag is found, so
@@ -275,7 +350,8 @@ module RedmineReporterDashboards
 
           Reference.new(raw: reference.raw, usage: reference.usage, span: reference.span,
                         origin: reference.origin, element_span: [open, element_end - open],
-                        candidates: reference.candidates)
+                        candidates: reference.candidates,
+                        element_attributes: reference.element_attributes)
         end
       end
 

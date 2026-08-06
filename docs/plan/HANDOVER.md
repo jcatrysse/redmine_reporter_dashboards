@@ -395,7 +395,7 @@ record as of the last local run.
 | **T-20: the retirement, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | **1460 DB-less examples** (was 1433), 0 failures, 114 pending — the deprecation shim's log-once, both `TagContext` branches, the retired-surface guard and the six inert-block lint cases. **278 spec_liquid under each major** (was 276), including the two version-project spellings `{% version_rollup %}` templates read. All six gates green, `LAYER_PURITY_MODE=strict` included, and `zero_reporter` down to **16 files / 16 entries** from 18. The retired-surface guard was **negative-tested**: a planted `Object.const_get('RedmineReporter::Liquid::Drops::IssueDrop')` fails it, a comment naming the class does not. **NOT RUN HERE: adapter, corpus, minitest** — no database and no Redmine checkout in this container, so CI is their first execution |
 | **T-16: the chart layer, DB-less** | **yes, locally (2026-08-06)** | **1562 rspec examples, 0 failures** (was 1462), including 10 SVG goldens as deterministic text, the six families through both emitters, and the escaping payload set through the JSON data block. All seven gates green, `vendor_integrity` new and **negative-tested on all three arms** — a corrupted vendored byte, an unmanifested vendored file, and a planted CDN reference each fail it |
 | **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
-| **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1768 rspec examples, 0 failures** (was 1562), 116 pending — 201 new: the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
+| **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1832 rspec examples, 0 failures** (was 1562), 116 pending — 265 new, of which 39 exist because the review found four blockers (§Findings E-17): the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
 | **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
@@ -654,6 +654,29 @@ of a CI that runs on fork pull requests.
    whole attribute value is replaced, and the rest are dropped with
    `Degradation(:asset_srcset_collapsed)` — visibly, because a PDF page has one pixel density
    and silently dropping alternatives is still dropping them.
+
+   **A STYLESHEET IS A DOCUMENT, and this was the review's worst finding.** CSS carries `url()`
+   and `@import`, so embedding a stylesheet verbatim handed every reference inside it to the
+   engine as a LIVE URL — egress under `:bundled`, and an allowlist bypass under `:external`
+   because one allowlisted host then chose arbitrary further egress. `Resolver#resolve_stylesheet`
+   closes it, depth-capped. **JavaScript is deliberately NOT treated this way**: a URL in a
+   program is a string, not a subresource, a script can mint one at runtime, and only the engine's
+   own egress denial answers that (`F-15-egress-denial`). Do not "finish the job" by rewriting
+   URLs inside JS — it would corrupt programs while closing nothing.
+
+   **A TRAILING SLASH MEANS NOTHING IN HTML, and honouring it cost a stylesheet.** `<style/>` is
+   an OPEN style element; the scanner skipped its body and every `url()` in it went unseen. The
+   same test scanned a `<script/>` body as markup. Foreign content (`<svg>`/`<math>`) is the one
+   real exception and is TRACKED — this plugin emits inline SVG itself, and treating `<style/>`
+   inside it as open makes the scanner hunt for a `</style>` that is not there and stop, losing
+   every later reference.
+
+   **A STRUCTURAL REWRITE DISCARDS THE ELEMENT'S ATTRIBUTES, and three of them are semantic.**
+   `media=print` silently became all-media, `type=module` became a classic script, `disabled`
+   started applying. Rather than replicate HTML's semantics, the rewrite is allowed only for a
+   closed safe set (`STRUCTURAL_SAFE_ATTRIBUTES`, with `media` carried through) and anything else
+   falls back to a `data:` URI, which keeps the element intact. Adding a name to that set is a
+   claim about what the attribute does.
 
    **NOTHING CONSUMES `DocumentRequest#assets` YET.** Neither shipped adapter declares
    `:asset_upload`, so the resolver always chooses `:inline` for both — correct and fully
