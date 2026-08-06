@@ -618,6 +618,25 @@ mechanism is the half with a test. Recorded rather than resolved: moving the fil
 alternative — two value objects and a converter with no home — was rejected because the
 converter's only possible owner is T-23.
 
+**F-13b · the same conflict is waiting for T-33, and it is worse there.** §1.1's tree puts
+`asset_resolver.rb` under `render/`. §5.1 requires that "resolution happens **in the plugin,
+never in the engine**: the plugin fetches, validates and hands over bytes via
+`:asset_upload`". And E3's `render/**` pattern forbids `Net::HTTP`, `Faraday`, `cookie` and
+`session` — the four things an asset fetcher is made of.
+
+That is not an accident of the gate's wording; it is the gate agreeing with §5.1. The whole
+point of the inversion is that **the renderer is never the thing holding the network**, so a
+fetcher inside `render/` would contradict the invariant the directory exists to protect. The
+resolver belongs upstream of the render layer, where it builds the `DocumentRequest` whose
+`body` is already "a COMPLETE, already-asset-resolved document" — `document_request.rb`'s
+own comment says exactly that.
+
+Recorded here so T-33 does not spend a round discovering it: the neutral-namespace answer
+F-13 took for `charts/` applies unchanged, and `assets/` is the obvious home. Noted rather
+than decided, because it is the second file the tree and the mechanism disagree about, and
+two is the point at which the curator should settle the tree rather than have each task
+settle it again.
+
 **F-14 · `responsive` is derived from the output binding, and a capability would be one
 notch better.** §6 says `{% chart %}` emits it "from the **engine's capabilities**, not the
 author's choice". `Render::Capabilities::ALL` is a CLOSED vocabulary with no entry for it,
