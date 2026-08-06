@@ -364,8 +364,8 @@ asked about: slot text was being interpolated into that document **raw**, so an 
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
 
-**E-11 · the repaired `inline_asset` check found a wkhtmltopdf defect on its first CI run, and
-that is the check's whole point.** Measured in `render-smoke`, run 31078637086.
+**E-11 · the repaired `inline_asset` check went red on wkhtmltopdf on its first CI run — and the
+defect was MINE, not the engine's. CLOSED.** Measured in `render-smoke`, run 31078637086.
 
 ```
 wkhtmltopdf: an inline (data:) image decodes to the right colour — rgb[0, 170, 255], wanted rgb[0, 255, 0]
@@ -389,12 +389,27 @@ and absolute positioning works on that engine, in that document.
 
 That is not an argument, it is a technique that is already proven there. The plate is now
 positioned the same way — `position: absolute; top: 8%; height: 8%`, sampled at `y: 0.12` — so the
-check asks about DECODING and no longer about flow layout. If it still fails on the next CI run,
-the answer is unambiguous and worth writing in the support matrix: **wkhtmltopdf does not render
-inline `data:` images**. If it passes, the original failure was layout and the finding closes.
+check asks about DECODING and no longer about flow layout.
+
+**CLOSED, run 31079493206. The engine was fine; my document was wrong.**
+
+```
+render preflight: wkhtmltopdf 0.12.6.1 (with patched qt) (OK, 380ms)
+  PASS  an inline (data:) image decodes to the right colour  rgb[0, 255, 0], wanted rgb[0, 255, 0]
+```
+
+Exact. **wkhtmltopdf decodes inline `data:` images correctly** — the failure was the plate sitting
+in normal flow, where its position depended on that engine's default `<h1>` margins. Nothing about
+wkhtmltopdf needs recording in the support matrix, and the sentence that was nearly written into it
+would have been false.
+
+**Do not read this as a case for promoting wkhtmltopdf.** It now passes the preflight 9 of 9 with no
+informational skips, which is one document. `verification: corpus` is about T-12's twenty fixtures
+and E-5's two open curator items, and neither moved.
 
 The general point: the fix was not to sweep more pixels until something matched. It was to change
-the document so one sample can only mean one thing.
+the document so one sample can only mean one thing — and doing that turned a finding I was about to
+publish about an engine into a finding about my own probe.
 
 **So the three-state rule now applies per check, not just per engine.** `spec/render/preflight_spec.rb`
 matches what `conformance_spec.rb` has always done per fixture: an engine the catalogue calls

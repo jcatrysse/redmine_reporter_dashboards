@@ -336,6 +336,7 @@ record as of the last local run.
 | **T-12/T-13: the engine conformance corpus, Chromium 141** | **yes, locally (2026-08-06)** | 20 of 20 fixtures pass — geometry, orientation+margins, footer tokens, page breaks, backgrounds, flexbox, the readiness six, inline assets, egress denial, typed refusal, a 2 000-row envelope, fonts, pathological input and the escaping payload set. Run as a **non-root user**, sandbox on, `--no-sandbox` never passed. **It found three defects on its first run** (§Findings E-2, E-3, E-4) |
 | **T-12/T-13 DB-less half** | **yes, locally (2026-08-06)** | 155 examples green as root with no browser (45 pending), and 155 green as `rrd` with Chromium (22 pending — wkhtmltopdf, skipping with its reason). Includes the harness's own negative tests and 30 browser-less adapter examples |
 | **`:wkhtmltopdf`** | **YES, once, in CI (run 31059574558)** | 13 of 20. Not installable here at all — the package is gone from Ubuntu 24.04 — so CI is the only place it runs, like MariaDB and MySQL. Four failures were fixture bugs (fixed), one was a real egress defect (fixed), **two are a curator decision** and are §Findings E-5. It stays `verification: pending`, which now means its results are REPORTED AND NOT ENFORCED, and the matrix carries no cells for it |
+| **T-14: the render preflight, BOTH engines, in CI (run 31079493206)** | **YES** | **chromium_cdp 9/9 in 465 ms and wkhtmltopdf 9/9 in 380 ms**, both with the hosted image `EXPECTED_FAILURE` — INV-8 containment confirmed on two independent engines. This is the first time wkhtmltopdf has drawn the probe at all. It is **not** an argument for promoting it: `verification: corpus` is about T-12's twenty fixtures and E-5's two open curator items, and neither moved |
 | **T-14: the render preflight, Chromium 141** | **yes, locally (2026-08-06)** | 9 of 9 checks pass in **943 ms**, run as the non-root user (see the Chromium note in §1): page breaks → 2 pages, `Page 1 of 2` compiled, page rgb[0,170,255] and badge rgb[204,0,0], the inline data: image decoding to its own colour, `CANVAS-STATE drawn`, `SHELL present`, and the Redmine-hosted image `EXPECTED_FAILURE` — INV-8 containment confirmed against a real browser rather than argued. **The first run took 17.5 s and was red**; the three defects it found were all in the diagnostic, not the engine (§Findings E-10) |
 | **T-14 DB-less half** | **yes, locally (2026-08-06)** | 41 examples green with no browser (`spec/render/preflight_spec.rb`, `preflight_command_spec.rb`), including every one of the six document checks driven RED against a canned single-page PDF. `spec/render` + `spec/conformance` together: 205 examples, 0 failures, 49 pending. The Minitest half (`test/functional/reporter_preflight_controller_test.rb`, `test/unit/render_preflight_rake_test.rb`) **has not been executed** — it needs a booted Redmine, so the `standalone` CI job is its first run |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
@@ -451,6 +452,13 @@ of a CI that runs on fork pull requests.
    document stays open until that fetch resolves, which is what makes `HOSTED-IMAGE blocked` a fact
    rather than a race. Without the shell the probe waited out the full watchdog — 17.5 s and a
    spurious `readiness_timeout` — which is §Findings E-10's first defect.
+
+   **The probe's GEOMETRY is load-bearing too, and it fooled me once.** Anything the pixel checks
+   sample must be `position: absolute` with a percentage top/height, like `.badge` and `.plate` —
+   never in normal flow. A flow-positioned element lands wherever the engine's default margins put
+   it, so a red pixel check cannot be told apart from a layout difference. That cost a CI round and
+   very nearly put a false sentence about wkhtmltopdf into the support matrix (§Findings E-11):
+   it decodes inline `data:` images perfectly, and my plate was 4mm off.
 
    **The probe's colours are load-bearing, and one of them was wrong.** `PROBE_PNG` must be a
    colour that appears NOWHERE else in the document. It was `#00aaff`, the page background, and
