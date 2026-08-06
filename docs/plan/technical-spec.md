@@ -926,10 +926,48 @@ enumerated because *we* compute the layout. Mermaid computes its own; the allowl
 *output*, so a new diagram type in Mermaid 12 needs no plugin change. `mermaid_max_bytes` (default
 16 KiB of source) and the render timeout bound the cost.
 
-**`[OQ-L]`** Does Mermaid 11.x render correctly under wkhtmltopdf's 2011-era WebKit? Almost
-certainly not (it is ES2020+). Expected disposition: wkhtmltopdf declares `:mermaid` **absent**
-despite declaring `:javascript`, which is exactly why the capability vocabulary is per-feature
-rather than per-technology. Settled by T-12's conformance corpus, not by argument.
+**~~`[OQ-L]`~~ CLOSED 2026-08-06 BY MEASUREMENT. The answer is NO, and the expected disposition
+stands: wkhtmltopdf declares `:mermaid` absent despite declaring `:javascript`.**
+
+Measured rather than argued, with both engines rendering the SAME probe document — Mermaid 11.16.1's
+`dist/mermaid.min.js`, a two-node `graph LR` whose node labels are distinctive strings, and an
+in-page probe that reports which of four things happened (no global, threw, run resolved, run
+rejected):
+
+| engine | probe said | the diagram |
+|---|---|---|
+| `chromium_cdp` Chrome/141.0.7390.37 | `PROBE-RUN-RESOLVED` | **drawn** — both node labels extract from the PDF as SVG text, and the literal source is gone |
+| `wkhtmltopdf` 0.12.6.1 (patched qt) | `PROBE-NO-MERMAID-GLOBAL` | **not drawn** — the literal source remains as text |
+
+The bundle does not merely fail to draw; it **never defines its global**. Mermaid 11 ships as an
+esbuild IIFE opening with `(__esbuild_esm_mermaid_nm||={})` — logical assignment, ES2021.
+
+**And the cause is established by a discriminator rather than inferred from the shape of the
+bundle**, because "modern syntax, therefore this" is exactly the kind of plausible story that turns
+out to be a timeout or a file-size limit. Two three-line documents, identical but for one statement,
+each setting a probe div BEFORE the statement under test:
+
+| script | wkhtmltopdf printed |
+|---|---|
+| `x.a = x.a \|\| 1;` | `ES5-OK-1` |
+| `x.a \|\|= 1;` | `INIT` |
+
+The second never reached the assignment *before* it, so the whole `<script>` block failed to
+**parse** — not to run. That is why a 3.5 MB bundle whose first statement uses `||=` leaves
+`mermaid` undefined, and it rules out the timeout, the document size and the probe's own JavaScript
+as explanations. There is no shim short of transpiling somebody else's bundle, which is not a thing
+this plugin will do.
+
+**Two facts for T-35 that fell out of the same measurement.** The required fallback shape — "on an
+engine without `:javascript` the source is emitted, labelled, with `Degradation(:mermaid_unsupported)`,
+and the output is not blank" — is what already happens: a `<pre class="mermaid">` body that Mermaid
+never touched stays visible, so the fallback is the *absence* of an action rather than a code path
+to invent. And **the bundle is 3.5 MB**, seven times `inline_max_bytes` (512 KiB) and inside
+`asset_max_bytes` (8 MiB), so under T-33's resolver it inlines with
+`Degradation(:asset_inline_oversize)` on any engine with no upload model — which is both shipped
+engines. T-35 should decide deliberately whether Mermaid is an asset-policy asset at all or a
+bundled library like Chart.js (§6 says libraries "are always inline" and unaffected by the policy,
+which is the answer, but the size is worth knowing).
 
 **Migration aid, shipped before the engine default changes:**
 `rake reporter_dashboards:lint_templates` scans **stored** bodies for every row above plus
@@ -1404,7 +1442,7 @@ sidebar. Neither is load-bearing for phases 0–2.
 | ~~**OQ-I**~~ | **CLOSED 2026-08-04 by OQ-4's answer.** Yes — `asset_policy: :redmine` / `:external`, allowlist-only, empty allowlist fails closed, and **the plugin fetches, not the engine** (§5.1). Now a supported, CI-tested mode rather than a documented-unverified one | §5.1 |
 | **OQ-J** | The concrete `resource_limits` constants — calibration, not design | §4 |
 | **OQ-K** | Is a separate-process `:ferrum_pdf` adapter worth maintaining beside a raw-CDP adapter that already works? A duplication question, not a capability one | §5.2 |
-| **OQ-L** | Does Mermaid 11.x render under wkhtmltopdf's 2011 WebKit? Expected: no → `:mermaid` declared absent. Settled by T-12's corpus | §6.1 |
+| ~~**OQ-L**~~ | **CLOSED 2026-08-06 BY MEASUREMENT: no.** Both engines rendered one probe document. Chromium 141 draws the diagram (`mermaid.run()` resolves, node labels extract as SVG text); wkhtmltopdf 0.12.6.1 *with patched qt* answers `PROBE-NO-MERMAID-GLOBAL` — the bundle never defines its global, because Mermaid 11 is an esbuild IIFE using `\|\|=` (ES2021) that Qt WebKit cannot parse. So `:mermaid` is declared **absent** for wkhtmltopdf despite `:javascript` being present, which is the case the per-feature vocabulary exists for | §6.1 |
 | **OQ-M** | Does a pre-built CodeMirror 6 bundle stay inside §6's no-build-step / non-digested asset rule on Redmine 7.0? | §9b.1 |
 | ~~OQ-3~~ | **CLOSED 2026-08-04 by curator decision**: external container acceptable *as one option*, documented and safe → Gotenberg becomes a **third CI-verified adapter**, default unchanged (§5.2) | §5.2 |
 | ~~OQ-4~~ | **CLOSED 2026-08-04 by curator decision**: fetch external references, ship local assets with the request → the three-model resolver + `asset_policy` (§5.1). The premise *"there will be a standard for this"* is **corrected**: there is no packaging standard, only three recurring mechanisms | §5.1 |

@@ -909,48 +909,66 @@ RUNNING a document through the layer. None was visible in review of the source, 
 (the CSS hole and the `<style/>` slash) were in code whose comments explained at length why the
 opposite hazard had been closed. A comment describing a defence is not the defence.
 
-**E-18 · wkhtmltopdf runs locally after all, and the first full local run found ONE failure that
-nobody has accounted for.** Discovered while looking for the next task after T-33.
+**E-18 · wkhtmltopdf runs locally, there are TWO builds of it, and the first version of this
+finding blamed the plugin for something the build was doing. Corrected 2026-08-06, same day.**
 
-**The premise that was wrong.** HANDOVER §1 said wkhtmltopdf "cannot be installed here — its
-package is gone from Ubuntu 24.04's archive". It is in **noble/universe as `0.12.6-2build2`**. What
-produced the wrong conclusion is worth knowing: the container's apt index is stale, so the first
-`apt-get install` fails with a wall of `404 Not Found` on unrelated dependencies, which reads as
-"the archive no longer carries this" and means "run `apt-get update`". Two commands, and
-`:wkhtmltopdf` stops being CI-only.
+**What I got wrong, first, because a wrong finding is worse than none.** This entry originally
+reported `F-04-page-furniture` as a real, unaccounted-for failure and said page 1 "carries neither
+the compiled tokens nor the literal slot", so it read as "the footer did not render". It is not a
+defect in this plugin. **Ubuntu's `wkhtmltopdf` package is built against UNPATCHED Qt, which cannot
+do headers or footers at all** — run by hand it says so on stderr, three times:
 
-**The measurement, both engines, run as the non-root user:**
+    The switch --footer-left, is not support using unpatched qt, and will be ignored.
+    The switch --footer-right, is not support using unpatched qt, and will be ignored.
+    The switch --footer-font-size, is not support using unpatched qt, and will be ignored.
+
+`wkhtmltopdf.rb` emits exactly the right flags; that binary discards them. The correct conclusion
+is the one I should have reached before writing the finding down: **verify which build you are
+measuring before attributing its behaviour to the code.** It cost a wrong claim in a pushed commit.
+
+**THE TWO BUILDS, and the distinction is the load-bearing part.**
+
+| build | source | headers/footers |
+|---|---|---|
+| `wkhtmltopdf 0.12.6` | `noble/universe`, `apt install wkhtmltopdf` | **NO** — unpatched Qt |
+| `wkhtmltopdf 0.12.6.1 (with patched qt)` | the release `.deb`, which is what CI installs | yes |
+
+So HANDOVER's old "cannot be installed here" was *nearly* right and for the right reason — the
+usable engine is only in a release `.deb` — and wrong in its conclusion, because **that `.deb`
+installs fine on noble**. The jammy asset (`wkhtmltox_0.12.6.1-3.jammy_amd64.deb`, the exact URL
+`ci.yml:750` uses; there is no noble asset) installs with `apt-get install ./wkhtmltox.deb`. Two
+commands, and `:wkhtmltopdf` stops being CI-only:
+
+    curl -fsSL -o /tmp/wkhtmltox.deb https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb
+    sudo apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb
+
+Do NOT `apt install wkhtmltopdf` and think you have measured the engine. The distro build passes 17
+of 20 and the difference is entirely the footer fixture — a plausible-looking result from the wrong
+binary, which is this repository's favourite failure mode wearing new clothes.
+
+**THE MEASUREMENT, on the build CI uses, both engines, run as the non-root user:**
 
 | engine | result |
 |---|---|
 | `chromium_cdp` Chrome/141.0.7390.37 | **20 pass, 0 fail, 0 skip** |
-| `wkhtmltopdf` 0.12.6 | **17 pass, 1 fail, 2 skip** |
+| `wkhtmltopdf` 0.12.6.1 (patched qt) | **18 pass, 0 fail, 2 skip** |
 
-The two skips are `F-11`/`F-12` on `:readiness_expression`, which E-5 already accounted for. **The
-one failure did not exist in E-5's arithmetic.** E-5 accounted for all seven of CI run
-31059574558's failures — four fixture bugs fixed, one egress defect fixed, two weakened by curator
-decision — so the expected result after those landed was 18 pass, 2 skip, **0 fail**. It is not:
+67 examples, 0 failures. The two skips are `F-11`/`F-12` on `:readiness_expression`, which E-5
+already accounted for as a genuine capability difference — an engine you cannot poll cannot "give up
+waiting and render anyway".
 
-    F-04-page-furniture: every page carries the footer, numbered for that page —
-    page 1 footer: "Page 1 of 3" is absent from "FOOTER-PAGE-ONE"
+**SO E-5'S PROMOTION CONDITION IS MET, AND THE DECISION IS THE CURATOR'S.** E-5 defines `pending` as
+"results are REPORTED, not enforced" and promotion to `corpus` as "the moment somebody accounts for
+every one of them". Every one is now accounted for: four fixture bugs fixed, one egress defect fixed,
+two weakened by curator decision, two skipping on a declared-absent capability. **18 + 2 = 20, with
+nothing unexplained.**
 
-Page 1 carries neither the compiled tokens nor the literal `FOOT-LEFT` slot, so this reads as *the
-footer did not render on that page at all* rather than as a token-compilation bug —
-`wkhtmltopdf.rb:397` maps `{{page}}`/`{{pages}}` to `[page]`/`[topage]` and F-04 asserts pages 1, 2
-AND 3 precisely because "renders the footer once" and "stamps the same number everywhere" both pass
-a one-page check. **Not diagnosed further here, deliberately:** it belongs to whoever owns
-`:wkhtmltopdf`'s promotion, and diagnosing it inside T-33 would be a second purpose (§11.5).
-
-**What this changes for the curator, and it is the useful part.** `pending` means "reported, not
-enforced", and promotion to `corpus` is "the moment somebody accounts for every failure". That list
-was seven and is now **one**, and the engine is now reproducible on a developer machine rather than
-in a single CI cell. Two consequences: promotion is a much smaller decision than it was, and it is
-gated on exactly one named failure. `config/capabilities.yml` is **unchanged** — promoting it would
-put twenty cells in the matrix and change a documented support claim, which is G9's business and
-the curator's, not something to take on the way past.
-
-**And OQ-L is now measurable here**, which is why this matters to T-35: "does Mermaid 11.x render
-under wkhtmltopdf's 2011 WebKit" no longer needs a CI round trip.
+What promotion costs, so it is a one-line decision rather than an investigation: `verification:
+corpus` in `config/capabilities.yml`, twenty cells appear in `docs/engine-support-matrix.md`, and G9
+requires the regenerated matrix in the same PR. **Not done here.** HANDOVER's rule is "promote it in
+the commit that reads a green CI run, not before", and what exists is a green LOCAL run on the same
+build — which is better evidence than this project has ever had for that engine, and still not the
+thing the rule names. One CI run settles it.
 
 **E-12 · `@context` belongs to `Liquid::Drop`, and a drop that stores its own there breaks
 Liquid's internals.** Found by T-18's first spec run, three frames from the cause. `RecordDrop`
@@ -1764,7 +1782,20 @@ is not a check); the container is pinned **by digest** and the CVE scan runs nig
 digest; the example compose file carries `internal: true`, non-root and a read-only root filesystem.
 **Default engine unchanged** — a test asserts auto-detect never selects `:gotenberg`.
 
-**T-35 · Mermaid** *(deps: T-16, T-33)*
+**T-35 · Mermaid** *(deps: T-16, T-33 — BOTH LANDED, so this is startable)*
+**`[OQ-L]` IS SETTLED — measured 2026-08-06, the answer is NO** (§Findings E-18, technical-spec §6.1
+and §12). Mermaid 11.16.1 does not run under wkhtmltopdf's Qt WebKit: its bundle never defines its
+global, because it is an esbuild IIFE using `||=` — and that cause is established by a
+discriminator (two three-line documents differing only in `x.a = x.a || 1` versus `x.a ||= 1`; the
+second fails to PARSE, so the statement before it never runs), not inferred from the bundle's shape.
+So this task builds with `:mermaid` **absent** for
+wkhtmltopdf as a measured fact rather than an expectation, and the "settles `[OQ-L]` by measurement"
+clause below is already satisfied — the conformance fixture confirms it rather than discovering it.
+Two more things the measurement handed over: the required fallback ("source emitted, labelled, not
+blank") is what already happens to an untouched `<pre class="mermaid">`, so it is the absence of an
+action rather than a path to invent; and the bundle is **3.5 MB**, which is 7× `inline_max_bytes` —
+§6 says a bundled library is always inline and unaffected by `asset_policy`, and that is the answer,
+but decide it deliberately rather than discovering it in a degradation list.
 *Touches:* `liquid/tags/mermaid_tag.rb`; `render/svg_sanitizer.rb`; vendored Mermaid 11.x.
 *Accept:* block tag, body **not** Liquid-interpolated unless `interpolate: true`; readiness covered
 by the existing `begin()`/`end()` contract with **no new handshake**; **one sanitiser shared with

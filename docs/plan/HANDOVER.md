@@ -187,26 +187,39 @@ happened to be on PATH. Reproduce the CI environment before pushing:
 The rule is CLAUDE.md §6: an example about a check's *reasoning* stubs `PdfInspector.available?`
 rather than inheriting it. Only examples that genuinely need real probes may skip on their absence.
 
-**CORRECTED 2026-08-06 — wkhtmltopdf IS installable here, and this entry said the opposite for
-three sessions.** The claim was that its package "is gone from Ubuntu 24.04's archive and only
-exists as a release `.deb`", which made `:wkhtmltopdf` CI-only like MariaDB and MySQL. It is in
-**noble/universe as `0.12.6-2build2`** and installs cleanly:
+**CORRECTED 2026-08-06 — wkhtmltopdf IS installable here, but there are TWO BUILDS and only one
+of them is the engine.** This entry used to say the package "is gone from Ubuntu 24.04's archive and
+only exists as a release `.deb`", concluding `:wkhtmltopdf` was CI-only. The premise is nearly right
+and the conclusion is wrong.
 
-    sudo apt-get update && sudo apt-get install -y wkhtmltopdf     # 0.12.6
-    sudo apt-get install -y poppler-utils                           # the corpus needs the probes
+| build | how you get it | headers/footers |
+|---|---|---|
+| `wkhtmltopdf 0.12.6` | `apt install wkhtmltopdf` (noble/universe) | **NO** — built against unpatched Qt |
+| `wkhtmltopdf 0.12.6.1 (with patched qt)` | the release `.deb` — what `ci.yml:750` installs | yes |
 
-The trap behind the wrong conclusion is worth more than the correction: the container's apt index
-is STALE, so the first `apt-get install` fails with a wall of `404 Not Found` on unrelated
-dependencies (`libinput10`, `udev`, `avahi`). That reads as "the archive no longer carries this",
-and it means "run `apt-get update` first". CLAUDE.md §4 has the same lesson about a different
-stale premise; this is the second one.
+**Install the release `.deb`. The jammy asset works on noble, and there is no noble asset:**
 
-**What that unlocks:** the corpus can be run against BOTH engines locally, so `:wkhtmltopdf`'s
-results are reproducible rather than one CI cell — and OQ-L (Mermaid under its 2011 WebKit) becomes
-measurable here as soon as T-35 vendors Mermaid. Its `verification: pending` in
-`config/capabilities.yml` is still what keeps unmeasured cells out of the matrix, and **promotion
-remains a curator decision**: see §Findings E-5 for what `pending` means and E-18 for the one
-failure that is now the only thing standing in its way.
+    curl -fsSL -o /tmp/wkhtmltox.deb https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb
+    sudo apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb
+    sudo apt-get install -y poppler-utils    # the corpus needs pdfinfo/pdftotext/pdftoppm
+
+**THE TRAP, and it cost a wrong finding in a pushed commit.** `apt install wkhtmltopdf` succeeds and
+gives you a binary that passes **17 of 20** conformance fixtures. The one failure is the footer
+fixture, and it looks exactly like a defect in `wkhtmltopdf.rb` — page 1 with no footer. It is not:
+that build silently discards every `--footer-*` flag and says so on stderr ("is not support using
+unpatched qt, and will be ignored"). A plausible result from the wrong binary is this repository's
+favourite failure mode; **check `wkhtmltopdf --version` says `(with patched qt)` before attributing
+anything to the code.**
+
+With the right build: `chromium_cdp` **20 pass / 0 fail / 0 skip**, `wkhtmltopdf` **18 pass / 0 fail
+/ 2 skip** (the two are `:readiness_expression`, accounted for by §Findings E-5). Its
+`verification: pending` in `config/capabilities.yml` is unchanged — **promotion is a curator
+decision** and E-18 states what it costs.
+
+**And a second stale-index trap underneath the first:** the container's apt index is old, so the
+first `apt-get install` of anything large fails with a wall of `404 Not Found` on unrelated
+dependencies (`libinput10`, `udev`, `avahi`). That reads as "the archive no longer carries this" and
+means `apt-get update`.
 
 **MySQL 8 evaluates `projects.<col> IN (SELECT …)` inside a LEFT JOIN's ON clause as
 TRUE.** Measured on 8.0.46 (E-1 in §Findings). An entitlement check written that way
@@ -412,7 +425,8 @@ record as of the last local run.
 | **T-16: the chart layer, DB-less** | **yes, locally (2026-08-06)** | **1562 rspec examples, 0 failures** (was 1462), including 10 SVG goldens as deterministic text, the six families through both emitters, and the escaping payload set through the JSON data block. All seven gates green, `vendor_integrity` new and **negative-tested on all three arms** — a corrupted vendored byte, an unmanifested vendored file, and a planted CDN reference each fail it |
 | **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
 | **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1832 rspec examples, 0 failures** (was 1562), 116 pending — 265 new, of which 39 exist because the review found four blockers (§Findings E-17): the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
-| **T-13/T-33: the conformance corpus, BOTH engines, LOCALLY** | **yes (2026-08-06) — first time for wkhtmltopdf outside CI** | `chromium_cdp` Chrome/141.0.7390.37: **20 pass, 0 fail, 0 skip**. `wkhtmltopdf` 0.12.6: **17 pass, 1 fail, 2 skip** — the two skips are `:readiness_expression`, correctly undeclared, and the one failure is `F-04-page-furniture`, which is **new and unaccounted-for** (§Findings **E-18**). 67 examples, 0 failures, 3 pending; G9 green, so the committed matrix is unmoved. Run as the non-root `rrd` user with `RRD_CONFORMANCE=1`. **This is what corrected the "cannot be installed here" entry in §1** |
+| **T-13: the conformance corpus, BOTH engines, LOCALLY** | **yes (2026-08-06) — first time for wkhtmltopdf outside CI** | On the build CI uses (`0.12.6.1`, **patched qt**): `chromium_cdp` Chrome/141.0.7390.37 **20 pass / 0 fail / 0 skip**, `wkhtmltopdf` **18 pass / 0 fail / 2 skip** — 67 examples, 0 failures, and the two skips are `:readiness_expression`, which E-5 accounted for. **Nothing is unexplained, so E-5's promotion condition is met and the decision is the curator's** (§Findings E-18). G9 green, committed matrix unmoved. Run as the non-root `rrd` user with `RRD_CONFORMANCE=1`. **On the DISTRO build it is 17/1/2 and the failure is the footer fixture — that build cannot do footers at all**; see §1 |
+| **OQ-L settled by measurement — Mermaid 11.16.1 through both engines** | **yes, locally (2026-08-06)** | One probe document, both engines. Chromium 141: `mermaid.run()` resolves and both node labels extract from the PDF as SVG text. wkhtmltopdf 0.12.6.1 patched: **`PROBE-NO-MERMAID-GLOBAL`** — the bundle never defines its global, because Mermaid 11 is an esbuild IIFE opening with `\|\|=` (ES2021) that Qt WebKit cannot parse — established by a DISCRIMINATOR, not inferred: two three-line documents differing only in `x.a = x.a \|\| 1` versus `x.a \|\|= 1` print `ES5-OK-1` and `INIT` respectively, and `INIT` means the statement BEFORE the assignment never ran, so the whole script block failed to parse. That rules out a timeout, the 3.5 MB size and the probe's own JS. **So `:mermaid` is absent for wkhtmltopdf despite `:javascript` being present**, which is the answer T-35's acceptance list expected and now has. Probe kept out of the repo deliberately — vendoring Mermaid is T-35's job, with `THIRD_PARTY.md` and the digest gate |
 | **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
