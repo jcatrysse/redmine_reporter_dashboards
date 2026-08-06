@@ -169,6 +169,22 @@ html, body { background:#fff; margin:0; padding:0; font-family: Arial, Helvetica
 
 {% assign active_html = '' %}
 {% assign done_html = '' %}
+{% comment %}
+  Chart data is accumulated as a SEPARATOR-JOINED LIST and emitted with `| json`, never
+  as a hand-built JavaScript array literal.
+
+  `reference/verification-liquid-js-escaping.md` measured what the previous idiom cost:
+  it stripped quotes from each value to keep it inside its own JS string, and a value
+  ending in a BACKSLASH still broke the token — killing the whole `<script>` block with a
+  SyntaxError, which loses the chart, the drill-through URLs and the readiness handshake
+  in one go. 0 of 2 940 payloads executed, so it was a denial of rendering rather than an
+  XSS, and the defence was accidental.
+
+  `| json` closes the class rather than one instance of it, and emits the brackets itself.
+  The separator is stripped from every value on the way in, so a value containing it
+  cannot split one entry into two.
+{% endcomment %}
+{% assign sep = '~|~' %}
 {% assign ch_labels = '' %}
 {% assign ch_urls = '' %}
 {% assign ch_completed = '' %}
@@ -306,18 +322,19 @@ html, body { background:#fff; margin:0; padding:0; font-family: Arial, Helvetica
   {% assign g_est_cost = g_est_cost | plus: v_est_cost %}
   {% assign g_actual_cost = g_actual_cost | plus: v_actual_cost %}
 
-  {% comment %} sanitise the version name for the single-quoted JS string context in
-     the chart arrays: drop quotes AND angle brackets so a crafted name cannot break
-     out of the string or inject a </script> tag. {% endcomment %}
-  {% assign safe = vname | replace: "'", '' | replace: '"', '' | replace: '<', '' | replace: '>', '' %}
+  {% comment %} The version name goes into a JSON list, so nothing has to be stripped
+     for safety — `| json` escapes quotes, backslashes, angle brackets and the two line
+     separators at the point of emission. The one replacement left is the LIST separator,
+     removed so a name containing it cannot split one label into two. {% endcomment %}
+  {% assign safe = vname | replace: sep, '/' %}
 
   {% comment %} cost chart data: every version that carries cost (active AND completed) {% endcomment %}
   {% if has_cost %}
     {% assign n_cost_versions = n_cost_versions | plus: 1 %}
-    {% assign cc_labels = cc_labels | append: "'" | append: safe | append: "'," %}
-    {% assign cc_urls = cc_urls | append: "'" | append: url_version | append: "'," %}
-    {% assign cc_est = cc_est | append: v_est_cost | append: ',' %}
-    {% assign cc_actual = cc_actual | append: v_actual_cost | append: ',' %}
+    {% assign cc_labels = cc_labels | append: safe | append: sep %}
+    {% assign cc_urls = cc_urls | append: url_version | append: sep %}
+    {% assign cc_est = cc_est | append: v_est_cost | append: sep %}
+    {% assign cc_actual = cc_actual | append: v_actual_cost | append: sep %}
   {% endif %}
 
   {% capture card %}
@@ -428,12 +445,12 @@ html, body { background:#fff; margin:0; padding:0; font-family: Arial, Helvetica
   {% if v_open > 0 %}
     {% assign active_html = active_html | append: card %}
     {% assign n_active = n_active | plus: 1 %}
-    {% assign ch_labels = ch_labels | append: "'" | append: safe | append: "'," %}
-    {% assign ch_urls = ch_urls | append: "'" | append: url_version | append: "'," %}
-    {% assign ch_completed = ch_completed | append: completed | append: ',' %}
-    {% assign ch_elapsed = ch_elapsed | append: elapsed | append: ',' %}
-    {% assign ch_est = ch_est | append: v_est | append: ',' %}
-    {% assign ch_spent = ch_spent | append: v_spent | append: ',' %}
+    {% assign ch_labels = ch_labels | append: safe | append: sep %}
+    {% assign ch_urls = ch_urls | append: url_version | append: sep %}
+    {% assign ch_completed = ch_completed | append: completed | append: sep %}
+    {% assign ch_elapsed = ch_elapsed | append: elapsed | append: sep %}
+    {% assign ch_est = ch_est | append: v_est | append: sep %}
+    {% assign ch_spent = ch_spent | append: v_spent | append: sep %}
   {% else %}
     {% assign done_html = done_html | append: card %}
   {% endif %}
@@ -511,17 +528,21 @@ html, body { background:#fff; margin:0; padding:0; font-family: Arial, Helvetica
 {% if n_versions > 1 %}
 <script>
 (function(){
-  var labels    = [{{ ch_labels }}];
-  var urls      = [{{ ch_urls }}];
-  var completed = [{{ ch_completed }}];
-  var elapsed   = [{{ ch_elapsed }}];
-  var est       = [{{ ch_est }}];
-  var spent     = [{{ ch_spent }}];
+  // Every one of these is a JSON literal produced by `| json`, so no value in it can
+  // break the token it sits in. `.map(Number)` on the numeric lists because `split`
+  // yields strings and a chart axis wants numbers — one readable step, rather than a
+  // filter that would have to guess which lists are numeric.
+  var labels    = {{ ch_labels    | split: sep | json }};
+  var urls      = {{ ch_urls      | split: sep | json }};
+  var completed = {{ ch_completed | split: sep | json }}.map(Number);
+  var elapsed   = {{ ch_elapsed   | split: sep | json }}.map(Number);
+  var est       = {{ ch_est       | split: sep | json }}.map(Number);
+  var spent     = {{ ch_spent     | split: sep | json }}.map(Number);
 
-  var cost_labels = [{{ cc_labels }}];
-  var cost_urls   = [{{ cc_urls }}];
-  var cost_est    = [{{ cc_est }}];
-  var cost_actual = [{{ cc_actual }}];
+  var cost_labels = {{ cc_labels  | split: sep | json }};
+  var cost_urls   = {{ cc_urls    | split: sep | json }};
+  var cost_est    = {{ cc_est     | split: sep | json }}.map(Number);
+  var cost_actual = {{ cc_actual  | split: sep | json }}.map(Number);
 
   function openFrom(urlList, chart, evt){
     var pts = chart.getElementAtEvent(evt);

@@ -68,6 +68,7 @@ fact that CI has not yet run on this work at all.
 | T-17 | **done** — `liquid/{execution_policy,template_renderer}.rb` plus gate `single_parse.sh`. **Both mechanisms, because neither alone suffices**: per-CLASS resource limits (widget/report/preview, preview deliberately on the widget's numbers so an author feels the limit at the keyboard) handed to the `Liquid::Context` — the only per-render channel either Liquid 4 or 5 offers, verified on 4.0.4 and 5.13.0 — and a **cooperative monotonic deadline** wired into all three own tags, a no-op where no budget is bound. `Timeout.timeout` is not used and the file says why. **Errors never enter the document**: the spec first DEMONSTRATES Liquid's default of writing `Liquid error:` into the output, then shows the same template becoming a typed failure with no body at all. 36 examples against the real gem; the gate negative-tested |
 | T-18 | **done** — the twelve drop classes, the three bases and `liquid/batch.rb`. §3.2's disposition table is implemented accessor by accessor and ASSERTED accessor by accessor: the names kept identical, the `closed_on` timezone defect fixed (all three timestamps now go through the actor, never `User.current`), the four scalars promoted to `NamedRefDrop` with their `*_id` escape hatches, `version` promoted to a string-substitutable `VersionDrop`, `url` absolute by construction, and the **fifteen dropped accessors** — six vendor probes, four OQ-H, five from the addon's own subclass — each pinned UNREACHABLE under `strict_variables` so the negative half cannot rot. `all` is reachable, refused and records `Degradation(:unbounded_collection)`; deleting it would render blank, which is the silent answer INV-4 forbids. **The gating criteria are measured, not argued**: zero `Issue` instantiations for an aggregate-only template at 10 AND 10 000 issues, identical query count across that span, one custom field across 400 issues in **4** queries and a second one for **free**, and the cap asserted AT it and one past it. **Visibility is in the batch, not in the drop**: `IssueCustomField.visible` plus Redmine's per-project `visible_by?`, `TimeEntry.visible`, `Issue.visible` — and the auditor case (holds the role in ANOTHER project) is the leak the four-actor fixture exists to catch. Green on Liquid **4.0.4 and 5.13.0** (185 examples each) and on PostgreSQL 16 (31 adapter examples); the corpus is byte-identical. **CI run 31085742725 is 18/18 green on the first try**, MySQL 8 and MariaDB 11 included, and all four `minitest` branches — which is what actually answers whether `liquid/drops/` boots under Zeitwerk on 5.1 through 7.0. **It found three defects in itself** — §Findings **E-12**, **E-13**, and the `is_closed` attribute sourced from the wrong row — and left two questions for the curator, **F-8** and **F-9** |
 | T-14 | **done** — `render/preflight.rb`, `render/pdf_inspector.rb`, `render/preflight_command.rb`, plus the admin page (`ReporterPreflightController` + helper + view, `require_admin` **per action**) and `rake reporter_dashboards:render:preflight` **exiting 0/1/2** (2 = nothing was registered, so nothing was verified — deliberately not 0). Nine document checks, each a ROUND TRIP read back out of the PDF, `:expected_failure` a distinct state from `:fail` so the INV-8 containment result cannot be confused with a defect, and a missing `poppler-utils` a **skip naming the package** with `complete?` false and the headline never a bare OK. `spec/conformance/pdf_probe.rb` is now a **policy over `PdfInspector`**, not a second implementation — same mechanism, opposite policy (hard error there, skip here) — so the corpus and the operator's diagnostic cannot drift apart. **Negative-tested**: the canned single-page PDF drives every one of the six document checks red, one at a time. **Measured against real Chromium 141: 9/9 in 943 ms**, hosted image `expected_failure`. **It found nine defects in itself** — three on its first real run, five more in review, one in CI — including an `inline_asset` check that was a tautology and a missing poppler DELETING the INV-8 check rather than skipping it. See §Findings E-10 |
+| T-19 | **done** — `liquid/filters.rb` + six registered modules, `liquid/html_scanner.rb`, four new lint rules, and the examples and README fixed. **21 owned filters**, registered PER RENDER (the default of `TemplateRenderer#render`, never `Template.register_filter`), with `OWNED`/`INHERITED`/`REMOVED`/`DEFERRED` as asserted constants so a security removal cannot come back as a convenience. **`| json` and `| js`** escape `< > & \ ' " ` $` and U+2028/9, in `\uXXXX` form so the output stays valid JSON for §6's `<script type="application/json">` block. **OQ-C is closed by measurement**: `where` and `sort_natural` inherited, `sum` owned for cross-major parity, and the `StandardFilters` name list **pinned per version so an unpinned Liquid fails the build**. The FR-19 lint now **parses** rather than regexes — `HtmlScanner` walks the document's states, and its spec is the argument: a commented-out script, a `>` inside an attribute, a `>` inside a Liquid expression and `<style>` were each answered wrongly before. **E-8's two rules shipped, which was the condition the curator's decision rested on**, plus a warning for `.all` and one error per removed filter carrying §3.6's reason. **The copy-paste surface is fixed and pinned**: both examples and all 25 README snippets are FR-19-clean, the frozen reference copies are asserted STILL defective because the verification cites them, and the other findings are held at a ratchet owned by T-16/T-11. The escaping regression table asserts the assembled block **PARSES** under node — 43 examples, because a "nothing executed" test would have passed the defect. Green on Liquid **4.0.4 and 5.13.0** (276 examples each), 1433 DB-less, 187 adapter, corpus byte-identical. **It found two defects in itself** (§Findings **E-14**) and left **F-10** for the curator |
 | T-16 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -522,6 +523,54 @@ Three DB-less regression tests cover it without the engine, using `/bin/sh` stub
 `build_argv`'s contract (argv.last is the output path): a non-zero exit with a plausible PDF is a
 Success carrying the degradation, a non-zero exit with nothing usable is still a Failure, and the
 flag does not leak from one render into the next.
+
+**E-14 · the FR-19 lint answered the right question about the wrong text, twice, and both
+times because something MENTIONED a `<script>`.** Found by running T-19's own work over
+the files it had just edited.
+
+**First: a `{% comment %}` body.** The `HtmlScanner`'s first version skipped the
+`{% comment %}` TAG but not its body, so a comment explaining *why* chart data must not be
+built by string concatenation — prose containing the word `<script>` — opened a raw-text
+region that ran to the next real `</script>` several hundred lines away. The linter then
+reported **72 escaping findings in a template that had none**, every interpolation in
+between having become "inside a script". Fixed by skipping `{% comment %}` and `{% raw %}`
+bodies whole, which is also the right semantics: a comment body is not rendered, and a raw
+body is rendered literally so `{{ x }}` in it is text rather than interpolation.
+
+**Second: the README's own prose.** Linting `README.md` as one document produced **23
+findings in Markdown**, because the sentence describing this very rule contains a backticked
+`` `<script>` `` — which the scanner correctly reads as an element, because in a Markdown
+file it has no way not to. The fix is the UNIT, not the scanner: T-19's Accept list says "the
+README's own snippets", and a snippet is a fenced block. `spec/shipped_templates_lint_spec.rb`
+extracts the 25 ```liquid blocks and lints each.
+
+**Both are the same lesson and it is worth stating once.** A linter that reports findings in
+the wrong place is worse than one that misses them: the author checks the line, finds
+nothing wrong, and learns to skim. Neither of these would have been found by reading the
+scanner — they were found by pointing it at real files and disbelieving the count. The
+scanner's spec now carries a case for each.
+
+**A third, smaller one, in the spec rather than the code:** the assertion "no example builds
+a JS string by appending a quote" fired on the `{% comment %}` that QUOTES the old idiom for
+the next author. Same shape as `layer_purity.sh`'s own note — "a gate that punishes writing
+down its own rationale teaches people to delete the rationale" — so the assertion strips
+comments and says why.
+
+**F-10 · `| inline` is deferred to T-33, and the curator may want it sooner.** §3.6 lists it
+among the filters T-19 reimplements, and T-19 shipped without it. The reason is an ordering
+fact rather than a preference: `| inline` embeds asset bytes in the document, and WHICH
+mechanism it may use — `data:` URI, request upload, or refuse — is `asset_policy`, which
+**T-33** builds (§5.1: three models, one policy, `:bundled` by default). A filter that
+embeds bytes without consulting that policy is a second embedding path, and T-33's
+acceptance list explicitly requires that "an author **cannot** widen egress from template
+content". It would also be rewritten by T-33.
+
+**Nothing loses a capability by waiting**: the owned render path is not wired up, and the
+`file_url` that `| inline` replaces was never registered by this plugin — it is the vendor
+gem's, and the gem is what this plan removes. Recorded rather than decided because it is a
+scope call: if a real template needs to embed an attachment before T-33 lands, that is worth
+knowing. `Filters::DEFERRED` names the task, and a spec asserts the filter is absent so it
+cannot be added here by accident.
 
 **E-12 · `@context` belongs to `Liquid::Drop`, and a drop that stores its own there breaks
 Liquid's internals.** Found by T-18's first spec run, three frames from the cause. `RecordDrop`

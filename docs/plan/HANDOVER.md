@@ -120,6 +120,20 @@ gate knows nothing**, which must be loud. `layer_purity.sh`'s `search()` does th
 are valid so they do not fail today, but the hazard is the same shape and is worth
 closing the next time either is touched.
 
+**A LINT THAT LOCATES `<script>` WILL FIND ONE IN PROSE, and then it is confidently wrong
+about hundreds of lines.** Cost T-19 two rounds (§Findings E-14). `HtmlScanner` skipped the
+`{% comment %}` tag but not its BODY, so a comment explaining why chart data must not be
+concatenated — prose containing the word `<script>` — opened a raw-text region running to the
+next real `</script>`: **72 escaping findings in a template that had none.** And linting
+`README.md` as one document produced **23 findings in Markdown**, because the sentence
+describing the rule contains a backticked `` `<script>` ``.
+
+Two rules follow. The scanner skips `{% comment %}` and `{% raw %}` bodies (also the correct
+semantics — one is not rendered, the other is rendered literally). And **a README is linted
+per fenced snippet, never as a document** — prose talks ABOUT tags and no scanner can tell
+that from markup. Neither bug was findable by reading the scanner; both were found by
+pointing it at real files and disbelieving the count.
+
 **Every name `Liquid::Drop` uses is reserved on every subclass, and two of them have now cost a
 session each.** `key?` (E-8) made every accessor on `NamedRefDrop` render EMPTY, because Liquid's
 `VariableLookup` asks `respond_to?(:key?)` to decide whether a value is hash-like. `@context`
@@ -361,6 +375,9 @@ record as of the last local run.
 | **T-18: the drop layer, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | 185 examples green under each major, run the way CI runs them (`rspec -r /tmp/pin.rb spec_liquid`). Includes the substitutability battery against `VersionDrop` as well as `NamedRefDrop`, and both E-8 gaps pinned as they are |
 | **T-18: the gating performance criteria, PostgreSQL 16** | **yes, locally (2026-08-06)** | 31 adapter examples, 0 failures. Zero `Issue` instantiations at 10 and 10 000; one query for `size` at both; a custom field across 400 issues in 4 queries and a second for free; the cap AT and one past. The full adapter suite is **187 examples, 0 failures** with the harness's new `attachments` table and `Issue.visible`/`TimeEntry.visible` scopes, and the **corpus is unmoved — 217 examples, all 176 recorded values identical** |
 | **T-18 in CI (run 31085742725)** | **YES — 18 of 18 green, first try** | Both things the local run could not answer are answered. `adapter (MySQL 8.0)` and `adapter (MariaDB 11)` green, so the batch's four visibility-filtered queries behave on all three engines. **All four `minitest` branches green** — 5.1, 6.0, 6.1 and 7.0 — which is the real answer to the Zeitwerk question in §1: `liquid/drops/` boots on every supported Redmine. All three `corpus` jobs green, so G7 holds across the harness change |
+| **T-19: the filters and the lint, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | 276 examples green under each major. Includes the `StandardFilters` enumeration (49 names on 4.0.4, 61 on 5.13.0, pinned per version), the 21-filter inventory, and the OQ-C measurement that closed it |
+| **T-19: the escaping regression table, node v22** | **yes, locally (2026-08-06)** | 43 examples. 18 payloads through `| json`, each asserted to PARSE and to round-trip byte-for-byte; the OLD idiom pinned as measured — SyntaxError on a backslash terminator, and no payload reaching code position. **One assertion in it was wrong on the first run** and is now written from what the output actually is: the combined payload PARSES, because `| escape` turns its quotes into `&#39;` and `\&` is an identity escape. Two payload shapes, two outcomes |
+| **T-19: the shipped copy-paste surface** | **yes, locally (2026-08-06)** | Both examples and all 25 README ```liquid snippets are FR-19-clean; the frozen reference copies asserted STILL defective, because `verification-liquid-js-escaping.md` cites their line numbers. 1433 DB-less examples, 187 adapter, corpus **byte-identical — 217 examples, all 176 values unchanged** |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -448,6 +465,42 @@ of a CI that runs on fork pull requests.
    Next after T-13 was **T-14**, now done — see entry 11. **T-15** (render-path containment) is
    partly done and blocked on an entry point (§Findings E-6). **T-33** (the asset-resolution triple)
    depends on T-12 and is likewise open.
+
+13. **T-19 is done — the owned filters and the FR-19 lint.** `liquid/filters.rb` plus six
+   registered modules, `liquid/html_scanner.rb`, four new lint rules, and the examples and
+   README actually fixed. Five things a later session should know.
+
+   **REGISTRATION IS THE POINT, not the filter list.** `Filters.modules` is the DEFAULT of
+   `TemplateRenderer#render`, and nothing anywhere calls `Template.register_filter` —
+   `single_parse.sh` fails on one. The gem registers four modules globally at require time
+   and monkey-patches `to_number` into `StandardFilters`; a spec asserts both are absent,
+   because that is a property of the whole process and no care inside this plugin would
+   restore it.
+
+   **OQ-C IS CLOSED BY MEASUREMENT.** `where` and `sort_natural` are INHERITED — identical
+   on both majors and already working on the drops, because Liquid's `where` reads through
+   `Drop#[]`. `sum` is OWNED, because only Liquid 5 has one and a plugin supporting both
+   majors cannot leave that divergence in place; it reproduces Liquid 5's semantics
+   exactly, which is why it differs from its four neighbours on how it treats non-numbers.
+   **The `StandardFilters` list is pinned per version and an unpinned Liquid FAILS** — that
+   is the whole mechanism, and Liquid 5 added twelve filters since 4.0.4 without anybody
+   choosing them.
+
+   **`Support.read` GOES THROUGH `Drop#[]` AND NOTHING ELSE.** Never `send`, never
+   `public_send`. §3.6 removes the gem's `call_method` as "the sharpest single instance of
+   INV-9", and a filter resolving a property with `public_send` would reintroduce it one
+   property name at a time — `avg: "estimated_hours"` and `avg: "destroy"` are the same
+   call. A spec asserts the drop is never sent to.
+
+   **THE LINT PARSES, AND ITS SPEC IS THE ARGUMENT.** See the trap in §1: the scanner cost
+   two rounds. Every example in `spec/html_scanner_spec.rb` is a case the regexp it replaced
+   got wrong, and the two hardest were prose mentioning `<script>`.
+
+   **WHAT IS DEFERRED, AND WHAT IS HELD AT A RATCHET.** `| inline` is **F-10** and belongs to
+   T-33 (`asset_policy`). The examples' Chart.js 2 idioms and `window.status` handshake are
+   **not** fixed — they belong to T-16 and T-11, which rewrite that code — so
+   `spec/shipped_templates_lint_spec.rb` pins FR-19 at ZERO and the rest at a per-file
+   ratchet. Lower those numbers when their owner lands; never raise one.
 
 12. **T-18 is done — the owned drop layer.** `liquid/drops/` (12 classes + 3 bases),
    `liquid/batch.rb`, `liquid/diagnostics.rb`, and `RenderContext` grown a `batch`, a

@@ -36,8 +36,11 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
       # Every message names the replacement or the reason. A finding an author cannot
       # act on is a finding they learn to ignore.
       described_class.rules.each do |rule|
+        # ONE LINE, no `/x`. The extended flag strips insignificant whitespace, which
+        # turns `write the` into `writethe` and silently stops matching — found the
+        # hard way while adding the last four alternatives.
         expect(rule.message).to match(
-          /v3|v4|owned|engine|document request|json|js|chart layer|readiness|replaced|vendors/i
+          /v3|v4|owned|engine|document request|json|js|chart layer|readiness|replaced|vendors|write the|ask the|use the|not provided by/i
         ), "#{rule.id}'s message offers no way forward"
       end
     end
@@ -309,14 +312,19 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
       expect(usage[group]['issue.target_version']).to eq(1)
     end
 
-    it 'counts jsonify as gem usage rather than as an escaping finding' do
+    it 'counts jsonify as gem usage AND now flags it as a removed filter' do
       analysis = described_class.analyse(script('var a = {{ x | jsonify }};'))
       group = analysis.usage.keys.find { |key| key.include?('gem filters') }
 
-      # It escapes correctly, so it is NOT a finding...
-      expect(analysis.findings.map(&:rule)).to eq(['script.unfiltered_interpolation'])
-      # ...but it is gem-coupled, so it IS counted. (The finding above is honest: the
-      # linter accepts only `json`/`js`, and a template must move off `jsonify` too.)
+      # T-19 added the second finding, and this example used to assert its absence.
+      # The behaviour moved for a stated reason rather than by accident: `jsonify`
+      # escapes correctly — it was never an ESCAPING defect, and it still is not — but
+      # `Filters::REMOVED` drops it as gem-coupled, so a template using it will stop
+      # working when the vendor gem goes. Telling the author now is the whole job.
+      expect(analysis.findings.map(&:rule))
+        .to eq(%w[filter.removed_jsonify script.unfiltered_interpolation])
+      # Still counted as usage as well, which is a different question: findings are
+      # what breaks, usage is what the migration has to reproduce.
       expect(analysis.usage[group]['jsonify']).to eq(1)
     end
   end
@@ -386,11 +394,20 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
       expect(described_class.analyse(nil).findings).to eq([])
     end
 
-    it 'does not hang on an unterminated script element' do
-      # No closing tag: the region regex simply does not match, so nothing inside is
-      # script-scoped. Asserted because the alternative — a scanner that loops — is
-      # the failure mode a timeout hides.
-      expect(described_class.lint('<script>var a = "{{ x }}";').map(&:rule)).to eq([])
+    # T-19 CHANGED THE ANSWER HERE, and the change is the point rather than a
+    # casualty. The regexp this rule used to run on needed a closing tag to match at
+    # all, so an unterminated `<script>` was linted as if it contained nothing. A
+    # browser does not agree: raw text runs to end-of-file, so that interpolation is
+    # live script content and the unescaped value in it is a real finding.
+    #
+    # The example's original purpose — the scanner TERMINATES rather than looping —
+    # still holds and is still what the timeout would have hidden. So it now asserts
+    # both: the call returns, and it returns the finding that is actually there.
+    it 'does not hang on an unterminated script element, and still lints its content' do
+      found = described_class.lint('<script>var a = "{{ x }}";')
+
+      expect(found.map(&:rule)).to eq(['script.unfiltered_interpolation'])
+      expect(found.first.line).to eq(1)
     end
   end
 

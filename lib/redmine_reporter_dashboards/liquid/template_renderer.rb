@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'execution_policy'
+require_relative 'filters'
 require_relative 'render_context'
 
 module RedmineReporterDashboards
@@ -126,8 +127,21 @@ module RedmineReporterDashboards
       # (a covering page, a preview of static markup) — NOT because the actor is
       # optional when there is a scope. INV-1 is enforced by RenderContext's own
       # constructor, which is where it belongs.
-      def render(source, assigns: {}, registers: {}, filters: [], render_context: nil,
-                 correlation_id: nil)
+      #
+      # `filters:` DEFAULTS TO THE OWNED SET, and defaults rather than registers globally.
+      #
+      # The vendor gem registers four filter modules at require time and monkey-patches
+      # `Liquid::StandardFilters`; the base plugin does the same. Every Liquid template in
+      # the process then gains 55 filters nobody asked for, one of which invokes an
+      # arbitrary named method on an arbitrary object. `Context#add_filters` is the
+      # per-render channel, this is the only place it is called, and
+      # `script/gates/single_parse.sh` fails on a global `register_filter` anywhere in the
+      # repository — so "per-render" is a property of the code rather than of a promise.
+      #
+      # A caller wanting extra filters passes `Filters.modules + [mine]`. A caller wanting
+      # NONE passes `[]`, which is what the spec proving the scoping does.
+      def render(source, assigns: {}, registers: {}, filters: Filters.modules,
+                 render_context: nil, correlation_id: nil)
         budget = policy.budget
         started = monotonic_ms
 

@@ -425,8 +425,20 @@ rather than being carried forward as a hedge nobody re-audits.
 
 ### 3.6 Filters — 55 gem + 12 reporter → ~28 owned
 
+> **OQ-C is CLOSED (2026-08-06, measured in T-19) and it changes this list.** `where` and
+> `sort_natural` are **inherited** — provided identically by 4.0.4 and 5.13.0 and already
+> working on the owned drops. `sum` is **owned** because only 5.x has it. `| inline` is
+> **deferred to T-33**, which owns `asset_policy`: a filter that embeds asset bytes without
+> consulting that policy is the "an author widens egress by editing a document" shape T-33's
+> acceptance list forbids, and it would be rewritten by T-33 anyway. That leaves **21 owned
+> filters**, held as `Liquid::Filters::OWNED` and asserted by spec, with `INHERITED`,
+> `REMOVED` and `DEFERRED` beside it carrying the reason for each. §Findings **F-10**.
+>
+> `replace_all` needs no code: §3.6 gives it as the replacement for the removed
+> `regex_replace`, and Liquid's own `replace` already replaces all.
+
 **Reimplement:** `avg median min max sum` (property forms; **subtract whatever Liquid 5's
-`StandardFilters` already provides** — `[OQ-C]`), `currency duration wiki hex_color
+`StandardFilters` already provides** — ~~`[OQ-C]`~~ closed, see above), `currency duration wiki hex_color
 contrasting_text_color darken lighten group_by group_by_custom_field where where_custom_field
 custom_field custom_field_by_id custom_fields sort_natural utc`, **`json`**, **`js`**, **`inline`**.
 
@@ -1292,7 +1304,7 @@ sidebar. Neither is load-bearing for phases 0–2.
 |---|---|---|
 | ~~**OQ-A**~~ | **CLOSED 2026-08-04 by measurement — claim REFUTED.** It does not break: Rails 6.1, 7.2 and 8.1 all round-trip it to byte-identical YAML. 6.1's signature is `serialize(attr_name, class_name_or_coder = Object, **options)`, so `coder:` is silently discarded and the `Object` default selects YAML anyway. `reporter_project_tab.rb:9-10` is **not** a defect and the 5.1 support claim stands. The shim is still wanted, for the inverse risk: a non-YAML coder would be silently ignored on 6.1. Evidence: `reference/verification-oq-a-serialize-oq-b-liquid.md` | §8 |
 | ~~**OQ-B**~~ | **CLOSED 2026-08-04 by measurement — claim REFUTED, and the consequence inverts.** It parses *and* resolves on Liquid 4.0.4 and 5.13.0, in all three error modes, bare, inside `{% if %}` and through a filter. The lexer allows a trailing `?` explicitly: `VariableParser = /…|#{VariableSegment}+\?\?/`. So the five `?` accessors were **always reachable** — live surface, not dead — and §3.2's aliases are a **backward-compatibility requirement**, not a courtesy. Evidence: `reference/verification-oq-a-serialize-oq-b-liquid.md` | §3.2 |
-| **OQ-C** | The exact `Liquid::StandardFilters` set in the pinned version — subtract before reimplementing | §3.6 |
+| ~~**OQ-C**~~ | **CLOSED 2026-08-06 by measurement, in T-19.** Enumerated on both majors: 4.0.4 provides **49** filters, 5.13.0 provides **61**. Of §3.6's list, `where` and `sort_natural` are provided by BOTH, behave identically, and already work on the owned drops (Liquid's `where` reads through `Drop#[]`) — so they are **inherited, not reimplemented**. `sum` is provided by **5.x only**, which is a cross-major divergence a plugin supporting both cannot leave in place, so it **is** owned and reproduces Liquid 5's semantics exactly. Everything else on the list is absent from both. `spec_liquid/filters_spec.rb` **pins the full name list per version and FAILS on an unpinned one**, so a `bundle update` that adds a filter is a decision rather than a silent capability grant — Liquid 5 added twelve since 4.0.4, every one of which became template surface without anybody choosing it | §3.6 |
 | **OQ-D** | Liquid floor `>= 5.5` or `>= 5.6` (`Liquid::Environment` for scoped **tag** registration) | §4 |
 | **OQ-E** | Redmine 7.0's asset pipeline | §6 (design does not depend on it) |
 | **OQ-F** | `template_authoring` default — `:project_managers` upgraded, `:admins_only` new? | §4 |

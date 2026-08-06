@@ -573,13 +573,13 @@ Total: {{ by_dept.total }}{% if by_dept.truncated %} (long tail grouped){% endif
 new Chart(document.getElementById('deptChart').getContext('2d'), {
   type: 'bar',
   data: {
-    labels: [{% for row in xtab.rows %}"{{ row.label | escape }}"{% unless forloop.last %},{% endunless %}{% endfor %}],
+    labels: [{% for row in xtab.rows %}{{ row.label | json }}{% unless forloop.last %},{% endunless %}{% endfor %}],
     datasets: [
       {% for name in xtab.series %}
       {
-        label: "{{ name | escape }}",
-        backgroundColor: ['#4e79a7', '#e15759', '#59a14f'][{{ forloop.index0 }} % 3],
-        data: [{% for row in xtab.rows %}{{ row.cells[name] }}{% unless forloop.last %},{% endunless %}{% endfor %}]
+        label: {{ name | json }},
+        backgroundColor: ['#4e79a7', '#e15759', '#59a14f'][{{ forloop.index0 | json }} % 3],
+        data: [{% for row in xtab.rows %}{{ row.cells[name] | json }}{% unless forloop.last %},{% endunless %}{% endfor %}]
       }{% unless forloop.last %},{% endunless %}
       {% endfor %}
     ]
@@ -1032,8 +1032,8 @@ of small queries) and no query at all per element. It runs no extra aggregation.
 <canvas id="chart_xt" width="600" height="300"></canvas>
 <script>
 (function(){
-  var labels = [{% for r in xt.rows %}"{{ r.label | escape }}"{% unless forloop.last %},{% endunless %}{% endfor %}];
-  var urls   = [{% for row in xt.cell_urls %}[{% for u in row %}{% if u %}"{{ u }}"{% else %}null{% endif %}{% unless forloop.last %},{% endunless %}{% endfor %}]{% unless forloop.last %},{% endunless %}{% endfor %}];
+  var labels = [{% for r in xt.rows %}{{ r.label | json }}{% unless forloop.last %},{% endunless %}{% endfor %}];
+  var urls   = [{% for row in xt.cell_urls %}[{% for u in row %}{% if u %}{{ u | json }}{% else %}null{% endif %}{% unless forloop.last %},{% endunless %}{% endfor %}]{% unless forloop.last %},{% endunless %}{% endfor %}];
 
   // Same shape as openFrom() in the "Version overview" template, one dimension deeper.
   function openCell(urlGrid, chart, evt){
@@ -1051,8 +1051,8 @@ of small queries) and no query at all per element. It runs no extra aggregation.
       labels: labels,
       datasets: [
         {% for s in xt.series_entries %}
-        { label: "{{ s.label | escape }}",
-          data: [{% for r in xt.rows %}{{ r.cells[s.label] }}{% unless forloop.last %},{% endunless %}{% endfor %}] }{% unless forloop.last %},{% endunless %}
+        { label: {{ s.label | json }},
+          data: [{% for r in xt.rows %}{{ r.cells[s.label] | json }}{% unless forloop.last %},{% endunless %}{% endfor %}] }{% unless forloop.last %},{% endunless %}
         {% endfor %}
       ]
     },
@@ -1070,7 +1070,7 @@ into one array and reuse `openFrom(urls, this, e)` exactly as the version
 dashboard does:
 
 ```liquid
-var urls = [{% for b in by_dept.buckets %}{% if b.url %}"{{ b.url }}"{% else %}null{% endif %}{% unless forloop.last %},{% endunless %}{% endfor %}];
+var urls = [{% for b in by_dept.buckets %}{% if b.url %}{{ b.url | json }}{% else %}null{% endif %}{% unless forloop.last %},{% endunless %}{% endfor %}];
 ```
 
 **A `<canvas>` is a raster in an exported PDF: `onClick` works on screen only.**

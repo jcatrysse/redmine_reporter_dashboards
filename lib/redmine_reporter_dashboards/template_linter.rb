@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'liquid/html_scanner'
+require_relative 'liquid/filters'
+
 module RedmineReporterDashboards
   # Reads a stored template body and says two different things about it.
   #
@@ -77,7 +80,13 @@ module RedmineReporterDashboards
                       keyword_init: true)
 
     SEVERITIES = %i[error warning].freeze
-    SCOPES     = %i[body script].freeze
+
+    # `:liquid` joined :body and :script in T-19. A rule about a Liquid IDIOM — a
+    # reversed comparison, `| size` on a reference, `.all` on a collection — must not
+    # match the same text sitting in prose or in a JS comment, and the only way to say
+    # that is to search inside `{{ … }}` / `{% … %}` and nowhere else. Same discipline as
+    # the :script rules, one construct further in.
+    SCOPES = %i[body script liquid].freeze
 
     # One line of context, at most this many characters. A finding is a pointer, not
     # a copy of the template.
@@ -204,7 +213,73 @@ module RedmineReporterDashboards
                         'the whole block — the chart silently disappears and every later ' \
                         'statement in that block is lost').freeze
 
-    PATTERN_RULES = (CHARTJS_RULES + HANDSHAKE_RULES + ENGINE_RULES).freeze
+    # §Findings E-8, and these two are NOT optional. The curator's decision on
+    # 2026-08-06 was to keep `NamedRefDrop` as a `Liquid::Drop` rather than make it a
+    # String subclass — which keeps `{{ status.id }}` and `{{ status.url }}` and keeps the
+    # path that dissolves `{% geo_version_map %}`'s 295 lines. The decision COSTS two
+    # idioms, both measured, and it was taken *on condition that the linter flags them*:
+    #
+    #   "Without those two rules the decision is only half taken: a template that uses
+    #    either one gets a silently wrong branch instead of an error, and the whole reason
+    #    for choosing the Drop was that a visible authoring error beats a silent wrong
+    #    answer. Whoever builds T-19 should treat these as acceptance criteria for T-19,
+    #    not as a nice-to-have inherited from another task."
+    #
+    # So they are here, they are :error, and each one names the working spelling — a rule
+    # that says "this is wrong" without saying "write this instead" costs the author the
+    # same afternoon the finding was meant to save.
+    LIQUID_IDIOM_RULES = [
+      Rule.new(id: 'liquid.reversed_comparison', severity: :error, scope: :liquid,
+               pattern: /\A\{%-?\s*(?:if|elsif|unless)\s+(?:"[^"]*"|'[^']*')\s*(?:==|!=)/,
+               message: 'a literal on the LEFT of a comparison against a reference is ' \
+                        'always false. Ruby asks the left operand, so this is ' \
+                        '`String#==(drop)`, which answers false for anything that is not ' \
+                        'a String. Write the reference first: `issue.status == "Closed"`. ' \
+                        'Measured, §Findings E-8'),
+
+      # Scoped to the five accessors that ARE references, rather than to every `| size`.
+      # `{{ issue.subject | size }}` is correct and common; flagging it would be a false
+      # positive on the most ordinary expression in any template.
+      Rule.new(id: 'liquid.size_on_reference', severity: :error, scope: :liquid,
+               pattern: /\.(?:status|tracker|priority|category|version|target_version)\s*\|\s*size\b/,
+               message: '`| size` asks the OBJECT for its size, and a reference drop has ' \
+                        'none — it answers 0 where the string it replaced answered its ' \
+                        'length. Ask the name: `issue.status.name | size`. Measured, ' \
+                        '§Findings E-8'),
+
+      # §3.2: "A template calling it gets a parse-time lint warning and a render-time
+      # Degradation(:unbounded_collection)." This is the parse-time half; the drop layer
+      # ships the other.
+      Rule.new(id: 'liquid.collection_all', severity: :warning, scope: :liquid,
+               pattern: /\.all\s*(?:\||%\}|\}\})/,
+               message: '`all` is not implemented on a collection: it builds one object ' \
+                        'per record however many there are, which is the materialisation ' \
+                        'the aggregator exists to avoid. Use the collection directly in a ' \
+                        '`{% for %}`, or an aggregate. At render time this produces ' \
+                        'Degradation(:unbounded_collection) and no value')
+    ].freeze
+
+    # A filter this layer removed ON PURPOSE, with the reason. Built from
+    # `Liquid::Filters::LINTABLE_REMOVED`, which is the subset Liquid itself does NOT
+    # provide — flagging `| round` (a Liquid-core duplicate, still perfectly valid) would
+    # be the worst kind of false positive, and that list exists to prevent it.
+    #
+    # The message carries §3.6's stated reason rather than "unknown filter", because an
+    # author who wrote `| md5` needs to know it was taken away and why, not that it was
+    # never there.
+    REMOVED_FILTER_RULES = Liquid::Filters::LINTABLE_REMOVED.map do |name|
+      reason = Liquid::Filters::REMOVED[name]
+      # `filter.removed_<name>`, two segments, because that is this file's id convention
+      # and a spec asserts it. One rule per filter rather than one rule with a union
+      # pattern: the whole value of the finding is the SPECIFIC reason §3.6 gives, and a
+      # shared message could only say "some removed filter".
+      Rule.new(id: "filter.removed_#{name}", severity: :error, scope: :liquid,
+               pattern: /\|\s*#{Regexp.escape(name)}\b/,
+               message: "`| #{name}` is not provided by this plugin's filter set: #{reason}")
+    end.freeze
+
+    PATTERN_RULES = (CHARTJS_RULES + HANDSHAKE_RULES + ENGINE_RULES +
+                     LIQUID_IDIOM_RULES + REMOVED_FILTER_RULES).freeze
     RULES         = (PATTERN_RULES + [SCRIPT_INTERPOLATION_RULE]).freeze
 
     # The filters that make an interpolation safe inside <script>.
@@ -341,7 +416,11 @@ module RedmineReporterDashboards
       end
 
       def pattern_findings(text, scripts, rule)
-        regions = rule.scope == :script ? scripts : [[0, text]]
+        regions = case rule.scope
+                  when :script then scripts
+                  when :liquid then liquid_regions_with_offsets(text)
+                  else [[0, text]]
+                  end
 
         regions.flat_map do |region_offset, region|
           next [] if rule.suppressed_by && rule.suppressed_by.match?(region)
@@ -432,10 +511,27 @@ module RedmineReporterDashboards
       # `to_enum(:scan, …)`: `$~` is frame-local, so reading it from inside an
       # enumerator block is an idiom that works by accident. `Regexp#match(str, pos)`
       # returns the MatchData directly and cannot be confused by a nested scan.
+      # PARSED, NOT MATCHED — T-19's acceptance list requires it, and the reason is that
+      # the rule this feeds is the one the security review ranked highest. Getting "where
+      # is the script" wrong means answering the right question about the wrong text.
+      #
+      # `Liquid::HtmlScanner` walks the document's states once. What that buys over the
+      # regexp this replaced, each with a spec: a commented-out `<script>` is not code, a
+      # `>` inside an attribute value does not end the tag, a `>` inside a Liquid
+      # expression is not markup, and `<style>` is raw text but is not script. The first
+      # two produced WRONG findings rather than missing ones, and a linter that cries wolf
+      # is a linter somebody switches off.
       def script_regions(text)
-        each_match(text, %r{<script\b[^>]*>(.*?)</script\s*>}mi).map do |match|
-          [match.begin(1), match[1]]
+        Liquid::HtmlScanner.new(text).script_regions.map do |region|
+          [region.content_offset, region.content]
         end
+      end
+
+      # `{{ … }}` and `{% … %}` WITH their offsets, so a :liquid rule reports a real line.
+      # `liquid_regions` below drops the offsets because `usage_for` only counts; a
+      # finding needs somewhere to point.
+      def liquid_regions_with_offsets(text)
+        each_match(text, /\{\{.*?\}\}|\{%.*?%\}/m).map { |match| [match.begin(0), match[0]] }
       end
 
       def each_match(text, pattern)

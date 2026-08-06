@@ -6,6 +6,43 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **A `| json` filter, and the chart snippets in this README now use it.** This is a fix
+  to a real defect in the documented way of building a chart, and it is worth reading
+  even if you never touch the filter.
+
+  The idiom the README and both shipped examples used — `"{{ label | escape }}"` inside a
+  `<script>` — does not escape a backslash. `escape` is HTML escaping; a backslash is not
+  in its character set. So a **version name or custom-field value ending in `\`** broke
+  the JavaScript string it was sitting in, and the whole `<script>` block then failed to
+  parse: the chart silently vanished, its drill-through links went with it, and nothing
+  appeared in any log. One awkwardly-named version was enough, and any project member
+  could create one.
+
+  It was tested rather than assumed: 2 940 crafted values, none of which managed to run
+  code, so this is a **broken report rather than a security hole** — but it is one payload
+  shape away from being both, and the defence was accidental. `| json` closes the class:
+  it escapes quotes, backslashes, `<`, `>`, `&` and the two Unicode line separators, and
+  it writes the surrounding brackets and quotes itself so an author cannot forget them.
+
+  - **Every chart snippet in the README and both shipped example templates now use it.**
+    If you copied one of those snippets, that is where to look; the templates in
+    `examples/` show the shape.
+  - **The template linter now flags the old idiom**, and it locates `<script>` blocks by
+    parsing the document rather than pattern-matching it — so a commented-out block, or a
+    `>` inside an attribute or a Liquid expression, no longer produce findings in the
+    wrong place.
+  - It also flags three more mistakes it can now recognise: `{% if "Closed" == issue.status %}`
+    (a literal on the left is always false — Ruby asks the left operand), `{{ issue.status | size }}`
+    (asks the object, not the name), and `.all` on a collection.
+  - **21 filters** in total, registered **only for this plugin's own renders**. The vendor
+    gem registers its 55 globally at load time and patches Liquid itself, which affects
+    every other plugin in the same Redmine; this one does not.
+  - Not provided, each for a stated reason: `call_method` (invokes any named method on any
+    object from inside a template), `regex_replace` (a template-supplied regular
+    expression is a denial-of-service primitive), `md5` (existed to mint the unexpiring
+    share token), `file_url` (a permanent unauthenticated link to a file), and `random` /
+    `shuffle` (a report may be an audit record).
+
 - **An owned Liquid drop layer, so report templates stop depending on the vendor gem's.**
   Nothing user-facing changes yet — nothing constructs one of these drops until the
   filters and the template surface land, and the existing `issue.target_version` and

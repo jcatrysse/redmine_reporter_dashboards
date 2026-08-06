@@ -133,18 +133,41 @@ table.vers a { color:#2f4b7c; text-decoration:none; border-bottom:1px solid #cbd
 </table>
 
 {% comment %} Build the chart arrays from the SQL breakdown (no per-issue loop). {% endcomment %}
+{% comment %}
+  Chart data is accumulated as a SEPARATOR-JOINED LIST and emitted with `| json`, never
+  as a hand-built JavaScript array literal.
+
+  What was here before was `append: "'" | append: safe | append: "',"` — a JS array
+  built by string concatenation, with quotes stripped from the value to keep it inside
+  its own string. `reference/verification-liquid-js-escaping.md` measured what that
+  costs: `| escape` and a `replace` chain both let a BACKSLASH through, a version name
+  or custom-field value ending in one breaks the surrounding token, and the whole
+  `<script>` block then dies with a SyntaxError — the chart silently disappears and
+  every later statement in the block is lost. 0 of 2 940 payloads executed, so it is a
+  denial of rendering rather than an XSS, and the defence was accidental: stripping
+  quotes happens to remove the attacker's way of re-synchronising the parse.
+
+  `| json` closes the class rather than one instance of it: it escapes quotes,
+  backslashes, `<`, `>`, `&` and U+2028/9, and it emits the brackets itself.
+
+  The separator is stripped from every value on the way in, so a value containing it
+  cannot mis-split the list. That is why this is a `replace` and not a comment.
+{% endcomment %}
+{% assign sep = '~|~' %}
 {% assign chart_labels = '' %}
 {% assign chart_values = '' %}
 {% for bucket in by_status.buckets %}
-  {% assign safe = bucket.label | replace: "'", '' | replace: '"', '' %}
-  {% assign chart_labels = chart_labels | append: "'" | append: safe | append: "'," %}
-  {% assign chart_values = chart_values | append: bucket.count | append: ',' %}
+  {% assign clean = bucket.label | replace: sep, '/' %}
+  {% assign chart_labels = chart_labels | append: clean | append: sep %}
+  {% assign chart_values = chart_values | append: bucket.count | append: sep %}
 {% endfor %}
 
 <script>
 (function(){
-  var labels = [{{ chart_labels }}];
-  var values = [{{ chart_values }}];
+  var labels = {{ chart_labels | split: sep | json }};
+  // `split` yields strings; a chart axis wants numbers, and coercing here is one
+  // readable step rather than a filter that would have to guess which lists are numeric.
+  var values = {{ chart_values | split: sep | json }}.map(Number);
   function draw(){
     var el = document.getElementById('status_chart');
     if (!el || !window.Chart || !labels.length) { return; }
