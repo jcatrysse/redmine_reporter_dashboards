@@ -724,6 +724,17 @@ jobs:
           RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
         run: rspec spec/conformance --format documentation
 
+      # T-15's containment assertions, which need a real browser and assert on the
+      # PROCESS TABLE rather than on a return value. A timeout that answers on time
+      # while the browser keeps burning CPU passes every ordinary test and is the
+      # 504-with-a-burning-worker failure; the only symptom is a host that gets slower
+      # every time somebody exports a broken template.
+      - name: Render-path containment
+        env:
+          RRD_CONFORMANCE: '1'
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+        run: rspec spec/render --format documentation
+
       # G9. Regenerating and diffing rather than trusting the spec's own comparison,
       # so the failure output is the diff itself — a reviewer should be able to see
       # WHICH cell moved without re-running anything.

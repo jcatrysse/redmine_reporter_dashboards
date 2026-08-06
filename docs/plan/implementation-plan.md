@@ -64,7 +64,8 @@ fact that CI has not yet run on this work at all.
 | T-11 | **done** — `render/readiness.rb` and `assets/javascripts/chart_shell.js`: one DOM contract (`window.__rd` with `pending/ready/begin/end/fail`, plus `data-rd-ready` and `window.status`, all set at the same instant), an in-page watchdog firing BEFORE the engine timeout, `Degradation(:readiness_timeout, pending: n)` unless `strict`, and `begin`/`end` owned by the shell. The JS is **executed in node**, not mocked. **F-7 IS CLOSED**: the wall-clock falsifier runs through the real Chromium adapter as conformance fixture `F-13`, 3 of 3 attempts inside 5.9–12 s with the post-readiness marker present, alongside five more (`F-08`…`F-12`) covering the chart-free case, three finishing charts, the page watchdog, the engine timeout and `strict` |
 | T-12 | **done** — `spec/conformance/`: 20 fixtures, the harness that applies the three-state rule (G12), the generator that turns a run into `docs/engine-support-matrix.md` (G9), `config/capabilities.yml` (DoR-5) with `Render::EngineCatalogue` validating it, and the `render-smoke` CI job. **Negative-tested**: 23 DB-less examples drive the harness with engines that decline capabilities, that DECLARE one and do not deliver it, that return bytes which are not a PDF, and that raise. Probes are `pdfinfo`/`pdftotext`/`pdftoppm`, and a missing one is an ERROR rather than a skip |
 | T-13 | **done for `:chromium_cdp`, written-but-unrun for `:wkhtmltopdf`** — `render/engines/{cdp_client,chromium_cdp,wkhtmltopdf}.rb` and `render/process_pool.rb`; `pdf_polyfills.rb` → `glue/legacy/wk_legacy_shims.rb` with the payload asserted byte-identical. CDP over a **pipe, not a port**; `--no-sandbox` never set (so the browser itself enforces non-root); pool of 1 with a bounded queue answering `Failure(:engine_unavailable)`. **20 of 20 conformance fixtures green on Chromium 141.** wkhtmltopdf is registered and has **never been executed** — its package is gone from Ubuntu 24.04 — so it stays `verification: pending` and the matrix prints "not verified" rather than cells nobody measured. **The corpus found three defects on its first run** — see §Findings E-2, E-3, E-4 |
-| T-14 onward | not started |
+| T-15 | **partly done** — `render/batch_guard.rb` plus `spec/render/chromium_containment_spec.rb`. The cap OWNS the render loop rather than sitting beside it, so "refuse before any render" is a property of the object and not of the caller's discipline; asserted with a double that counts calls (**zero** over the cap), at the cap and one past it. Batch deadline keeps what is finished and refuses the rest, typed, with each undrawn document's own correlation id. Against a real browser: a wedged renderer times out bounded-and-monotonic **and the browser is gone from the process table**, the next render is served from a fresh one, shutdown leaves nothing behind, and concurrency never exceeds one browser. **Two Accept items are blocked on an entry point that does not exist** — see §Findings E-6 |
+| T-14, T-16 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -359,6 +360,32 @@ with non-breaking spaces in the literal segments. The rewrite exposed a second d
 asked about: slot text was being interpolated into that document **raw**, so an unescaped `<` from a
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
+
+**E-6 · T-15's two app-layer assertions have no caller to make them against, and inventing one
+would be another task's work.** T-15's `Accept:` list is written for an HTTP entry point: a **422**
+whose message names the cap, and `assert_no_difference` on **both** `Attachment.count` and
+`Journal.count`. Neither can be written today, and the reason is a fact about the tree rather than a
+choice:
+
+**The only PDF entry point in the plugin is `reporter_project_pages_controller#report_pdf`, and it
+404s standalone.** It resolves a reporter report template, so on an install without the base plugin
+— which is the configuration CI runs and the one this project exists to reach — the action declines
+before it renders anything. There is nothing there to refuse a batch from, and no attachment for an
+`assert_no_difference` to count. The owned entry point arrives with **T-23** (template CRUD and
+preview) and the owned attachment write with **T-30** (failure reports).
+
+What was built instead is the half that is real now: the cap and the deadline as a `BatchGuard` that
+cannot be bypassed, and the containment properties asserted **against a live browser and the process
+table**. What is owed, precisely, so it is not mistaken for done:
+
+* the 422 itself — status, and a message naming the cap and the count, from a controller;
+* `assert_no_difference` on `Attachment.count` and `Journal.count` across a failed render;
+* **streamed archives with no `Content-Length`**, which is entirely an HTTP concern — a zip built in
+  `render/` would be the layer violation `layer_purity.sh` exists to catch, and building it anywhere
+  else means building the controller that serves it.
+
+Whoever picks up T-23 or T-30 should finish T-15 in the same PR rather than after it. A cap with no
+caller is a cap nobody has seen refuse anything.
 
 **E-5 · wkhtmltopdf's first CI run, and TWO DIFFERENCES THE CLOSED VOCABULARY CANNOT SAY.
 CURATOR DECISION NEEDED.** CI run 31059574558 executed the corpus against wkhtmltopdf for the first
