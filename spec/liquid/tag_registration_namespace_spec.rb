@@ -4,8 +4,9 @@ require_relative '../spec_helper'
 
 # Regression guard for a subtle constant-shadowing bug.
 #
-# This plugin defines a RedmineReporterDashboards::Liquid namespace (VersionDrop).
-# Inside `module RedmineReporterDashboards`, a *bare* `Liquid` constant therefore
+# This plugin defines a RedmineReporterDashboards::Liquid namespace (the owned drop
+# layer, the renderer, the filters). Inside `module RedmineReporterDashboards`, a *bare*
+# `Liquid` constant therefore
 # resolves to RedmineReporterDashboards::Liquid — NOT the top-level Liquid gem.
 # When the tag registration used a bare `Liquid`, the guard
 # `return unless defined?(Liquid::Tag)` silently returned early and the

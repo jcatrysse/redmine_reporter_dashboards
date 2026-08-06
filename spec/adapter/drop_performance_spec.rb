@@ -135,9 +135,9 @@ else
 
     # `Setting` is Redmine's, and this process has no Redmine. Two keys, stubbed per
     # example rather than defined globally: this file is LOADED (and skipped) by the
-    # DB-less `rspec spec` run too, and `spec/liquid/version_drop_spec.rb` stubs the same
-    # constant there. A permanent definition here would silently change what that spec
-    # is testing against.
+    # DB-less `rspec spec` run too, and other specs there define the same constant —
+    # `spec/sql_aggregation/liquid_version_rollup_tag_spec.rb` is the current one. A
+    # permanent definition here would silently change what those specs test against.
     before do
       # Plain defs, not endless ones: the floor is Ruby 2.7 (Redmine 5.1) and
       # `.codex/check_ruby_floor.sh` scans the specs too.

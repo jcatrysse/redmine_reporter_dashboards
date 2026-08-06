@@ -24,8 +24,6 @@ lib/redmine_reporter_dashboards/project_page.rb        OPTIONAL_BLOCKS declares 
 # --- The integration surface itself: code that only runs when reporter is present.
 # --- Goes away with Phase 4, when the reporting surface is owned (T-30..T-35).
 lib/redmine_reporter_dashboards/patches/report_patch.rb          patches reporter's Report#to_pdf
-lib/redmine_reporter_dashboards/liquid/issue_drop_patch.rb       prepends into reporter's IssueDrop
-lib/redmine_reporter_dashboards/liquid/custom_field_value_drop.rb documents the reporter drop it extends
 app/controllers/reporter_project_pages_controller.rb            report_pdf declines when the plugin is absent
 app/helpers/reporter_project_pages_helper.rb                    comment explaining the widget degradation path
 app/views/my/_report.erb                                        renders a reporter report template

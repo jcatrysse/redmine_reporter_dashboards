@@ -4,6 +4,44 @@ All notable changes to this plugin are documented in this file.
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`{% geo_version_map %}` will be removed in the next minor version.** It still works
+  exactly as it always has; it now writes one line to the log per process saying so, and
+  the template linter reports it as a warning (not an error — the template is not
+  broken).
+
+  It existed for one reason: the vendor gem handed a template `issue.version` as a bare
+  *name*, so building a link to a roadmap or a filtered issue list was impossible without
+  a lookup table. The version is now an object that answers `.id`, `.effective_date`,
+  `.status`, `.project` and five absolute URLs directly, and it still prints and compares
+  as its own name — so `{% if issue.version == "2026.1" %}` keeps working. The README has
+  a before/after and a one-row-per-accessor table under *Migrating off
+  `{% geo_version_map %}`*, and `rake reporter_dashboards:import:plan` lists the templates
+  that still use it.
+
+### Removed
+
+- **The prepend into Reporter's issue drop is gone.** `issue.target_version` and
+  `issue.custom_field_value[…]` were added by reaching into another plugin's class and
+  changing its method table. That is not an integration — it is a second owner for
+  somebody else's code, and it fails silently when their class moves. Both accessors are
+  now defined on this plugin's own issue drop, under the same names.
+
+  **What this costs, stated plainly:** this plugin's issue drop is not yet what renders a
+  Reporter report — the owned report renderer is still being built. Until it ships, a
+  template rendered by Reporter gets Reporter's drop, which has neither accessor, so
+  `{% if issue.target_version %}` is false and that part of the report renders empty
+  rather than wrong. `{% sql_aggregate %}`, `{% version_rollup %}` and (still)
+  `{% geo_version_map %}` are unaffected, and the last of those reaches the same version
+  metadata in the meantime.
+
+- The addon's own `VersionDrop` — 295 lines across three files, all of it compensating
+  for a version accessor that was a bare string. `{% version_rollup %}` now hands each row
+  the owned version object instead. **Every accessor a template reads off `row.version`
+  answers the same as before**, `project_name` and `project_identifier` included, and it
+  gained `.project` as an object and `.sharing`.
+
 ### Added
 
 - **A `| json` filter, and the chart snippets in this README now use it.** This is a fix

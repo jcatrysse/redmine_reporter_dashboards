@@ -6,9 +6,21 @@
  adds to a Reporter "issues" report template:
 
    * {% sql_aggregate %}     — fast SQL breakdown (alias: {% geo_aggregate %})
-   * {% geo_version_map %}    — version-name -> id/metadata lookup
-   * issue.target_version     — the VersionDrop, with ABSOLUTE urls
+   * issue.target_version     — the version drop, with ABSOLUTE urls
    * a Chart.js chart that also renders in the wkhtmltopdf PDF export
+
+ It used to call {% geo_version_map %} as well, to reach a version's id
+ and metadata. That tag is deprecated and removed next minor: the version
+ drop carries all of it (.id .effective_date .status .project, plus the
+ four urls), so the lookup table has nothing left to add.
+
+ ONE CAVEAT, and it is temporary. issue.target_version is served by THIS
+ plugin's issue drop, and this plugin's report renderer is not finished —
+ a template rendered by Reporter still gets Reporter's drop, which does
+ not have it. So section 3 below renders EMPTY on a Reporter install
+ today. Nothing else in this template is affected, and {% version_rollup %}
+ (see examples/version_status_dashboard.liquid) reaches the same version
+ metadata per version in the meantime.
 
  Source query: an "issues" report. Paste this into a Reporter report
  template (Administration -> Reporter -> Report templates) whose source
@@ -35,9 +47,6 @@
 
 {% comment %} 1) One fast SQL breakdown by status (no per-issue Liquid loop). {% endcomment %}
 {% sql_aggregate from: issues, group_by: status, assign_to: by_status %}
-
-{% comment %} 2) Version lookup, so we can link even versions with no issue in scope. {% endcomment %}
-{% geo_version_map assign_to: geo_versions %}
 
 <style>
 html, body { background:#fff; margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; color:#222; }

@@ -2,7 +2,8 @@
 
 require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
 require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
-require_relative '../redmine_reporter_dashboards/liquid/version_drop'
+require_relative '../redmine_reporter_dashboards/liquid/tag_context'
+require_relative '../redmine_reporter_dashboards/liquid/drops'
 
 module SqlAggregation
   # Liquid tag: {% version_rollup ... %}
@@ -16,7 +17,7 @@ module SqlAggregation
   #      cost_fields: "20,21", assign_to: versions %}
   #   {% for v in versions %}
   #     {{ v.name }} — {{ v.open }} open / {{ v.closed }} closed
-  #     <a href="{{ v.version.url }}">roadmap</a>          {# v.version is a VersionDrop, nil for 'None' #}
+  #     <a href="{{ v.version.url }}">roadmap</a>          {# v.version is a version drop, nil for 'None' #}
   #     est {{ v.est_hours }}h / spent {{ v.spent_hours }}h
   #     budget {{ v.cost['20'] }} / {{ v.cost['21'] }}
   #   {% endfor %}
@@ -28,7 +29,7 @@ module SqlAggregation
   #   assign_to       — result variable name (default: versions)
   #
   # Each result row is a Hash with STRING keys (Liquid dot-access):
-  #   name, version (VersionDrop or nil), version_id, total, open, closed,
+  #   name, version (Drops::VersionDrop or nil), version_id, total, open, closed,
   #   open_done_sum, overdue_open, unassigned_open, no_estimate, est_hours,
   #   spent_hours, start_date (Date/nil), due_date (Date/nil), cost ({id=>Float}).
   # Rows are sorted by version name (case-insensitive) for deterministic output.
@@ -78,7 +79,7 @@ module SqlAggregation
       rows = SqlAggregation::QueryAggregator.version_rollup(
         scope, closed_statuses: statuses, cost_field_ids: cost_ids
       )
-      rows = decorate_with_versions(rows)
+      rows = decorate_with_versions(rows, context)
 
       Rails.logger.info("[version_rollup] #{rows.size} versions aggregated in #{elapsed_ms(t0)}ms")
       context.scopes.last[assign_to] = rows
@@ -91,17 +92,37 @@ module SqlAggregation
 
     private
 
-    # Attach the version NAME and a VersionDrop (absolute URLs, PDF-safe) to each
+    # Attach the version NAME and a version drop (absolute URLs, PDF-safe) to each
     # row via one batched query (no N+1). A nil version_id (issues without a target
     # version) becomes name 'None' with a nil drop.
-    def decorate_with_versions(rows)
+    #
+    # T-20 swapped the drop CLASS, not the template surface. It used to be the addon's
+    # own `RedmineReporterDashboards::Liquid::VersionDrop` — 108 lines that existed
+    # because the vendor gem had no version object worth the name. It is now
+    # `Drops::VersionDrop`, which answers every accessor the old one did (`url`,
+    # `roadmap_url`, the three issue lists, `time_url`, `effective_date`, `status`,
+    # `project_identifier`, `project_name`) plus `project` as a drop of its own, and
+    # substitutes for a String on top. Nothing in a template has to change.
+    #
+    # ONE context for the whole decoration, resolved once. Building it per row would
+    # mean one `User.current` read per version and one `Batch` per version, and the
+    # rows all belong to the same render.
+    #
+    # A drop and not a Hash, deliberately: a drop is LAZY. `completed_percent` runs a
+    # query, and a Hash would run it for every version whether or not the template ever
+    # asks — turning a bounded render into one that pays per version for a field most
+    # dashboards do not print.
+    def decorate_with_versions(rows, context)
       ids      = rows.map { |r| r['version_id'] }.compact.uniq
       versions = ids.any? ? Version.where(id: ids).includes(:project).index_by(&:id) : {}
+      drop_context = RedmineReporterDashboards::Liquid::TagContext.for(context)
 
       rows.each do |row|
         version        = versions[row['version_id']]
         row['name']    = version ? version.name : 'None'
-        row['version'] = version ? RedmineReporterDashboards::Liquid::VersionDrop.new(version) : nil
+        row['version'] = version &&
+                         RedmineReporterDashboards::Liquid::Drops::VersionDrop
+                           .new(version, context: drop_context)
       end
 
       rows.sort_by { |r| r['name'].to_s.downcase }

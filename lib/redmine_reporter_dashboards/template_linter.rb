@@ -106,6 +106,13 @@ module RedmineReporterDashboards
     # resolve (the same trap adapter_helper.rb records for CORPUS_TIME_ZONE).
     CHART_TYPE_WINDOW = 400
 
+    # `{% comment %}` / `{% raw %}` and their bodies — the spans a :liquid rule must not
+    # look inside. An UNCLOSED opener produces no span, so the rest of the document is
+    # still linted: a missed exclusion costs one false finding, an over-eager one
+    # silences the file from that point on. On the MODULE for the same reason
+    # CHART_TYPE_WINDOW is.
+    INERT_BLOCK_RE = /\{%-?\s*(comment|raw)\s*-?%\}.*?\{%-?\s*end\1\s*-?%\}/m
+
     # ------------------------------------------------------------------
     # Rules — what breaks
     # ------------------------------------------------------------------
@@ -278,8 +285,35 @@ module RedmineReporterDashboards
                message: "`| #{name}` is not provided by this plugin's filter set: #{reason}")
     end.freeze
 
+    # A surface of this plugin's OWN that is on its way out. Different from a removed
+    # filter (which is gone now, with a security reason) and from a Chart.js 2 idiom
+    # (which is somebody else's code): this is a name this plugin published, still
+    # answers, and will stop answering.
+    #
+    # :warning rather than :error, and the distinction is the whole point of having two
+    # severities. The template WORKS today. `Analysis#rework?` is `errors.any?`, and it
+    # is what `import:plan` uses to answer "which templates need rework" — calling a
+    # working template broken would make that answer useless in the release where an
+    # operator most needs it. It becomes an error when the shim goes.
+    #
+    # Scoped to :liquid so the tag name in a `{% comment %}` explaining the migration,
+    # or in prose pasted into a template header, is not a finding. That is the same
+    # lesson §Findings E-14 records about `<script>` in prose.
+    DEPRECATED_SURFACE_RULES = [
+      Rule.new(id: 'deprecated.geo_version_map', severity: :warning, scope: :liquid,
+               pattern: /\bgeo_version_map\b/,
+               message: '`{% geo_version_map %}` is deprecated and is removed in the ' \
+                        'next minor version. It existed because the vendor gem returned ' \
+                        '`issue.version` as a bare name; the owned drop layer answers the ' \
+                        'same four facts directly — use the version itself: ' \
+                        '`issue.version.id`, `.effective_date`, `.status`, `.project`, ' \
+                        'plus `.url`, `.roadmap_url`, `.open_issues_url`, ' \
+                        '`.closed_issues_url` and `.time_url`')
+    ].freeze
+
     PATTERN_RULES = (CHARTJS_RULES + HANDSHAKE_RULES + ENGINE_RULES +
-                     LIQUID_IDIOM_RULES + REMOVED_FILTER_RULES).freeze
+                     LIQUID_IDIOM_RULES + REMOVED_FILTER_RULES +
+                     DEPRECATED_SURFACE_RULES).freeze
     RULES         = (PATTERN_RULES + [SCRIPT_INTERPOLATION_RULE]).freeze
 
     # The filters that make an interpolation safe inside <script>.
@@ -330,7 +364,11 @@ module RedmineReporterDashboards
         '{% sql_aggregate %}' => /\bsql_aggregate\b/,
         '{% geo_aggregate %} — legacy alias' => /\bgeo_aggregate\b/,
         '{% version_rollup %}' => /\bversion_rollup\b/,
-        '{% geo_version_map %}' => /\bgeo_version_map\b/,
+        # Counted as well as flagged, and those are different questions: the finding
+        # says "this breaks next minor", the count says "this many templates have to be
+        # touched before it can be removed". Removing the count when the rule arrived
+        # would have taken the second answer away at the moment it became useful.
+        '{% geo_version_map %} — deprecated' => /\bgeo_version_map\b/,
         'issue.target_version' => /\.\s*target_version\b/,
         'issue.custom_field_value[…]' => /\.\s*custom_field_value\b/,
         '| json — already safe' => /\|\s*json\b/
@@ -484,8 +522,17 @@ module RedmineReporterDashboards
       end
 
       # The inside of every `{{ … }}` and `{% … %}`.
+      # Usage counting asks a different question from a finding — "what does this
+      # template DEPEND on", not "what breaks" — but it gets the same answer about
+      # comments, and for the same reason. A `{% sql_aggregate %}` inside a
+      # `{% comment %}` is not a dependency; counting it would tell an operator planning
+      # a migration that a template needs work it does not need. So the two share
+      # `inert_spans`, and the asymmetry that would otherwise develop between the
+      # finding list and the usage table cannot.
       def liquid_regions(text)
-        text.scan(/\{\{(.*?)\}\}|\{%(.*?)%\}/m).map { |output, tag| output || tag }
+        liquid_regions_with_offsets(text).map do |_offset, region|
+          region.sub(/\A\{[{%]-?/, '').sub(/-?[%}]\}\z/, '')
+        end
       end
 
       # ----------------------------------------------------------------
@@ -530,8 +577,26 @@ module RedmineReporterDashboards
       # `{{ … }}` and `{% … %}` WITH their offsets, so a :liquid rule reports a real line.
       # `liquid_regions` below drops the offsets because `usage_for` only counts; a
       # finding needs somewhere to point.
+      #
+      # MINUS the bodies of `{% comment %}` and `{% raw %}`, which is the same decision
+      # `HtmlScanner` already makes about `<script>` and for the same measured reason
+      # (§Findings E-14: prose that MENTIONS a construct is not that construct, and a
+      # linter confidently wrong about a correct template gets switched off). It is also
+      # what Liquid does: a comment body is never rendered and a raw body is rendered
+      # literally, so neither can be the construct a rule is about. The rule that made
+      # this bite was T-20's deprecation warning — the example template's own header
+      # comment explains the migration, and naming the retired tag there produced a
+      # finding against a template that had already been migrated.
       def liquid_regions_with_offsets(text)
-        each_match(text, /\{\{.*?\}\}|\{%.*?%\}/m).map { |match| [match.begin(0), match[0]] }
+        inert = inert_spans(text)
+
+        each_match(text, /\{\{.*?\}\}|\{%.*?%\}/m)
+          .reject { |match| inert.any? { |span| span.cover?(match.begin(0)) } }
+          .map { |match| [match.begin(0), match[0]] }
+      end
+
+      def inert_spans(text)
+        each_match(text, INERT_BLOCK_RE).map { |match| (match.begin(0)...match.end(0)) }
       end
 
       def each_match(text, pattern)

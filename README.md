@@ -28,9 +28,11 @@ With hundreds or thousands of issues that gets slow. The `{% sql_aggregate %}` t
 
 With `drill: true` every bar, slice, point and cell also carries a link to the Redmine issue list, filtered to exactly the issues behind it, inheriting the report query's own filters, columns, grouping, totals and sort order. See [Drill-through URLs](#drill-through-urls).
 
-### `{% geo_version_map %}` Liquid tag
+### `{% geo_version_map %}` Liquid tag — **deprecated**
 
-The Reporter issue drop exposes `issue.version` as a scalar (the name only), with no id. That makes it impossible to build version-filtered URLs — roadmap, issues list, time entries — from a template. The `{% geo_version_map %}` tag provides a lookup from version name to its id and metadata so you can construct those links.
+It existed because the Reporter issue drop exposes `issue.version` as a scalar (the name only), with no id, which made version-filtered URLs — roadmap, issues list, time entries — impossible to build from a template. The tag provided a lookup from version name to its id and metadata.
+
+**The owned drop layer answers all of that directly, so the tag is deprecated and is removed in the next minor version.** It still works, logs one deprecation line per process, and the template linter flags it. See [Migrating off `{% geo_version_map %}`](#migrating-off--geo_version_map-).
 
 ### `{% version_rollup %}` Liquid tag
 
@@ -51,9 +53,13 @@ Redmine. Installed or not, one line in the log says which mode you are in.
 What still needs `redmine_reporter` — and only this:
 
 - the two **report widgets** (*Report* and *Report by issues*), which render one of
-  Reporter's own report templates, and their **Export as PDF** link;
-- `issue.target_version` and `issue.custom_field_value` inside a Reporter report
-  template, which are additions to Reporter's own Liquid drop.
+  Reporter's own report templates, and their **Export as PDF** link.
+
+`issue.target_version` and `issue.custom_field_value` used to be on this list. They were
+added by prepending a module into Reporter's own Liquid drop; that prepend is **gone**,
+and both accessors now live on this plugin's own issue drop instead — same spelling,
+same behaviour, no reaching into another plugin's classes. See
+[What changed for `issue.target_version`](#what-changed-for-issuetarget_version).
 
 ### Support matrix
 
@@ -1114,7 +1120,14 @@ stay clickable in the PDF, which is the reason the URLs are absolute.
 
 The tag was previously called `{% geo_aggregate %}`. That name still works as an alias so existing templates keep working without changes.
 
-## Using the `{% geo_version_map %}` tag
+## Using the `{% geo_version_map %}` tag — **deprecated**
+
+> **This tag is removed in the next minor version.** It still works exactly as
+> documented below, writes one deprecation line to the log per process, and the
+> template linter reports it as a warning. Everything it provided is now on the version
+> object itself — see [Migrating off `{% geo_version_map %}`](#migrating-off--geo_version_map-)
+> at the end of this section. Run `rake reporter_dashboards:import:plan` to list the
+> templates that still use it.
 
 Place the tag near the top of your Reporter template. It writes a lookup table into a Liquid variable (`geo_versions` by default), keyed by version name.
 
@@ -1129,7 +1142,7 @@ Place the tag near the top of your Reporter template. It writes a lookup table i
 {% endfor %}
 ```
 
-By default the map covers every version (`Version.all`). Pass a project identifier to limit it to that project's shared versions:
+By default the map covers **every version the person reading the report may see** — never every version in the database. Pass a project identifier to limit it to that project's shared versions:
 
 ```liquid
 {% geo_version_map project: my-project, assign_to: geo_versions %}
@@ -1156,6 +1169,33 @@ Look up a version by name — typically the scalar `issue.version` from the issu
 
 If the name is unknown (for example an issue with no target version), the lookup returns nothing and the surrounding template still renders. The tag itself produces no output; on any error it assigns an empty map so the template never crashes.
 
+### Migrating off `{% geo_version_map %}`
+
+The tag existed for one reason: the version was a bare name and you needed its id. It
+is not any more. Delete the tag and read the version directly — the version still prints
+and compares as its own name, so `{% if issue.version == "2026.1" %}` keeps working.
+
+```liquid
+{% comment %} before {% endcomment %}
+{% geo_version_map assign_to: geo_versions %}
+{% assign v = geo_versions[issue.version] %}
+<a href="/projects/{{ v.project }}/roadmap">{{ issue.version }}</a>
+
+{% comment %} after — no tag, and the link is absolute so it survives PDF export {% endcomment %}
+<a href="{{ issue.version.roadmap_url }}">{{ issue.version }}</a>
+```
+
+| Was | Now |
+|-----|-----|
+| `geo_versions[issue.version].id` | `issue.version.id` |
+| `geo_versions[issue.version].effective_date` | `issue.version.effective_date` |
+| `geo_versions[issue.version].status` | `issue.version.status` |
+| `geo_versions[issue.version].project` | `issue.version.project_identifier` |
+| hand-built roadmap / issue-list / time URLs | `.roadmap_url` `.issues_url` `.open_issues_url` `.closed_issues_url` `.time_url`, all absolute |
+
+The same accessors are on `{% version_rollup %}`'s `row.version`, so a dashboard built on
+that tag needs no change at all.
+
 ## Using the `{% version_rollup %}` tag
 
 Aggregates the report's issues per target version in SQL and assigns a ready-to-render Array. Use it instead of a nested `{% for version %}{% for issue %}` loop when you build a per-version dashboard.
@@ -1163,7 +1203,7 @@ Aggregates the report's issues per target version in SQL and assigns a ready-to-
 ```liquid
 {% version_rollup from: issues, closed_statuses: "Closed;Rejected", cost_fields: "20,21", assign_to: versions %}
 {% for v in versions %}
-  <h3><a href="{{ v.version.url }}">{{ v.name }}</a></h3>   {# v.version is a VersionDrop, nil for the "None" bucket #}
+  <h3><a href="{{ v.version.url }}">{{ v.name }}</a></h3>   {# v.version is the version object, nil for the "None" bucket #}
   {{ v.open }} open / {{ v.closed }} closed · {{ v.spent_hours }} / {{ v.est_hours }} h
   {% if v.cost['20'] or v.cost['21'] %}budget {{ v.cost['21'] }} / {{ v.cost['20'] }}{% endif %}
 {% endfor %}
@@ -1178,7 +1218,7 @@ One row per target version (a nil version → name `None`), sorted by name. Stri
 | Key | Type | Content |
 |-----|------|---------|
 | `.name` | string | Version name (`None` for issues with no target version) |
-| `.version` | drop / nil | A `VersionDrop` (absolute, PDF-safe URLs: `.url`, `.roadmap_url`, `.issues_url`, …); nil for `None` |
+| `.version` | object / nil | The version, with the same accessors as `issue.target_version` (absolute, PDF-safe URLs: `.url`, `.roadmap_url`, `.issues_url`, …); nil for `None` |
 | `.total` `.open` `.closed` | integer | Issue counts |
 | `.open_done_sum` | integer | Σ `done_ratio` over open issues (for % complete) |
 | `.overdue_open` `.unassigned_open` `.no_estimate` | integer | Flag counts |
@@ -1190,7 +1230,15 @@ Cost sums mirror Redmine's own numeric custom-field totalling (`joins(:custom_va
 
 ## `issue.target_version` in report templates
 
-Reporter's issue drop exposes `issue.version` as a scalar (the name only). This plugin adds `issue.target_version`, a drop wrapping the issue's target version with everything needed to build links — and **all URLs are absolute**, so they keep working when a report is exported to PDF by wkhtmltopdf.
+`issue.target_version` is a drop wrapping the issue's target version with everything needed to build links — and **all URLs are absolute**, so they keep working when a report is exported to PDF by wkhtmltopdf. It is also what `{% version_rollup %}` puts in each row's `.version`.
+
+### What changed for `issue.target_version`
+
+Until now this accessor was added by **prepending a module into Reporter's own issue drop**. A prepend is a second owner for another plugin's method table: it breaks silently when their class moves, and it is precisely the coupling this plugin is removing.
+
+It is gone. Both `issue.target_version` and `issue.custom_field_value` are now defined on **this plugin's own issue drop**, with the same spelling and the same behaviour — `target_version` as a second name for `issue.version`, which is now a full version object rather than a bare string.
+
+One consequence worth stating plainly, because it is a real gap rather than a detail: **this plugin's issue drop is not yet what renders a Reporter report.** Until the owned report renderer ships, a template rendered by Reporter gets Reporter's drop, which has neither accessor — so `{% if issue.target_version %}` is simply false and that part of the report renders empty. `{% version_rollup %}` and `{% sql_aggregate %}` are unaffected, and `{% geo_version_map %}` (deprecated, still working) reaches the same version metadata in the meantime.
 
 ```liquid
 {% if issue.target_version %}
@@ -1205,8 +1253,10 @@ Reporter's issue drop exposes `issue.version` as a scalar (the name only). This 
 | `.id` `.name` `.description` | Version identity |
 | `.effective_date` | Due date (`Date` or empty) |
 | `.status` | `open` / `locked` / `closed` |
+| `.sharing` | Redmine's version sharing mode |
 | `.completed_percent` | Completion percentage |
-| `.project_identifier` | Identifier of the version's project |
+| `.project` | The version's project, itself an object (`.name`, `.identifier`, `.url`) |
+| `.project_identifier` / `.project_name` | The same two facts as plain strings |
 | `.url` | Absolute link to the version page |
 | `.roadmap_url` | Absolute link to the project roadmap |
 | `.issues_url` / `.open_issues_url` / `.closed_issues_url` | Absolute issue-list links filtered by this version (all / open / closed) |

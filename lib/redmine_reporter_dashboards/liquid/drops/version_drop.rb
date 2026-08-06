@@ -69,6 +69,27 @@ module RedmineReporterDashboards
           record.project_id
         end
 
+        # `project_identifier` and `project_name` are kept, and the reason is different
+        # from the one that DROPPED `IssueDrop#project_name`.
+        #
+        # There, §3.2 folded a gem accessor into `project.name` because two spellings of
+        # one fact is how a template prints them inconsistently, and the gem's spelling
+        # had no other claim. Here both names are THIS PLUGIN'S OWN shipped surface: the
+        # addon's `VersionDrop` published them, `{% version_rollup %}` hands its rows to
+        # templates that read them, and T-20 moves the implementation, not the
+        # vocabulary. Deleting a name a plugin shipped, in the release that moves the
+        # class behind it, is a migration cost with nothing bought by it.
+        #
+        # They stay aliases in spirit — one fact, resolved through `project` — so there
+        # is no second code path to keep in step.
+        def project_identifier
+          record.project&.identifier
+        end
+
+        def project_name
+          record.project&.name
+        end
+
         def url
           absolute("/versions/#{id}")
         end
@@ -106,10 +127,6 @@ module RedmineReporterDashboards
         end
 
         private
-
-        def project_identifier
-          record.project&.identifier
-        end
 
         def issues_url_for(status_id)
           absolute("/projects/#{project_identifier}/issues?set_filter=1" \

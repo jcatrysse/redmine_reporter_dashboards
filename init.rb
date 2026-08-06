@@ -106,7 +106,9 @@ class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
 
     return unless reporter
 
-    RedmineReporterDashboards.register_issue_target_version_drop
+    # T-20 removed a fourth step here — the prepend that added `issue.target_version`
+    # and `issue.custom_field_value[…]` to the HOST plugin's issue drop. Both accessors
+    # are now on this plugin's own drops. See RedmineReporterDashboards for the note.
     RedmineReporterDashboards.apply_reporter_patches
   end
 end

@@ -249,6 +249,128 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
     end
   end
 
+  # T-20. The tag still works; it stops working next minor. That is a WARNING, and the
+  # examples below are as much about the severity as about the match — `Analysis#rework?`
+  # is `errors.any?`, and `import:plan` uses it to answer "which templates need rework".
+  # Calling a working template broken would make that answer useless in exactly the
+  # release where an operator is deciding what to migrate first.
+  describe 'the deprecated geo_version_map tag' do
+    it 'reports the tag as a warning, not an error' do
+      finding = described_class.lint('{% geo_version_map assign_to: v %}').first
+
+      expect(finding.rule).to eq('deprecated.geo_version_map')
+      expect(finding).not_to be_error
+    end
+
+    it 'does not put a template that merely uses it into rework' do
+      analysis = described_class.analyse('{% geo_version_map %}')
+
+      expect(analysis.warnings.map(&:rule)).to eq(['deprecated.geo_version_map'])
+      expect(analysis).not_to be_rework
+    end
+
+    it 'names the accessors that replace it' do
+      finding = described_class.lint('{% geo_version_map %}').first
+
+      expect(finding.message).to include('issue.version.id')
+      expect(finding.message).to include('.roadmap_url')
+    end
+
+    it 'counts it as usage as well, so a migration can be scoped' do
+      usage = described_class.analyse('{% geo_version_map %}').usage
+      group = usage.keys.find { |key| key.include?('own surface') }
+
+      expect(usage[group]).to include('{% geo_version_map %} — deprecated' => 1)
+    end
+
+    # The two accessors the same task retired from the HOST plugin's drop are NOT
+    # flagged, and that is a decision rather than an omission: `Drops::IssueDrop` keeps
+    # `target_version` as an alias of `version` and `custom_field_value` as the bracket
+    # drop, so a template using either is still correct against the owned layer. A rule
+    # here would tell an author to rewrite working Liquid.
+    it 'leaves issue.target_version and issue.custom_field_value alone — still valid surface' do
+      body = '{{ issue.target_version.name }} {{ issue.custom_field_value[20] }}'
+
+      expect(described_class.lint(body).map(&:rule)).to eq([])
+    end
+  end
+
+  # §Findings E-14 generalised. The HTML scanner already skips `{% comment %}` and
+  # `{% raw %}` bodies; the :liquid scope did not, so a comment EXPLAINING a migration
+  # was linted as if it performed one. Every example here is a case the previous version
+  # got wrong, which is the same standard `spec/html_scanner_spec.rb` is written to.
+  describe 'inert Liquid blocks' do
+    it 'does not lint inside a {% comment %} body' do
+      body = '{% comment %} we used to call {% geo_version_map %} here {% endcomment %}'
+
+      expect(described_class.lint(body).map(&:rule)).to eq([])
+    end
+
+    it 'does not lint inside a {% raw %} body' do
+      body = '{% raw %}{% geo_version_map %}{% endraw %}'
+
+      expect(described_class.lint(body).map(&:rule)).to eq([])
+    end
+
+    it 'honours the whitespace-control spellings' do
+      body = '{%- comment -%}{% geo_version_map %}{%- endcomment -%}'
+
+      expect(described_class.lint(body).map(&:rule)).to eq([])
+    end
+
+    it 'still lints the same construct outside the comment' do
+      body = "{% comment %}{% geo_version_map %}{% endcomment %}\n{% geo_version_map %}"
+      findings = described_class.lint(body)
+
+      expect(findings.map(&:rule)).to eq(['deprecated.geo_version_map'])
+      expect(findings.first.line).to eq(2)
+    end
+
+    it 'suppresses every :liquid rule inside a comment, not only the new one' do
+      body = '{% comment %} do not write {{ x | md5 }} or {% if "a" == b %} {% endcomment %}'
+
+      expect(described_class.lint(body).map(&:rule)).to eq([])
+    end
+
+    # FAILS OPEN. An unterminated comment must not silence the rest of the document —
+    # a missed exclusion costs one false finding, an over-eager one hides everything
+    # after it, and only one of those is recoverable by reading the output.
+    it 'lints normally when a comment is never closed' do
+      body = "{% comment %} oops\n{% geo_version_map %}"
+
+      expect(described_class.lint(body).map(&:rule)).to eq(['deprecated.geo_version_map'])
+    end
+
+    # USAGE COUNTING TOO, and it has to be the same answer. A commented-out
+    # `{% sql_aggregate %}` is not a dependency, and counting it would tell an operator
+    # planning a migration that a template needs work it does not need. Asserted
+    # separately from the findings because these are two different code paths that would
+    # otherwise drift.
+    it 'does not count usage inside a comment either' do
+      body = '{% comment %} we could use {% sql_aggregate %} and {{ issue.story_points }} {% endcomment %}'
+
+      expect(described_class.analyse(body).usage).to eq({})
+    end
+
+    it 'counts the same constructs when they are outside the comment' do
+      body = '{% comment %}{% sql_aggregate %}{% endcomment %}{% sql_aggregate %}'
+      usage = described_class.analyse(body).usage
+      group = usage.keys.find { |key| key.include?('own surface') }
+
+      expect(usage[group]['{% sql_aggregate %}']).to eq(1)
+    end
+
+    # SCOPE-SPECIFIC, deliberately. A `<script>` inside a Liquid comment is already
+    # handled by `HtmlScanner`; this change is only about the :liquid regions, and a
+    # :body rule (which searches the whole document) is unaffected. Pinned so the two
+    # mechanisms cannot silently merge.
+    it 'leaves a :body rule matching inside a comment, which is HtmlScanner\'s question' do
+      body = '{% comment %} the footer token [page] is engine-specific {% endcomment %}'
+
+      expect(described_class.lint(body).map(&:rule)).to eq(['footer.engine_page_token'])
+    end
+  end
+
   describe 'line numbers and excerpts' do
     it 'reports the line the match is on, 1-indexed' do
       body = "line one\nline two\n<script>\nctx.setLineDash([1]);\n</script>\n"

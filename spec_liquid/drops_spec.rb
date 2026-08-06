@@ -380,6 +380,25 @@ module RedmineReporterDashboards
             expect(render('{{ issue.version }}|{{ issue.target_version }}')).to eq('2026.1|2026.1')
             expect(render('{{ issue.version.id }}')).to eq('11')
           end
+
+          # T-20. `{% version_rollup %}` used to hand templates the ADDON's VersionDrop,
+          # which published these two names; it now hands them this class. They are kept
+          # for that reason and not by analogy with `IssueDrop#project_name`, which §3.2
+          # deliberately DROPS in favour of `project.name` (asserted unreachable above) —
+          # that one was the gem's spelling, these two are this plugin's own shipped
+          # surface, and the release that moves the class behind a name is the wrong
+          # release to delete the name.
+          it 'keeps the two project spellings {% version_rollup %} templates read' do
+            expect(::Liquid::Template.parse(
+              '{{ v.project_identifier }}|{{ v.project_name }}'
+            ).render!('v' => version)).to eq('survey|Survey')
+          end
+
+          it 'resolves them through the same project, so there is one fact and not two' do
+            expect(::Liquid::Template.parse(
+              '{{ v.project.identifier }}|{{ v.project.name }}'
+            ).render!('v' => version)).to eq('survey|Survey')
+          end
         end
 
         # --------------------------------------------------------------

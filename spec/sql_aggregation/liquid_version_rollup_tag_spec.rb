@@ -27,6 +27,18 @@ unless defined?(Setting)
   end
 end
 
+# `User.current` — needed since T-20, and its absence is the whole reason this comment
+# exists. `Drops::VersionDrop` refuses a nil RenderContext (INV-1), so the tag now asks
+# `Liquid::TagContext` for one, and on the legacy path that reads `User.current`. Redmine
+# always defines it; a DB-less spec process does not, and the tag's rescue turned the
+# resulting NameError into an EMPTY row list — a degradation that looks exactly like an
+# aggregation returning nothing. Worth knowing before diagnosing an empty rollup.
+class RollupTagUser
+  def self.current
+    @current ||= Object.new
+  end
+end
+
 require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 require_relative '../../lib/sql_aggregation/liquid_version_rollup_tag'
 # T-07: these examples exercise the LEGACY resolution path — a tag renders with no
@@ -84,6 +96,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
 
   before do
     stub_const('Version', RollupTagVersion)
+    stub_const('User', RollupTagUser)
     RollupTagVersion.registry = {
       1 => RollupTagVersion::Ver.new(1, 'Beta 2.0', nil, nil, 'open'),
       2 => RollupTagVersion::Ver.new(2, 'Alpha 1.0', nil, nil, 'open')
@@ -119,14 +132,66 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
       expect(names).to eq(['Alpha 1.0', 'Beta 2.0', 'None']) # sorted case-insensitively
     end
 
-    it 'attaches a VersionDrop for real versions and nil for the None bucket' do
+    # T-20 changed the CLASS behind `row['version']` from the addon's own drop to the
+    # owned `Drops::VersionDrop`. Asserted by class, because the accessor set is what a
+    # template sees and the two answer the same names — a duck-typed assertion would
+    # have passed the deleted class just as happily.
+    it 'attaches the owned VersionDrop for real versions and nil for the None bucket' do
       ctx = build_context('issues' => drop_with(scope))
       build_tag('from: issues').render(ctx)
       rows = ctx.scopes.last['versions']
       real = rows.find { |r| r['version_id'] == 1 }
       none = rows.find { |r| r['version_id'].nil? }
-      expect(real['version']).to be_a(RedmineReporterDashboards::Liquid::VersionDrop)
+      expect(real['version']).to be_a(RedmineReporterDashboards::Liquid::Drops::VersionDrop)
       expect(none['version']).to be_nil
+    end
+
+    # The accessors a shipped template actually reads off `row.version`
+    # (`examples/version_status_dashboard.liquid` uses every one of these). T-20 is a
+    # class swap and must not be a vocabulary change; `project_name` and
+    # `project_identifier` in particular were only on the addon's drop until this task.
+    it 'answers every accessor the retired drop published' do
+      ctx = build_context('issues' => drop_with(scope))
+      build_tag('from: issues').render(ctx)
+      drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']
+
+      expect(drop.name).to eq('Beta 2.0')
+      expect(drop.url).to eq('https://redmine.test/versions/1')
+      expect(drop.issues_url).to include('status_id=*')
+      expect(drop.open_issues_url).to include('status_id=o')
+      expect(drop.closed_issues_url).to include('status_id=c')
+      expect(drop.time_url).to include('issue.fixed_version_id')
+      expect(drop.roadmap_url).to include('/roadmap')
+      # nil project on this fixture — the point is that it answers rather than raises.
+      expect(drop.project_identifier).to be_nil
+      expect(drop.project_name).to be_nil
+    end
+
+    # ONE context for the whole decoration, not one per row. Two rows have a version,
+    # so a per-row build would read the ambient actor twice and hand out two Batches
+    # for one render.
+    it 'builds one render context for every row' do
+      ctx = build_context('issues' => drop_with(scope))
+      build_tag('from: issues').render(ctx)
+      contexts = ctx.scopes.last['versions'].filter_map { |r| r['version'] }
+                    .map { |d| d.instance_variable_get(:@render_context) }
+
+      expect(contexts.length).to eq(2)
+      expect(contexts.uniq(&:object_id).length).to eq(1)
+    end
+
+    # INV-1 through the seam: no RenderContext in the registers means the host plugin
+    # produced this render, and the actor is the ambient one — read ONCE, in
+    # TagContext, and carried explicitly from there.
+    it 'renders under the legacy fallback context when no owned renderer supplied one' do
+      ctx = build_context('issues' => drop_with(scope))
+
+      expect(RedmineReporterDashboards::Liquid::TagContext).not_to be_owned(ctx)
+
+      build_tag('from: issues').render(ctx)
+      drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']
+
+      expect(drop.instance_variable_get(:@render_context).actor).to eq(User.current)
     end
 
     it 'returns an empty string (side-effect tag)' do

@@ -378,6 +378,7 @@ record as of the last local run.
 | **T-19: the filters and the lint, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | 276 examples green under each major. Includes the `StandardFilters` enumeration (49 names on 4.0.4, 61 on 5.13.0, pinned per version), the 21-filter inventory, and the OQ-C measurement that closed it |
 | **T-19: the escaping regression table, node v22** | **yes, locally (2026-08-06)** | 43 examples. 18 payloads through `| json`, each asserted to PARSE and to round-trip byte-for-byte; the OLD idiom pinned as measured — SyntaxError on a backslash terminator, and no payload reaching code position. **One assertion in it was wrong on the first run** and is now written from what the output actually is: the combined payload PARSES, because `| escape` turns its quotes into `&#39;` and `\&` is an identity escape. Two payload shapes, two outcomes |
 | **T-19: the shipped copy-paste surface** | **yes, locally (2026-08-06)** | Both examples and all 25 README ```liquid snippets are FR-19-clean; the frozen reference copies asserted STILL defective, because `verification-liquid-js-escaping.md` cites their line numbers. 1433 DB-less examples, 187 adapter, corpus **byte-identical — 217 examples, all 176 values unchanged** |
+| **T-20: the retirement, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | **1460 DB-less examples** (was 1433), 0 failures, 114 pending — the deprecation shim's log-once, both `TagContext` branches, the retired-surface guard and the six inert-block lint cases. **278 spec_liquid under each major** (was 276), including the two version-project spellings `{% version_rollup %}` templates read. All six gates green, `LAYER_PURITY_MODE=strict` included, and `zero_reporter` down to **16 files / 16 entries** from 18. The retired-surface guard was **negative-tested**: a planted `Object.const_get('RedmineReporter::Liquid::Drops::IssueDrop')` fails it, a comment naming the class does not. **NOT RUN HERE: adapter, corpus, minitest** — no database and no Redmine checkout in this container, so CI is their first execution |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -501,6 +502,46 @@ of a CI that runs on fork pull requests.
    **not** fixed — they belong to T-16 and T-11, which rewrite that code — so
    `spec/shipped_templates_lint_spec.rb` pins FR-19 at ZERO and the rest at a per-file
    ratchet. Lower those numbers when their owner lands; never raise one.
+
+14. **T-20 is done — the two compensating tags retired.** `{% geo_version_map %}` is a
+   deprecation shim, `liquid/{version_drop,custom_field_value_drop,issue_drop_patch}.rb`
+   are deleted, and `liquid/tag_context.rb` is new. Five things a later session should
+   know, and the first two are the ones that cost time.
+
+   **T-20'S `Touches:` LIST IS INCOMPLETE, AND SO MAY THE NEXT TASK'S BE.**
+   `{% version_rollup %}` built one addon `VersionDrop` per row; the acceptance list does
+   not mention it. It surfaced as a LoadError in `rspec spec` — loud, this time — but the
+   question behind it was not: the replacement drop refuses a nil `RenderContext` and a
+   host-plugin render has none. **Before deleting a class, `rg` for its constant, not
+   only for its filename.** The registration site and the requires are the easy half.
+
+   **`liquid/tag_context.rb` IS WHERE `User.current` IS READ, AND IT IS DELIBERATE.**
+   `TagContext.for(liquid_context)` answers the owned `RenderContext` when the owned
+   renderer supplied one, and otherwise builds an **actor-only** one — `scope` and
+   `query` stay nil, so nothing rebuilds a scope by archaeology and §6's warning is
+   respected rather than sidestepped. `TagContext.owned?` exists so the two branches are
+   ASSERTABLE; a spec that only checked "a context came back" would pass either. This is
+   **F-12** and the curator may still want it done differently — read the finding's table
+   before changing it, because the two alternatives both cost something measured.
+
+   **`issue.target_version` HAS A WINDOW WITH NO IMPLEMENTATION** between here and T-23.
+   The accessor is on `Drops::IssueDrop`, but nothing constructs one, so a
+   Reporter-rendered template gets Reporter's drop and it resolves to empty. **F-11**, in
+   the CHANGELOG in plain words. Do not "fix" it by having the glue build a
+   `Drops::IssueDrop` — that is the producer T-23 owns, and faking it makes the owned path
+   look tested.
+
+   **THE `:liquid` LINT SCOPE NOW SKIPS `{% comment %}` AND `{% raw %}` BODIES.** It did
+   not, and the first thing the new deprecation rule did was flag the example template's
+   own header comment explaining the migration. Same lesson as E-14 one construct further
+   in. It **fails open** on an unterminated comment, on purpose: a missed exclusion costs
+   one false finding, an over-eager one silences everything after it.
+
+   **A DROP, NOT A HASH, IN `{% version_rollup %}`'s ROWS.** The tempting simplification
+   is to hand each row a plain Hash of the version's facts. It is EAGER:
+   `completed_percent` runs a query per version whether or not the template prints it, and
+   `{{ v.version }}` stops substituting for the version name. Both are silent. The drop is
+   lazy and string-substitutable; keep it.
 
 12. **T-18 is done — the owned drop layer.** `liquid/drops/` (12 classes + 3 bases),
    `liquid/batch.rb`, `liquid/diagnostics.rb`, and `RenderContext` grown a `batch`, a

@@ -69,6 +69,7 @@ fact that CI has not yet run on this work at all.
 | T-18 | **done** — the twelve drop classes, the three bases and `liquid/batch.rb`. §3.2's disposition table is implemented accessor by accessor and ASSERTED accessor by accessor: the names kept identical, the `closed_on` timezone defect fixed (all three timestamps now go through the actor, never `User.current`), the four scalars promoted to `NamedRefDrop` with their `*_id` escape hatches, `version` promoted to a string-substitutable `VersionDrop`, `url` absolute by construction, and the **fifteen dropped accessors** — six vendor probes, four OQ-H, five from the addon's own subclass — each pinned UNREACHABLE under `strict_variables` so the negative half cannot rot. `all` is reachable, refused and records `Degradation(:unbounded_collection)`; deleting it would render blank, which is the silent answer INV-4 forbids. **The gating criteria are measured, not argued**: zero `Issue` instantiations for an aggregate-only template at 10 AND 10 000 issues, identical query count across that span, one custom field across 400 issues in **4** queries and a second one for **free**, and the cap asserted AT it and one past it. **Visibility is in the batch, not in the drop**: `IssueCustomField.visible` plus Redmine's per-project `visible_by?`, `TimeEntry.visible`, `Issue.visible` — and the auditor case (holds the role in ANOTHER project) is the leak the four-actor fixture exists to catch. Green on Liquid **4.0.4 and 5.13.0** (185 examples each) and on PostgreSQL 16 (31 adapter examples); the corpus is byte-identical. **CI run 31085742725 is 18/18 green on the first try**, MySQL 8 and MariaDB 11 included, and all four `minitest` branches — which is what actually answers whether `liquid/drops/` boots under Zeitwerk on 5.1 through 7.0. **It found three defects in itself** — §Findings **E-12**, **E-13**, and the `is_closed` attribute sourced from the wrong row — and left two questions for the curator, **F-8** and **F-9** |
 | T-14 | **done** — `render/preflight.rb`, `render/pdf_inspector.rb`, `render/preflight_command.rb`, plus the admin page (`ReporterPreflightController` + helper + view, `require_admin` **per action**) and `rake reporter_dashboards:render:preflight` **exiting 0/1/2** (2 = nothing was registered, so nothing was verified — deliberately not 0). Nine document checks, each a ROUND TRIP read back out of the PDF, `:expected_failure` a distinct state from `:fail` so the INV-8 containment result cannot be confused with a defect, and a missing `poppler-utils` a **skip naming the package** with `complete?` false and the headline never a bare OK. `spec/conformance/pdf_probe.rb` is now a **policy over `PdfInspector`**, not a second implementation — same mechanism, opposite policy (hard error there, skip here) — so the corpus and the operator's diagnostic cannot drift apart. **Negative-tested**: the canned single-page PDF drives every one of the six document checks red, one at a time. **Measured against real Chromium 141: 9/9 in 943 ms**, hosted image `expected_failure`. **It found nine defects in itself** — three on its first real run, five more in review, one in CI — including an `inline_asset` check that was a tautology and a missing poppler DELETING the INV-8 check rather than skipping it. See §Findings E-10 |
 | T-19 | **done** — `liquid/filters.rb` + six registered modules, `liquid/html_scanner.rb`, four new lint rules, and the examples and README fixed. **21 owned filters**, registered PER RENDER (the default of `TemplateRenderer#render`, never `Template.register_filter`), with `OWNED`/`INHERITED`/`REMOVED`/`DEFERRED` as asserted constants so a security removal cannot come back as a convenience. **`| json` and `| js`** escape `< > & \ ' " ` $` and U+2028/9, in `\uXXXX` form so the output stays valid JSON for §6's `<script type="application/json">` block. **OQ-C is closed by measurement**: `where` and `sort_natural` inherited, `sum` owned for cross-major parity, and the `StandardFilters` name list **pinned per version so an unpinned Liquid fails the build**. The FR-19 lint now **parses** rather than regexes — `HtmlScanner` walks the document's states, and its spec is the argument: a commented-out script, a `>` inside an attribute, a `>` inside a Liquid expression and `<style>` were each answered wrongly before. **E-8's two rules shipped, which was the condition the curator's decision rested on**, plus a warning for `.all` and one error per removed filter carrying §3.6's reason. **The copy-paste surface is fixed and pinned**: both examples and all 25 README snippets are FR-19-clean, the frozen reference copies are asserted STILL defective because the verification cites them, and the other findings are held at a ratchet owned by T-16/T-11. The escaping regression table asserts the assembled block **PARSES** under node — 43 examples, because a "nothing executed" test would have passed the defect. Green on Liquid **4.0.4 and 5.13.0** (276 examples each), 1433 DB-less, 187 adapter, corpus byte-identical. **It found two defects in itself** (§Findings **E-14**) and left **F-10** for the curator |
+| T-20 | **done** — `{% geo_version_map %}` is a **deprecation shim**: same behaviour, same map shape, one log line per process (locked, so once means once under Puma), and `Version.visible` was already the scope. The addon's `VersionDrop` (108), `issue_drop_patch.rb` (43) and `custom_field_value_drop.rb` (32) are **deleted**, `register_issue_target_version_drop` with them, and **two `zero_reporter.allowlist` entries went with the files** — the ratchet shrank 18 → 16 rather than going stale. The linter gained `deprecated.geo_version_map` as a **warning, not an error**: the template still works, and `import:plan`'s "which templates need rework" is `errors.any?`. It also gained a counted usage marker, because the finding says *this breaks next minor* and the count says *this many templates must be touched first*. **It found two defects in itself and one gap in its own task definition** — §Findings **E-15** — and left **F-11** (the `issue.target_version` window before T-23) and **F-12** (`TagContext` reading `User.current`) for the curator. Green DB-less (1460, was 1433), Liquid **4.0.4 and 5.13.0** (278 each), and all six gates |
 | T-16 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -555,6 +556,65 @@ a JS string by appending a quote" fired on the `{% comment %}` that QUOTES the o
 the next author. Same shape as `layer_purity.sh`'s own note — "a gate that punishes writing
 down its own rationale teaches people to delete the rationale" — so the assertion strips
 comments and says why.
+
+**E-15 · T-20's `Touches:` list missed a live consumer, and the linter it added was
+confidently wrong about a template that had already been migrated.** Two defects, both
+found by running the work rather than reading it.
+
+**The consumer.** T-20's acceptance list names three files to delete and says nothing about
+`{% version_rollup %}`, which built one addon `VersionDrop` per row. Deleting the class
+broke the tag's spec on the first run — a load error, so it was loud — but the underlying
+question was not: the owned `Drops::VersionDrop` is the obvious replacement and it
+**refuses to be constructed without a `RenderContext`** (INV-1), which no host-plugin render
+has. See **F-12**.
+
+**The lint.** `deprecated.geo_version_map` fired on the example template's own header
+comment, which explains the migration and therefore names the retired tag. The `:liquid`
+scope searched every `{{ … }}` / `{% … %}` in the document, **including the bodies of
+`{% comment %}` and `{% raw %}`** — text Liquid never renders and renders literally
+respectively, so neither can be the construct a rule is about. `HtmlScanner` already made
+this exact decision for `<script>` (E-14); the `:liquid` scope had not. It does now, it
+fails OPEN on an unterminated comment, and six examples pin cases the previous version got
+wrong. Neither defect was findable by reading; the first needed the suite, the second needed
+the linter pointed at a real file.
+
+**F-11 · `issue.target_version` has a WINDOW with no implementation, and it is T-20's doing.**
+The prepend into the host plugin's issue drop is deleted, as T-20 requires. The accessor did
+not vanish from the vocabulary — `Drops::IssueDrop` carries `target_version` (alias of
+`version`) and `custom_field_value` — but **nothing constructs a `Drops::IssueDrop` yet**, so
+between this task and **T-23** a Reporter-rendered template gets Reporter's drop and both
+accessors resolve to nothing. Liquid renders that as empty rather than as an error, which is
+the silent shape INV-4 dislikes.
+
+This is a consequence of the plan's own ordering (T-20 depends only on T-18; the producer
+arrives with T-23), not a mistake in the implementation, and it was **not** resolved by
+inventing a producer — HANDOVER §6 forbids exactly that. It is recorded because the honest
+options are a curator's: ship the window and say so in the CHANGELOG (**what was done** —
+the entry states it plainly, and the deprecated `{% geo_version_map %}` reaches the same
+version metadata meanwhile), or hold the deletion until T-23 lands. The second costs an
+allowlist entry and a monkey-patch for one more release; the first costs a feature gap in
+templates that use it.
+
+**F-12 · `Liquid::TagContext` reads `User.current`, and whether that is INV-1 kept or INV-1
+bent is a curator call.** F-11's consumer needed answering: `{% version_rollup %}` must hand
+templates a version object, `Drops::VersionDrop` requires a `RenderContext`, and a
+host-plugin render has none. Three options were on the table.
+
+| Option | Cost |
+|---|---|
+| Refuse without a context | 100% of live installs lose the version links in every dashboard built on the tag |
+| Return a plain Hash | EAGER, so `completed_percent` runs a query per version whether or not the template prints it; and `{{ v.version }}` stops substituting for the name |
+| Read `User.current` once, at the tag boundary, into an explicit context | one named module, one branch, `owned?` so a spec can tell the two apart |
+
+The third was built (`liquid/tag_context.rb`, 12 examples). The argument for it: INV-1 is not
+"never touch `User.current`" — Redmine has no other answer to *who is this request for* — it
+is "never touch it AMBIENTLY, three frames deep, where nobody can see it happened". The
+argument against it: HANDOVER §6 says not to have the glue synthesise a `RenderContext`, and
+a reader who remembers that sentence and not its reason will read this as the thing it
+forbids. **It is not: the fallback carries an actor and nothing else — `scope` and `query`
+are nil — so no scope archaeology happens behind a new name, and `TagContext.owned?` keeps
+the owned path distinguishable rather than laundered.** Recorded so the decision is
+reviewable rather than discovered.
 
 **F-10 · `| inline` is deferred to T-33, and the curator may want it sooner.** §3.6 lists it
 among the filters T-19 reimplements, and T-19 shipped without it. The reason is an ordering

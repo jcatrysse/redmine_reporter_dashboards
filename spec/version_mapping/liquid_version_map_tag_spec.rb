@@ -66,7 +66,12 @@ end
 
 class VersionMapProjectClass
   def self.find_by(**); end
-  def self.visible; end
+
+  # Redmine's own signature is `scope :visible, lambda {|user=User.current| … }`, so it
+  # takes the actor. The stub used to declare it arity-0, which — with
+  # verify_partial_doubles on — meant this spec could not have caught the tag passing
+  # the actor explicitly OR failing to.
+  def self.visible(*); end
 end
 
 # User.current, needed by the visibility scopes.
@@ -86,8 +91,12 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
     stub_const('Version', VersionMapVersionClass)
     stub_const('Project', VersionMapProjectClass)
     stub_const('User',    VersionMapUserClass)
-    # Project.visible.find_by(...) — the visible scope returns the class itself.
+    # Project.visible(actor).find_by(...) — the visible scope returns the class itself.
     allow(Project).to receive(:visible).and_return(Project)
+    # ONCE-PER-PROCESS state is per-process, and rspec runs in ONE. Without this reset
+    # the deprecation examples would pass or fail on file order, which is the class of
+    # bug spec/README warns about and the hardest kind to reproduce.
+    described_class.reset_deprecation_notice!
   end
 
   def build_tag(markup)
@@ -312,6 +321,104 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
       build_tag('assign_to: custom_name').render(ctx)
 
       expect(ctx.scopes.last['custom_name']).to eq({})
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # T-20 — the deprecation shim
+  # ------------------------------------------------------------------
+  #
+  # The tag is retired. What is under test here is that retiring it did not change what
+  # it DOES — every example above still applies — and that the notice behaves like a
+  # deprecation rather than like log spam.
+  describe 'the deprecation notice' do
+    before { allow(Version).to receive(:visible).and_return(scope_stub([v1])) }
+
+    it 'warns on the first render' do
+      expect(Rails.logger).to receive(:warn).with(/DEPRECATED/)
+
+      build_tag('assign_to: geo_versions').render(build_context)
+    end
+
+    # ONCE, and once across TAG INSTANCES, not once per instance. Liquid parses a
+    # template into fresh tag objects, so a per-instance flag would print for every
+    # template on the page and again on the next request — which is a deprecation an
+    # operator filters out of their log by the end of the day.
+    it 'warns exactly once per process, however many renders and however many tags' do
+      expect(Rails.logger).to receive(:warn).with(/DEPRECATED/).once
+
+      3.times { build_tag('assign_to: geo_versions').render(build_context) }
+      build_tag('assign_to: other').render(build_context)
+    end
+
+    it 'names the replacement rather than only the problem' do
+      expect(described_class::DEPRECATION_MESSAGE).to include('issue.version.id')
+      expect(described_class::DEPRECATION_MESSAGE).to include('removed in the next minor')
+    end
+
+    it 'reports whether it has fired, so the reset seam is observable' do
+      expect(described_class).not_to be_deprecation_notice_logged
+
+      build_tag('').render(build_context)
+
+      expect(described_class).to be_deprecation_notice_logged
+    end
+
+    # The notice must not become the tag's job. A logger that raises — a full disk, a
+    # closed file handle — is not a reason for a report to lose its version table.
+    it 'still assigns the map when the notice cannot be logged' do
+      allow(Rails.logger).to receive(:warn).and_raise(IOError, 'log device closed')
+
+      ctx = build_context
+      build_tag('assign_to: geo_versions').render(ctx)
+
+      # IOError is a StandardError, so the tag's own rescue catches it — and the
+      # rescue's contract is an EMPTY map, never a half-built one. Asserted rather than
+      # assumed, because "it degrades" and "it degrades to the documented value" are
+      # different claims.
+      expect(ctx.scopes.last['geo_versions']).to eq({})
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # INV-1 — the actor is asked for, never assumed
+  # ------------------------------------------------------------------
+  describe 'the actor' do
+    let(:render_context_actor) { Object.new }
+
+    # Driven through a stubbed `RenderContext.from` rather than by putting a real context
+    # in the registers, and deliberately so: the tag asks `TagContext`, `TagContext` asks
+    # `RenderContext.from`, and stubbing the far end proves the whole delegation rather
+    # than the near end of it. `RenderContext.from` type-checks with `is_a?(self)`, so a
+    # double could not be planted in the registers anyway.
+    it 'prefers the render context actor over User.current' do
+      allow(RedmineReporterDashboards::Liquid::RenderContext)
+        .to receive(:from).and_return(double('render_context', actor: render_context_actor))
+
+      expect(Version).to receive(:visible).with(render_context_actor).and_return(scope_stub([v1]))
+
+      build_tag('assign_to: geo_versions').render(build_context)
+    end
+
+    it 'falls back to User.current when no owned renderer produced this render' do
+      allow(RedmineReporterDashboards::Liquid::RenderContext).to receive(:from).and_return(nil)
+
+      expect(Version).to receive(:visible).with(User.current).and_return(scope_stub([v1]))
+
+      build_tag('assign_to: geo_versions').render(build_context)
+    end
+
+    it 'resolves project: through the same actor, not a second one' do
+      allow(RedmineReporterDashboards::Liquid::RenderContext)
+        .to receive(:from).and_return(double('render_context', actor: render_context_actor))
+      shared = shared_scope_stub([v1])
+      project = double('project', shared_versions: shared)
+
+      expect(Project).to receive(:visible).with(render_context_actor).and_return(Project)
+      allow(Project).to receive(:find_by).with(identifier: 'proj-a').and_return(project)
+      expect(shared).to receive(:visible).with(render_context_actor).and_return(shared)
+
+      build_tag('project: proj-a, assign_to: geo_versions').render(build_context)
     end
   end
 end

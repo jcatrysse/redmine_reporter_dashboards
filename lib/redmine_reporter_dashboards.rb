@@ -102,9 +102,9 @@ module RedmineReporterDashboards
     require File.join(lib_root, 'redmine_reporter_dashboards/aggregation')
 
     # NOTE: use the top-level ::Liquid explicitly. This plugin also defines a
-    # RedmineReporterDashboards::Liquid namespace (VersionDrop), which would
-    # otherwise shadow a bare `Liquid` constant here and make this guard/register
-    # silently target the wrong (nonexistent) constant.
+    # RedmineReporterDashboards::Liquid namespace (the owned drop layer), which
+    # would otherwise shadow a bare `Liquid` constant here and make this
+    # guard/register silently target the wrong (nonexistent) constant.
     return unless defined?(::Liquid::Tag)
 
     require File.join(lib_root, 'sql_aggregation/liquid_aggregate_tag')
@@ -131,9 +131,10 @@ module RedmineReporterDashboards
     Rails.logger.warn("[reporter_dashboards] version_rollup tag registration failed: #{e.message}")
   end
 
-  # Liquid tag exposing a version-name → id/metadata lookup, so report templates
-  # can build version-filtered URLs from the Reporter issue drop (which only
-  # exposes issue.version as a scalar name).
+  # DEPRECATED (T-20). The tag NAME is registered for one more minor version so
+  # templates in somebody else's database do not become parse errors overnight; the
+  # owned drop layer's `issue.version` replaces what it did. See
+  # VersionMapping::LiquidVersionMapTag for the removal condition.
   VERSION_MAP_TAG_NAME = 'geo_version_map'
 
   # Register the geo_version_map Liquid tag. Mirrors register_sql_aggregate_tag:
@@ -147,36 +148,20 @@ module RedmineReporterDashboards
     Rails.logger.warn("[reporter_dashboards] geo_version_map tag registration failed: #{e.message}")
   end
 
-  # Expose issue.target_version on the Reporter issue drop by prepending
-  # IssueDropPatch into RedmineReporter::Liquid::Drops::IssueDrop. Loaded from
-  # after_plugins_loaded so Reporter's drop class is already defined.
+  # RETIRED IN T-20: `register_issue_target_version_drop`.
   #
-  # Liquid::Drop memoises the set of invokable methods per class on first use;
-  # we clear that memo after prepending so target_version is recognised even if
-  # the class was touched before this runs.
-  def register_issue_target_version_drop
-    return unless defined?(::Liquid::Drop)
-
-    require File.join(lib_root, 'redmine_reporter_dashboards/liquid/version_drop')
-    require File.join(lib_root, 'redmine_reporter_dashboards/liquid/custom_field_value_drop')
-    require File.join(lib_root, 'redmine_reporter_dashboards/liquid/issue_drop_patch')
-
-    klass = Object.const_get('RedmineReporter::Liquid::Drops::IssueDrop')
-    patch = RedmineReporterDashboards::Liquid::IssueDropPatch
-    klass.prepend(patch) unless klass.ancestors.include?(patch)
-    if klass.instance_variable_defined?(:@invokable_methods)
-      klass.remove_instance_variable(:@invokable_methods)
-    end
-    Rails.logger.info('[reporter_dashboards] issue.target_version exposed on Reporter issue drop')
-  rescue LoadError, StandardError => e
-    # One branch, and it WARNS. This is only reached when reporter_present? already
-    # said yes, so a NameError here does not mean "reporter is not installed" — it
-    # means reporter is installed and its drop class is not where we expect, which is
-    # a real defect and must not be logged as if it were an absent optional feature.
-    # (LoadError is not a StandardError, hence naming both: a require failure here
-    # must not propagate and abort after_plugins_loaded.)
-    Rails.logger.warn("[reporter_dashboards] target_version registration failed: #{e.class}: #{e.message}")
-  end
+  # It prepended a module into `RedmineReporter::Liquid::Drops::IssueDrop` to add
+  # `issue.target_version` and `issue.custom_field_value[…]` to the HOST plugin's drop.
+  # Both accessors now live on this plugin's own `Drops::IssueDrop` — `target_version`
+  # as an alias of `version`, `custom_field_value` as `CustomFieldValuesDrop` — so the
+  # template vocabulary is unchanged and the monkey-patch into another plugin's class
+  # is gone. That patch was two of the entries in `zero_reporter.allowlist`; both went
+  # with it.
+  #
+  # There is a WINDOW, and it is stated rather than hidden: until the owned renderer
+  # constructs these drops (T-23), a report rendered by the host plugin gets the gem's
+  # drop, which has neither accessor. `spec/liquid/retired_surface_spec.rb` pins the
+  # deletion; `implementation-plan.md` §Findings F-11 records the window.
 
   # Apply the performance patches to reporter's classes. Only called when
   # reporter_present? is true, so absence is not a case handled here.
