@@ -791,6 +791,21 @@ jobs:
           RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
         run: rspec spec/render --format documentation
 
+      # T-16's FALSIFIER, and it is the only place it can run. `ChartLayout` computes one
+      # plot rectangle for both paths; `SvgRenderer` draws it in Ruby and Chart.js draws
+      # it in a browser from its own font metrics. Whether those two agree is not a
+      # question Ruby can answer, so a Ruby-only run reports it as UNVERIFIED — which is
+      # honest and is not evidence. This step is the evidence.
+      #
+      # It also catches a Chart.js UPGRADE moving a default: the title box and the tick
+      # array are pinned explicitly, and a version that reads either differently shows up
+      # here as a percentage rather than as a chart that quietly sits 18px lower than its
+      # PDF twin.
+      - name: The shared-layout claim, measured in a browser
+        env:
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+        run: rspec -I spec spec/charts/shared_layout_falsifier_spec.rb --format documentation
+
       # G9. Regenerating and diffing rather than trusting the spec's own comparison,
       # so the failure output is the diff itself — a reviewer should be able to see
       # WHICH cell moved without re-running anything.

@@ -44,6 +44,51 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **`{% chart %}` — one line per chart, and the plugin does the rest.** Compare it with
+  what a chart costs in a template today: a `<canvas>` with a hand-picked width and
+  height, a `<script>` that loads Chart.js 2.8 from a CDN, a Chart.js config, a data array
+  assembled by string concatenation, a `window.status` handshake so the PDF engine knows
+  when to take its snapshot, and a `responsive: false` that exists because of one PDF
+  engine's 2011 browser. Six things, five of which are facts about the renderer rather
+  than about the report.
+
+  ```liquid
+  {% sql_aggregate from: issues, group_by: status, drill: true, assign_to: by_status %}
+  {% chart id: status, from: by_status, title: "Issues by status" %}
+  ```
+
+  - **The same chart is drawn twice, from one calculation.** On screen it is a `<canvas>`
+    drawn by Chart.js 4; in a PDF it is an inline `<svg>` computed on the server —
+    **vector, selectable, and with no JavaScript involved at all**, so a PDF chart is no
+    longer a picture of a chart. Its bars are real links.
+  - **The axis is the same in both.** Not "looks about the same": the scale, the ticks,
+    the colours and the plot rectangle are computed once and handed to both. That is
+    measured rather than claimed — a test renders a chart in a real browser and compares
+    the plot area with the server's, and it currently agrees to within **1.17%**.
+  - **Chart data is no longer written into JavaScript.** It travels in a
+    `<script type="application/json">` block. The old idiom had a real defect: a value
+    ending in a backslash broke the surrounding string, the whole script block died, and
+    the chart and every statement after it disappeared with nothing in any log. There is
+    no JavaScript syntax for a value to break out of a data block.
+  - **Chart.js ships with the plugin** — version 4.5.0, with its checksum recorded in
+    `THIRD_PARTY.md` and a build check that recomputes it. Nothing is fetched from a CDN
+    at render time. A subresource-integrity hash would have proved the bytes; it would not
+    have removed the need to reach the internet from your Redmine, and that is the part
+    worth removing.
+  - **Six chart types**: bar (vertical or horizontal), stacked bar, diverging stacked bar,
+    line, pie/doughnut, and progress. Anything else still draws, through Chart.js, and
+    says so in the diagnostics rather than failing.
+  - **Charts are readable without seeing them.** Every SVG carries a title and a
+    description with the numbers in it, every canvas carries the same sentence as an
+    `aria-label`, and the palette is the one designed for colour-vision deficiency — with
+    a darker outline on every fill so a greyscale print still separates two bars.
+  - `examples/chart_tag_showcase.liquid` is the same report written with the tag.
+
+  **What it needs:** this plugin's own report renderer, which is still being built. Pasted
+  into a Reporter report template today, `{% chart %}` records the chart and leaves a
+  placeholder that Reporter's renderer does not fill. The two existing example templates
+  are unchanged and keep working as they do.
+
 - **A `| json` filter, and the chart snippets in this README now use it.** This is a fix
   to a real defect in the documented way of building a chart, and it is worth reading
   even if you never touch the filter.

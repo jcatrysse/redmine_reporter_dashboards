@@ -98,10 +98,11 @@ class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
     # Register the Liquid tags FIRST and independently. Report templates depend on
     # {% sql_aggregate %} / {% geo_aggregate %}, so their registration must never be
     # skipped because an unrelated later step raised. Each register_* method rescues
-    # its own errors. None of the three needs reporter.
+    # its own errors. None of the four needs reporter.
     RedmineReporterDashboards.register_sql_aggregate_tag
     RedmineReporterDashboards.register_version_rollup_tag
     RedmineReporterDashboards.register_geo_version_map_tag
+    RedmineReporterDashboards.register_chart_tag
     RedmineReporterDashboards.load_patches
 
     return unless reporter

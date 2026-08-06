@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require_relative '../../script_safe_json'
 
 module RedmineReporterDashboards
   module Liquid
@@ -38,33 +39,20 @@ module RedmineReporterDashboards
       # happens to remove the attacker's re-sync primitive. One payload shape away from
       # executable, per the verification's own warning. Nothing below relies on it.
       module Escaping
-        # The five characters JSON permits raw but a `<script>` element does not treat
-        # as data.
+        # THE FIVE SCRIPT-CONTEXT ESCAPES MOVED, and only the alias is left here.
         #
-        # `<` and `>` because `</script>` inside a JS string ends the ELEMENT — the HTML
-        # tokenizer never looks inside the string, so no amount of JS-level correctness
-        # helps. `&` because a document served as XHTML decodes entities inside script
-        # content, where an HTML document does not, and a report that behaves differently
-        # under two content types is a report with a bug in exactly one of them.
+        # T-16 added a second caller — `Charts::ChartjsEmitter` writes chart data into
+        # `<script type="application/json">` and runs on the path a PDF engine takes,
+        # where `script/gates/layer_purity.sh` forbids naming the Liquid layer. Two
+        # copies of a security-bearing escaper is the worst of the available options:
+        # they drift, and the copy that drifts is the one nobody has a test for.
         #
-        # U+2028 and U+2029 because they are valid JSON and, before ES2019, terminated a
-        # JavaScript line — so a value containing one split a statement in half. Modern
-        # V8 permits them in strings; wkhtmltopdf's 2011 JavaScriptCore does not, and
-        # this plugin supports both engines.
-        #
-        # `\uXXXX` and not `\x3c`: the output has to stay valid JSON, because §6 puts
-        # chart data in `<script type="application/json">` and `JSON.parse` rejects the
-        # `\x` form. One escaping that is correct in both places beats two that each
-        # work in one.
-        SCRIPT_ESCAPES = {
-          '<' => '\\u003c',
-          '>' => '\\u003e',
-          '&' => '\\u0026',
-          "\u2028" => '\\u2028',
-          "\u2029" => '\\u2029'
-        }.freeze
-
-        SCRIPT_PATTERN = Regexp.union(SCRIPT_ESCAPES.keys).freeze
+        # So the table lives in `RedmineReporterDashboards::ScriptSafeJson`, which
+        # belongs to no layer, and the reasoning for each of the five characters is
+        # there next to it. These two constants stay because they are `| json`'s
+        # documented surface and a spec asserts them by name.
+        SCRIPT_ESCAPES = ScriptSafeJson::SCRIPT_ESCAPES
+        SCRIPT_PATTERN = ScriptSafeJson::SCRIPT_PATTERN
 
         # `| js`'s set: everything that can end or re-open a JavaScript string literal,
         # plus the two line separators above.
@@ -105,11 +93,11 @@ module RedmineReporterDashboards
         # JSON, then the script-context escapes. In that order: escaping first would
         # have `JSON.generate` escape our backslashes again.
         def json(value)
-          escape_script(JSON.generate(value))
+          ScriptSafeJson.generate(value)
         end
 
         def escape_script(text)
-          text.to_s.gsub(SCRIPT_PATTERN, SCRIPT_ESCAPES)
+          ScriptSafeJson.escape(text)
         end
 
         # No surrounding quotes, because the author's template supplies them:

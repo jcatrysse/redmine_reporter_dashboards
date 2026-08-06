@@ -34,6 +34,10 @@ It existed because the Reporter issue drop exposes `issue.version` as a scalar (
 
 **The owned drop layer answers all of that directly, so the tag is deprecated and is removed in the next minor version.** It still works, logs one deprecation line per process, and the template linter flags it. See [Migrating off `{% geo_version_map %}`](#migrating-off--geo_version_map-).
 
+### `{% chart %}` Liquid tag
+
+One line per chart, and no markup in the template. `{% chart %}` records what you asked for; the plugin decides how to draw it — a `<canvas>` drawn by the bundled Chart.js 4 on screen, and an inline `<svg>` computed on the server in a PDF. Both come from **one** layout calculation, so the axis, the ticks, the colours and the plot rectangle are the same in the two documents. Chart.js ships with the plugin; nothing is fetched from a CDN. See [Using the `{% chart %}` tag](#using-the--chart--tag).
+
 ### `{% version_rollup %}` Liquid tag
 
 A per-**target-version** rollup, computed entirely in SQL. A "one card per version" dashboard normally loops over every version *and* every issue (`O(versions × issues)`) in Liquid, which gets very slow with many issues. `{% version_rollup %}` returns one ready-to-render row per version — counts, hours, min/max dates and summed numeric custom fields (e.g. cost) — in a handful of grouped queries, so the template only loops over the (few) versions.
@@ -1195,6 +1199,77 @@ and compares as its own name, so `{% if issue.version == "2026.1" %}` keeps work
 
 The same accessors are on `{% version_rollup %}`'s `row.version`, so a dashboard built on
 that tag needs no change at all.
+
+## Using the `{% chart %}` tag
+
+> **This tag needs the plugin's own report renderer, which is still being built.** Pasted
+> into a Reporter report template today it records the chart and leaves a placeholder that
+> Reporter's renderer does not fill. The two hand-written example templates are unchanged
+> and keep working.
+
+Point it at anything `{% sql_aggregate %}` or `{% version_rollup %}` assigned:
+
+```liquid
+{% sql_aggregate from: issues, group_by: status, drill: true, assign_to: by_status %}
+{% chart id: status, from: by_status, title: "Issues by status", y_title: "Issues" %}
+```
+
+That is the whole chart. There is no `<canvas>`, no `<script>`, no Chart.js config, no
+data array, no readiness handshake and no `responsive: false` — and none of them is
+something you are allowed to add, because each is a fact about the renderer rather than
+about the report. See [`examples/chart_tag_showcase.liquid`](examples/chart_tag_showcase.liquid).
+
+### Parameters
+
+| Parameter | Content |
+|-----------|---------|
+| `id` | Required. Letters, digits, `_` and `-`; it becomes a DOM id, so it is restricted rather than escaped. Two charts sharing one is refused, not renamed |
+| `from` | The variable holding the aggregation result (default: `stats`) |
+| `type` | `bar` (default), `stacked_bar`, `diverging_stacked_bar`, `line`, `pie`, `doughnut`, `progress`. Anything else still draws, through Chart.js, and says so |
+| `orientation` | `vertical` (default) or `horizontal`. On a horizontal bar the category labels move to the value-axis side and the layout reserves the width for them |
+| `title` `x_title` `y_title` | Text |
+| `width` `height` | Pixels (default 640 × 360), bounded |
+| `x` `y` | Which keys to read. For a breakdown, `y` is the bucket key (`count` by default, or `value` for a measure). For a time series, `y` is a comma-separated list of the arrays to draw — `created,closed` by default, because putting `open_now` on the same axis is a chart nobody asked for |
+| `legend` | `true` / `false`. Left alone it shows when there is more than one series, and for a pie when there is more than one slice |
+
+Drill-through comes from the aggregation, not from the chart: `drill: true` on the
+`{% sql_aggregate %}` puts a URL on every bucket, and the chart carries it through — as an
+`<a xlink:href>` per element in the SVG, and as a click handler in the browser.
+
+### The two outputs
+
+| | On screen | In a PDF |
+|---|---|---|
+| Element | `<canvas>` + a `<script type="application/json">` data block | inline `<svg>` |
+| Drawn by | the bundled Chart.js 4.5.0 | the server, in Ruby |
+| JavaScript | yes | **none** |
+| Drill-through | click handler | real links, so a PDF chart is clickable |
+| Text | canvas pixels, plus an `aria-label` carrying the numbers | selectable, with `<title>`/`<desc>` carrying the numbers |
+
+An unsupported type is the one case that needs JavaScript in the PDF as well; the plugin
+knows that as a fact about the document rather than by searching the finished HTML for a
+`<canvas>`, and negotiates the engine's capabilities accordingly.
+
+### Why they agree
+
+Everything a chart's geometry depends on — the value range, the tick array, the tick
+labels, the palette, the label truncation and the plot rectangle — is computed **once**, on
+the server, and handed to both paths. Chart.js is given explicit bounds and an explicit
+tick array and is not allowed to choose its own.
+
+That is checked rather than asserted: `spec/charts/shared_layout_falsifier_spec.rb` renders
+a horizontal bar with twelve long labels in a real browser and compares Chart.js's own plot
+area with the server's. It currently agrees to within **1.17%**, against a 2% tolerance,
+and it runs in CI on every push. If it ever exceeds the tolerance the answer is to serve
+the server-drawn SVG on both paths, not to widen the tolerance.
+
+### Accessibility
+
+Charts are readable without being seen (FR-76). Every SVG carries a `<title>` and a
+`<desc>` with the numbers in them; every canvas carries the same sentence as an
+`aria-label`; the palette is the Okabe–Ito set designed for the three common colour-vision
+deficiencies; and every fill has a darker outline, so two adjacent bars stay two bars in a
+greyscale print. Meaning is never carried by colour alone.
 
 ## Using the `{% version_rollup %}` tag
 

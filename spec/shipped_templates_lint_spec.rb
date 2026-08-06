@@ -39,7 +39,15 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
   EXAMPLES = %w[
     examples/sample_report_template.liquid
     examples/version_status_dashboard.liquid
+    examples/chart_tag_showcase.liquid
   ].freeze
+
+  # The `{% chart %}` example is held at ZERO, not at a ratchet, and it is the only one
+  # that can be. The other two draw their charts by hand — a `<canvas>`, a Chart.js 2
+  # config and a `window.status` handshake — and every finding they carry is owned by a
+  # task that rewrites that code. This one writes no markup at all, so there is nothing
+  # for a rule to find, and that is the point of it rather than a happy accident.
+  CHART_TAG_EXAMPLE = 'examples/chart_tag_showcase.liquid'
 
   # NOT LINTED, DELIBERATELY. `docs/plan/reference/example-template-*.liquid` are frozen
   # EVIDENCE: they are the templates as they were when the escaping experiment was run,
@@ -57,7 +65,8 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
   # a failure. Reduce these numbers as T-16 and T-11 land; never raise one.
   OTHER_RULES_RATCHET = {
     'examples/sample_report_template.liquid' => 12,
-    'examples/version_status_dashboard.liquid' => 44
+    'examples/version_status_dashboard.liquid' => 44,
+    CHART_TAG_EXAMPLE => 0
   }.freeze
 
   def read(path)
@@ -99,8 +108,28 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
       # `| json` is not merely present — it is what the chart data goes through. Asserted
       # positively as well as negatively, because "no findings" is also true of a template
       # that no longer draws a chart at all.
+      #
+      # THE `{% chart %}` EXAMPLE IS EXEMPT, and the exemption is the whole finding: it
+      # has no `| json` and no `new Chart` because it has no JavaScript. The data block
+      # and the escaping still happen — in `ChartjsEmitter`, where no author can get them
+      # wrong. Asserting the opposite property for that file keeps this from reading as a
+      # gap.
       it "#{path} still emits chart data, and does it through `| json`" do
         body = read(path)
+
+        if path == CHART_TAG_EXAMPLE
+          # COMMENTS STRIPPED FIRST. This file's header EXPLAINS what the tag emits, so
+          # it names `<canvas>` and `<script type="application/json">` in prose — and an
+          # assertion that punished it would teach the next author to delete the
+          # explanation. Same lesson `layer_purity.sh` records about its own first run,
+          # and the same treatment the quote-appending assertion below already gives.
+          code = body.gsub(/\{%-?\s*comment\s*-?%\}.*?\{%-?\s*endcomment\s*-?%\}/m, '')
+
+          expect(code).to include('{% chart ')
+          expect(code).not_to include('<script')
+          expect(code).not_to include('<canvas')
+          next
+        end
 
         expect(body).to include('| json }}')
         expect(body).to include('new Chart')

@@ -148,6 +148,21 @@ module RedmineReporterDashboards
     Rails.logger.warn("[reporter_dashboards] geo_version_map tag registration failed: #{e.message}")
   end
 
+  # `{% chart %}` (T-16). One authoring act; the output binding decides whether it
+  # becomes a `<canvas>` or an inline `<svg>`. The tag emits NO markup — see
+  # `Liquid::Tags::ChartTag` for why that is the whole design rather than a detail.
+  CHART_TAG_NAME = 'chart'
+
+  def register_chart_tag
+    return unless defined?(::Liquid::Tag)
+
+    require File.join(lib_root, 'redmine_reporter_dashboards/liquid/tags/chart_tag')
+    ::Liquid::Template.register_tag(CHART_TAG_NAME,
+                                    RedmineReporterDashboards::Liquid::Tags::ChartTag)
+  rescue => e
+    Rails.logger.warn("[reporter_dashboards] chart tag registration failed: #{e.message}")
+  end
+
   # RETIRED IN T-20: `register_issue_target_version_drop`.
   #
   # It prepended a module into `RedmineReporter::Liquid::Drops::IssueDrop` to add

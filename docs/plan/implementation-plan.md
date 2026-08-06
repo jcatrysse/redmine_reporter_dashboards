@@ -70,7 +70,8 @@ fact that CI has not yet run on this work at all.
 | T-14 | **done** — `render/preflight.rb`, `render/pdf_inspector.rb`, `render/preflight_command.rb`, plus the admin page (`ReporterPreflightController` + helper + view, `require_admin` **per action**) and `rake reporter_dashboards:render:preflight` **exiting 0/1/2** (2 = nothing was registered, so nothing was verified — deliberately not 0). Nine document checks, each a ROUND TRIP read back out of the PDF, `:expected_failure` a distinct state from `:fail` so the INV-8 containment result cannot be confused with a defect, and a missing `poppler-utils` a **skip naming the package** with `complete?` false and the headline never a bare OK. `spec/conformance/pdf_probe.rb` is now a **policy over `PdfInspector`**, not a second implementation — same mechanism, opposite policy (hard error there, skip here) — so the corpus and the operator's diagnostic cannot drift apart. **Negative-tested**: the canned single-page PDF drives every one of the six document checks red, one at a time. **Measured against real Chromium 141: 9/9 in 943 ms**, hosted image `expected_failure`. **It found nine defects in itself** — three on its first real run, five more in review, one in CI — including an `inline_asset` check that was a tautology and a missing poppler DELETING the INV-8 check rather than skipping it. See §Findings E-10 |
 | T-19 | **done** — `liquid/filters.rb` + six registered modules, `liquid/html_scanner.rb`, four new lint rules, and the examples and README fixed. **21 owned filters**, registered PER RENDER (the default of `TemplateRenderer#render`, never `Template.register_filter`), with `OWNED`/`INHERITED`/`REMOVED`/`DEFERRED` as asserted constants so a security removal cannot come back as a convenience. **`| json` and `| js`** escape `< > & \ ' " ` $` and U+2028/9, in `\uXXXX` form so the output stays valid JSON for §6's `<script type="application/json">` block. **OQ-C is closed by measurement**: `where` and `sort_natural` inherited, `sum` owned for cross-major parity, and the `StandardFilters` name list **pinned per version so an unpinned Liquid fails the build**. The FR-19 lint now **parses** rather than regexes — `HtmlScanner` walks the document's states, and its spec is the argument: a commented-out script, a `>` inside an attribute, a `>` inside a Liquid expression and `<style>` were each answered wrongly before. **E-8's two rules shipped, which was the condition the curator's decision rested on**, plus a warning for `.all` and one error per removed filter carrying §3.6's reason. **The copy-paste surface is fixed and pinned**: both examples and all 25 README snippets are FR-19-clean, the frozen reference copies are asserted STILL defective because the verification cites them, and the other findings are held at a ratchet owned by T-16/T-11. The escaping regression table asserts the assembled block **PARSES** under node — 43 examples, because a "nothing executed" test would have passed the defect. Green on Liquid **4.0.4 and 5.13.0** (276 examples each), 1433 DB-less, 187 adapter, corpus byte-identical. **It found two defects in itself** (§Findings **E-14**) and left **F-10** for the curator |
 | T-20 | **done** — `{% geo_version_map %}` is a **deprecation shim**: same behaviour, same map shape, one log line per process (locked, so once means once under Puma), and `Version.visible` was already the scope. The addon's `VersionDrop` (108), `issue_drop_patch.rb` (43) and `custom_field_value_drop.rb` (32) are **deleted**, `register_issue_target_version_drop` with them, and **two `zero_reporter.allowlist` entries went with the files** — the ratchet shrank 18 → 16 rather than going stale. The linter gained `deprecated.geo_version_map` as a **warning, not an error**: the template still works, and `import:plan`'s "which templates need rework" is `errors.any?`. It also gained a counted usage marker, because the finding says *this breaks next minor* and the count says *this many templates must be touched first*. **It found two defects in itself and one gap in its own task definition** — §Findings **E-15** — and left **F-11** (the `issue.target_version` window before T-23) and **F-12** (`TagContext` reading `User.current`) for the curator. Green DB-less (1460, was 1433), Liquid **4.0.4 and 5.13.0** (278 each), and all six gates |
-| T-16 onward | not started |
+| T-16 | **done** — `charts/` (palette, spec, layout, SVG renderer, Chart.js emitter, collector), `liquid/tags/chart_tag.rb`, `assets/javascripts/chart_boot.js`, **Chart.js 4.5.0 vendored** with its digest in `THIRD_PARTY.md` and a `vendor_integrity` gate that recomputes it. `{% chart %}` **emits no markup** — a placeholder and a `ChartSpec`, and the output binding decides: `<canvas>` + `<script type="application/json">` for HTML, inline `<svg>` for PDF with `<a xlink:href>` per element and no JavaScript at all. **One `ChartLayout` for both paths**, and the claim is MEASURED rather than argued: the falsifier renders a horizontal bar with twelve long labels in a real Chromium and compares `chart.chartArea` with `ChartLayout#plot` — worst edge **1.17%** against T-16's 2% tolerance, with Chart.js using exactly the ticks, min and max it was handed. **It found two defects doing so** (§Findings **E-16**), neither findable in Ruby. Ten SVG goldens as deterministic text; `responsive`/`animation`/`devicePixelRatio` derived from the output binding, never from the author (G3). Left for the curator: **F-13** (where the chart layer lives), **F-14** (a `:responsive_canvas` capability), **F-15** (the two legacy examples' CDN reference) |
+| T-22 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -577,6 +578,68 @@ this exact decision for `<script>` (E-14); the `:liquid` scope had not. It does 
 fails OPEN on an unterminated comment, and six examples pin cases the previous version got
 wrong. Neither defect was findable by reading; the first needed the suite, the second needed
 the linter pointed at a real file.
+
+**E-16 · T-16's falsifier fired on its first run, twice, and both were real.** The
+shared-layout claim — "identical in HTML and PDF is a construction" — was measured in a
+real Chromium against the vendored Chart.js, comparing `chart.chartArea` with
+`ChartLayout#plot` on a horizontal bar with twelve long labels.
+
+**Round 1: right edge 21.88%.** With `responsive: true` Chart.js ignores the canvas's
+width/height ATTRIBUTES and sizes itself to its parent's content box, so a chart laid out
+for 640px was drawn 768px wide in an 800px document. The two paths were not disagreeing
+about a rectangle; they were drawing different-sized charts. Fixed by sizing the frame
+(`max-width` so §9b's "responsive down to a phone" still holds below the authored width).
+
+**Round 2: top edge 4.94%.** Chart.js's title box is `lineHeight + padding.top +
+padding.bottom` and its defaults are 1.2 and 10/10 — 36.8px against `ChartLayout`'s 19.
+The whole plot sat 18px lower in HTML than in its SVG twin. Fixed by pinning the title
+font's `lineHeight` and `padding` explicitly, which is the SAME mechanism §6 already
+applies to the tick array rather than a tuned constant: both sides now compute the height
+from `LINE_HEIGHT_RATIO`.
+
+**Final, measured: left 0.86%, right 0.00%, top 0.22%, bottom 1.17%** — worst edge 1.17%
+against a 2% tolerance, and Chart.js used exactly the ticks, min and max it was handed.
+Neither defect was findable in Ruby: both paths read the same `ChartLayout`, so a Ruby
+test would have compared a number with itself and passed for ever. The bottom edge at
+1.17% is the legend box, which is NOT pinned — inside tolerance today, and the reason the
+falsifier is wired into the `render-smoke` job rather than run once.
+
+**F-13 · the spec's own tree and its own boundary mechanism disagree about where the chart
+layer can live.** §1.1 puts `charts/{chart_spec,chart_layout,svg_renderer,chartjs_emitter}.rb`
+under `render/`. §3.5 puts `charts` on `RenderContext`, which is the **Liquid** layer. And
+mechanism E3 (`layer_purity.sh`) forbids `liquid/**` from naming `…Dashboards::Render`.
+All three cannot hold: `{% chart %}` has to build a `ChartSpec`, and under `render/` it
+could not name one.
+
+Built as `lib/redmine_reporter_dashboards/charts/`, naming neither layer, so both may name
+it and the gate is untouched. The mechanism won over the directory listing because the
+mechanism is the half with a test. Recorded rather than resolved: moving the files is a
+`git mv` plus a namespace change if the curator prefers the tree as written, and the
+alternative — two value objects and a converter with no home — was rejected because the
+converter's only possible owner is T-23.
+
+**F-14 · `responsive` is derived from the output binding, and a capability would be one
+notch better.** §6 says `{% chart %}` emits it "from the **engine's capabilities**, not the
+author's choice". `Render::Capabilities::ALL` is a CLOSED vocabulary with no entry for it,
+and adding one changes `config/capabilities.yml` for every engine — at which point gate G9
+requires the generated support matrix to move in the same PR. So the emitter derives it
+from `output` (`:html` → responsive, `:pdf` → fixed canvas, `devicePixelRatio: 1`, no
+animation), which satisfies the clause that matters (the AUTHOR cannot set it, G3/FR-34)
+and not the letter of "capabilities". A `:responsive_canvas` capability is the tidier
+answer and is a curator call, not one to take on the way past.
+
+**F-15 · the two legacy examples still load Chart.js 2.8 from a CDN, and T-16 did not fix
+them.** `vendor_integrity.sh` finds both and runs in **warn** mode for that reason. They are
+Reporter report templates rendered by the HOST plugin, and migrating them needs two things
+this task cannot supply: a Chart.js 4 rewrite of hand-written 2.x configs (which would break
+the charts if the loader changed and the config did not), and an ABSOLUTE URL to the plugin
+asset — `/plugin_assets/…` is root-relative, and wkhtmltopdf resolves it against nothing,
+which is the same problem `Drops::AbsoluteUrl` exists to solve on the owned path. T-19's
+ratchet note assigned "the examples' Chart.js 2 idioms" to T-16 on the assumption that T-16
+would rewrite them with `{% chart %}`; it cannot, for F-11's reason. `examples/chart_tag_showcase.liquid`
+is the additive answer — a third example, held at ZERO findings, that writes no markup at
+all. The ratchets on the other two are unchanged, and flipping `VENDOR_INTEGRITY_MODE` to
+strict belongs with whoever retires them.
 
 **F-11 · `issue.target_version` has a WINDOW with no implementation, and it is T-20's doing.**
 The prepend into the host plugin's issue drop is deleted, as T-20 requires. The accessor did

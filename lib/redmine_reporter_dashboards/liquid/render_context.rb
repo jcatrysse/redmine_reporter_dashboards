@@ -3,6 +3,7 @@
 require_relative 'batch'
 require_relative 'diagnostics'
 require_relative 'execution_policy'
+require_relative '../charts/collector'
 
 module RedmineReporterDashboards
   module Liquid
@@ -44,7 +45,13 @@ module RedmineReporterDashboards
     class RenderContext
       REGISTER_KEY = :rrd_render_context
 
-      attr_reader :actor, :scope, :query, :correlation_id, :diagnostics, :budget, :batch
+      # The output binding. Closed, for the reason every closed set in this plugin is
+      # closed: an open one lets a caller pass `:print` and an emitter test for `:pdf`,
+      # and the two never meet.
+      OUTPUTS = %i[html pdf].freeze
+
+      attr_reader :actor, :scope, :query, :correlation_id, :diagnostics, :budget, :batch,
+                  :charts, :output
 
       # actor          the user the render is FOR. Required (INV-1).
       # scope          an ActiveRecord issue relation, already visibility-scoped by
@@ -63,8 +70,20 @@ module RedmineReporterDashboards
       #                check. `TemplateRenderer` binds the real one per render.
       # batch          the first-touch registry (§3.4). Derived from `scope` unless a
       #                caller passes one, which is what `with_batch` does.
+      # charts         what `{% chart %}` recorded, in document order (§6). Built here
+      #                rather than defaulted to nil for the same reason as diagnostics:
+      #                a nil collector is a render where every chart is silently
+      #                dropped, and a tag would have to branch on it at the one moment
+      #                it must not.
+      # output         `:html` or `:pdf` — WHICH DOCUMENT this render is producing, and
+      #                the only thing that differs between the two emitters. The author
+      #                writes one `{% chart %}`; this is what decides whether it becomes
+      #                a `<canvas>` or an `<svg>` (§6, and FR-34's "no engine-specific
+      #                workaround in a template"). Defaults to `:html` because that is
+      #                the preview an author sees while writing.
       def initialize(actor:, scope: nil, query: nil, correlation_id: nil,
-                     diagnostics: nil, budget: nil, batch: nil)
+                     diagnostics: nil, budget: nil, batch: nil, charts: nil,
+                     output: :html)
         if actor.nil?
           raise ArgumentError,
                 'a RenderContext needs an actor (INV-1: never ambient User.current)'
@@ -78,8 +97,19 @@ module RedmineReporterDashboards
         @budget = budget || Budget::NULL
         @batch = batch || Batch.new(actor: actor, scope: scope, diagnostics: @diagnostics,
                                     budget: @budget)
+        @charts = charts || Charts::Collector.new
+        @output = OUTPUTS.include?(output.to_sym) ? output.to_sym : :html
         freeze
       end
+
+      # NOT FROZEN, and it is the one mutable thing this object holds. A `RenderContext`
+      # is a frozen value because an actor that can be reassigned mid-render is INV-1
+      # lost; the chart collector is an APPEND LOG that a tag writes to as the document
+      # is produced, which is a different kind of thing and cannot be a value.
+      #
+      # `freeze` here is shallow, so the collector stays writable — deliberately, and
+      # said out loud because "the context is frozen" would otherwise read as a promise
+      # this field does not keep. `Diagnostics` is the same shape for the same reason.
 
       # The registry for some OTHER scope — a collection drop built over a relation that
       # is not the context's own, which is every named scope a `from:` argument reaches.
@@ -123,7 +153,23 @@ module RedmineReporterDashboards
       def with_batch(other_batch)
         self.class.new(actor: @actor, scope: @scope, query: @query,
                        correlation_id: @correlation_id, diagnostics: @diagnostics,
-                       budget: @budget, batch: other_batch)
+                       budget: @budget, batch: other_batch, charts: @charts,
+                       output: @output)
+      end
+
+      # The output binding is chosen by whoever is producing the document, and it is a
+      # derivation rather than a constructor argument at the call site for the same
+      # reason `with_budget` is: one render context, one render, two documents from it
+      # only if somebody says so explicitly.
+      #
+      # The CHARTS COLLECTOR IS SHARED across the derivation, not rebuilt. That is the
+      # whole point — `{% chart %}` recorded once, and the HTML and PDF bindings draw
+      # the same recordings.
+      def with_output(other_output)
+        self.class.new(actor: @actor, scope: @scope, query: @query,
+                       correlation_id: @correlation_id, diagnostics: @diagnostics,
+                       budget: @budget, batch: @batch, charts: @charts,
+                       output: other_output)
       end
 
       def with_budget(other_budget)
@@ -131,7 +177,8 @@ module RedmineReporterDashboards
                        correlation_id: @correlation_id, diagnostics: @diagnostics,
                        budget: other_budget,
                        batch: Batch.new(actor: @actor, scope: @scope,
-                                        diagnostics: @diagnostics, budget: other_budget))
+                                        diagnostics: @diagnostics, budget: other_budget),
+                       charts: @charts, output: @output)
       end
 
       # The one register lookup the owned path performs. Returns nil when there is no
@@ -157,8 +204,8 @@ module RedmineReporterDashboards
       private_class_method :registers_of
 
       def to_s
-        "#<RenderContext actor=#{actor_label} scope=#{@scope ? 'yes' : 'nil'} " \
-          "query=#{@query ? "##{@query.id}" : 'nil'}>"
+        "#<RenderContext actor=#{actor_label} output=#{@output} " \
+          "scope=#{@scope ? 'yes' : 'nil'} query=#{@query ? "##{@query.id}" : 'nil'}>"
       end
 
       # A login, never a name: this appears in log lines, and a display name is

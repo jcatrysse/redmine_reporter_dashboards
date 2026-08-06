@@ -1,0 +1,85 @@
+{% comment %}
+=====================================================================
+ {% chart %} — the same report, drawn twice, written once
+ ---------------------------------------------------------------------
+ Compare this with examples/sample_report_template.liquid, which draws
+ one chart. That one needs: a <canvas> with a hand-picked width and
+ height, a <script> that loads Chart.js from a CDN, a Chart.js config,
+ a data array assembled from Liquid strings, a window.status handshake
+ so the PDF engine knows when to snapshot, and a responsive:false that
+ exists because of one PDF engine's 2011 WebKit.
+
+ Six things. Five of them are facts about the RENDERER, and none of
+ them is something the person writing a report should have to know.
+
+ This template has none of them. Every chart below is one line, and
+ the plugin decides the rest:
+
+   * in a browser  -> a <canvas> plus a <script type="application/json">
+                      data block, and the bundled Chart.js 4 draws it
+   * in a PDF      -> an inline <svg> computed on the server: vector,
+                      selectable, no JavaScript at all, and every bar
+                      is a real link
+
+ Both are laid out by ONE calculation, so the axis, the ticks, the
+ colours and the plot rectangle are the same in the two documents.
+ That is measured rather than asserted — see
+ spec/charts/shared_layout_falsifier_spec.rb, which renders this exact
+ kind of chart in a real browser and compares the plot area with the
+ server's to within 2%.
+
+ WHICH RENDERER. {% chart %} needs this plugin's own report renderer.
+ Pasted into a Reporter report template it records the chart and emits
+ a placeholder that Reporter's renderer does not fill, so use it with
+ the plugin's own preview and reports.
+
+ Source query: an "issues" report.
+=====================================================================
+{% endcomment %}
+
+{% comment %} 1) Three aggregations, all in SQL, no per-issue loop anywhere. {% endcomment %}
+{% sql_aggregate from: issues, group_by: status, drill: true, assign_to: by_status %}
+{% sql_aggregate from: issues, group_by: assignee, sort: count, limit: 12, drill: true, assign_to: by_assignee %}
+{% sql_aggregate from: issues, period: month, periods: 6, assign_to: per_month %}
+
+<div class="rrd-report-head">
+  <h1>Issue report</h1>
+  <p>{{ by_status.total }} issues in scope</p>
+</div>
+
+{% comment %}
+ 2) A vertical bar. `drill: true` on the aggregation above put a URL on every
+    bucket, and the chart carries them through — as <a xlink:href> in the SVG
+    and as a click handler in the browser. The author writes neither.
+{% endcomment %}
+{% chart id: status, from: by_status, title: "Issues by status", y_title: "Issues" %}
+
+{% comment %}
+ 3) A horizontal bar, because assignee names are long. `orientation` is the only
+    thing that changes; the layout reserves the label width on the correct side.
+{% endcomment %}
+{% chart id: assignee, from: by_assignee, orientation: horizontal, width: 640, height: 420,
+   title: "Open issues by assignee" %}
+
+{% comment %}
+ 4) A line over the period series. `y:` names which of the parallel arrays to
+    draw — the aggregator also returns open_now, and putting it on this axis
+    would be a chart nobody asked for.
+{% endcomment %}
+{% chart id: trend, from: per_month, type: line, y: "created,closed",
+   title: "Created and closed", x_title: "Month" %}
+
+{% comment %}
+ 5) The same status breakdown as a pie, to show that the type is the only
+    difference. A pie legend keys on the CATEGORIES, so the slices are labelled
+    rather than being four colours a reader has to guess at.
+{% endcomment %}
+{% chart id: mix, from: by_status, type: pie, width: 420, height: 320,
+   title: "Share of issues by status" %}
+
+<p class="rrd-report-note">
+  Every chart above is described in text as well as drawn: the SVG carries a
+  &lt;title&gt; and a &lt;desc&gt; with the numbers in them, and the canvas carries the
+  same sentence as an aria-label. A reader using a screen reader, and a reader
+  looking at a greyscale print, both get the findings.
+</p>

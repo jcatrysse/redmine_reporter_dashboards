@@ -379,6 +379,8 @@ record as of the last local run.
 | **T-19: the escaping regression table, node v22** | **yes, locally (2026-08-06)** | 43 examples. 18 payloads through `| json`, each asserted to PARSE and to round-trip byte-for-byte; the OLD idiom pinned as measured — SyntaxError on a backslash terminator, and no payload reaching code position. **One assertion in it was wrong on the first run** and is now written from what the output actually is: the combined payload PARSES, because `| escape` turns its quotes into `&#39;` and `\&` is an identity escape. Two payload shapes, two outcomes |
 | **T-19: the shipped copy-paste surface** | **yes, locally (2026-08-06)** | Both examples and all 25 README ```liquid snippets are FR-19-clean; the frozen reference copies asserted STILL defective, because `verification-liquid-js-escaping.md` cites their line numbers. 1433 DB-less examples, 187 adapter, corpus **byte-identical — 217 examples, all 176 values unchanged** |
 | **T-20: the retirement, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | **1460 DB-less examples** (was 1433), 0 failures, 114 pending — the deprecation shim's log-once, both `TagContext` branches, the retired-surface guard and the six inert-block lint cases. **278 spec_liquid under each major** (was 276), including the two version-project spellings `{% version_rollup %}` templates read. All six gates green, `LAYER_PURITY_MODE=strict` included, and `zero_reporter` down to **16 files / 16 entries** from 18. The retired-surface guard was **negative-tested**: a planted `Object.const_get('RedmineReporter::Liquid::Drops::IssueDrop')` fails it, a comment naming the class does not. **NOT RUN HERE: adapter, corpus, minitest** — no database and no Redmine checkout in this container, so CI is their first execution |
+| **T-16: the chart layer, DB-less** | **yes, locally (2026-08-06)** | **1562 rspec examples, 0 failures** (was 1462), including 10 SVG goldens as deterministic text, the six families through both emitters, and the escaping payload set through the JSON data block. All seven gates green, `vendor_integrity` new and **negative-tested on all three arms** — a corrupted vendored byte, an unmanifested vendored file, and a planted CDN reference each fail it |
+| **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -542,6 +544,60 @@ of a CI that runs on fork pull requests.
    `completed_percent` runs a query per version whether or not the template prints it, and
    `{{ v.version }}` stops substituting for the version name. Both are silent. The drop is
    lazy and string-substitutable; keep it.
+
+15. **T-16 is done — the hybrid chart layer.** `charts/` (six files), `liquid/tags/chart_tag.rb`,
+   `assets/javascripts/chart_boot.js`, vendored Chart.js 4.5.0. Six things a later session
+   should know, and the first two will cost time if they are not known.
+
+   **THE CHART LAYER IS NOT UNDER `render/`, AND THAT IS DELIBERATE.** §1.1's tree says it
+   should be; E3 (`layer_purity.sh`) forbids `liquid/**` from naming the render layer; and
+   §3.5 puts `charts` on `RenderContext`, which IS the Liquid layer. All three cannot hold.
+   It lives at `lib/redmine_reporter_dashboards/charts/` naming neither layer, so both may
+   name it. **F-13**, and moving it is a `git mv` if the curator disagrees — do not "fix"
+   the tree without reading the finding, because the obvious fix breaks the gate.
+
+   **THE FALSIFIER IS THE ONLY THING THAT CAN ANSWER THE SHARED-LAYOUT CLAIM, AND IT NEEDS
+   A BROWSER.** Both emitters read the same `ChartLayout`, so a Ruby test comparing what
+   each was TOLD compares a number with itself and passes for ever. The claim is that both
+   DRAW the same rectangle, and Chart.js draws its own from real font metrics. Run it as
+   the non-root user (§1's Chromium note):
+
+       chmod -R a+rX . && su rrd -s /bin/bash -c \
+         'PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers rspec -I spec spec/charts/shared_layout_falsifier_spec.rb'
+
+   It found two real defects on its first run (§Findings **E-16**) and now measures
+   **1.17% worst edge** against a 2% tolerance. It is wired into the `render-smoke` CI job,
+   which is also what would catch a Chart.js upgrade moving a default.
+
+   **`responsive: true` SIZES THE CANVAS FROM THE PARENT, NOT FROM ITS OWN ATTRIBUTES.**
+   That is the 21.88% finding, and it is worth knowing generally: a `<canvas width=640>`
+   inside an 800px div becomes 768px wide and every server-computed coordinate is wrong.
+   `ChartjsEmitter#frame_style` is what constrains it, and it uses `max-width` so §9b's
+   "responsive down to a phone" still holds below the authored width.
+
+   **A RUBY METHOD WITH A KEYWORD PARAMETER SWALLOWS A TRAILING BARE HASH.** Cost two
+   rounds in one session, in two different files: `element('rect', 'x' => 0)` raised
+   "unknown keywords: x" because the method declared `inner:`, and `context('stats' => x)`
+   in a spec did the same because it declared `with_render_context:`. Both are now
+   positional or braced, and both say so in a comment. Watch for it whenever a helper
+   grows its first keyword argument.
+
+   **THE THIRD EXAMPLE IS HELD AT ZERO AND THE OTHER TWO ARE NOT.**
+   `examples/chart_tag_showcase.liquid` writes no markup at all, so it has no findings and
+   `shipped_templates_lint_spec.rb` pins it at 0. The two legacy examples still load
+   Chart.js 2.8 from cdnjs and their ratchets are UNCHANGED — **F-15** says why T-16 could
+   not migrate them (they need an absolute plugin-asset URL that a Reporter-rendered
+   template has no way to build) and who owns it. `vendor_integrity.sh` runs in **warn**
+   mode for exactly those two lines; flipping it to strict is what finishing that job
+   looks like.
+
+   **`ScriptSafeJson` MOVED OUT OF THE FILTERS, and the move is the interesting part.**
+   `| json`'s five script-context escapes are now
+   `lib/redmine_reporter_dashboards/script_safe_json.rb`, belonging to no layer, because
+   `ChartjsEmitter` is the second caller and it sits on the path a PDF engine takes.
+   `Liquid::Filters::Escaping` keeps the constants as aliases. Two copies of a
+   security-bearing escaper was the alternative, and the copy that drifts is always the one
+   without a test.
 
 12. **T-18 is done — the owned drop layer.** `liquid/drops/` (12 classes + 3 bases),
    `liquid/batch.rb`, `liquid/diagnostics.rb`, and `RenderContext` grown a `batch`, a
