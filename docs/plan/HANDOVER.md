@@ -487,8 +487,11 @@ of a CI that runs on fork pull requests.
    exactly as `RenderContext`'s own comment says of T-07 — T-19 (filters), T-20 (retiring the two
    compensating tags) and T-23 are what wire them in. The `liquid/{version,custom_field_value}_drop.rb`
    and `issue_drop_patch.rb` files in the OLD location are still live for installs with the host
-   plugin; T-20 deletes them. Two questions were left for the curator rather than decided: **F-8**
-   (`UserDrop#mail` is absent) and **F-9** (§3.1's class count).
+   plugin; T-20 deletes them. The two questions it raised are ANSWERED (2026-08-06): **F-8** is
+   closed — `UserDrop#mail` stays absent, and note the scope, because the name invites the wrong
+   one: it is only about printing an address inside a template body, not about §7b.5's mail
+   sending, which resolves Redmine users server-side and reads `User#mail` on the model. **F-9** is
+   deferred to real-template testing, with `Drops::CLASSES` holding the inventory until then.
 
 11. **T-14 is done — the render preflight, in three places that share one implementation.**
    `render/preflight.rb` builds the probe document and the checks, `render/pdf_inspector.rb` reads

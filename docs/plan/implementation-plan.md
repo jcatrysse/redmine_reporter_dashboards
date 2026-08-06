@@ -548,8 +548,18 @@ example only found it because it built the two relations separately. An example 
 object would have passed the broken code, and a cap that silently does not apply is exactly the
 class of failure INV-4 exists to make visible.
 
-**F-8 · `UserDrop` does not expose `mail`, and that is a curator question rather than an
-oversight.** Redmine lets a user hide their address (`UserPreference#hide_mail`). Honouring it per
+**F-8 · CLOSED by the curator, 2026-08-06: not for now.** `UserDrop` ships without `mail` and stays
+that way; revisit only if a real template needs it.
+
+**The scope of the question was confirmed before it was answered, because the name invites the wrong
+one.** This is *only* about printing an address inside a template body — `{{ issue.author.mail }}`.
+It has nothing to do with mail SENDING: §7b.5's ad-hoc report mail does not exist in the tree yet,
+and when it does it resolves recipients as **Redmine users** server-side, with `From`
+server-controlled and external addresses behind an admin toggle plus a domain allowlist. It reads
+`User#mail` on the model, never through a drop. So the absent accessor costs that capability
+nothing, which is what made "not for now" a cheap answer rather than a deferred risk.
+
+The original question, kept because the reasoning is what a future session needs: Redmine lets a user hide their address (`UserPreference#hide_mail`). Honouring it per
 row means reading `user.pref` for every person a report prints, and `preference` is not among the
 associations `IssuesDrop` preloads — an issue list showing 500 authors' addresses would be 500
 queries, and preloading it for every issue list to serve the one template that wants addresses is
@@ -560,7 +570,12 @@ unreachable. What the curator owes is whether reports need addresses at all; if 
 is a purpose-built accessor that preloads `:preference` and honours the flag, not a line added to
 `UserDrop`.
 
-**F-9 · §3.1's heading says thirteen drop classes and its own list enumerates eleven.** The list is
+**F-9 · DEFERRED by the curator, 2026-08-06: to be settled while testing the plugin and the real
+templates**, which is the only place the answer can come from — a thirteenth class is worth having
+only if a template wants it. `Liquid::Drops::CLASSES` is the inventory in the meantime and the spec
+holds it, so adding one later is a deliberate edit rather than a drift.
+
+The discrepancy, kept for whoever settles it: The list is
 the specific one, so T-18 built the list — plus `CustomFieldValuesDrop`, the bracket-lookup sibling
 that carries the addon's `issue.custom_field_value[20]` surface across T-20's deletion of
 `issue_drop_patch.rb`. Twelve concrete classes and three bases, held as
