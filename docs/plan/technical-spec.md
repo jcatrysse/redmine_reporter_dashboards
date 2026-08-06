@@ -912,14 +912,39 @@ requires `| json`-free plain-text values only). Emission mirrors `{% chart %}`: 
 | `:pdf`, engine has `:javascript` | same code path inside the engine; the readiness contract holds the render open until Mermaid resolves | vector SVG in the PDF |
 | `:pdf`, engine lacks `:javascript` (WeasyPrint) | `Degradation(:mermaid_unsupported)` + the diagram **source** in a `<pre>`, clearly labelled | honest, readable, not blank |
 
-**Security, three settings and one rule.** `securityLevel: 'strict'`, `htmlLabels: false`,
-`flowchart.htmlLabels: false` — Mermaid's own advisory record is overwhelmingly *labels containing
-markup* `[CITE: 2025–26 advisories, 02-analysis.md §245]`. The rule that matters more than the
-settings: **the rendered SVG is sanitised by the plugin after Mermaid produces it, not trusted
-because Mermaid was configured**, using the same SVG allowlist `SvgRenderer` output passes through
-(elements and attributes on a closed list, no `<script>`, no `<foreignObject>`, no `xlink:href`
-except the drill-through form, no `on*`). One sanitiser, two producers — a defence that does not
-depend on a third-party library's configuration being honoured.
+**Security — AMENDED 2026-08-06 by curator decision (§Findings F-17). The SVG sanitiser is
+DROPPED, and the reason is the product's purpose.**
+
+This section used to require that *"the rendered SVG is sanitised by the plugin after Mermaid
+produces it, not trusted because Mermaid was configured"*, against the same allowlist `SvgRenderer`
+output passes through — one sanitiser, two producers. It cannot earn its keep. **The plugin exists to
+let a report author use modern JavaScript**, Chart.js and Mermaid being examples rather than the
+feature; an author may write `<script>` directly, and INV-9 says so — template authorship *is* code
+execution, which is why T-27 ships the label *"Author report templates (executes server-side code)"*.
+Stripping `<script>` from a library's output inside a document whose author may write one is a cost
+with a security-shaped name.
+
+`securityLevel: 'strict'`, `htmlLabels: false` and `flowchart.htmlLabels: false` **stay as defaults** —
+they cost nothing and spare an author from knowing about them — but nothing downstream depends on them
+being honoured, because nothing needs to.
+
+**What replaces it is not weaker; it is aimed at the threat that survives.** The dangerous bytes are
+not the author's — they are **Redmine's content**, written by every user rather than by the template
+author, and that boundary is FR-19's: `| json` / `| js`, the `HtmlScanner` lint and T-19's payload
+table. Under this decision that becomes the *only* control on that path, so it tightens rather than
+relaxes. `{% mermaid interpolate: true %}` is the one Mermaid-specific instance of it and must escape
+or refuse rather than pass through.
+
+**Unchanged, because neither is about author-written JavaScript:** T-33's `asset_policy` (SSRF
+originating on the *server*, INV-8) and T-17's execution policy (a runaway template is a denial of
+service whoever wrote it).
+
+**And the residual risk, stated rather than implied:** on the `:pdf` path this is safe by construction
+— the engine has no network and the output is a document. On the `:html` path author-written script
+runs in the *viewer's* browser with the viewer's session, so the authoring permission is
+administrator-adjacent and **the permission is the control**. That makes `[OQ-F]` — whether
+`template_authoring` defaults to `:admins_only` — the load-bearing decision of this area rather than a
+naming question.
 
 **Diagram types are not enumerated and deliberately so** — unlike charts, where six types are
 enumerated because *we* compute the layout. Mermaid computes its own; the allowlist is on the

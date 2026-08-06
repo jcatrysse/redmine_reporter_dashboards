@@ -821,6 +821,81 @@ security property is unchanged either way: any `| inline` must go through
 `Assets::Policy`/`LocalStore`, or it is the second embedding path this finding exists to
 prevent.
 
+**F-17 · RESOLVED 2026-08-06 BY THE CURATOR, and the answer reframes the product rather than
+picking one of my three options.** Read this before F-17's original text below, which is kept because
+its measurements are still the evidence base.
+
+**The curator's statement of intent, which was not in any spec document:** *"the whole idea was that
+we want a modern system accepting most modern forms of javascript to be used in reports. This way
+managers can create fantastic reports with chart.js, use mermaid charts and also support any other
+reasonable or new javascript script to improve the templates. We didn't want a specific management of
+specific javascript libraries. We just used chart.js and mermaid as examples."*
+
+**That makes the SVG sanitiser theatre, and the reasoning is worth keeping.** The sanitiser exists to
+strip `<script>` from Mermaid's output — in a document where the author may write `<script>` directly,
+because that is the product. INV-9 already says so in as many words: template authorship IS code
+execution, and T-27 ships the permission label *"Author report templates (executes server-side
+code)"*. A control that stops a library doing what the author is explicitly allowed to do himself is
+not a control; it is a cost with a security-shaped name. **Dropped.** `securityLevel: 'strict'` and
+`htmlLabels: false` stay as Mermaid *defaults* — they cost nothing and they are one less thing an
+author has to know — but nothing downstream depends on them being honoured, because nothing needs to.
+
+**WHAT THE REAL CONTROL IS, and it is already built.** The threat that survives the reframing is not
+the author; it is **Redmine content flowing into a document**. Issue subjects, custom field values and
+version names are written by every user, not only by template authors — so the curator's *"the content
+will be content from redmine"* is the one part of the framing that is not automatically safe, and it
+is precisely the boundary FR-19 already guards: `| json` / `| js`, the `HtmlScanner` lint, and T-19's
+43-payload regression table. That boundary gets **tighter** under this decision, not looser, because
+it is now the only one. Same for `{% mermaid interpolate: true %}`: interpolating issue text into a
+diagram is the one Mermaid-specific path where a non-author's bytes reach the output, so `interpolate:`
+must escape or refuse rather than pass through.
+
+**WHAT IS NOT RELAXED, stated so a later reader does not over-read this decision.** Two server-side
+controls have nothing to do with author-written JavaScript and stay exactly as they are:
+
+* **T-33's asset policy.** It stops the RENDERER fetching arbitrary URLs — SSRF originating on the
+  server, under no author's control and outside the browser's own sandbox. INV-8 is untouched.
+* **The Liquid execution policy** (T-17) — resource limits and the deadline. A runaway template is a
+  denial of service whoever wrote it.
+
+**AND ONE CONSEQUENCE THE CURATOR SHOULD OWN KNOWINGLY.** For the PDF path this is genuinely safe: the
+engine has no network (INV-8, measured by `F-15-egress-denial`) and the output is a document. For the
+**live HTML** path, author-written JavaScript runs in the *viewer's* browser with the viewer's
+session — so "may author templates" becomes operationally equivalent to "may run code as any user who
+views a report, including an administrator". That is not an argument for a sanitiser (a sanitiser on
+Mermaid's SVG would not touch it). It is an argument that the permission must be treated as
+administrator-adjacent, which is exactly what T-27 and the `template_authoring` setting already do —
+so the answer to the curator's *"I hope this is more or less safe"* is: **yes for PDFs; for on-screen
+reports it is as safe as the trust placed in whoever holds the authoring permission, and that
+permission is the control.** `[OQ-F]` (whether `template_authoring` defaults to `:admins_only`) stops
+being a naming question and becomes the load-bearing decision of this whole area.
+
+**T-35 IS RE-SCOPED, because as specified it is exactly the "specific management of specific
+libraries" the curator does not want.** A `{% mermaid %}` tag, a vendored Mermaid, a `:mermaid`
+capability and a Mermaid-specific degradation are four pieces of per-library plumbing. What the stated
+intent asks for is generic, and **most of it already exists**:
+
+| what a template needs | what already provides it |
+|---|---|
+| include any JS library, offline, no CDN | T-33's resolver inlines any local reference; `{% chart %}`'s vendored Chart.js is the pattern |
+| tell the renderer "wait for my script" | T-11's `window.__rd.begin()/end()` — already engine-independent and already documented as the contract |
+| know whether the engine can run it | `:javascript` — plus the new capability below |
+
+So T-35 shrinks to: **vendor Mermaid as a convenience** (so it works offline like Chart.js), a thin
+block tag for the ergonomics, and no sanitiser. The `MermaidSpec`/collector machinery mirroring
+`{% chart %}` is no longer justified — `{% chart %}` needs it because the PLUGIN computes the layout;
+Mermaid computes its own, so the tag can emit a `<pre class="mermaid">` and the shell can run it.
+
+**REPLACE `:mermaid` WITH A CAPABILITY ABOUT MODERN JAVASCRIPT, which is the generic form of OQ-L's
+answer and strictly more useful.** The measurement (E-18, §6.1) found that wkhtmltopdf does not fail
+at *Mermaid* — it fails to **parse** `||=`, and `globalThis` is undefined. That is true of every
+modern library, not one of them: Chart.js 4 today, whatever a manager reaches for tomorrow. A
+`:mermaid` capability would answer one question and lie by omission about all the others. A capability
+meaning *"this engine runs post-ES5 JavaScript"* tells an author the truth once, satisfies F-14's test
+(an engine either does or does not; absence degrades and is recorded), and needs no new entry when the
+next library arrives. Suggested name `:modern_javascript`; wkhtmltopdf declares `:javascript` and not
+this.
+
 **F-17 · T-35's "one sanitiser, two producers" CANNOT hold as written, and the measurements to
 settle it are done. CURATOR DECISION NEEDED before the task is built.**
 
