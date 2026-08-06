@@ -6,6 +6,35 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **An owned Liquid drop layer, so report templates stop depending on the vendor gem's.**
+  Nothing user-facing changes yet — nothing constructs one of these drops until the
+  filters and the template surface land, and the existing `issue.target_version` and
+  `issue.custom_field_value` accessors keep working exactly as they do today. What is
+  new is the vocabulary, and three things in it are fixes rather than ports.
+
+  - **`issue.closed_on` is now shown in your timezone, like `created_on` and
+    `updated_on` already were.** Three date accessors on the same issue were being
+    rendered in two different timezones, with nothing in the output to say which was
+    which. All three now follow the person the report is *for* — not whoever happened
+    to trigger the render.
+  - **`issue.status`, `.tracker`, `.priority`, `.category` and `.version` answer more
+    than their own name.** They still print exactly as before and still compare
+    correctly against a string, so existing templates are unaffected; but they now also
+    carry `.id`, `.url` and — for a version — its date, status and project. That is
+    what makes the `{% geo_version_map %}` tag unnecessary. `issue.status_id` and its
+    four siblings ship as well, for templates that would rather have the plain number.
+  - **Every URL a template gets is absolute.** A link in an exported PDF has no page to
+    resolve against, so this is the difference between a working link and a dead one.
+  - **A long issue list is cut off visibly instead of quietly.** Past 5 000 records the
+    render stops and says so, rather than handing you a report that looks complete.
+  - Custom-field values, spent time, attachments, sub-tasks and time entries are read
+    **once for the whole list** rather than once per issue, and each of them is filtered
+    by what the person reading the report is allowed to see — including a custom field
+    restricted to a role they hold in a *different* project.
+  - Removed on purpose: the six accessors that reached into other RedmineUP paid
+    plugins, and an attachment's `file_url`, which produced a permanent unauthenticated
+    link to the file. Attachments keep their ordinary authenticated URLs.
+
 - **An owned PDF render path, with two engines and a conformance corpus that judges
   them.** Nothing user-facing changes yet — no button, no menu item and no report
   currently goes through it (the widget export still uses Reporter's own path). What

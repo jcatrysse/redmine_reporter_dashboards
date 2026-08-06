@@ -66,7 +66,7 @@ fact that CI has not yet run on this work at all.
 | T-13 | **done for `:chromium_cdp`, written-but-unrun for `:wkhtmltopdf`** — `render/engines/{cdp_client,chromium_cdp,wkhtmltopdf}.rb` and `render/process_pool.rb`; `pdf_polyfills.rb` → `glue/legacy/wk_legacy_shims.rb` with the payload asserted byte-identical. CDP over a **pipe, not a port**; `--no-sandbox` never set (so the browser itself enforces non-root); pool of 1 with a bounded queue answering `Failure(:engine_unavailable)`. **20 of 20 conformance fixtures green on Chromium 141.** wkhtmltopdf is registered and has **never been executed** — its package is gone from Ubuntu 24.04 — so it stays `verification: pending` and the matrix prints "not verified" rather than cells nobody measured. **The corpus found three defects on its first run** — see §Findings E-2, E-3, E-4 |
 | T-15 | **partly done** — `render/batch_guard.rb` plus `spec/render/chromium_containment_spec.rb`. The cap OWNS the render loop rather than sitting beside it, so "refuse before any render" is a property of the object and not of the caller's discipline; asserted with a double that counts calls (**zero** over the cap), at the cap and one past it. Batch deadline keeps what is finished and refuses the rest, typed, with each undrawn document's own correlation id. Against a real browser: a wedged renderer times out bounded-and-monotonic **and the browser is gone from the process table**, the next render is served from a fresh one, shutdown leaves nothing behind, and concurrency never exceeds one browser. **Two Accept items are blocked on an entry point that does not exist** — see §Findings E-6 |
 | T-17 | **done** — `liquid/{execution_policy,template_renderer}.rb` plus gate `single_parse.sh`. **Both mechanisms, because neither alone suffices**: per-CLASS resource limits (widget/report/preview, preview deliberately on the widget's numbers so an author feels the limit at the keyboard) handed to the `Liquid::Context` — the only per-render channel either Liquid 4 or 5 offers, verified on 4.0.4 and 5.13.0 — and a **cooperative monotonic deadline** wired into all three own tags, a no-op where no budget is bound. `Timeout.timeout` is not used and the file says why. **Errors never enter the document**: the spec first DEMONSTRATES Liquid's default of writing `Liquid error:` into the output, then shows the same template becoming a typed failure with no body at all. 36 examples against the real gem; the gate negative-tested |
-| T-18 | **begun — the prerequisite only.** T-18's Accept list names a *"Required spec before this task is done"*, and that is what landed: `liquid/drops/named_ref_drop.rb` and its proof, green on Liquid **4.0.4 and 5.13.0**, 28 examples each, every one comparing the drop's rendering against the **String's**. It found a protocol-breaking defect (`key?` made every accessor render empty) and **two gaps in §3.3's own table** which are E-8 and the curator's. **The other 12 drop classes and `liquid/batch.rb` are not started** — deliberately, rather than left as stubs |
+| T-18 | **done** — the twelve drop classes, the three bases and `liquid/batch.rb`. §3.2's disposition table is implemented accessor by accessor and ASSERTED accessor by accessor: the names kept identical, the `closed_on` timezone defect fixed (all three timestamps now go through the actor, never `User.current`), the four scalars promoted to `NamedRefDrop` with their `*_id` escape hatches, `version` promoted to a string-substitutable `VersionDrop`, `url` absolute by construction, and the **fifteen dropped accessors** — six vendor probes, four OQ-H, five from the addon's own subclass — each pinned UNREACHABLE under `strict_variables` so the negative half cannot rot. `all` is reachable, refused and records `Degradation(:unbounded_collection)`; deleting it would render blank, which is the silent answer INV-4 forbids. **The gating criteria are measured, not argued**: zero `Issue` instantiations for an aggregate-only template at 10 AND 10 000 issues, identical query count across that span, one custom field across 400 issues in **4** queries and a second one for **free**, and the cap asserted AT it and one past it. **Visibility is in the batch, not in the drop**: `IssueCustomField.visible` plus Redmine's per-project `visible_by?`, `TimeEntry.visible`, `Issue.visible` — and the auditor case (holds the role in ANOTHER project) is the leak the four-actor fixture exists to catch. Green on Liquid **4.0.4 and 5.13.0** (185 examples each) and on PostgreSQL 16 (26 adapter examples); the corpus is byte-identical. **It found three defects in itself** — §Findings **E-12**, **E-13**, and the `is_closed` attribute sourced from the wrong row — and left two questions for the curator, **F-8** and **F-9** |
 | T-14 | **done** — `render/preflight.rb`, `render/pdf_inspector.rb`, `render/preflight_command.rb`, plus the admin page (`ReporterPreflightController` + helper + view, `require_admin` **per action**) and `rake reporter_dashboards:render:preflight` **exiting 0/1/2** (2 = nothing was registered, so nothing was verified — deliberately not 0). Nine document checks, each a ROUND TRIP read back out of the PDF, `:expected_failure` a distinct state from `:fail` so the INV-8 containment result cannot be confused with a defect, and a missing `poppler-utils` a **skip naming the package** with `complete?` false and the headline never a bare OK. `spec/conformance/pdf_probe.rb` is now a **policy over `PdfInspector`**, not a second implementation — same mechanism, opposite policy (hard error there, skip here) — so the corpus and the operator's diagnostic cannot drift apart. **Negative-tested**: the canned single-page PDF drives every one of the six document checks red, one at a time. **Measured against real Chromium 141: 9/9 in 943 ms**, hosted image `expected_failure`. **It found nine defects in itself** — three on its first real run, five more in review, one in CI — including an `inline_asset` check that was a tautology and a missing poppler DELETING the INV-8 check rather than skipping it. See §Findings E-10 |
 | T-16 onward | not started |
 
@@ -522,6 +522,53 @@ Three DB-less regression tests cover it without the engine, using `/bin/sh` stub
 `build_argv`'s contract (argv.last is the output path): a non-zero exit with a plausible PDF is a
 Success carrying the degradation, a non-zero exit with nothing usable is still a Failure, and the
 flag does not leak from one render into the next.
+
+**E-12 · `@context` belongs to `Liquid::Drop`, and a drop that stores its own there breaks
+Liquid's internals.** Found by T-18's first spec run, three frames from the cause. `RecordDrop`
+stored the `RenderContext` in `@context`; `Liquid::Drop` declares `attr_writer :context` and
+ASSIGNS that ivar to the `Liquid::Context` every time a template touches the drop, then reads it
+back in its own `liquid_method_missing` to decide whether `strict_variables` is on. The symptom was
+`NoMethodError: undefined method 'actor' for an instance of Liquid::Context` from
+`RecordDrop#in_actor_zone` — which reads as a bug in the timezone code and is not. It is the same
+class of defect as `key?` in E-8: a name that looks free and is not, invisible to reading and
+obvious to a test. Both bases now use `@render_context`, and both carry the comment.
+
+**The generalisation worth keeping:** every name `Liquid::Drop` itself uses — `@context`, `key?`,
+`invoke_drop`, `[]`, `to_liquid`, `liquid_method_missing` — is reserved surface on every subclass in
+this layer. Two of the six have already cost a session.
+
+**E-13 · `RenderContext#batch_for` compared scopes with `equal?`, and `IssueQuery#base_scope`
+returns a new object every call.** Found by T-18's cap test, which deliberately passes two separate
+`bench(21)` relations because that is the production shape. The collection drop therefore got a
+SECOND `Batch` instead of the context's: two id plucks, two custom-value queries, and — the part
+that actually bit — the collection running under the DEFAULT 5 000 cap rather than the configured
+one. Nothing raised; 21 records rendered where 20 were asked for. Now compared by `to_sql`, which is
+what a Batch's answers actually depend on. **The lesson is about the test, not the fix:** the
+example only found it because it built the two relations separately. An example that reused one
+object would have passed the broken code, and a cap that silently does not apply is exactly the
+class of failure INV-4 exists to make visible.
+
+**F-8 · `UserDrop` does not expose `mail`, and that is a curator question rather than an
+oversight.** Redmine lets a user hide their address (`UserPreference#hide_mail`). Honouring it per
+row means reading `user.pref` for every person a report prints, and `preference` is not among the
+associations `IssuesDrop` preloads — an issue list showing 500 authors' addresses would be 500
+queries, and preloading it for every issue list to serve the one template that wants addresses is
+the opposite trade. Ignoring the preference instead is worse than an N+1: it publishes addresses
+their owners asked to hide, into a document that gets mailed and archived. **T-18 shipped the
+accessor absent rather than wrong**, with the reason in the class comment and a spec asserting it is
+unreachable. What the curator owes is whether reports need addresses at all; if they do, the answer
+is a purpose-built accessor that preloads `:preference` and honours the flag, not a line added to
+`UserDrop`.
+
+**F-9 · §3.1's heading says thirteen drop classes and its own list enumerates eleven.** The list is
+the specific one, so T-18 built the list — plus `CustomFieldValuesDrop`, the bracket-lookup sibling
+that carries the addon's `issue.custom_field_value[20]` surface across T-20's deletion of
+`issue_drop_patch.rb`. Twelve concrete classes and three bases, held as
+`Liquid::Drops::CLASSES` / `BASES` and asserted by spec, with the seven the gem had and §3.1 drops
+asserted ABSENT by name and reason. Recorded rather than resolved: if the heading's thirteenth was
+meant to be something specific — `VersionsDrop` and `AttachmentsDrop` are the obvious candidates,
+neither of which any accessor needs today — that is the curator's to say. §3.1 now carries the
+discrepancy inline.
 
 **E-8 · `NamedRefDrop` is proven, and the proof found TWO gaps in §3.3's table plus one defect the
 table could not have predicted. CURATOR DECISION on the first two.** `technical-spec.md` §3.3 marks

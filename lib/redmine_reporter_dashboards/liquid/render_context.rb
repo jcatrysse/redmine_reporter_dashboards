@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require_relative 'batch'
+require_relative 'diagnostics'
+require_relative 'execution_policy'
+
 module RedmineReporterDashboards
   module Liquid
     # What a render is FOR: who is looking, at which issues, through which query.
@@ -40,7 +44,7 @@ module RedmineReporterDashboards
     class RenderContext
       REGISTER_KEY = :rrd_render_context
 
-      attr_reader :actor, :scope, :query, :correlation_id
+      attr_reader :actor, :scope, :query, :correlation_id, :diagnostics, :budget, :batch
 
       # actor          the user the render is FOR. Required (INV-1).
       # scope          an ActiveRecord issue relation, already visibility-scoped by
@@ -49,7 +53,18 @@ module RedmineReporterDashboards
       #                drill-through". nil is a supported answer, never an error.
       # correlation_id carried so a log line in the aggregation layer can be tied to
       #                the render that produced it.
-      def initialize(actor:, scope: nil, query: nil, correlation_id: nil)
+      # diagnostics    where a degradation becomes visible (INV-4). Built here when the
+      #                caller does not supply one, because a context whose diagnostics
+      #                are nil is a context where every degradation is silent — which
+      #                is the failure mode, not the safe default.
+      # budget         the cooperative deadline. `Budget::NULL` by default so a context
+      #                built outside `TemplateRenderer` — a preview, a spec — is not a
+      #                render with no time limit but a render whose limit is nothing to
+      #                check. `TemplateRenderer` binds the real one per render.
+      # batch          the first-touch registry (§3.4). Derived from `scope` unless a
+      #                caller passes one, which is what `with_batch` does.
+      def initialize(actor:, scope: nil, query: nil, correlation_id: nil,
+                     diagnostics: nil, budget: nil, batch: nil)
         if actor.nil?
           raise ArgumentError,
                 'a RenderContext needs an actor (INV-1: never ambient User.current)'
@@ -59,7 +74,64 @@ module RedmineReporterDashboards
         @scope = scope
         @query = query
         @correlation_id = correlation_id
+        @diagnostics = diagnostics || Diagnostics.new(correlation_id: correlation_id)
+        @budget = budget || Budget::NULL
+        @batch = batch || Batch.new(actor: actor, scope: scope, diagnostics: @diagnostics,
+                                    budget: @budget)
         freeze
+      end
+
+      # The registry for some OTHER scope — a collection drop built over a relation that
+      # is not the context's own, which is every named scope a `from:` argument reaches.
+      #
+      # A fresh Batch rather than a shared one, because a Batch answers "the ids in my
+      # scope" and two scopes have two answers. Handing one Batch two scopes would let
+      # it answer the first scope's questions with the second's rows, and every value
+      # would look plausible.
+      def batch_for(other_scope)
+        return @batch if other_scope.nil? || same_scope?(other_scope)
+
+        Batch.new(actor: @actor, scope: other_scope, diagnostics: @diagnostics,
+                  budget: @budget)
+      end
+
+      # NOT `equal?`, and the difference is not academic — it was caught by a test.
+      #
+      # `IssueQuery#base_scope` builds a NEW relation object every time it is called, so
+      # a caller that passed one to the context and another to the collection drop got
+      # two Batches for one issue set: two id plucks, two custom-value queries, and — the
+      # part that actually bit — the collection silently running under the DEFAULT cap
+      # instead of the one the caller configured. Everything still worked, twice, with
+      # the wrong limit.
+      #
+      # Two relations are the same scope when they generate the same SQL. That is what a
+      # Batch's answers depend on, and nothing else about the object matters.
+      def same_scope?(other)
+        return true if other.equal?(@scope)
+        return false if @scope.nil?
+        return false unless @scope.respond_to?(:to_sql) && other.respond_to?(:to_sql)
+
+        @scope.to_sql == other.to_sql
+      end
+      private :same_scope?
+
+      # Derivations. The object is frozen — that is the point of it — so "the same
+      # context with one thing changed" is a new object, and the things that must be
+      # SHARED across the derivation (the diagnostics collector above all: a degradation
+      # recorded through a derived context has to reach the same list) are passed
+      # through explicitly rather than rebuilt.
+      def with_batch(other_batch)
+        self.class.new(actor: @actor, scope: @scope, query: @query,
+                       correlation_id: @correlation_id, diagnostics: @diagnostics,
+                       budget: @budget, batch: other_batch)
+      end
+
+      def with_budget(other_budget)
+        self.class.new(actor: @actor, scope: @scope, query: @query,
+                       correlation_id: @correlation_id, diagnostics: @diagnostics,
+                       budget: other_budget,
+                       batch: Batch.new(actor: @actor, scope: @scope,
+                                        diagnostics: @diagnostics, budget: other_budget))
       end
 
       # The one register lookup the owned path performs. Returns nil when there is no

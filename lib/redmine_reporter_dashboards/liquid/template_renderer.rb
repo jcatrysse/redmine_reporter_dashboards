@@ -134,6 +134,18 @@ module RedmineReporterDashboards
         template = parse(source)
         return template if template.is_a?(Failure)
 
+        # THE DEADLINE HAS TO REACH THE DROPS, not only the tags.
+        #
+        # `Budget::REGISTER_KEY` is how an own TAG finds it, and that was enough while
+        # tags were the only thing that could be slow. The drop layer added two more
+        # checkpoints §4 names — every collection batch boundary and every prefetch —
+        # and a drop is handed a `RenderContext`, not a `Liquid::Context`. A context
+        # carrying `Budget::NULL` would make both of those checks no-ops that LOOK live,
+        # which is worse than not having them.
+        #
+        # `with_budget` rather than a setter: the context is frozen on purpose.
+        render_context = render_context.with_budget(budget) if render_context
+
         context = build_context(assigns, registers, budget, render_context)
         context.add_filters(Array(filters)) unless Array(filters).empty?
 

@@ -120,6 +120,25 @@ gate knows nothing**, which must be loud. `layer_purity.sh`'s `search()` does th
 are valid so they do not fail today, but the hazard is the same shape and is worth
 closing the next time either is touched.
 
+**Every name `Liquid::Drop` uses is reserved on every subclass, and two of them have now cost a
+session each.** `key?` (E-8) made every accessor on `NamedRefDrop` render EMPTY, because Liquid's
+`VariableLookup` asks `respond_to?(:key?)` to decide whether a value is hash-like. `@context`
+(E-12) is worse, because it is an IVAR rather than a method: `Liquid::Drop` declares
+`attr_writer :context` and assigns it on every touch, so a drop storing its own object there both
+loses it mid-render and breaks Liquid's `strict_variables` check. The symptom was
+`NoMethodError: undefined method 'actor' for an instance of Liquid::Context`, raised from the
+timezone helper — three frames from the cause, and reading like a bug in the wrong file. The
+reserved set is `@context`, `key?`, `invoke_drop`, `[]`, `to_liquid`, `liquid_method_missing`, and
+`context=`. Neither of these is findable by reading; both were found by rendering a real template.
+
+**A relation is not the same object twice, and `equal?` on one is a cap that silently does not
+apply.** `IssueQuery#base_scope` builds a fresh `ActiveRecord::Relation` every call.
+`RenderContext#batch_for` compared with `equal?`, so a caller that passed one relation to the
+context and another to the collection drop got a SECOND `Batch` — with the default 5 000 cap
+instead of the configured one, and duplicate queries for every key. Nothing raised. Compare by
+`to_sql` (E-13). The test only caught it because it deliberately built the two relations
+separately; write cap tests that way.
+
 **Ruby's `IO.pipe` hands the CHILD a non-blocking descriptor, and Chromium hangs up on it.**
 `O_NONBLOCK` lives on the open file description, so a child inherits it — and Chromium's
 `--remote-debugging-pipe` reader treats the resulting `EAGAIN` as a closed connection. It answers
@@ -339,6 +358,8 @@ record as of the last local run.
 | **T-14: the render preflight, BOTH engines, in CI (run 31079493206)** | **YES** | **chromium_cdp 9/9 in 465 ms and wkhtmltopdf 9/9 in 380 ms**, both with the hosted image `EXPECTED_FAILURE` — INV-8 containment confirmed on two independent engines. This is the first time wkhtmltopdf has drawn the probe at all. It is **not** an argument for promoting it: `verification: corpus` is about T-12's twenty fixtures and E-5's two open curator items, and neither moved |
 | **T-14: the render preflight, Chromium 141** | **yes, locally (2026-08-06)** | 9 of 9 checks pass in **943 ms**, run as the non-root user (see the Chromium note in §1): page breaks → 2 pages, `Page 1 of 2` compiled, page rgb[0,170,255] and badge rgb[204,0,0], the inline data: image decoding to its own colour, `CANVAS-STATE drawn`, `SHELL present`, and the Redmine-hosted image `EXPECTED_FAILURE` — INV-8 containment confirmed against a real browser rather than argued. **The first run took 17.5 s and was red**; the three defects it found were all in the diagnostic, not the engine (§Findings E-10) |
 | **T-14 DB-less half** | **yes, locally (2026-08-06)** | 41 examples green with no browser (`spec/render/preflight_spec.rb`, `preflight_command_spec.rb`), including every one of the six document checks driven RED against a canned single-page PDF. `spec/render` + `spec/conformance` together: 205 examples, 0 failures, 49 pending. The Minitest half (`test/functional/reporter_preflight_controller_test.rb`, `test/unit/render_preflight_rake_test.rb`) **has not been executed** — it needs a booted Redmine, so the `standalone` CI job is its first run |
+| **T-18: the drop layer, Liquid 4.0.4 AND 5.13.0** | **yes, locally (2026-08-06)** | 185 examples green under each major, run the way CI runs them (`rspec -r /tmp/pin.rb spec_liquid`). Includes the substitutability battery against `VersionDrop` as well as `NamedRefDrop`, and both E-8 gaps pinned as they are |
+| **T-18: the gating performance criteria, PostgreSQL 16** | **yes, locally (2026-08-06)** | 26 adapter examples, 0 failures. Zero `Issue` instantiations at 10 and 10 000; one query for `size` at both; a custom field across 400 issues in 4 queries and a second for free; the cap AT and one past. The full adapter suite is **182 examples, 0 failures** with the harness's new `attachments` table and `Issue.visible`/`TimeEntry.visible` scopes, and the **corpus is unmoved — 217 examples, all 176 recorded values identical**. MySQL and MariaDB are CI's to answer |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -426,6 +447,47 @@ of a CI that runs on fork pull requests.
    Next after T-13 was **T-14**, now done — see entry 11. **T-15** (render-path containment) is
    partly done and blocked on an entry point (§Findings E-6). **T-33** (the asset-resolution triple)
    depends on T-12 and is likewise open.
+
+12. **T-18 is done — the owned drop layer.** `liquid/drops/` (12 classes + 3 bases),
+   `liquid/batch.rb`, `liquid/diagnostics.rb`, and `RenderContext` grown a `batch`, a
+   `diagnostics` and a `budget`. Five things a later session should know.
+
+   **THE SPECS ARE SPLIT IN TWO ON PURPOSE, and neither can answer the other's question.**
+   `spec_liquid/drops_spec.rb` + `collection_drop_spec.rb` render REAL templates against fake
+   records — that is where the disposition table, the drop protocol and the two Liquid majors are
+   proven. `spec/adapter/drop_performance_spec.rb` drives the drops DIRECTLY with no template —
+   that is where the SQL is. The adapter half cannot render a template: `adapter_helper.rb`
+   requires `spec_helper.rb`, which defines the Liquid stub, and the stub and the real gem cannot
+   share a process (E-7). Pulling the gem in there would break 200+ tag examples in `rspec spec`.
+   Do not "unify" these two files.
+
+   **VISIBILITY LIVES IN `Batch`, NOT IN THE DROPS**, and a reviewer should check that first. Four
+   of the six keys read tables with their own rules, so the actor is a REQUIRED constructor
+   argument. The case that matters is the auditor: they hold ROLE_MANAGER in a DIFFERENT project,
+   so `CustomField.visible` resolves the restricted field for them and only Redmine's per-project
+   `visible_by?` refuses it. Without that second call the leak passes for everyone holding the role
+   anywhere — and a values-only assertion would not see it, which is why the spec asserts the
+   field's NAME is absent too.
+
+   **`total_spent_hours` short-circuits on a LEAF, and that is load-bearing.** The batch answers
+   own-hours; the total is self-plus-descendants, so for a leaf the two are the same number and the
+   batched value answers with no query. Only a parent pays. `leaf?` is `rgt - lft == 1` on the row
+   already loaded, and it is `respond_to?`-guarded because the adapter harness's Issue has no
+   nested-set columns.
+
+   **THE CAP IS THE MEMORY BOUND AND `find_each` IS NOT.** Liquid's `{% for %}` calls
+   `Utils.slice_collection_using_each`, which collects the WHOLE segment into an Array before
+   rendering one iteration. Batching bounds the database result set and the preload working set,
+   not the peak memory of the render. Also: an ORDERED scope is deliberately NOT walked with
+   `find_each` — that forces primary-key order and silently discards the author's, which renders a
+   report in the wrong sequence with nothing to say so.
+
+   **What T-18 did NOT do, deliberately:** nothing constructs a drop yet. There is no producer,
+   exactly as `RenderContext`'s own comment says of T-07 — T-19 (filters), T-20 (retiring the two
+   compensating tags) and T-23 are what wire them in. The `liquid/{version,custom_field_value}_drop.rb`
+   and `issue_drop_patch.rb` files in the OLD location are still live for installs with the host
+   plugin; T-20 deletes them. Two questions were left for the curator rather than decided: **F-8**
+   (`UserDrop#mail` is absent) and **F-9** (§3.1's class count).
 
 11. **T-14 is done — the render preflight, in three places that share one implementation.**
    `render/preflight.rb` builds the probe document and the checks, `render/pdf_inspector.rb` reads

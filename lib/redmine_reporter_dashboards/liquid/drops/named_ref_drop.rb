@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'string_substitutable'
+
 module RedmineReporterDashboards
   module Liquid
     module Drops
@@ -45,6 +47,13 @@ module RedmineReporterDashboards
       # semantics bite in a shape the spec did not enumerate. Belt and braces where the
       # cost of being wrong is every install's templates.
       class NamedRefDrop < ::Liquid::Drop
+        # The five methods live in `StringSubstitutable`, shared with `VersionDrop`,
+        # which needs the identical contract for the identical reason — the gem's
+        # `issue.version` was a String too. The rationale for each one is there; so is
+        # the warning that sharing a module is not evidence the sharing worked, which is
+        # why both classes are put through the same battery.
+        include StringSubstitutable
+
         attr_reader :id, :name, :url
 
         def initialize(id:, name:, url: nil, attributes: {})
@@ -60,44 +69,6 @@ module RedmineReporterDashboards
           # the map that tag builds is just these attributes, per name.
           @attributes = attributes.transform_keys(&:to_s).freeze
           super()
-        end
-
-        # --- The five substitutability methods -------------------------------------
-
-        def to_s
-          name
-        end
-
-        # A String on either side. `name == other` rather than `other == name` because
-        # the reverse asks the STRING to compare itself to a Drop, and String#== answers
-        # false for anything that is not a String — which is the whole failure mode.
-        # Liquid's `==` operator evaluates left-to-right with the drop on the left in
-        # every idiom that matters, and the spec asserts both orders anyway.
-        def ==(other)
-          return name == other if other.is_a?(String)
-          return name == other.name if other.is_a?(self.class)
-
-          false
-        end
-
-        # Delegated to `name` so a drop and its string group into the same bucket. A
-        # filter that groups by status must not produce two buckets for "Closed"
-        # depending on whether the value came through a drop.
-        def eql?(other)
-          self == other
-        end
-
-        def hash
-          name.hash
-        end
-
-        # `{% if issue.status contains "Clo" %}` compiles to `include?`.
-        def include?(other)
-          name.include?(other.to_s)
-        end
-
-        def to_liquid
-          self
         end
 
         # --- The drop protocol -------------------------------------------------------

@@ -279,6 +279,13 @@ surface**.
 Bases: `RecordDrop` (one record + a `Batch` handle), `CollectionDrop` (a scope), `NamedRefDrop`.
 Keep: `Issue`, `Issues`, `User`, `Users`, `Project`, `Projects`, `Version`, `TimeEntry`,
 `TimeEntries`, `Attachment`, `CustomFieldValue`.
+
+> **The heading and the list disagree, and T-18 built the list.** The heading says thirteen; the
+> line above enumerates **eleven**. T-18 shipped those eleven plus `CustomFieldValues`, the
+> bracket-lookup sibling that carries the addon's existing `issue.custom_field_value[20]` surface
+> across T-20's deletion of `issue_drop_patch.rb` — **twelve**, held as
+> `Liquid::Drops::CLASSES` and asserted by spec. Recorded as §Findings **F-9** rather than
+> resolved by picking whichever number reads better.
 Drop: `IssueRelation(s)`, `Journal(s)` `[OQ-H — narrowed: not part of the six required capabilities]`, `News(s)` (the double-`s` typo is itself
 disqualifying; the dashboard has a native news widget), `CustomFieldEnumeration` (folded in).
 
@@ -342,7 +349,14 @@ String it replaces**:
 
 **Every one is a claim about Liquid's internals and must be proven by test, not by reasoning** —
 a required spec renders each idiom under **both Liquid 4.0.x and 5.x** and asserts byte-equality
-with the String behaviour. `[UNVERIFIED]` until green.
+with the String behaviour. ~~`[UNVERIFIED]` until green.~~ **VERIFIED 2026-08-06** on Liquid
+**4.0.4 and 5.13.0**, `spec_liquid/named_ref_drop_spec.rb`; the five methods now live in
+`Drops::StringSubstitutable` and `VersionDrop` includes them too, so `spec_liquid/drops_spec.rb`
+runs the same battery a second time — a shared module is not evidence that the sharing worked.
+The proof found a protocol-breaking defect and **two gaps in this table**, both recorded as
+§Findings **E-8** and decided by the curator: the comparison only works with the drop on the LEFT,
+and `{{ status | size }}` answers `0` where the String answered its length. Both are pinned by
+tests that assert them AS THEY ARE, and T-19's linter owes a rule for each.
 
 Belt and braces deliberately: the `*_id` accessors ship **as well**. Five one-line methods, and
 they are the escape hatch if the Drop-vs-String semantics bite in a shape the spec did not

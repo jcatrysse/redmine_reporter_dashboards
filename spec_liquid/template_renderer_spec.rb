@@ -179,8 +179,42 @@ module RedmineReporterDashboards
           context = RenderContext.new(actor: actor)
           renderer.render('{% rrd_spec_ctx %}', render_context: context)
 
-          expect(seen).to equal(context)
-          expect(seen.actor.login).to eq('jsmith')
+          expect(seen).to be_a(RenderContext)
+          expect(seen.actor).to equal(actor)
+          expect(seen.diagnostics).to equal(context.diagnostics)
+        end
+
+        # NOT THE SAME OBJECT, and this example is why the one above no longer says so.
+        #
+        # T-18 gave the drop layer two of §4's three deadline checkpoints — every
+        # collection batch boundary and every prefetch — and a drop is handed a
+        # RenderContext, not a Liquid::Context, so `Budget::REGISTER_KEY` cannot reach
+        # it. A context whose budget was `Budget::NULL` would make both checks no-ops
+        # that LOOK live, which is worse than not having them.
+        #
+        # `RenderContext` is frozen on purpose, so binding the budget derives a new one.
+        # What must be SHARED across that derivation is the diagnostics collector —
+        # a degradation recorded through the derived context has to reach the caller's
+        # list — and the example above asserts exactly that.
+        it 'binds the render budget into the context so the drop checkpoints are live' do
+          seen = nil
+          probe = Class.new(::Liquid::Tag) do
+            define_method(:render) do |context|
+              seen = RenderContext.from(context)
+              ''
+            end
+          end
+          ::Liquid::Template.register_tag('rrd_spec_budget_ctx', probe)
+
+          context = RenderContext.new(actor: Struct.new(:login).new('jsmith'))
+          expect(context.budget).to equal(Budget::NULL)
+
+          described_class.new(policy: ExecutionPolicy.report)
+                         .render('{% rrd_spec_budget_ctx %}', render_context: context)
+
+          expect(seen.budget).to be_a(Budget)
+          expect(seen.budget.deadline_ms).to eq(30_000)
+          expect(seen.batch.send(:instance_variable_get, :@budget)).to equal(seen.budget)
         end
 
         it 'scopes filters to the render rather than registering them globally' do

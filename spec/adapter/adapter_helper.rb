@@ -315,14 +315,25 @@ module RrdAdapterHarness
       end
 
       c.create_table(:time_entries, force: true) do |t|
-        t.integer :project_id, :issue_id, :user_id
+        t.integer :project_id, :issue_id, :user_id, :activity_id
         t.float   :hours
         t.date    :spent_on
+        t.string  :comments
+      end
+
+      # T-18. The drop layer reads attachments through `Batch`, so the harness needs
+      # the columns that query names. Redmine's own polymorphic shape
+      # (`container_type`/`container_id`), because that is what the batch keys on and a
+      # simplified `issue_id` here would let a wrong query pass.
+      c.create_table(:attachments, force: true) do |t|
+        t.string   :container_type, :filename, :content_type, :description
+        t.integer  :container_id, :filesize, :author_id
+        t.datetime :created_on
       end
     end
 
     MODEL_NAMES = %i[Project IssueStatus Tracker IssueCategory Version IssuePriority User
-                     Role Member MemberRole
+                     Role Member MemberRole Attachment TimeEntryActivity
                      TimeEntry CustomValue CustomField IssueCustomField ProjectCustomField
                      Issue].freeze
 
@@ -345,7 +356,18 @@ module RrdAdapterHarness
       Object.const_set(:IssueStatus, Class.new(ActiveRecord::Base))
       Object.const_set(:Tracker, Class.new(ActiveRecord::Base))
       Object.const_set(:IssueCategory, Class.new(ActiveRecord::Base))
-      Object.const_set(:Version, Class.new(ActiveRecord::Base))
+      Object.const_set(:Version, Class.new(ActiveRecord::Base) do
+        belongs_to :project, optional: true
+      end)
+
+      # T-18. `Drops::AttachmentDrop` reads its author; the batch preloads it.
+      Object.const_set(:Attachment, Class.new(ActiveRecord::Base) do
+        belongs_to :author, class_name: 'User', optional: true
+      end)
+
+      Object.const_set(:TimeEntryActivity, Class.new(ActiveRecord::Base) do
+        self.table_name = 'enumerations'
+      end)
 
       Object.const_set(:IssuePriority, Class.new(ActiveRecord::Base) do
         self.table_name = 'enumerations'
@@ -379,12 +401,24 @@ module RrdAdapterHarness
       # case in the corpus would return the same numbers and INV-1 would be frozen
       # as untested rather than as held. nil user → 1=0, fail closed.
       Object.const_set(:TimeEntry, Class.new(ActiveRecord::Base) do
+        belongs_to :project, optional: true
+        belongs_to :user, optional: true
+        belongs_to :activity, class_name: 'TimeEntryActivity', optional: true
+
         def self.visible_condition(user)
           return '1=0' if user.nil?
 
           "projects.status = 1 AND #{RrdAdapterHarness.entitled_projects_sql(
             user, RrdAdapterHarness::TIME_ENTRY_ROLE_IDS, 'projects.id'
           )}"
+        end
+
+        # T-18. Redmine's own `TimeEntry.visible` is `joins(:project)` plus
+        # `visible_condition`, and the drop layer's `Batch` calls it by that name — an
+        # unfiltered `where(issue_id:)` would hand a viewer without :view_time_entries
+        # somebody else's hours. Same condition as above, so the two cannot disagree.
+        def self.visible(user)
+          joins(:project).where(visible_condition(user))
         end
       end)
 
@@ -400,6 +434,18 @@ module RrdAdapterHarness
           return where(visible: true) if role_ids.empty?
 
           where(visible: true).or(where(visibility_role_id: role_ids))
+        end
+
+        # T-18. Redmine's `IssueCustomField#visible_by?(project, user)` — the PER
+        # PROJECT half of custom-field visibility, which `CustomField.visible`'s
+        # "holds the role anywhere" answer deliberately does not cover. Same shape as
+        # 6.1-stable's (`visible? || roles.intersect?(user.roles_for_project(project))`),
+        # with this harness's one-column stand-in for `custom_fields_roles`.
+        def visible_by?(project, user = ::User.current)
+          return true if visible
+          return false if project.nil? || visibility_role_id.nil?
+
+          RrdAdapterHarness.role_ids_in_project(user, project.id).include?(visibility_role_id.to_i)
         end
 
         # Defaults to User.current exactly as Redmine's does, because the aggregator
@@ -425,6 +471,31 @@ module RrdAdapterHarness
         belongs_to :project, optional: true
         belongs_to :status, class_name: 'IssueStatus', optional: true
         has_many :time_entries, dependent: nil
+
+        # T-18. The five references `Drops::IssuesDrop::PRELOADS` names, under Redmine's
+        # own association names — a preload that named something else would silently do
+        # nothing and the N+1 assertions would measure the fallback instead.
+        belongs_to :tracker, optional: true
+        belongs_to :priority, class_name: 'IssuePriority', optional: true
+        belongs_to :category, class_name: 'IssueCategory', optional: true
+        belongs_to :fixed_version, class_name: 'Version', optional: true
+        belongs_to :assigned_to, class_name: 'User', optional: true
+        belongs_to :author, class_name: 'User', optional: true
+
+        # `issues.project_id IN (SELECT …)`, which is the shape HANDOVER §1 records as
+        # correct on every supported engine — the `projects.id IN (subquery)` spelling
+        # is silently TRUE inside a LEFT JOIN's ON clause on MySQL 8 (E-1).
+        def self.visible(user)
+          return where('1=0') if user.nil?
+
+          where(RrdAdapterHarness.entitled_projects_subquery_sql(
+                  user, RrdAdapterHarness.role_ids_for(user)
+                ))
+        end
+
+        def visible?(user)
+          self.class.visible(user).where(id: id).exists?
+        end
 
         # The marker define_models! recognises, so a second call is a no-op rather
         # than a "already defined" failure against its own classes.
@@ -514,6 +585,17 @@ module RrdAdapterHarness
 
     # Every role the user holds anywhere, sorted so the generated SQL of a scope
     # built from it does not depend on row order.
+    # The roles a user holds IN ONE PROJECT — Redmine's `User#roles_for_project`. The
+    # sibling below answers "anywhere", and the difference is the whole of INV-3 for a
+    # role-restricted custom field: holding the role somewhere is not holding it here.
+    def role_ids_in_project(user, project_id)
+      return [] if user.nil? || project_id.nil?
+
+      ::MemberRole.where(member_id: ::Member.where(user_id: user.id, project_id: project_id)
+                                            .select(:id))
+                  .distinct.pluck(:role_id).compact.sort
+    end
+
     def role_ids_for(user)
       return [] if user.nil?
 
@@ -1000,7 +1082,7 @@ module RrdAdapterHarness
     end
 
     def truncate_all!
-      %w[issues custom_values time_entries projects issue_statuses trackers
+      %w[issues custom_values time_entries attachments projects issue_statuses trackers
          issue_categories enumerations users versions custom_fields
          roles members member_roles].each do |table|
         ActiveRecord::Base.connection.delete("DELETE FROM #{table}")
