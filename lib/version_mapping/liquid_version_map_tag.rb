@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
+
 module VersionMapping
   # Liquid tag: {% geo_version_map ... %}
   #
@@ -48,6 +50,18 @@ module VersionMapping
     end
 
     def render(context)
+      # THE COOPERATIVE DEADLINE (T-17). One line, at the top of `render`, because a
+      # resource limit bounds WORK UNITS and this tag's cost is TIME: a
+      # sql_aggregate tag running a ninety-second query costs exactly one render-score
+      # point, and no resource limit will ever notice it.
+      #
+      # A no-op today on every existing install: these tags still run inside the host
+      # plugin's renderer, which binds no budget, and `Budget.from` answers a null
+      # object rather than nil precisely so this call site is safe to add before the
+      # owned renderer exists. When `TemplateRenderer` is the one rendering, this same
+      # line is what stops a slow template.
+      RedmineReporterDashboards::Liquid::Budget.from(context).check!('version_map')
+
       # Resolve assign_to first so the rescue block always has the correct name.
       assign_to = str_param(@raw_params['assign_to'], context, default: 'geo_versions')
 

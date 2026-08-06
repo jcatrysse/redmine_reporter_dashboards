@@ -65,6 +65,7 @@ fact that CI has not yet run on this work at all.
 | T-12 | **done** — `spec/conformance/`: 20 fixtures, the harness that applies the three-state rule (G12), the generator that turns a run into `docs/engine-support-matrix.md` (G9), `config/capabilities.yml` (DoR-5) with `Render::EngineCatalogue` validating it, and the `render-smoke` CI job. **Negative-tested**: 23 DB-less examples drive the harness with engines that decline capabilities, that DECLARE one and do not deliver it, that return bytes which are not a PDF, and that raise. Probes are `pdfinfo`/`pdftotext`/`pdftoppm`, and a missing one is an ERROR rather than a skip |
 | T-13 | **done for `:chromium_cdp`, written-but-unrun for `:wkhtmltopdf`** — `render/engines/{cdp_client,chromium_cdp,wkhtmltopdf}.rb` and `render/process_pool.rb`; `pdf_polyfills.rb` → `glue/legacy/wk_legacy_shims.rb` with the payload asserted byte-identical. CDP over a **pipe, not a port**; `--no-sandbox` never set (so the browser itself enforces non-root); pool of 1 with a bounded queue answering `Failure(:engine_unavailable)`. **20 of 20 conformance fixtures green on Chromium 141.** wkhtmltopdf is registered and has **never been executed** — its package is gone from Ubuntu 24.04 — so it stays `verification: pending` and the matrix prints "not verified" rather than cells nobody measured. **The corpus found three defects on its first run** — see §Findings E-2, E-3, E-4 |
 | T-15 | **partly done** — `render/batch_guard.rb` plus `spec/render/chromium_containment_spec.rb`. The cap OWNS the render loop rather than sitting beside it, so "refuse before any render" is a property of the object and not of the caller's discipline; asserted with a double that counts calls (**zero** over the cap), at the cap and one past it. Batch deadline keeps what is finished and refuses the rest, typed, with each undrawn document's own correlation id. Against a real browser: a wedged renderer times out bounded-and-monotonic **and the browser is gone from the process table**, the next render is served from a fresh one, shutdown leaves nothing behind, and concurrency never exceeds one browser. **Two Accept items are blocked on an entry point that does not exist** — see §Findings E-6 |
+| T-17 | **done** — `liquid/{execution_policy,template_renderer}.rb` plus gate `single_parse.sh`. **Both mechanisms, because neither alone suffices**: per-CLASS resource limits (widget/report/preview, preview deliberately on the widget's numbers so an author feels the limit at the keyboard) handed to the `Liquid::Context` — the only per-render channel either Liquid 4 or 5 offers, verified on 4.0.4 and 5.13.0 — and a **cooperative monotonic deadline** wired into all three own tags, a no-op where no budget is bound. `Timeout.timeout` is not used and the file says why. **Errors never enter the document**: the spec first DEMONSTRATES Liquid's default of writing `Liquid error:` into the output, then shows the same template becoming a typed failure with no body at all. 36 examples against the real gem; the gate negative-tested |
 | T-14, T-16 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -360,6 +361,31 @@ with non-breaking spaces in the literal segments. The rewrite exposed a second d
 asked about: slot text was being interpolated into that document **raw**, so an unescaped `<` from a
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
+
+**E-7 · the Liquid stub and the real gem cannot share a process, and 200+ specs are written
+against the stub.** Found while building T-17, by trying it. The plugin has never loaded Liquid
+itself — it registers tags into whatever Liquid the host plugin already loaded — so `spec_helper.rb`
+defines a minimal stub and every tag spec is written against it. Declaring `gem 'liquid'` and having
+`spec_helper` prefer the real gem produced **218 failures out of 1332**: `Liquid::Tag.new` is public
+on the stub and PRIVATE on Liquid 5, and the constructor signatures differ.
+
+Two things were separated, and the separation is what made T-17 possible without a 218-example
+rewrite:
+
+* **Declaring the gem is harmless.** `gem 'liquid', '>= 4.0', '< 6.0'` in the plugin Gemfile with
+  `spec_helper` left alone: 1332 examples, 0 failures. Nothing requires the gem automatically, so
+  the stub still wins in the default suite.
+* **Loading it in the same process is not.** A spec file that requires the real gem pulls it in for
+  everything, and which one wins depends on FILENAME ORDER — the worst kind of ordering failure.
+
+So `spec_liquid/` is a directory of its own, run as `rspec -r liquid spec_liquid`, with `-r` making
+the gem win before any spec file loads. `spec_liquid/README.md` says why, because a reader who finds
+one spec directory outside `spec/` will otherwise assume it was a mistake.
+
+**This is a workaround for a migration nobody has done, not a design.** Moving the tag specs onto
+the real gem belongs with **T-18/T-19**, which rewrite those tags anyway; doing it inside T-17 would
+be a task growing a second purpose (CLAUDE.md §11.5). When it lands, `spec_liquid/` folds back into
+`spec/` and the stub can be deleted outright.
 
 **E-6 · T-15's two app-layer assertions have no caller to make them against, and inventing one
 would be another task's work.** T-15's `Accept:` list is written for an HTTP entry point: a **422**

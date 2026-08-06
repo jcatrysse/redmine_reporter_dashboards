@@ -15,7 +15,10 @@
 
 set -uo pipefail
 
-DIRS=(lib app spec test config db)
+# `spec_liquid` is a spec directory too — it needs the real Liquid gem and so runs
+# as its own invocation (see spec_liquid/README.md), but the Ruby floor applies to
+# it exactly as it does to spec/.
+DIRS=(lib app spec spec_liquid test config db)
 status=0
 
 ruby_files() {

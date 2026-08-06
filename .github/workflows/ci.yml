@@ -116,6 +116,21 @@ jobs:
             --format progress
         working-directory: redmine
 
+      # A SECOND INVOCATION, and it has to be second rather than part of the first.
+      # `spec/spec_helper.rb` stubs Liquid so the tag specs can run without the gem, and
+      # the stub cannot share a process with the real gem: `Liquid::Tag.new` is public on
+      # one and private on the other. Loading both broke 200+ tag examples in an ordering
+      # that depended on filename order, which is why `spec_liquid/` is its own directory
+      # with its own run. `-r liquid` requires the gem before any spec file loads, so
+      # there is no window in which the stub could win. See spec_liquid/README.md and
+      # §Findings E-7 — this is a migration nobody has done yet, not a design.
+      - name: Run the execution-policy specs against the real Liquid gem
+        run: |
+          bundle exec rspec -r liquid \
+            plugins/redmine_reporter_dashboards/spec_liquid \
+            --format progress
+        working-directory: redmine
+
   # ------------------------------------------------------------------
   # Adapter execution — the same specs, but against a real database engine
   # ------------------------------------------------------------------
@@ -551,7 +566,7 @@ jobs:
   # Non-test gates. A green suite says nothing about any of these.
   # ------------------------------------------------------------------
   gates:
-    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size)
+    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, single_parse)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -596,6 +611,14 @@ jobs:
       # `Redmine::VERSION` outside compat, and prints the compat LOC.
       - name: compat_size
         run: ./script/gates/compat_size.sh
+
+      # T-17 — one parse entry point, and no globally registered filters. Every limit
+      # the execution policy applies is a property of the CALL SITE (resource limits,
+      # the deadline, :strict, and rethrow_errors, without which Liquid writes its
+      # errors into the document), so a second parse site has none of them — not by
+      # decision, but because those are Liquid's defaults.
+      - name: single_parse
+        run: ./script/gates/single_parse.sh
 
       # Not a gate, and deliberately not failing the build: the number that has to
       # reach zero by 1.0, printed where a reviewer sees it move.
