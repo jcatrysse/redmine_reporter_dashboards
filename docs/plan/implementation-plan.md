@@ -364,6 +364,36 @@ asked about: slot text was being interpolated into that document **raw**, so an 
 template author would silently break the footer on every page of every report. Authoring is already
 a code-execution privilege (INV-9), which is a reason to escape it rather than a licence not to.
 
+**E-11 · the repaired `inline_asset` check found a wkhtmltopdf defect on its first CI run, and
+that is the check's whole point.** Measured in `render-smoke`, run 31078637086.
+
+```
+wkhtmltopdf: an inline (data:) image decodes to the right colour — rgb[0, 170, 255], wanted rgb[0, 255, 0]
+```
+
+The sampled pixel is the PAGE BACKGROUND where the plate should be. **The previous version of this
+check would have reported PASS**, because the probe image was that same colour — which is E-10's
+tautology, caught in review, going straight on to earn its keep.
+
+**What is NOT yet known, and must not be written down as if it were.** Two explanations fit the one
+pixel: wkhtmltopdf does not decode the `data:` URI at all, or it lays the plate out somewhere other
+than `y: 0.12` (it is an old engine and `height: 20mm` on an `<img>` is exactly the kind of thing it
+handles differently). One pixel cannot tell them apart, and the engine **cannot be installed in this
+container** — its package is gone from Ubuntu 24.04 — so the discrimination is CI's to do, by
+someone who can read a rendered page rather than a single sample.
+
+Deliberately NOT fixed by guessing. Sweeping several y positions, or scanning the whole bitmap for
+the plate colour, would be inventing a repair for an engine that cannot be run here, and the repair
+would itself be unverified. The honest record is this entry.
+
+**So the three-state rule now applies per check, not just per engine.** `spec/render/preflight_spec.rb`
+matches what `conformance_spec.rb` has always done per fixture: an engine the catalogue calls
+`verification: corpus` is held to its results, and one it calls `pending` has them **reported and
+not enforced** — warned line by line and repeated in the skip reason. That is the E-5 policy, and
+its own comment states the limit: this must never become a way to keep a red engine green, and
+promotion to `corpus` is the moment every failure has to be fixed, expressed as an undeclared
+capability, or argued. **This finding is now one of the things blocking that promotion.**
+
 **E-10 · the preflight's FIRST REAL RUN found three defects, and all three were in the
 diagnostic rather than in the engine.** Chromium 141, non-root so the sandbox initialises.
 

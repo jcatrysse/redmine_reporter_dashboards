@@ -144,6 +144,16 @@ inside an rspec example, which reads as a spec bug.
 `pdftotext` and `pdftoppm` (`apt-get install -y poppler-utils`). A missing probe is an ERROR: a
 matrix generated without them would still print PASS for every check that never ran.
 
+**A poppler-less run is a DIFFERENT run, and the four `rspec` CI jobs are one.** Two preflight
+examples passed locally and failed on all four branches because they inherited whether poppler
+happened to be on PATH. Reproduce the CI environment before pushing:
+
+    env PATH="$(python3 -c "import os;print(os.pathsep.join(d for d in os.environ['PATH'].split(os.pathsep) if not os.path.exists(os.path.join(d,'pdfinfo'))))")" \
+      ruby -e "require 'rspec/core'; exit RSpec::Core::Runner.run(['spec/render','-I','spec'])"
+
+The rule is CLAUDE.md §6: an example about a check's *reasoning* stubs `PdfInspector.available?`
+rather than inheriting it. Only examples that genuinely need real probes may skip on their absence.
+
 **wkhtmltopdf cannot be installed here.** Its package is gone from Ubuntu 24.04's archive and only
 exists as a release `.deb`. So `:wkhtmltopdf` is CI-only, exactly like MariaDB and MySQL, and its
 `verification: pending` in `config/capabilities.yml` is what keeps twenty unmeasured cells out of

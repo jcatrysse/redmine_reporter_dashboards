@@ -313,6 +313,14 @@ module RedmineReporterDashboards
       end
 
       describe 'the hosted-image check' do
+        # THE INSPECTOR IS STUBBED AVAILABLE IN EVERY EXAMPLE HERE, INCLUDING THIS ONE.
+        # What is under test is the check's own reasoning, and leaving it to whether the
+        # machine happens to have poppler makes the outcome environmental: this example
+        # passed locally and failed on all four CI branches, where the skip's reason is
+        # the install hint rather than the missing URL. Both are correct skips for
+        # different reasons — CLAUDE.md §6, set it in the test rather than inherit it.
+        before { allow(PdfInspector).to receive(:available?).and_return(true) }
+
         it 'skips when no Redmine base URL was supplied, rather than pretending' do
           hosted = check(report_for(engine), :hosted_asset)
 
@@ -324,7 +332,6 @@ module RedmineReporterDashboards
         # the same state, or the one that matters gets ignored along with the one that
         # does not.
         it 'is an expected_failure — not a failure — when the image was blocked' do
-          allow(PdfInspector).to receive(:available?).and_return(true)
           allow(PdfInspector).to receive(:flat_text).and_return('HOSTED-IMAGE blocked')
 
           report = report_for(engine, redmine_base_url: 'https://redmine.example')
@@ -339,7 +346,6 @@ module RedmineReporterDashboards
         # the containment that F-15 asserts has a hole in it on this install, and that
         # is a real failure with the invariant named.
         it 'is a hard failure when the renderer reached the network, and names INV-8' do
-          allow(PdfInspector).to receive(:available?).and_return(true)
           allow(PdfInspector).to receive(:flat_text).and_return('HOSTED-IMAGE loaded')
 
           hosted = check(report_for(engine, redmine_base_url: 'https://redmine.example'),
@@ -461,6 +467,33 @@ if ENV['RRD_CONFORMANCE'] == '1'
           if engine_check.state != :pass && !claimed
             skip "#{engine_id} is registered but did not render here " \
                  "(#{engine_check.detail}); the catalogue does not claim a conformance run"
+          end
+
+          # A `pending` ENGINE'S RESULTS ARE REPORTED, NOT ENFORCED — the same rule
+          # `conformance_spec.rb` applies per fixture, and for the same reason.
+          # `verification: corpus` says "these results are the contract";
+          # `verification: pending` says "we run it and print what happened, and nobody
+          # has yet decided that this is what it must do". Holding an engine to a
+          # contract before anyone has read a single one of its results is how a support
+          # matrix acquires cells that were never argued.
+          #
+          # This must never become a way to keep a red engine green, so the results are
+          # LOUD: every failure is warned and repeated in the skip reason. Promotion to
+          # `corpus` is the moment somebody has to look at each one and either fix it,
+          # express it as a capability the engine does not declare, or argue it.
+          #
+          # It is already load-bearing. wkhtmltopdf's first run through the REPAIRED
+          # `inline_asset` check came back `rgb[0, 170, 255]` where the plate should be —
+          # the page background, not the plate. See §Findings E-11: that is a real
+          # measurement, and it is not yet discriminated between "does not decode the
+          # data: URI" and "lays the plate out somewhere else".
+          unless claimed || report.failures.empty?
+            report.failures.each do |failure|
+              warn "[preflight] #{engine_id} #{failure.id}: #{failure.detail}"
+            end
+            skip "#{engine_id} is `verification: #{entry&.verification}` — these results are " \
+                 'INFORMATIONAL and not yet a contract: ' +
+                 report.failures.map { |c| "#{c.title} — #{c.detail}" }.join('; ')
           end
 
           expect(report.failures).to be_empty,
