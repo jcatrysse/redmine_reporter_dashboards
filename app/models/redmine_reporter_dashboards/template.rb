@@ -269,7 +269,12 @@ module RedmineReporterDashboards
         # `user.roles_for_project` answers the built-in Non-member / Anonymous role for a
         # non-member, so this is not "any role" — it is the roles this user actually holds
         # here, intersected with the ones the author named.
-        project ? user.roles_for_project(project).intersect?(roles) : false
+        # `(a & b).any?` AND NOT `a.intersect?(b)`, which is what core writes
+        # (`app/models/query.rb:422`). `Array#intersect?` is Ruby 3.1, this plugin
+        # declares a 2.7 floor, and `.codex/check_ruby_floor.sh` is a CI job — so copying
+        # core's line verbatim was a real regression on the two oldest supported Rubies.
+        # Same answer, same cost at these list sizes.
+        project ? (user.roles_for_project(project) & roles).any? : false
       else
         # `authored_by?` AND NOT `author_id == user.id`, because the second one matches
         # for the ANONYMOUS user. `User.anonymous` is a real row with a real id, so a
