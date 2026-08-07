@@ -1,0 +1,13 @@
+<%= l(:text_reporter_schedule_mail_intro, name: @template_name, date: format_date(@occurrence_date)) %>
+
+<%#
+  FR-47: "shared output is labelled with the identity it was rendered as."
+  The recipient is NOT the person whose visibility produced these numbers, and on this
+  path they are usually different people — that is the whole point of `render_as`. Saying
+  so is what stops a recipient reading the report as their own view of the data.
+%>
+<%= l(:text_reporter_schedule_mail_rendered_as, user: @rendered_as.name) %>
+<% if @project %>
+<%= l(:field_project) %>: <%= @project.name %>
+<% end %>
+<%= l(:label_reporter_report_diagnostic_correlation_id) %>: <%= @correlation_id %>

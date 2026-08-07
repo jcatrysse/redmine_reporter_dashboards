@@ -943,12 +943,24 @@ class ReporterDashboardsScheduleRunnerTest < ActiveSupport::TestCase
     # of the schedule count (a schema question asked per row, an association loaded in a
     # loop) is the same defect one level up, and it is invisible until an installation has
     # a hundred schedules.
+    # WARM THE CONNECTION FIRST, and this line is why the example is trustworthy rather
+    # than flaky. PostgreSQL's adapter issues catalogue lookups (`SHOW search_path`, a
+    # `pg_attribute` query per table) the FIRST time a process touches a table, so a cold
+    # measurement carries four statements a warm one does not. The example passed when the
+    # file ran alone and failed inside the full suite, which is CLAUDE.md §3's
+    # passes-locally-fails-in-CI shape exactly — here caused by test ORDER rather than by
+    # the code under test.
+    count_queries_for_schedules(1)
+
     one = count_queries_for_schedules(1)
     two = count_queries_for_schedules(2)
     four = count_queries_for_schedules(4)
 
     per_schedule = two - one
     assert_operator per_schedule, :>, 0, 'precondition: each schedule costs something'
+    assert_operator per_schedule, :<=, 4,
+                    'a tick costs an INSERT and two UPDATEs per schedule; a fourth ' \
+                    'statement means something is being loaded in the loop'
     assert_equal one + (3 * per_schedule), four,
                  "queries are not linear in the schedule count: 1 -> #{one}, " \
                  "2 -> #{two}, 4 -> #{four}"

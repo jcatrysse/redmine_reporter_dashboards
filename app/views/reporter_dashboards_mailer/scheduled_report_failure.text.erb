@@ -1,0 +1,14 @@
+<%= l(:text_reporter_schedule_mail_failed_intro, name: @template_name, date: format_date(@occurrence_date)) %>
+
+<%#
+  FR-43 and INV-5. There is no attachment on this path and there must never be one: a
+  recipient who gets a file called .pdf that is not a PDF has been told a lie, and §7b.3
+  is explicit that the error is never the document. Only the schedule's owner is mailed —
+  the recipients are told nothing, because they are twenty people who can do nothing.
+%>
+<%= l(:text_reporter_schedule_mail_failed_recipients) %>
+
+<%= l(:label_reporter_report_diagnostic_code) %>: <%= @diagnostic.code %>
+<%= @diagnostic.message %>
+
+<%= l(:label_reporter_report_diagnostic_correlation_id) %>: <%= @diagnostic.correlation_id %>

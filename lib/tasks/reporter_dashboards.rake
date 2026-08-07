@@ -20,6 +20,49 @@ namespace :reporter_dashboards do
     end
   end
 
+  # T-25. FR-44's first half is that this contract is DOCUMENTED: the scheduler does not
+  # run itself. Nothing inside Redmine wakes it — there is no daemon, no background worker
+  # this plugin ships and no `after_initialize` timer — so a report is delivered exactly as
+  # often as something outside calls `schedules:run`. The README carries the cron line; the
+  # second half of FR-44 is `Scheduling::Heartbeat`, which is why a hand-run tick prints a
+  # warning when it finds work that should already have happened.
+  namespace :schedules do
+    desc 'Deliver every scheduled report that is due today (exit 1 if any schedule ' \
+         'failed; RRD_SCHEDULE=id, RRD_CATCH_UP=1, RRD_MAX_CATCHUP_DAYS=n)'
+    task run: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/scheduling/run_command', __dir__)
+
+      # THE ONLY CLOCK READ ON THE WHOLE PATH. `Occurrences`, `Runner`, `Heartbeat` and
+      # `RunCommand` all take the answer as an argument; this line is where the question is
+      # asked, and it is asked once so a tick that straddles midnight cannot disagree with
+      # itself about what day it is.
+      exit RedmineReporterDashboards::Scheduling::RunCommand.new(
+        now: Time.zone.now,
+        schedule_id: ENV['RRD_SCHEDULE'],
+        catch_up: ENV['RRD_CATCH_UP'].to_s == '1',
+        max_catchup_days: (ENV['RRD_MAX_CATCHUP_DAYS'] ||
+          RedmineReporterDashboards::Scheduling::Occurrences::DEFAULT_MAX_CATCHUP_DAYS).to_i,
+        logger: Rails.logger
+      ).call
+    end
+
+    desc 'Report whether the scheduler is actually being invoked, and what is overdue ' \
+         '(writes nothing; exit 1 if there is a warning)'
+    task status: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/scheduling/heartbeat', __dir__)
+
+      heartbeat = RedmineReporterDashboards::Scheduling::Heartbeat
+      status = heartbeat.status(today: Time.zone.now.to_date)
+
+      puts "enabled schedules: #{status.enabled_count}"
+      puts "last attempt:      #{status.last_attempt_at || 'never'}"
+      heartbeat.warnings(status).each { |warning| puts "  * #{warning}" }
+      puts '  no warnings' unless status.warning?
+
+      exit(status.warning? ? 1 : 0)
+    end
+  end
+
   namespace :render do
     # T-14. Same shape as `import:plan` and for the same reason: the decisions —
     # which engines, what the exit code means, what happens when there are none —

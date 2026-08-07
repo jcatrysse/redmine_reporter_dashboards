@@ -156,9 +156,16 @@ module RedmineReporterDashboards
       # relation with no order is a relation whose failure ordering changes between
       # PostgreSQL and MySQL, and an operator reading two logs side by side should not have
       # to wonder whether that means anything.
+      # `preload` FOR THE IDENTITY, because `render_identity` reads one of the two on every
+      # schedule and a lazy `belongs_to` is a query apiece. Measured before adding it: a
+      # tick over N schedules issued `4N + 1` statements, of which N were
+      # `SELECT users … WHERE id = $1`. It is a small N and FR-48 is about ISSUE count, but
+      # a per-row query in the one loop that grows with an installation's size is the same
+      # defect one level up, and it costs a word to remove.
       def schedules
         (@schedules || ::RedmineReporterDashboards::Schedule.all)
           .where(enabled: true)
+          .preload(:author, :render_as_user)
           .order(:id)
       end
 

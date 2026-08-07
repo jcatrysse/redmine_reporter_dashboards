@@ -523,6 +523,86 @@ it, whatever the file asks for.
   and export, but only issue reporting has a data source today. A template carrying it is
   refused with a message rather than reported against the wrong table.
 
+## Scheduled reports
+
+A schedule mails a report template to a list of Redmine users on a repeating day —
+daily, weekly, monthly, quarterly or yearly, counted from its start date.
+
+### The scheduler does not run itself
+
+**This is the one thing to get right at install time.** Nothing inside Redmine wakes the
+scheduler: there is no daemon, no background worker shipped with this plugin, and no timer
+that starts when the application boots. A scheduled report is delivered exactly as often as
+something outside calls the rake task. Add one cron entry:
+
+```cron
+# every morning at 06:00
+0 6 * * *  cd /path/to/redmine && RAILS_ENV=production bundle exec rake reporter_dashboards:schedules:run
+```
+
+It exits **0** when every schedule either delivered or had nothing to do, and **1** when at
+least one failed — so it can be monitored like any other job. A schedule that is still an
+unfinished draft is reported but does *not* make the run exit non-zero; an exit code that is
+always non-zero is one nobody reads.
+
+If you are not sure whether it is running:
+
+```bash
+bundle exec rake reporter_dashboards:schedules:status
+```
+
+That writes nothing. It reports how many schedules are enabled, when one was last attempted,
+and warns when there is work that should already have happened — which is what the failure
+mode looks like when a cron entry was never added or was lost in a deployment. Everything
+works, nothing is red, and no report is ever sent.
+
+### What a run does
+
+* **A day is claimed before it is rendered.** The claim is a database insert against a
+  unique index, so two overlapping cron entries produce one delivery and one skip rather
+  than two e-mails.
+* **A normal run does not backfill.** If the machine was off for three days, switching it
+  back on does not mail three reports to everybody. Pass `RRD_CATCH_UP=1` to recover missed
+  days deliberately, bounded to the last 7 (`RRD_MAX_CATCHUP_DAYS=n`) — a schedule dormant
+  for a year must not emit 365 e-mails.
+* **One render per occurrence**, not one per recipient. Twenty recipients receive the same
+  attachment from one render.
+* **One failing schedule does not stop the others.** Its `last_status` becomes `failed`,
+  its error is recorded, the run continues, and the task exits 1.
+
+### Who the report is rendered as
+
+Every schedule stores the identity its numbers are produced with — its author by default,
+or a specific user. That identity is what the visibility rules are applied to, so two
+schedules over the same template can legitimately produce different numbers, and the mail
+says whose view it holds.
+
+If that identity is locked, deleted, or set to a policy this version does not understand,
+the schedule **fails** rather than falling back to somebody else. A report mailed as the
+wrong person is worse than a report that did not arrive.
+
+### When a report cannot be produced
+
+The schedule's **owner** gets a notice naming what went wrong and a correlation id to quote.
+**Recipients get nothing** — never an e-mail with a broken attachment, and never a file
+named `.pdf` that is not one.
+
+Sender addresses are server-controlled: schedules address Redmine *users*, and there is no
+`from`, `to` or `bcc` field anywhere in the schema to forge.
+
+### Limits
+
+* Attachments totalling more than **10 MB** are refused before anything is sent, with a
+  notice to the owner, rather than handed to a mail server that will bounce them.
+* The 50-document PDF cap applies here too.
+* A schedule with no active recipient does not render at all; its owner is told.
+
+### Not built yet
+
+Schedules have no UI in this version and no permissions of their own — they are created and
+edited in the console. `RRD_SCHEDULE=<id>` runs a single schedule by hand, which still
+respects the enabled flag.
+
 ## Using the `{% sql_aggregate %}` tag
 
 Place the tag at the top of your Reporter template. It writes the result into a Liquid variable (`stats` by default) that you can then use freely.

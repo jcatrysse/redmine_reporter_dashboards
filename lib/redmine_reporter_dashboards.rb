@@ -54,6 +54,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/runner
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/diagnostic'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/exchange'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'
+# T-25's delivery. It is required AFTER report_run and the scheduler because it names both,
+# and it lives in reporting/ rather than scheduling/ so that `layer_purity`'s scheduling arm
+# — which forbids that directory from naming Render or Liquid — stays true and enforced.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/scheduled_delivery'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards

@@ -1,0 +1,496 @@
+# frozen_string_literal: true
+
+require File.expand_path('../test_helper', __dir__)
+
+# T-25 — the delivery, end to end, against a real Redmine and a real ActionMailer.
+#
+# `reporter_dashboards_schedule_runner_test.rb` drives the tick with a FAKE delivery, so
+# nothing there ever renders or mails. This is the other half, and it has to be a
+# full-application test for two reasons that no double reproduces: `Mailer#process` sets
+# `User.current` and `I18n.locale` per recipient (which is what makes nine locale files
+# mean anything), and `IssueQuery#statement` reads `User.current` — so whether the scope is
+# built as the right person is a fact about a booted Redmine, not about this class.
+#
+# Rendering to PDF needs a browser this container may not have, so the engine is injected
+# where a document is needed. Which documents come out is `ReportRun`'s subject and is
+# covered there; what this file is about is who gets them, who does not, and what the
+# owner is told when nothing can be produced.
+class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
+  fixtures :projects, :users, :members, :member_roles, :roles, :issues, :issue_statuses,
+           :trackers, :enabled_modules, :projects_trackers, :enumerations, :queries
+
+  Template = RedmineReporterDashboards::Template
+  Schedule = RedmineReporterDashboards::Schedule
+  ScheduleRun = RedmineReporterDashboards::ScheduleRun
+  ScheduleRecipient = RedmineReporterDashboards::ScheduleRecipient
+  Delivery = RedmineReporterDashboards::Reporting::ScheduledDelivery
+  Diagnostic = RedmineReporterDashboards::Reporting::Diagnostic
+
+  OCCURRENCE = Date.new(2026, 3, 10)
+
+  # A mailer double that records rather than sends, for the examples that are about WHO is
+  # mailed and WHAT they are handed. The examples about the message itself use the real one.
+  class RecordingMailer
+    attr_reader :reports, :failures
+
+    def initialize(raising: false)
+      @reports = []
+      @failures = []
+      @raising = raising
+    end
+
+    def deliver_scheduled_report(user, schedule, date, attachments, rendered_as, cid)
+      raise Net::SMTPFatalError, 'the relay refused it' if @raising
+
+      @reports << { user: user, schedule: schedule, date: date, attachments: attachments,
+                    rendered_as: rendered_as, correlation_id: cid }
+    end
+
+    def deliver_scheduled_report_failure(user, schedule, date, diagnostic)
+      @failures << { user: user, schedule: schedule, date: date, diagnostic: diagnostic }
+    end
+  end
+
+  # A render engine that answers bytes without a browser.
+  #
+  # `Renderer` VERIFIES what an adapter hands back — `%PDF-` magic, a `%%EOF` trailer, and
+  # more than 1 KiB — so a fake that answers `"pdf"` gets a `Failure(:output_not_pdf)` and
+  # every example downstream of it fails for a reason that has nothing to do with its
+  # subject. `.pdf_of` builds bytes that clear all three post-conditions, which is what
+  # makes the size-cap examples below say what they claim to.
+  class FakeEngine
+    CAPABILITIES = RedmineReporterDashboards::Render::Capabilities::ALL
+
+    class << self
+      attr_writer :bytes
+
+      def bytes
+        @bytes ||= pdf_of(2_048)
+      end
+
+      # A byte string a Renderer will accept, of exactly `size` bytes.
+      def pdf_of(size)
+        head = "%PDF-1.4\n"
+        tail = "\n%%EOF\n"
+        filler = size - head.bytesize - tail.bytesize
+        raise ArgumentError, 'too small to be a PDF' if filler.negative?
+
+        "#{head}#{'x' * filler}#{tail}"
+      end
+    end
+
+    def id
+      :fake
+    end
+
+    def version
+      '1.0'
+    end
+
+    def capabilities
+      CAPABILITIES
+    end
+
+    def render(_request)
+      RedmineReporterDashboards::Render::Success.new(
+        bytes: self.class.bytes, engine: :fake, engine_version: '1.0', page_count: 1,
+        duration_ms: 1
+      )
+    end
+  end
+
+  def setup
+    @project = Project.find(1)
+    @author = User.find(2)
+    @recipient = User.find(3)
+    @template = Template.create!(project: @project, author_id: @author.id,
+                                 name: 'Weekly numbers',
+                                 content: '<p>{{ issues.size }} issues</p>')
+    @schedule = Schedule.create!(project: @project, template_id: @template.id,
+                                 author_id: @author.id, repeat: 'daily',
+                                 start_date: Date.new(2026, 1, 1))
+    @run = ScheduleRun.claim(@schedule, OCCURRENCE, correlation_id: 'cid-1',
+                                                    status: ScheduleRun::STATUS_RUNNING)
+    @mailer = RecordingMailer.new
+    FakeEngine.bytes = FakeEngine.pdf_of(2_048)
+    ActionMailer::Base.deliveries.clear
+  end
+
+  # The TEXT AND HTML parts, and not `parts.map(&:body)`. Once there is an attachment the
+  # message is multipart/mixed, so `parts` is [multipart/alternative, application/pdf] and
+  # joining their bodies gives you half a megabyte of PDF and none of the prose. The first
+  # version of these examples asserted against that and failed for a reason that looked
+  # like a missing translation.
+  def mail_body(mail)
+    [mail.text_part, mail.html_part].compact.map { |part| part.body.decoded }.join("\n")
+  end
+
+  def add_recipient(user)
+    ScheduleRecipient.create!(schedule_id: @schedule.id, user_id: user.id)
+  end
+
+  def deliver(mailer: @mailer, actor: @author, schedule: @schedule, engine: FakeEngine)
+    delivery = Delivery.new(mailer: mailer)
+    with_engine(engine) do
+      delivery.call(schedule: schedule, occurrence_date: OCCURRENCE, actor: actor, run: @run)
+    end
+  end
+
+  # `ReportRun` resolves the engine through `Render::Registry` unless one is injected, and
+  # `ScheduledDelivery` deliberately does not expose that seam — a schedule renders with the
+  # configured engine or it does not render. So the REGISTRY is what a test replaces.
+  def with_engine(engine)
+    registry = RedmineReporterDashboards::Render::Registry
+    registry.stubs(:ids).returns([:fake])
+    registry.stubs(:registered?).returns(true)
+    registry.stubs(:fetch).returns(engine)
+    yield
+  end
+
+  # --- FR-42: one render, N recipients --------------------------------------------------
+
+  def test_three_recipients_receive_the_same_bytes_from_one_render
+    [@recipient, User.find(4), User.find(8)].each { |u| add_recipient(u) }
+
+    result = deliver
+
+    assert result.ok?, result.error
+    assert_equal 3, @mailer.reports.length
+    assert_equal 3, result.recipients_count
+    assert_equal 1, result.document_count
+
+    payloads = @mailer.reports.map { |r| r[:attachments].map(&:last) }.uniq
+    assert_equal 1, payloads.length, 'FR-42: every recipient gets the bytes of one render'
+  end
+
+  def test_the_attachment_is_named_after_the_template_and_the_occurrence
+    add_recipient(@recipient)
+
+    deliver
+
+    names = @mailer.reports.first[:attachments].map(&:first)
+    assert_equal ['weekly-numbers-2026-03-10.pdf'], names
+  end
+
+  def test_a_template_name_with_no_latin_characters_still_produces_a_usable_filename
+    # `parameterize` reduces to [a-z0-9-], which empties a Cyrillic or Chinese name — and
+    # an attachment called ".pdf" is one an operator cannot tell apart from any other.
+    @template.update_columns(name: 'Еженедельный отчёт')
+    add_recipient(@recipient)
+
+    deliver
+
+    name = @mailer.reports.first[:attachments].first.first
+    assert_equal "report-#{@schedule.id}-2026-03-10.pdf", name
+  end
+
+  # --- FR-43: a failure never reaches a recipient ----------------------------------------
+
+  def test_a_render_failure_notifies_the_owner_only_and_attaches_nothing
+    add_recipient(@recipient)
+    @template.update_columns(content: '{% this is not a tag %}')
+
+    result = deliver
+
+    assert_not result.ok?
+    assert_empty @mailer.reports, 'INV-5: recipients never receive a failure'
+    assert_equal 1, @mailer.failures.length
+    notice = @mailer.failures.first
+    assert_equal @author, notice[:user], 'the owner is the one person who can act'
+    assert_not_nil notice[:diagnostic].correlation_id
+    assert_equal 0, result.recipients_count
+  end
+
+  def test_a_failure_notice_carries_no_attachment_argument_at_all
+    # Not "an empty attachment list" — the method has nowhere to put one. The strongest
+    # form of FR-43 available: a failure cannot carry a document because the signature
+    # cannot express one.
+    parameters = ReporterDashboardsMailer.instance_method(:scheduled_report_failure)
+                                         .parameters.map(&:last)
+
+    assert_equal %i[user schedule occurrence_date diagnostic], parameters
+  end
+
+  def test_a_schedule_with_no_recipients_does_not_render_at_all
+    # Rendering a PDF nobody receives is waste, and a silent one. The operator is told.
+    result = deliver
+
+    assert_not result.ok?
+    assert_includes result.error, 'no active recipient'
+    assert_empty @mailer.reports
+    assert_equal 1, @mailer.failures.length
+  end
+
+  def test_a_locked_recipient_is_dropped_rather_than_mailed
+    # The same departed employee the runner refuses to render AS. Mailing them their old
+    # team's numbers is the same leak from the other end. Fixture user 5 is locked.
+    locked = User.find(5)
+    assert_not locked.active?, 'fixture precondition'
+    add_recipient(locked)
+    add_recipient(@recipient)
+
+    result = deliver
+
+    assert_equal 1, result.recipients_count
+    assert_equal [@recipient], @mailer.reports.map { |r| r[:user] }
+  end
+
+  def test_a_schedule_whose_only_recipient_is_locked_refuses_rather_than_mailing_nobody
+    add_recipient(User.find(5))
+
+    result = deliver
+
+    assert_not result.ok?
+    assert_includes result.error, 'no active recipient'
+  end
+
+  # --- FR-45 / INV-1: whose visibility produced the numbers -------------------------------
+
+  def test_the_scope_is_built_as_the_render_identity_and_not_as_the_process_user
+    # THE ONE THAT NEEDS A REAL REDMINE. A rake task runs with `User.current` = Anonymous,
+    # and `Issue.visible` defaults to it — so without `#as` the report would be built from
+    # Anonymous's visibility and come out empty, which reads as "no issues this week"
+    # rather than as a bug.
+    add_recipient(@recipient)
+    User.current = User.anonymous
+    seen = nil
+    RedmineReporterDashboards::Reporting::ReportRun.any_instance
+                                                   .stubs(:count_scope)
+                                                   .with { seen = User.current; true }
+                                                   .returns(0)
+
+    deliver(actor: @author)
+
+    assert_equal @author, seen, 'the scope must be built as the schedule identity'
+  ensure
+    User.current = User.anonymous
+  end
+
+  def test_the_process_user_is_restored_afterwards
+    add_recipient(@recipient)
+    User.current = @recipient
+
+    deliver(actor: @author)
+
+    assert_equal @recipient, User.current, 'the ambient actor is borrowed, not taken'
+  ensure
+    User.current = User.anonymous
+  end
+
+  def test_the_mail_is_told_which_identity_produced_the_numbers
+    # FR-47: "shared output is labelled with the identity it was rendered as." On this path
+    # the recipient and the render identity are usually DIFFERENT people — that is what
+    # `render_as` is for — so the mail has to say so.
+    add_recipient(@recipient)
+
+    deliver(actor: @author)
+
+    assert_equal @author, @mailer.reports.first[:rendered_as]
+  end
+
+  # --- the saved query, which fails rather than silently widening --------------------------
+
+  def test_a_query_the_render_identity_cannot_see_fails_instead_of_falling_back
+    # DELIBERATELY DIFFERENT FROM THE INTERACTIVE PATH. `TemplatesController` ignores an
+    # unresolvable query id and uses the project scope, because answering differently for
+    # "deleted" and "you may not see it" would make the picker a probe. Nobody is probing
+    # here, and the fallback would mail every issue in the project under the name of a
+    # schedule configured for a narrow one.
+    add_recipient(@recipient)
+    @schedule.update_columns(query_id: 999_999, query_type: 'IssueQuery')
+
+    result = deliver
+
+    assert_not result.ok?
+    assert_includes result.error, 'saved query 999999'
+    assert_empty @mailer.reports
+    assert_equal 1, @mailer.failures.length
+  end
+
+  def test_a_query_the_render_identity_can_see_is_used
+    add_recipient(@recipient)
+    query = IssueQuery.create!(name: 'Mine', project: @project, user: @author,
+                               visibility: Query::VISIBILITY_PUBLIC)
+    @schedule.update_columns(query_id: query.id, query_type: 'IssueQuery')
+
+    result = deliver
+
+    assert result.ok?, result.error
+    assert_equal 1, @mailer.reports.length
+  end
+
+  # --- the mail-size cap ---------------------------------------------------------------------
+
+  def test_attachments_over_the_cap_are_refused_before_anything_is_sent
+    # `BatchGuard` bounds the DOCUMENT count; this bounds the BYTES, and only one of those
+    # is about mail. Fifty documents inside the cap can still be a message the MTA rejects
+    # — after the run row already said success.
+    add_recipient(@recipient)
+    FakeEngine.bytes = FakeEngine.pdf_of(Delivery::MAX_ATTACHMENT_BYTES + 1)
+
+    result = deliver
+
+    assert_not result.ok?
+    assert_empty @mailer.reports, 'nothing is sent, rather than sent and bounced'
+    assert_equal 1, @mailer.failures.length
+    assert_includes result.error, 'attachments_too_large'
+    assert_includes @mailer.failures.first[:diagnostic].message, 'MB'
+  end
+
+  def test_an_attachment_at_the_cap_is_sent
+    # At the limit and one past it, which is what CLAUDE.md §3 asks for.
+    add_recipient(@recipient)
+    FakeEngine.bytes = FakeEngine.pdf_of(Delivery::MAX_ATTACHMENT_BYTES)
+
+    result = deliver
+
+    assert result.ok?, result.error
+    assert_equal 1, @mailer.reports.length
+  end
+
+  # --- an SMTP failure is a failure -----------------------------------------------------------
+
+  def test_a_delivery_error_is_raised_rather_than_logged_and_forgotten
+    # Redmine's `Mailer.deliver_mail` swallows delivery errors unless `raise_delivery_errors`
+    # is set, so an SMTP server that is down produces a log line nobody reads and a run row
+    # that says success. `ScheduledDelivery` sets the flag the way `deliver_test_email` does.
+    add_recipient(@recipient)
+
+    assert_raises(Net::SMTPFatalError) do
+      deliver(mailer: RecordingMailer.new(raising: true))
+    end
+  end
+
+  def test_the_delivery_errors_flag_is_restored_afterwards
+    add_recipient(@recipient)
+    before = ActionMailer::Base.raise_delivery_errors
+
+    assert_raises(Net::SMTPFatalError) { deliver(mailer: RecordingMailer.new(raising: true)) }
+
+    assert_equal before, ActionMailer::Base.raise_delivery_errors
+  end
+
+  # --- the real mailer, the real message ---------------------------------------------------
+
+  def test_the_real_mailer_sends_one_message_per_recipient_with_the_attachment
+    add_recipient(@recipient)
+
+    with_engine(FakeEngine) do
+      Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                        actor: @author, run: @run)
+    end
+
+    assert_equal 1, ActionMailer::Base.deliveries.length
+    mail = ActionMailer::Base.deliveries.last
+    assert_equal [@recipient.mail], mail.to
+    assert_equal 1, mail.attachments.length
+    assert_equal 'weekly-numbers-2026-03-10.pdf', mail.attachments.first.filename
+    # CRLF-normalised on both sides: Mail canonicalises line endings in a base64 part on
+    # the way out, so the bytes that come back are not byte-identical to the ones that went
+    # in. What matters here is that the attachment IS the render's output rather than a
+    # placeholder, so the comparison is made on the normalised form and says so.
+    assert_equal FakeEngine.bytes.gsub(/\r\n/, "\n"),
+                 mail.attachments.first.body.decoded.gsub(/\r\n/, "\n")
+  end
+
+  def test_the_sender_is_the_server_and_there_is_no_way_to_set_it
+    # §7b.5's finding: the base plugin let a schedule specify `from` as free text — "a
+    # report over any issue in the instance, mailed anywhere, with a forged sender". The
+    # schema has no such column and the mailer takes no such argument, so this is asserted
+    # rather than hoped for.
+    add_recipient(@recipient)
+
+    with_engine(FakeEngine) do
+      Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                        actor: @author, run: @run)
+    end
+
+    assert_equal [Mail::Address.new(Setting.mail_from).address],
+                 ActionMailer::Base.deliveries.last.from
+    assert_not_includes Schedule.column_names, 'from'
+    assert_not_includes ScheduleRecipient.column_names, 'to'
+  end
+
+  def test_the_authors_own_subject_wins_and_is_not_prefixed
+    add_recipient(@recipient)
+    @schedule.update_columns(email_subject: 'Monday numbers')
+
+    with_engine(FakeEngine) do
+      Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                        actor: @author, run: @run)
+    end
+
+    assert_equal 'Monday numbers', ActionMailer::Base.deliveries.last.subject
+  end
+
+  def test_the_generated_subject_names_the_report_and_the_day
+    add_recipient(@recipient)
+
+    with_engine(FakeEngine) do
+      Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                        actor: @author, run: @run)
+    end
+
+    subject = ActionMailer::Base.deliveries.last.subject
+    assert_includes subject, 'Weekly numbers'
+    assert_includes subject, '2026'
+  end
+
+  def test_the_body_names_the_identity_the_numbers_were_produced_with
+    add_recipient(@recipient)
+
+    with_engine(FakeEngine) do
+      Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                        actor: @author, run: @run)
+    end
+
+    assert_includes mail_body(ActionMailer::Base.deliveries.last), @author.name
+  end
+
+  def test_a_failure_notice_is_addressed_to_the_owner_and_carries_no_attachment
+    add_recipient(@recipient)
+    @template.update_columns(content: '{% this is not a tag %}')
+
+    with_engine(FakeEngine) do
+      Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                        actor: @author, run: @run)
+    end
+
+    assert_equal 1, ActionMailer::Base.deliveries.length
+    mail = ActionMailer::Base.deliveries.last
+    assert_equal [@author.mail], mail.to, 'the owner, not the recipients'
+    assert_empty mail.attachments
+  end
+
+  def test_the_failure_notice_never_carries_the_diagnostics_detail
+    # §7b.3's leak prevention. `detail` holds the raw exception and can hold SQL, role ids
+    # and project ids; `Diagnostic#to_h` omits it and so must the mail.
+    add_recipient(@recipient)
+    diagnostic = Diagnostic.new(origin: :template, code: :boom, message: 'the safe summary',
+                                correlation_id: 'cid-9',
+                                detail: 'SELECT secret FROM issues WHERE role_id = 4')
+
+    ReporterDashboardsMailer.deliver_scheduled_report_failure(@author, @schedule,
+                                                              OCCURRENCE, diagnostic)
+
+    body = mail_body(ActionMailer::Base.deliveries.last)
+    assert_includes body, 'the safe summary'
+    assert_includes body, 'cid-9'
+    assert_not_includes body, 'SELECT secret'
+  end
+
+  def test_the_mail_is_written_in_the_recipients_language
+    # `Mailer#process` switches `I18n.locale` to the recipient's, which is the whole reason
+    # this mailer subclasses Redmine's rather than ActionMailer::Base — and the reason nine
+    # locale files are worth maintaining on this path.
+    @recipient.update_columns(language: 'de')
+    add_recipient(@recipient)
+
+    with_engine(FakeEngine) do
+      Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                        actor: @author, run: @run)
+    end
+
+    assert_includes mail_body(ActionMailer::Base.deliveries.last), 'Hier ist der Bericht'
+  end
+end

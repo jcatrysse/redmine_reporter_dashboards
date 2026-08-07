@@ -49,8 +49,24 @@ check() {
 # Endless method definitions (Ruby 3.0+): `def foo = expr`, `def self.foo(x) = expr`.
 # The `=` has to terminate the argument list, so a default argument value
 # (`def foo(a = 1)`) must not match — hence the optional parenthesised group.
+#
+# --- THE WHITESPACE IS LOAD-BEARING, AND THE FIRST VERSION DID NOT HAVE IT ---
+#
+# `\s*=` also matched `def self.bytes=(value)` and `def name=(v)` — ORDINARY SETTERS, valid
+# in every Ruby there has ever been — and reported them as needing Ruby 3.0. A gate that
+# fails on correct 2.7 code teaches people to route around the gate, which is the one
+# outcome worse than not having it.
+#
+# Ruby itself disambiguates the two by exactly this: an endless definition REQUIRES
+# whitespace before the `=` (`def foo = 1`), and a setter's `=` is part of the method name
+# and therefore adjacent to it (`def foo=(v)`). So the pattern demands either a closing
+# paren or whitespace immediately before the `=`, which is the same rule the parser uses.
+#
+# Negative-tested in both directions before being trusted: `def foo = 1`,
+# `def self.foo(x) = y` and `def foo() = 1` still FAIL; `def foo=(v)`, `def self.foo=(v)`
+# and `def foo(a = 1)` pass.
 check 'endless method definition — needs Ruby 3.0, the floor is 2.7' \
-      '^\s*def\s+[A-Za-z_][\w.]*[!?]?(\([^)]*\))?\s*=(?!=|~)'
+      '^\s*def\s+[A-Za-z_][\w.]*[!?]?(\([^)]*\)\s*|\s+)=(?!=|~)'
 
 # Hash#except is Ruby 3.0 core. ActiveSupport backports it, so this only bites where
 # ActiveSupport is absent — which is exactly how the pure-unit specs run.
