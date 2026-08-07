@@ -35,7 +35,11 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
     self.class.plugin_root
   end
 
-  # One subprocess for the whole file.
+  # One subprocess PER EXAMPLE GROUP, not one per file — the memo is on `self`, and RSpec
+  # gives each nested `describe` its own subclass. Measured: seven groups, seven spawns.
+  # Said accurately rather than fixed, because the cost is ~40 ms each and hoisting the memo
+  # onto a shared constant is exactly the top-level-constant hazard that broke T-16's chart
+  # examples (see `reversibility_spec.rb`). The comment was the defect, not the code.
   def self.recorded_schema
     @recorded_schema ||= begin
       recorder = File.join(plugin_root, 'spec', 'migrations', 'schema_recorder.rb')

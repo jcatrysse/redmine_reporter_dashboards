@@ -211,10 +211,20 @@ class ReporterDashboardsScheduleTest < ActiveSupport::TestCase
   end
 
   def test_the_two_rule_five_columns_degrade_rather_than_raising_when_absent
+    # The reader must DIFFER between the two states, or the example is vacuous: an earlier
+    # version only asserted the stubbed-absent side, so deleting the guard from the reader
+    # and returning the column directly still passed. Both sides are asserted, against a
+    # value that is deliberately not the degraded one.
+    @schedule.update!(next_run_on: OCCURRENCE, consecutive_failures: 3)
+
+    assert Schedule.next_run_on_supported?
+    assert_equal OCCURRENCE, @schedule.next_run_on_or_nil
+    assert_equal 3, @schedule.consecutive_failures_or_zero
+
     RedmineReporterDashboards::Compat.stub(:column_present?, false) do
       assert_not Schedule.next_run_on_supported?
       assert_not Schedule.consecutive_failures_supported?
-      assert_nil @schedule.next_run_on_or_nil
+      assert_nil @schedule.next_run_on_or_nil, 'the guard is not consulted by the reader'
       assert_equal 0, @schedule.consecutive_failures_or_zero
     end
   end
@@ -240,12 +250,30 @@ class ReporterDashboardsScheduleTest < ActiveSupport::TestCase
   end
 
   def test_versions_read_newest_first
-    older = TemplateVersion.create!(template_id: @template.id, content: 'a',
-                                    created_at: Time.zone.parse('2026-01-01 10:00'))
+    # Created in ASCENDING id order with DESCENDING timestamps, so the expected result is
+    # the opposite of insertion order. Written the other way round — the obvious way — the
+    # example passes whether the scope orders by `created_at` or by `id`, and would go on
+    # passing if somebody deleted the `order` clause entirely on a database that happens to
+    # return rows by primary key.
     newer = TemplateVersion.create!(template_id: @template.id, content: 'b',
                                     created_at: Time.zone.parse('2026-02-01 10:00'))
+    older = TemplateVersion.create!(template_id: @template.id, content: 'a',
+                                    created_at: Time.zone.parse('2026-01-01 10:00'))
 
+    assert older.id > newer.id, 'the fixture must have ascending ids and descending times'
     assert_equal [newer.id, older.id], @template.reload.versions.map(&:id)
+  end
+
+  def test_the_id_tiebreak_orders_two_versions_written_in_the_same_instant
+    # `order(created_at: :desc, id: :desc)`'s second key. Two rows sharing a timestamp is
+    # not hypothetical — an import writes a whole history in one transaction — and without
+    # the tiebreak the order is whatever the engine returns, which CLAUDE.md §6 forbids
+    # relying on because the three engines do not agree.
+    stamp = Time.zone.parse('2026-03-01 09:00')
+    first = TemplateVersion.create!(template_id: @template.id, content: 'a', created_at: stamp)
+    second = TemplateVersion.create!(template_id: @template.id, content: 'b', created_at: stamp)
+
+    assert_equal [second.id, first.id], @template.reload.versions.map(&:id)
   end
 
   # --- documents -------------------------------------------------------------

@@ -88,6 +88,13 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+if [ ! -d "$REDMINE_DIR/plugins/$PLUGIN_NAME/db/migrate" ]; then
+  echo "ERROR: the plugin is not mirrored into '$REDMINE_DIR/plugins/$PLUGIN_NAME'." >&2
+  echo "       Run ./.codex/redmine_clone.sh <branch> first — rake migrates the MIRROR, and" >&2
+  echo "       this gate must compare against the migrations that actually ran." >&2
+  exit 2
+fi
+
 # NOTHING IS COPIED INTO THE REDMINE CHECKOUT, and the first version did.
 #
 # It wrote `redmine/.rrd_schema_snapshot.rb` and removed it in an EXIT trap. `rails runner`
@@ -208,20 +215,73 @@ $(sed 's/^/    /' "$WORK/drop.log")"
 # reporting schema adds may exist. A leftover is reported as what it is — a previous run's
 # down-migration that did not complete — rather than being quietly adopted as the baseline.
 # ===========================================================================
-assert_no_plugin_tables() {
-  local snapshot_file="$1" context="$2" leftovers
-  leftovers="$(awk '$1 == "TABLE" && $2 ~ /^reporter_dashboards_/ { print $2 }' "$snapshot_file")"
+#
+# THE CHECK ASKS THE MIGRATIONS WHAT THEY CREATE, rather than matching a name prefix.
+#
+# The first attempt at this guard grepped for `TABLE reporter_dashboards_*`, and an
+# independent review reproduced the tautology straight through it: a leftover table called
+# anything else — and, more realistically, a leftover COLUMN or INDEX that a future
+# migration adds to a table Redmine already owns, like `projects` — was still adopted as the
+# baseline. A prefix is a guess about what the migrations do; `schema_recorder.rb` KNOWS,
+# because it executes their DSL. Both halves of this gate now read the same source of truth.
+#
+# READ FROM THE MIRROR, NOT FROM THE SOURCE REPO. `rake redmine:plugins:migrate` runs
+# `<redmine>/plugins/<name>/db/migrate`, and `.codex/redmine_clone.sh` is what puts the
+# source there. Asking the source tree instead means the check can describe a different set
+# of migrations from the ones that actually ran — which is silent, and which showed up the
+# first time this guard was tested: a migration added to the repo and not yet mirrored
+# simply did not exist as far as `rake` was concerned, while the guard expected it.
+# In CI the two are identical by construction; locally they diverge the moment you forget
+# to re-run the clone script, which HANDOVER §1 records as a standing trap.
+PLUGIN_MIGRATIONS="$REDMINE_DIR/plugins/$PLUGIN_NAME/db/migrate"
+
+plugin_objects() {
+  ruby "$ROOT/spec/migrations/schema_recorder.rb" "$PLUGIN_MIGRATIONS" 2>"$WORK/recorder.log" |
+    ruby -rjson -e '
+      schema = JSON.parse($stdin.read)
+      schema["tables"].each do |table, definition|
+        puts "TABLE #{table}"
+        definition["columns"].each { |c| puts "COLUMN #{table}.#{c["name"]}" }
+      end
+      schema["indexes"].each { |i| puts "INDEX #{i["table"]}.#{i["name"]}" }
+    '
+}
+
+assert_no_plugin_objects() {
+  local snapshot_file="$1" context="$2"
+
+  # `reporter_project_tabs` is created by 001 and is REQUIRED to survive VERSION=0, so it is
+  # the one thing whose presence at baseline is not evidence of anything. Everything else the
+  # migrations describe must be absent.
+  plugin_objects | grep -v 'reporter_project_tabs' | sort -u >"$WORK/expected_objects.txt" || true
+
+  if [ ! -s "$WORK/expected_objects.txt" ]; then
+    infrastructure "could not work out what the migrations create, so the baseline cannot be
+       proven clean. schema_recorder.rb output:
+$(sed 's/^/    /' "$WORK/recorder.log")"
+    return 1
+  fi
+
+  # Field 1-and-2 of each snapshot line, which is the object's identity without its type or
+  # default — enough to say "this exists" and stable across engines.
+  awk '{ print $1, $2 }' "$snapshot_file" | sort -u >"$WORK/present_objects.txt"
+
+  local leftovers
+  leftovers="$(comm -12 <(sed 's/ /|/' "$WORK/expected_objects.txt" | tr '|' ' ' | sort -u) \
+                        "$WORK/present_objects.txt")"
 
   [ -z "$leftovers" ] && return 0
 
   echo >&2
-  echo "FAIL: after VERSION=0 ($context) these tables still exist:" >&2
+  echo "FAIL: after VERSION=0 ($context) the database still contains objects this plugin's" >&2
+  echo "      migrations create:" >&2
   echo "$leftovers" | sed 's/^/    /' >&2
   echo >&2
-  echo "A down-migration did not remove its own table. If this is left over from an earlier" >&2
-  echo "failed run rather than from the migrations as they stand, drop them by hand and run" >&2
-  echo "again — but do not skip this: adopting them as the baseline is what would make every" >&2
-  echo "later comparison pass by comparing the damage with itself." >&2
+  echo "A down-migration did not remove what its up-migration made. If this is left over from" >&2
+  echo "an earlier failed run rather than from the migrations as they stand, drop them by hand" >&2
+  echo "and run again — but do NOT skip this check. Adopting the damage as the baseline is what" >&2
+  echo "makes every later comparison pass by comparing the damage with itself, so a red G11" >&2
+  echo "would turn green by pressing the button a second time." >&2
   return 1
 }
 
@@ -276,11 +336,11 @@ run_arm() {
   migrate 0 || { report_arm_failure "$arm" "could not reach VERSION=0 before the run"; return; }
 
   # The baseline is PROVEN clean rather than assumed. See the long note on
-  # assert_no_plugin_tables: without this, a broken down-migration poisons the baseline on
+  # assert_no_plugin_objects: without this, a broken down-migration poisons the baseline on
   # every run after the first and the final comparison passes by comparing the damage with
   # itself.
   snapshot "$WORK/zero.txt" || return
-  assert_no_plugin_tables "$WORK/zero.txt" "before arm '$arm'" || { STATUS=1; return; }
+  assert_no_plugin_objects "$WORK/zero.txt" "before arm '$arm'" || { STATUS=1; return; }
 
   case "$arm" in
     preseeded)

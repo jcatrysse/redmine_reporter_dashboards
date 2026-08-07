@@ -114,17 +114,23 @@ class ReporterDashboardsSchemaTest < ActiveSupport::TestCase
     # actually under control: `script/migrate_updown.sh`, which runs a real
     # `rake redmine:plugins:migrate` in both directions and fails if any plugin row
     # survives `VERSION=0`.
-    versions = CONNECTION.call.select_values(
-      "SELECT version FROM #{CONNECTION.call.quote_table_name('schema_migrations')}"
-    )
-    plugin_rows = versions.select { |v| v.to_s.match?(/\A\d+-\w+\z/) }
+    # The MECHANISM is asserted directly rather than by filtering rows and hoping some
+    # survive. An earlier version selected rows matching `<n>-<id>` and then asserted that
+    # each matched `<n>-<id>` — which is implied by its own filter, and iterated an empty
+    # collection here anyway because `db:test:prepare` does not restore plugin rows.
+    #
+    # What can be checked without a migration state to depend on: that Redmine's own
+    # migrator still writes the marker in that shape, read from the source it will use.
+    marker = Redmine::Plugin::Migrator.instance_method(:record_version_state_after_migrating)
+    assert marker, 'Redmine::Plugin::Migrator no longer overrides the version marker'
 
-    plugin_rows.each do |row|
-      assert_match(/\A\d+-[a-z0-9_]+\z/, row,
-                   'Redmine records a plugin migration as "<version>-<plugin_id>" ' \
-                   '(lib/redmine/plugin.rb:553-555); a row in another shape means the ' \
-                   'mechanism moved and FR-69 needs re-reading')
-    end
+    source = Redmine::Plugin::Migrator.instance_method(:record_version_state_after_migrating)
+                                      .source_location
+    assert_not_nil source, 'cannot locate the override; FR-69 needs re-reading against this Redmine'
+    body = File.read(source.first, encoding: 'UTF-8').lines[(source.last - 1), 4].join
+    assert_includes body, 'current_plugin.id',
+                    'the plugin marker is no longer "<version>-<plugin_id>", so ' \
+                    'script/migrate_updown.sh is asserting against the wrong mechanism'
   end
 
   def test_no_migration_in_this_plugin_reads_or_writes_a_row

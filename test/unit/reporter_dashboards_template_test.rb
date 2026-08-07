@@ -221,11 +221,18 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
   end
 
   def test_engine_hint_guard_degrades_rather_than_raising_when_the_column_is_absent
-    # §7 rule 5, and the only way to prove it is to take the column away. The guard's whole
-    # promise is "converts a support incident into a degraded feature".
+    # §7 rule 5, and the only way to prove it is to take the column away. BOTH states are
+    # asserted against a non-degraded value: an example that only checks the stubbed-absent
+    # side passes even if the reader ignores the guard and returns the column directly.
+    template = Template.create!(project: @project, author_id: @author.id, name: 'x',
+                                engine_hint: 'chromium_cdp')
+
+    assert Template.engine_hint_supported?
+    assert_equal 'chromium_cdp', template.engine_hint_or_nil
+
     RedmineReporterDashboards::Compat.stub(:column_present?, false) do
       assert_not Template.engine_hint_supported?
-      assert_nil Template.new.engine_hint_or_nil
+      assert_nil template.engine_hint_or_nil, 'the guard is not consulted by the reader'
     end
   end
 end

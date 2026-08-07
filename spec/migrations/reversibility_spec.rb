@@ -213,6 +213,18 @@ RSpec.describe MigrationReversibility do
       expect(rules_for('027_uninvertible.rb')).to include('no_uninvertible_ddl')
     end
 
+    it 'rejects conditional DDL hidden in a helper method called from `change`' do
+      # The review's cleanest bypass of the fixed reader: the rule was scoped to the body of
+      # `change`, so moving the `unless table_exists?` into a private helper made it
+      # invisible while the DDL still ran. Reproduced against a live database before the
+      # scope was widened to the whole file.
+      expect(rules_for('030_helper_conditional.rb')).to include('no_conditional_ddl')
+    end
+
+    it 'rejects a row delete reached through the connection' do
+      expect(rules_for('031_conn_delete.rb')).to include('no_data_statement')
+    end
+
     it 'sees a migration in a SUBDIRECTORY, because Rails runs one' do
       # `ActiveRecord::MigrationContext#migration_files` globs `**/[0-9]*_*.rb`, and
       # Redmine's plugin migrator inherits it. A reader that globs one level does not

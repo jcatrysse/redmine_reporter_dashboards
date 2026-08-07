@@ -85,12 +85,13 @@ module MigrationReversibility
   # where the receiver can only be the migration itself.
   DATA_METHODS_ANY_RECEIVER = %i[
     update_all delete_all destroy_all insert insert_all upsert upsert_all
-    create create! save save! update update! find_by find_by! find_each find_in_batches
+    create create! save save! update update! delete find_by find_by! find_each find_in_batches
   ].to_set.freeze
 
   DATA_METHODS_RECEIVERLESS = %i[
     destroy find first last pluck where count exists? select
   ].to_set.freeze
+
 
   # A name a parser cannot follow. `define_method(:down)` defines a method this reader's
   # `DEFN` scan cannot see; `send(:execute, …)` reaches a forbidden method by a computed
@@ -480,10 +481,17 @@ module MigrationReversibility
   # `db/migrate/001` is the one file this is allowed for, and it is allowlisted WITH the
   # measurement that justifies it rather than waved through.
   def check_conditional_ddl(path, tree)
-    change = find_node(tree) { |n| n.type == :DEFN && n.children[0] == :change }
-    return [] unless change
-
-    collect_nodes(change) { |n| %i[IF UNLESS CASE CASE2 CASE3].include?(n.type) }
+    # THE WHOLE FILE, not just the body of `change`.
+    #
+    # The first version scoped this to the `change` DEFN, and an independent review walked
+    # through it in one move: put the `unless table_exists?` in a private helper and call
+    # the helper from `change`. The DDL still runs, Rails still records only what the block
+    # emitted on that run, and the reader saw an empty `change` and said nothing. Reproduced
+    # against a live database.
+    #
+    # A migration has no legitimate conditional DDL anywhere in it, so there is nothing to
+    # scope. 001 is exempt by name in the allowlist, with the measurement that justifies it.
+    collect_nodes(tree) { |n| %i[IF UNLESS CASE CASE2 CASE3].include?(n.type) }
       .select { |n| collect_nodes(n) { |c| c.type == :FCALL || c.type == :VCALL }.any? { |c| ddl_call?(c) } }
       .map do |node|
         Finding.new(
