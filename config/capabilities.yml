@@ -102,22 +102,26 @@ engines:
     label: wkhtmltopdf (compatibility)
     role: compatibility
     default: false
-    # THE ADAPTER EXISTS AND ITS CELLS DO NOT, and the distinction is the point.
-    # `render/engines/wkhtmltopdf.rb` is written and registered; wkhtmltopdf itself
-    # cannot be installed in the container this was developed in, so nothing here has
-    # been measured. Marking it `corpus` would put twenty cells in the matrix that
-    # nobody has run — INV-7's exact sin, and the one this project has already paid for
-    # once with a four-version Redmine 5.1 claim.
-    verification: pending
+    # PROMOTED 2026-08-06 BY CURATOR DECISION, on a corpus run with nothing unexplained.
+    # It sat at `pending` for exactly the right reason and for exactly as long as that
+    # reason held: the adapter existed, and its cells did not, because nobody had run it.
+    # E-5's promotion condition was "every failure accounted for", and E-18 met it —
+    # 18 pass / 0 fail / 2 skip against the build CI uses, with both skips being
+    # `:readiness_expression`, an UNDECLARED capability, which the three-state rule
+    # (G12) says must skip with a reason. That is the rule working, not an exemption.
+    verification: corpus
     verification_note: >-
-      RUN ONCE, IN CI, AND NOT YET PROMOTED. Run 31059574558 executed the corpus
-      against it for the first time: 13 of 20 passed. Four failures were fixture bugs
-      and are fixed; one was a real egress defect and is fixed; TWO REMAIN AND ARE A
-      CURATOR DECISION — flexbox and font inking are genuine differences that the
-      CLOSED capability vocabulary has no way to express, so the three-state rule has
-      nothing to skip on (implementation-plan.md §Findings E-5). Until that is decided
-      this engine stays `pending`, which means its results are reported and not
-      enforced, and the matrix carries no cells for it.
+      MEASURED, and the history matters because it is the shape INV-7 exists for.
+      Run 31059574558 was its first execution ever: 13 of 20. Four failures were fixture
+      bugs and are fixed; one was a real egress defect and is fixed; two were held open
+      as a curator decision (implementation-plan.md §Findings E-5). Both closed on
+      measurement rather than by argument — the two "genuine differences the capability
+      vocabulary cannot express" turned out to be an artefact of an UNPATCHED-Qt build,
+      which discards every `--footer-*` option (§Findings E-18, and note that E-18 also
+      records a wrong finding I published before measuring the build). Against the
+      patched build CI uses, the corpus is 18/0/2 with both skips explained. `pending`
+      meant "reported and not enforced, no cells in the matrix"; `corpus` means the
+      cells are real and a regression here is a build failure.
     needs_service: false
     renders_offline: true
     install: provided by bundle install; no service, no configuration

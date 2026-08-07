@@ -604,6 +604,12 @@ asks that question). `Req` is Redmine's `require:`; `read` is Redmine's `read: t
 The four in bold are the code-execution class, and their `require: :member` is **derived** from
 that fact rather than typed on each row (`Entry#requires`), so the two cannot come apart.
 
+**This table is FROZEN at 13 by curator decision, 2026-08-06** — *"already very very fine grained, I
+wouldn't expand unless really necessary"*. It is the contract, not a starting point: a later task
+wanting a fourteenth argues for it against that sentence, and after T-23 registers these, splitting
+or renaming one costs a migration and an upgrade note because permission names are a public contract
+(§1). The cheap moment to disagree was before this line.
+
 **A `visibility` column on the template model is a consequence of row 9** and belongs to **T-22**,
 the tables task — not to T-23 and not to a later retrofit. `manage_public_…` has nothing to govern
 without it, and §7 rule 6 requires a column to be created in the same migration as its table, so

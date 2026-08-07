@@ -44,6 +44,24 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **The engine support matrix now covers wkhtmltopdf, with real results instead of
+  "not verified".**
+
+  `docs/engine-support-matrix.md` is generated from an actual render of twenty documents
+  through each engine, never written by hand. Until now wkhtmltopdf's column said *not
+  verified* for every row — honest, but not useful. It has now been run: **eighteen of the
+  twenty pass**, and the two that do not are skipped with the reason printed in the cell
+  (this engine cannot be asked "are you ready yet?", so the two fixtures that depend on
+  that question do not apply to it).
+
+  What this changes for you: the column is now something you can plan against, and a future
+  release that breaks one of those eighteen behaviours fails the build instead of quietly
+  reporting it.
+
+  One caveat worth knowing if you build wkhtmltopdf yourself: the results above are for a
+  build **with patched Qt** (`wkhtmltopdf --version` says so). An unpatched build silently
+  discards every header and footer option, which looks like a bug in this plugin and is not.
+
 - **A permission model, in the normal Redmine way — and a warning when another plugin
   claims one of our permission names.**
 

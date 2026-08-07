@@ -48,7 +48,8 @@ than implied.
    credential, or a judgement the specs leave open (§11).
 6. **Small, reversible, readable, consistent with what is already here.** No half-finished refactor
    left in the tree. No second way of doing something that already has a way.
-7. **Never resolve an open question silently.** `technical-spec.md` §12 lists 13 `[OQ]` items and
+7. **Never resolve an open question silently.** `technical-spec.md` §12 lists 13 `[OQ]` items — **7
+   still open** as of 2026-08-06; see §11.1 for which — and
    `claims.json` holds the open beliefs with their discriminators. Hitting one is a **report-and-ask**
    event (§11).
 8. **Ordering constraints outrank task attractiveness** (§2).
@@ -288,7 +289,16 @@ Report and ask — do not decide — when you hit any of these:
    `docs/plan/reference/verification-oq-a-serialize-oq-b-liquid.md`. Do not re-open them; do read
    OQ-B's consequence, because it inverts §3.2: `{{ issue.closed? }}` parses and resolves on Liquid
    4.x and 5.x, so the five `?` accessors are **live surface** and keeping their aliases is a
-   compatibility requirement, not a courtesy. The remaining 11 `[OQ]` items are still open.
+   compatibility requirement, not a courtesy.
+
+   **Six are now closed and seven are open. Count them from the table, not from memory — this line
+   has been stale before.** Closed: **OQ-A**, **OQ-B** (2026-08-04, both refuted by measurement);
+   **OQ-C** (2026-08-06, in T-19 — the filter inventory, measured on both Liquid majors);
+   **OQ-I** (2026-08-04, by OQ-4's answer); **OQ-L** (2026-08-06, by measurement — wkhtmltopdf
+   cannot parse `||=`); **OQ-F** (2026-08-06, by curator decision — the `template_authoring`
+   setting is *deleted*, not defaulted, and replaced by the role-permission model in
+   `technical-spec.md` §4.1; do not reintroduce a global switch over authoring). Still open:
+   **OQ-D**, **OQ-E**, **OQ-G**, **OQ-H** (narrowed, not closed), **OQ-J**, **OQ-K**, **OQ-M**.
 2. **A claim in `claims.json` whose discriminator your work just ran.** That is *evidence*, and the
    register must be updated rather than the conclusion assumed. C-014 (the asset fetcher's internal
    reachability) and C-015 (whether the UX design actually closes R9) are the two most likely to be
