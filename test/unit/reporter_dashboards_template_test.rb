@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 require File.expand_path('../test_helper', __dir__)
-# `Object#stub` is Minitest::Mock's, and Redmine's test_helper does not load it.
-# Needed by the §7 rule 5 examples, which have to take a column AWAY to prove the
-# guard degrades rather than raises.
-require 'minitest/mock'
+# NO `require 'minitest/mock'` — Ruby 3.4 ships minitest 6, which no longer provides it,
+# and the require made the whole file fail to LOAD on the Redmine 7.0 CI job. Mocha is what
+# Redmine's own suite loads and what the stub below uses; see the fuller note in
+# `reporter_dashboards_schedule_test.rb`.
 
 # T-22 — the template model, against a real Redmine and a real database.
 #
@@ -230,9 +230,9 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
     assert Template.engine_hint_supported?
     assert_equal 'chromium_cdp', template.engine_hint_or_nil
 
-    RedmineReporterDashboards::Compat.stub(:column_present?, false) do
-      assert_not Template.engine_hint_supported?
-      assert_nil template.engine_hint_or_nil, 'the guard is not consulted by the reader'
-    end
+    RedmineReporterDashboards::Compat.stubs(:column_present?).returns(false)
+
+    assert_not Template.engine_hint_supported?
+    assert_nil template.engine_hint_or_nil, 'the guard is not consulted by the reader'
   end
 end

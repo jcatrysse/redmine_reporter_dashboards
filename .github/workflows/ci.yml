@@ -934,6 +934,11 @@ jobs:
       # PDF twin.
       - name: The shared-layout claim, measured in a browser
         env:
+          # RRD_CONFORMANCE is the opt-in every browser-touching spec now requires: the
+          # falsifier used to run wherever `detect_binary` found anything, which made it
+          # start the runner's own Chromium in the plain `rspec` job and fail there. This
+          # step is where a browser is deliberately installed, so this is where it runs.
+          RRD_CONFORMANCE: '1'
           RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
         run: rspec -I spec spec/charts/shared_layout_falsifier_spec.rb --format documentation
 

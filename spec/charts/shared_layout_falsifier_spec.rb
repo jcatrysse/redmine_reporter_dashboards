@@ -123,6 +123,29 @@ RSpec.describe 'the shared-layout claim, falsified in a browser' do
   # browser means this was NOT VERIFIED, and it says so with the reason. It must never
   # read as a pass: the whole value of this file is that it is the one thing in T-16 a
   # Ruby-only run cannot answer.
+  #
+  # --- AND THE BROWSER HAS TO HAVE BEEN GIVEN, NOT MERELY FOUND ---
+  #
+  # `detect_binary` finding something is not the same question as "this run may start a
+  # browser", and conflating them kept the four `RSpec` CI jobs RED for four commits.
+  # GitHub's `ubuntu-latest` image has a Chromium on PATH; the plain `rspec` job installs
+  # none of what it needs, so that binary launched and died mid-session
+  # (`the browser exited while we were waiting for it`) and two examples FAILED — in a job
+  # whose own description says it "stubs Redmine away and never boots Rails".
+  #
+  # A failure there is noise: it says nothing about the shared-layout claim and it buries
+  # the signal from the 2 081 other examples beside it. So the browser must be OFFERED, by
+  # the same flag `spec/render/chromium_containment_spec.rb` already uses — one flag
+  # meaning "a real browser is available and this run may start it" — and `render-smoke`,
+  # which installs one deliberately, stays the place the claim is answered. It is green
+  # there, and that is the evidence.
+  def browser_offered?
+    ENV['RRD_CONFORMANCE'] == '1'
+  end
+
+  UNOFFERED = 'not a browser run — set RRD_CONFORMANCE=1 (the render-smoke job does). ' \
+              'The shared-layout claim is UNVERIFIED here, which is not a pass'
+
   def browser_available?
     binary = CdpClient.detect_binary
     !binary.to_s.empty? && File.executable?(binary)
@@ -135,6 +158,7 @@ RSpec.describe 'the shared-layout claim, falsified in a browser' do
   end
 
   it 'draws its plot area where the shared layout says, within 2%' do
+    skip UNOFFERED unless browser_offered?
     skip "no Chromium on PATH (set RRD_CHROMIUM_BINARY) — the shared-layout claim is UNVERIFIED without one" unless browser_available?
     skip 'Chromium will not run as root, and --no-sandbox is deliberately never set. ' \
          'Run as a non-root user: useradd -m rrd && chmod -R a+rX . && su rrd -s /bin/bash -c ' \
@@ -197,6 +221,7 @@ RSpec.describe 'the shared-layout claim, falsified in a browser' do
   # ARE rather than about where they sit — a worse failure, and one nothing else here
   # would catch.
   it 'uses exactly the ticks and bounds it was given, choosing none of its own' do
+    skip UNOFFERED unless browser_offered?
     skip 'no Chromium on PATH — UNVERIFIED' unless browser_available?
     skip 'Chromium will not run as root; see the example above for the invocation' if root?
 

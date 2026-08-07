@@ -684,7 +684,16 @@ of a CI that runs on fork pull requests.
    the non-root user (§1's Chromium note):
 
        chmod -R a+rX . && su rrd -s /bin/bash -c \
-         'PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers rspec -I spec spec/charts/shared_layout_falsifier_spec.rb'
+         'RRD_CONFORMANCE=1 PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers rspec -I spec spec/charts/shared_layout_falsifier_spec.rb'
+
+   **`RRD_CONFORMANCE=1` IS NOW REQUIRED and the command above did not used to need it.**
+   The falsifier ran wherever `CdpClient.detect_binary` found anything, which meant it
+   started GitHub's own Chromium in the plain `rspec` job — a job that installs nothing a
+   browser needs — where it died mid-session and failed two examples on FOUR CI cells for
+   four commits. "A binary exists" and "this run may start a browser" are different
+   questions; the flag is the second one, and it is the same flag
+   `chromium_containment_spec.rb` already used. Without it the two examples now skip
+   NAMING the flag, which is UNVERIFIED and not a pass.
 
    It found two real defects on its first run (§Findings **E-16**) and now measures
    **1.17% worst edge** against a 2% tolerance. It is wired into the `render-smoke` CI job,

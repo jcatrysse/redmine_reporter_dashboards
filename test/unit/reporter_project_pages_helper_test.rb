@@ -25,18 +25,22 @@ class ReporterProjectPagesHelperTest < ActionView::TestCase
   def test_reporter_dashboard_icon_is_the_bare_label_where_there_is_no_sprite_helper
     # Redmine 5.1: IconsHelper does not exist, so sprite_icon must never be reached.
     # `icon icon-<name>` on the link paints the glyph there; the label is the body.
-    self.stub(:reporter_dashboard_svg_icons?, false) do
-      assert_equal 'Settings', reporter_dashboard_icon('settings', 'Settings')
-    end
+    # Mocha, not `Object#stub`. This file used the latter WITHOUT requiring
+    # `minitest/mock` and worked only because two other test files in the same process
+    # required it first — so removing those requires would have broken this file for a
+    # reason nothing here mentions. A dependency satisfied by load order is not a
+    # dependency anybody can see.
+    stubs(:reporter_dashboard_svg_icons?).returns(false)
+
+    assert_equal 'Settings', reporter_dashboard_icon('settings', 'Settings')
   end
 
   def test_reporter_dashboard_icon_never_calls_sprite_icon_without_the_sprite
     calls = 0
     define_singleton_method(:sprite_icon) { |*| calls += 1; 'should not happen' }
 
-    self.stub(:reporter_dashboard_svg_icons?, false) do
-      reporter_dashboard_icon('close', 'Delete')
-    end
+    stubs(:reporter_dashboard_svg_icons?).returns(false)
+    reporter_dashboard_icon('close', 'Delete')
 
     assert_equal 0, calls, 'sprite_icon does not exist on Redmine 5.1 — calling it is the defect'
   end

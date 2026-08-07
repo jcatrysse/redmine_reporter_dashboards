@@ -1,10 +1,16 @@
 # frozen_string_literal: true
 
 require File.expand_path('../test_helper', __dir__)
-# `Object#stub` is Minitest::Mock's, and Redmine's test_helper does not load it.
-# Needed by the §7 rule 5 examples, which have to take a column AWAY to prove the
-# guard degrades rather than raises.
-require 'minitest/mock'
+# NO `require 'minitest/mock'`. It was here for `Object#stub` — the §7 rule 5 example has
+# to take a column AWAY to prove the reader degrades rather than raises — and it broke the
+# `Minitest standalone (Redmine 7.0)` CI job outright: Ruby 3.4 ships minitest 6, which no
+# longer provides `minitest/mock`, so the whole file failed to LOAD and took the other 30
+# tests in it down with a LoadError.
+#
+# Mocha is what Redmine's own test suite loads and what this plugin's other tests already
+# use (`Project.any_instance.expects` in the tabs controller test), so the stub below is
+# mocha's. It restores at teardown rather than at the end of a block, which is why the
+# assertions that follow it are the ones that need the stub and nothing after them does.
 
 # T-22 — schedules, runs, recipients and documents, against a real database.
 #
@@ -221,12 +227,12 @@ class ReporterDashboardsScheduleTest < ActiveSupport::TestCase
     assert_equal OCCURRENCE, @schedule.next_run_on_or_nil
     assert_equal 3, @schedule.consecutive_failures_or_zero
 
-    RedmineReporterDashboards::Compat.stub(:column_present?, false) do
-      assert_not Schedule.next_run_on_supported?
-      assert_not Schedule.consecutive_failures_supported?
-      assert_nil @schedule.next_run_on_or_nil, 'the guard is not consulted by the reader'
-      assert_equal 0, @schedule.consecutive_failures_or_zero
-    end
+    RedmineReporterDashboards::Compat.stubs(:column_present?).returns(false)
+
+    assert_not Schedule.next_run_on_supported?
+    assert_not Schedule.consecutive_failures_supported?
+    assert_nil @schedule.next_run_on_or_nil, 'the guard is not consulted by the reader'
+    assert_equal 0, @schedule.consecutive_failures_or_zero
   end
 
   # --- template versions -----------------------------------------------------
