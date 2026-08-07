@@ -72,6 +72,18 @@ module RedmineReporterDashboards
              foreign_key: 'template_id',
              dependent: :destroy,
              inverse_of: :template
+    # NULLIFY, not destroy, and the difference is deliberate. A stored document is a frozen
+    # SNAPSHOT — bytes that were already produced and may already have been shared (§7b.1).
+    # Destroying it with the template would revoke a link somebody holds, silently, as a side
+    # effect of an unrelated edit; leaving `template_id` dangling would point at a row that no
+    # longer exists. Nullifying keeps the document and forgets which template made it, which
+    # is what actually happened. Its own `expires_at` still bounds it, so nothing becomes
+    # immortal by being orphaned.
+    has_many :documents,
+             class_name: 'RedmineReporterDashboards::Document',
+             foreign_key: 'template_id',
+             dependent: :nullify,
+             inverse_of: :template
 
     # The same shape as Redmine's `Query` (`app/models/query.rb:265`), including the
     # join-table name being stated rather than derived — Rails would derive

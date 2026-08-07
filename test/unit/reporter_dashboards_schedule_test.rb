@@ -383,6 +383,19 @@ class ReporterDashboardsScheduleTest < ActiveSupport::TestCase
     assert_not @schedule.valid?
   end
 
+  def test_deleting_a_template_keeps_its_documents_and_forgets_the_template
+    # A stored document is a frozen snapshot that may already have been shared. Destroying it
+    # with the template would revoke somebody's link as a side effect of an unrelated edit;
+    # a dangling template_id would point at a row that is gone.
+    document = Document.create!(template_id: @template.id, expires_at: 1.day.from_now)
+    @schedule.destroy
+
+    assert_no_difference 'RedmineReporterDashboards::Document.count' do
+      @template.destroy
+    end
+    assert_nil document.reload.template_id
+  end
+
   def test_a_purged_document_is_in_neither_scope
     travel_to(Time.zone.parse('2026-06-01 12:00')) do
       document = Document.create!(template_id: @template.id, expires_at: 1.hour.ago,

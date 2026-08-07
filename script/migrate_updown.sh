@@ -287,7 +287,14 @@ $(sed 's/^/    /' "$WORK/recorder.log")"
   echo "     has nothing to roll back and the tables stay. Drop them and run again:" >&2
   echo >&2
   echo "       cd $REDMINE_DIR && RAILS_ENV=$RAILS_ENV bundle exec rails runner \\" >&2
-  echo "         'c=ActiveRecord::Base.connection; c.tables.grep(/^reporter_dashboards_/).each { |t| c.drop_table(t) }'" >&2
+  echo "         'c=ActiveRecord::Base.connection" >&2
+  echo "          c.tables.grep(/^reporter_dashboards_/).each { |t| c.drop_table(t) }" >&2
+  echo "          c.execute(%q{DELETE FROM schema_migrations WHERE version LIKE %s})' \\" >&2
+  echo "         # ...LIKE '\''%-$PLUGIN_NAME'\''" >&2
+  echo >&2
+  echo "     BOTH halves matter. Dropping the tables and leaving the schema_migrations rows" >&2
+  echo "     makes the NEXT VERSION=0 fail instead, because the down-migrations then try to" >&2
+  echo "     drop tables that are already gone." >&2
   echo >&2
   echo "  2. An earlier run of this script failed part-way through." >&2
   echo >&2
