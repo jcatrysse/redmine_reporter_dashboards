@@ -151,10 +151,12 @@ one field.
 
 **T-22 built `source` + `output` and no `type`**, because a column literally named `type` **is**
 Rails' STI discriminator whether or not anyone wants it to be, so writing one would build the
-subclass tree those four documents forbid. **`output` is a name no document uses, and it is the
-single most likely thing in T-22 the curator will want renamed** — it appears in exactly one
-migration, one model constant and three tests, so a rename is cheap while T-22 is unreleased. §7's
-cell needs a curator edit either way: it cannot stay as written.
+subclass tree those four documents forbid.
+
+**~~S-2~~ CLOSED by the curator, 2026-08-07: `source` + `output` are approved and §7's cell is
+corrected.** `output` was the name most likely to be sent back — no document used it — and it
+stands. The cell now lists the real column set and says why `type` is absent, so the next reader
+meets one answer instead of two.
 
 **S-3 · §7's table list has no roles join table, and `visibility` has a value that cannot work
 without one.** T-40 assigned `visibility` to T-22 (`technical-spec.md:613-618`) with Redmine's own
@@ -194,9 +196,15 @@ update there silently re-enables a schedule somebody just disabled.
 runner writes from a background task means the runner raises `StaleObjectError` whenever an admin
 happened to be editing, and T-25's per-schedule rescue would then record a failure that is not one.
 The right shape is probably run-state columns written with `update_columns` and a `lock_version`
-guarding only the form — which is T-25's design to make, not T-22's. **But §7 rule 6 means the
-column cannot be added later**, so the curator has to choose now: add it in T-22 or accept that
-schedules never get one. Recorded rather than decided.
+guarding only the form — which is T-25's design to make, not T-22's.
+
+**~~S-7~~ CLOSED by the curator, 2026-08-07: NO `lock_version` on schedules.** The cost of adding
+one is worse than the defect it prevents — the runner would raise `StaleObjectError` whenever an
+administrator happened to have the form open, and T-25's per-schedule rescue would record a failure
+that is not one: a scheduler that reports errors because a human was looking at it. **T-25 inherits
+the obligation**: write run state with `update_columns` (or an equivalent that does not carry the
+whole row), so the runner and the form cannot overwrite each other's columns. §7's Reversibility
+section records the decision next to rule 6, because rule 6 is what makes it irreversible.
 
 **S-8 · Deleting a `Role`, a `Project` or a `User` orphans plugin rows, and the roles join table is
 NOT the same shape as Redmine's.** Core's `Role` declares the reciprocal
@@ -221,9 +229,13 @@ into `spec/adapter`, which already runs all three engines. **Owed, and named rat
 of it.** `technical-spec.md:1203` requires the table; `:1213-1217` gives the policy (opt-in, a
 mandatory TTL, a purge task); `functional-spec.md:348` says in as many words that **"No retention
 model has an owner yet."** T-22 created it because §7 requires it, deriving every column from a
-stated requirement and naming that requirement in the migration. **The curator should either bless
-those columns or move the table to T-28**, whose share links are its only consumer: §7 rule 6 means
-a consumer needing a different column cannot add one in a later migration.
+stated requirement and naming that requirement in the migration.
+
+**~~S-6~~ CLOSED by the curator, 2026-08-07: the derived columns are approved and §7 now lists
+them.** The table stays in T-22 rather than moving to T-28. Rule 6 means a consumer that needs a
+different column cannot add one later, so T-28 and T-30 should read §7's row before designing
+against it — and if either finds it genuinely short, that is an argument to make BEFORE 1.0 ships,
+not after.
 
 **D-1 · `group_by: age` reported everything as `(none)` on MariaDB — FIXED 2026-08-05, in T-08.**
 Found by T-01's corpus on MariaDB 10.11, confirmed by the first CI run on MariaDB 11, and **measured

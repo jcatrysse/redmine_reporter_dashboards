@@ -1195,12 +1195,13 @@ which is the answer, but the size is worth knowing).
 | Table | Status |
 |---|---|
 | `reporter_project_tabs` | **exists**; keep as-is, unprefixed name included |
-| `reporter_dashboards_templates` | new. STI `type`, `name description content project_id author_id orientation page_size margins engine_hint enabled lock_version` |
+| `reporter_dashboards_templates` | new. `name description content project_id author_id source output visibility orientation page_size margins engine_hint enabled source_template_id source_digest lock_version`. **This row said "STI `type`" until 2026-08-07 and the curator corrected it** — four other places forbid a subclass tree (T-23's `Accept:`, §7b.4, FR-60, and `[OQ-H]` closed "as a `source` field, not a branch"), and a column literally named `type` IS Rails' STI discriminator whether or not anyone wants it to be. Reporter's three type values also conflated **two axes**, so there are two columns: `source` ∈ `issues \| time_entries` (FR-60) and `output` ∈ `per_record \| combined` (FR-36). One three-valued column cannot express a per-record report over time entries |
+| `reporter_dashboards_templates_roles` | new, **added 2026-08-07**: `id: false`, `template_id role_id`, unique index on the pair. `visibility = VISIBILITY_ROLES` cannot work without it — Redmine's own `Query` backs the value with `has_and_belongs_to_many :roles` and validates the list is non-blank (`app/models/query.rb:265,277`) — and §7 rule 6 forbids adding it in a later migration than its column. `id: false` follows core's `queries_roles`; the objection this section makes to `id: false` is about a RECIPIENT row, which is a thing an operator addresses and revokes, and does not reach a visibility pair |
 | `reporter_dashboards_template_versions` | new, **append-only**: `template_id author_id content content_digest created_at`. INV-9 audit + author rollback |
 | `reporter_dashboards_schedules` | new. `project_id template_id query_id query_type repeat start_date(**date**) end_date(**date**) email_subject email_template render_as timezone enabled` **+ run state** `last_run_on last_attempted_at last_status last_error last_duration_ms consecutive_failures next_run_on`. Reporter stores these dates as `datetime` while every comparison is date-based — fixed |
 | `reporter_dashboards_schedule_runs` | new. `schedule_id occurrence_date started_at finished_at status error duration_ms recipients_count document_count bytes_total correlation_id`, **`add_index [:schedule_id, :occurrence_date], unique: true`** |
 | `reporter_dashboards_schedule_recipients` | replaces `report_schedules_users` (which is `id: false`, so a join row is unaddressable). Gains `id`; **`user_id` only** — no free-text `to`/`cc`/`bcc`/`from`, which is the exfiltration-and-spoofing-relay finding. A security-motivated schema decision |
-| `reporter_dashboards_documents` | **required** — it is the snapshot store the share links serve from (§7b.1), no longer optional |
+| `reporter_dashboards_documents` | **required** — it is the snapshot store the share links serve from (§7b.1), no longer optional. **Columns approved by the curator 2026-08-07**, having been derived in T-22 from stated requirements rather than specified here: `template_id project_id schedule_run_id created_by_id rendered_as_user_id` (FR-45/FR-47 — a snapshot makes no visibility decision when served, so the identity it was rendered as is the only record of whose numbers it holds), `correlation_id engine engine_version render_duration_ms` (FR-27's stamp, queryable without opening the file), `content_type byte_size page_count digest`, `attachment_id` (nullable — the bytes live in Redmine's own `Attachment`, whose storage and cleanup are already solved), and `expires_at` **NOT NULL** with `purged_at`. The mandatory TTL is additionally **bounded** by the model at one year: presence alone permits `9999-12-31`, which is an immortal row wearing a TTL |
 
 **The unique index is the whole scheduler fix.** The runner **claims the occurrence first** by
 inserting the run row; a duplicate insert is caught and skipped. That makes three findings
@@ -1250,6 +1251,18 @@ wrecking the database" are different claims and only the first was being tested.
 6. **`lock_version` and the unique index are created in the same migration as their table**, never
    added later — an index added in a later migration is an index a partially-migrated install does
    not have, and the scheduler's at-most-once guarantee is only as strong as that index.
+
+**`lock_version` is on `reporter_dashboards_templates` and on nothing else — curator decision,
+2026-08-07.** T-22's review argued for one on `reporter_dashboards_schedules` too, and the argument
+was good: it is the one table with two writers, an administrator editing the form while T-25's runner
+writes `last_status`, `consecutive_failures`, `last_run_on` and `next_run_on`. **It was decided
+against, for the reason optimistic locking would cost there:** the runner would raise
+`StaleObjectError` whenever somebody happened to have the form open, and T-25's per-schedule rescue
+would record a failure that is not one — a scheduler that reports errors because a human was
+looking at it. The run-state columns are written by the runner and the form is written by a person;
+those are different concerns on one row, and the right shape is `update_columns` for the former
+rather than a lock over both. Because rule 6 means the column cannot arrive later, this is recorded
+as a decision rather than left open.
 
 **Not claimed:** reversibility does **not** mean a downgrade path *between plugin minor versions
 with data already written in the newer shape*. That is a data-migration question, and the honest
