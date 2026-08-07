@@ -344,6 +344,65 @@ no `.git` at all and the examples *skip*. Here `.git` exists and is incomplete, 
 FAIL. Two environments, two symptoms, one cause. Do **not** "fix" it by editing the SHA —
 `baseline.rb` says why in as many words.
 
+**RAILS' PARTIAL WRITES MAKE "IT WROTE ONLY THESE COLUMNS" UNTESTABLE BY READING THE ROW
+BACK.** Found by mutation testing on 2026-08-07, while paying S-7's inherited obligation in
+T-25's runner ("write run state with `update_columns` … so the runner and the form cannot
+overwrite each other's columns"). The behavioural example looked right: an administrator
+disables the schedule mid-delivery, and afterwards it is still disabled. It passes with
+`update_columns` — **and it also passes with `assign_attributes` + `save`**, because Rails
+only writes CHANGED attributes, so the runner never names `enabled` either way. A full-row
+write and a two-column write leave an identical row behind whenever nobody edited it in
+between, which is every test run.
+
+The claim has to be made about the STATEMENT, not the row. Subscribe to
+`sql.active_record`, find the UPDATE, and assert which columns it names — `updated_at` is
+the tell, because `update_columns` does not touch it and every `save`-shaped write does.
+Generalises past S-7: any claim of the form *"this write is narrow"* needs the SQL.
+
+**AN "INVALID RECORD" PRECONDITION IS VACUOUS WHEN THE CODE UNDER TEST OVERWRITES THE
+INVALID COLUMN.** Same afternoon, same file. To show `update_columns` records a failure on a
+row that can no longer be saved, the first version made `last_status` invalid — the column
+the runner *writes*. `update!` assigns the new valid value before validating, so the record
+saves and the example proves nothing. Pick a column the code does not touch.
+
+**`update_columns` DOES NOT RAISE FOR A COLUMN OMITTED FROM A `select`, so that is not a way
+to simulate §7 rule 5's absent column.** Measured on Rails 7.2:
+`Schedule.select(column_names - %w[next_run_on]).first.update_columns(next_run_on: …)`
+**succeeds** — the attribute is missing from the row but its type is still known to the
+class. Drop the column for real and `reset_column_information`, and the true failure mode
+appears: `ActiveModel::MissingAttributeError: can't write unknown attribute`. But DDL inside
+a test transaction is rolled back by PostgreSQL and **implicitly committed by MySQL**, so
+doing that in a test wrecks the schema for everything after it on one of the two supported
+engines. Assert on the emitted UPDATE instead.
+
+**AN EXCEPTION RAISED IN A RESCUE CLAUSE IS NOT CAUGHT BY THAT CLAUSE, and the obvious
+per-item rescue therefore does not survive its own error path.** T-25's runner had a
+12-line comment explaining why FR-41 needed a guard around the state write in its rescue
+body, and still shipped a hole: the rescue body was two statements, `record_failure` then
+the guarded write, and only the second was covered. `record_failure` does I/O — it logs,
+including a whole backtrace. The independent review measured it with a logger whose `warn`
+raised `Errno::EPIPE` (a closed log pipe, a full log volume): the raise left `#call`
+entirely and the next schedule never ran. **The guard's own rescue logged too.** If a loop
+must continue past an item's failure, every statement in the rescue body has to be
+non-throwing, and the cheapest way to get there is to make the LOGGER non-throwing at its
+one choke point rather than wrapping six call sites.
+
+**AN INJECTED SCOPE MADE THE ALTERNATIVE TO A FILTER SILENTLY DROPS THE FILTER.**
+`(@schedules || Schedule.where(enabled: true))` reads as "the caller's scope, or all the
+enabled ones" and means "the caller's scope, unfiltered". The test that looked like it
+covered this only ever ran the default branch. Write `(@injected || Model.all).where(...)`
+so the constraint is on both, and add the example that injects a row the filter should
+reject.
+
+**A LOCAL DATE CAN MOVE BACKWARDS, AND A UNIQUE INDEX ON IT CANNOT SEE THAT.** T-25 keys
+its at-most-once guarantee on `(schedule_id, occurrence_date)` where the date is the
+schedule's own timezone-local date. Retimezone a schedule westward — or step the clock
+back across local midnight, or restore a snapshot — and the same wall-clock day produces a
+DIFFERENT `occurrence_date`, which the index has no grounds to refuse. Measured:
+Auckland → America/Los_Angeles between two ticks one UTC hour apart produced run rows for
+both 10 and 11 March and walked `last_run_on` backwards, which also drops the catch-up
+floor. A uniqueness constraint is only as strong as the stability of the value it is on.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
@@ -499,6 +558,9 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-22 + T-36: DB-less** | **yes, locally (2026-08-07)** | **1996 rspec examples, 0 failures, 116 pending** (was 1933/0/116 — **skip count unchanged**). All eight gates green, `layer_purity` strict included, `zero_reporter` still **16/16**. The new gate's eight rules each have a committed fixture that fires them, and **eight of those fixtures are bypasses an independent review walked through** while the first reader reported nothing |
 | **T-23: template CRUD, preview and the permission promotion — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07)** | `rake redmine:plugins:test` — **340 runs, 1810 assertions, 0 failures, 0 errors, 4 skips** (was 258/4 at T-22, 260/4 at the start of this session; the skip count has not moved). 58 functional, 19 unit and 3 integration runs are new. **2042 DB-less rspec, 0 failures, 75 pending**; `spec/golden` 166 examples 0 pending from the PLUGIN CHECKOUT (G7); all eight gates green with `LAYER_PURITY_MODE=strict`, `zero_reporter` still **16/16**; `script/migrate_updown.sh` green on both arms. **The functional suite is the only thing that can prove a controller guards anything**, and it is where every authorization assertion in T-23 lives |
 | **T-23: the layer_purity `reporting` arm** | **yes, locally (2026-08-07), negative-tested in four directions** | A planted `Net::HTTP`, a planted `cookies` and a trailing comment on a CODE line each fail it; a whole-line comment naming `Net::HTTP`, `Faraday` and `cookies` does not. The composition root may name BOTH layers — that is what it is for — and may not hold the network or read request state |
+| **T-25 (parts 1 and 2): the scheduler's arithmetic and its runner — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07), and these are the POST-REVIEW figures** | `rake redmine:plugins:test` — **390 runs, 2042 assertions, 0 failures, 0 errors, 4 skips** (was 340/0/0/4 — **skip count unchanged**). 36 new Minitest examples driving the tick against a real database, because every claim the runner makes is about a WRITE: that the unique index refuses a second claim, that `update_columns` leaves an untouched column alone, that a run row stops saying `running`. A double cannot fail an index. DB-less: **2123 rspec examples, 0 failures, 126 pending** (was 2042). Nine gates green including `layer_purity` strict, G11 both arms, `zero_reporter` still 16/16, and the 2.7 floor |
+| **T-25: every guard in the runner, negative-tested one at a time — TWICE, before and after an independent review** | **yes, locally (2026-08-07)** | Each guard removed in the mirrored copy, the one test that names it re-run, and confirmed RED: the at-most-once claim, the delivery contract (a port answering `nil` must not read as a success), `last_run_on` not advancing on a failure, the guarded recording of a failure (an exception in a rescue clause is not caught by that clause — FR-41 violated by the code written for it), the bounded error text, the schedule's own timezone, draft-versus-failure, S-7's `update_columns` in three mutations, and rule 5's column filtering in two. **Three of the first ten were GREEN under mutation and the examples were rewritten** — see the §1 traps. A fresh-subagent review then REJECTED the result with one blocker and five majors, every one backed by a probe it ran; the eight fixes were negative-tested the same way (14 mutations, 13 red) and the one that stayed green — a `[date, last_run_on].max` that `#regressed?` makes provably unreachable — was DELETED rather than kept as a second mechanism for one property. Two clauses survive as documented redundancy rather than load-bearing guards: `logged?` in the render identity (`AnonymousUser`'s status already fails `active?`) and nothing else |
+| **T-25: the layer_purity `scheduling` arm** | **yes, locally (2026-08-07)** | Same pattern as the `reporting` arm and the same forbidden set. The scheduler runs from a rake task with no request behind it, so a cookie or a session there is not a leak across a boundary but a value that cannot exist |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -778,6 +840,56 @@ of a CI that runs on fork pull requests.
    it, the picker does not offer it, and nothing reports time entries against the issue scope. And
    a per-record PREVIEW draws exactly ONE document (`PREVIEW_MAX_DOCUMENTS`), because fifty
    synchronous PDF renders is a worker any member can hold for five minutes.
+
+20. **T-25 is PART DONE and nothing delivers yet.** Two increments: `scheduling/occurrences.rb`
+   (the date arithmetic, pure) and `scheduling/runner.rb` (the tick). Still owed: the delivery
+   itself, the two permission promotions, the schedule UI, the mailer, nine locales, the rake task
+   and the preflight "never run" warning. Five things a later session should know.
+
+   **THE `delivery:` PORT IS REQUIRED AND HAS NO DEFAULT, and that is the seam the rest of T-25
+   plugs into.** It implements `#call(schedule:, occurrence_date:, actor:, run:)` and answers a
+   `Runner::Delivered` — or raises, which is handled identically. Everything the runner owns is
+   bookkeeping (claim, rescue, run state, exit code) and none of it needs to know what a report is;
+   that is what lets a raise mid-run, a duplicate claim and an identity locked last week all be
+   driven without a browser or an SMTP server. **A port answering anything else is a FAILURE**, not
+   a success — recording a delivery that never happened would also advance `last_run_on` and so
+   remove the day from the catch-up window.
+
+   **FR-41 NEEDS TWO RESCUES, AND THE SECOND ONE IS NOT OBVIOUS.** `rescue => e; record_failure;
+   write_schedule_state` re-raises out of the RESCUE BODY if the write itself fails, because an
+   exception raised inside a rescue clause is not caught by that clause — so every schedule after
+   this one silently does not deliver, FR-41 violated by the code written to satisfy it.
+   `record_failure_state` is the guard, and it LOGS rather than swallowing: "failed, and the failure
+   could not be recorded" is a worse fact than "failed".
+
+   **A DRAFT IS NOT A FAILURE.** `repeat` and `start_date` are both nullable by T-22's decision, so
+   an enabled half-built schedule is a legitimate row. Counting it as a failure would make the cron
+   entry exit non-zero on every tick for ever, and an exit code that is always non-zero is one
+   nobody reads — the same decay CLAUDE.md §7 describes for a gate made advisory. It is recorded as
+   `skipped`, which is the status vocabulary T-22 defined for exactly this and nothing had used. An
+   unknown-but-PRESENT repeat rule is the other case and is a real failure.
+
+   **`last_run_on` IS NOT ADVANCED BY A FAILURE, on purpose.** It is the catch-up floor, so
+   advancing it would move a day that did not deliver out of the window — FR-40's "a missed
+   occurrence is visible" turned into its opposite. The cost is that a persistently failing schedule
+   re-enumerates the same days each catch-up tick and has each claim refused; that is bounded by
+   `max_catchup_days`, costs one failed INSERT apiece, and each refusal names the schedule and the
+   date. Do not "fix" the log noise by advancing the column.
+
+   **THE RENDER POLICY IS A CLOSED SET, and the version that was not cost a BLOCKER.**
+   `if render_as == 'user' … else author end` sends every other value — an unknown policy, a
+   case variant, a value a later version wrote — down the author branch silently, reports
+   success, and mails one person's view of the data to a list chosen for somebody else's.
+   `validates … inclusion:` does not close it, because `update_columns` and `update_all`
+   bypass validation and this plugin uses both, and §7 rule 5 makes the state routine: roll
+   back one minor while keeping the DATA and every newer policy reverts. Close the set the
+   way `Occurrences` closes the repeat rule. The same shape is worth checking anywhere a
+   stored string selects behaviour.
+
+   **S-7's OBLIGATION IS PAID, AND READING THE ROW BACK CANNOT PROVE IT.** See the three new §1
+   traps. The run state goes through `update_columns`; the example that establishes it subscribes to
+   `sql.active_record` and asserts which columns the UPDATE names, because Rails' partial writes
+   make a full-row write and a two-column write leave an identical row behind.
 
 18. **T-40 is done — the permission model, and `[OQ-F]` is CLOSED because the SETTING is gone.**
    `lib/redmine_reporter_dashboards/permissions.rb`, `spec/permissions/permission_map_spec.rb` and

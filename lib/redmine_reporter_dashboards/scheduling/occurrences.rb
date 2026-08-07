@@ -51,6 +51,21 @@ module RedmineReporterDashboards
       # cron entry was restored.
       DEFAULT_MAX_CATCHUP_DAYS = 7
 
+      # How far `next_occurrence` will look before answering "no".
+      #
+      # THE SUFFICIENT VALUE IS 365, and this is 397 for headroom rather than because 397
+      # is needed — said plainly because an earlier version of this comment claimed 366 was
+      # the bound and that trimming the constant would "silently lose leap years", and both
+      # halves were wrong. The gap from `after + 1` to the next occurrence is at most 365
+      # days for every rule here: a yearly schedule started on 29 February clamps to the
+      # 28th, which is 364 days after 1 March.
+      #
+      # What the constant is actually for is TERMINATION, not reach. A search that ends is
+      # the difference between an empty answer and a rake task that never returns because
+      # somebody stored a rule whose `end_date` is in the past. `occurrences_spec.rb` pins
+      # the value, so trimming it is a decision somebody takes rather than one that passes.
+      DEFAULT_HORIZON_DAYS = 397
+
       class UnknownRepeat < ArgumentError; end
 
       class << self
@@ -118,6 +133,45 @@ module RedmineReporterDashboards
           end
 
           dates.first(limit)
+        end
+
+        # THE NEXT DATE THIS RULE FIRES ON, strictly after `after` — or nil.
+        #
+        # This is the only forward-looking question in the module, and it exists for one
+        # column: `next_run_on`. §7 rule 5 lists it as a forward-compatibility column and
+        # `technical-spec.md`'s index `[:enabled, :next_run_on]` is "the runner's own
+        # query" — an operator looking at a schedule list wants to know when the next one
+        # is without running the enumerator in their head.
+        #
+        # --- WHY A BOUNDED SCAN AND NOT A FORMULA ---
+        #
+        # A formula would have to reproduce `month_aligned?`'s clamping in reverse, and the
+        # reverse of a clamp is not a function: 28 February is the 1-month step from both
+        # 31 January and 28 January, so "which step-count lands here" has no single answer.
+        # Stepping forward asks the SAME predicate the runner will ask on the day, so the
+        # two can never disagree — which is the property that matters, because a
+        # `next_run_on` that says Tuesday while `due_on?` says Wednesday is a lie in the UI
+        # that no test of either half alone would catch.
+        #
+        # Nil means "not within the horizon", which covers a schedule whose `end_date` has
+        # passed and one whose `start_date` is years out. A caller writes the nil straight
+        # into the column: "no next run" is exactly what an ended schedule should show.
+        def next_occurrence(after:, repeat:, start_date:, end_date: nil,
+                            horizon_days: DEFAULT_HORIZON_DAYS)
+          after = to_date(after)
+          start_date = to_date(start_date)
+          validate_repeat!(repeat)
+          return nil if start_date.nil?
+
+          # From the day after `after`, or from the start date when that is still ahead —
+          # so a schedule beginning in 2030 is found rather than scanned past.
+          first = [after + 1, start_date].max
+          last = first + Integer(horizon_days)
+          return nil if end_date && to_date(end_date) < first
+
+          (first..last).find do |date|
+            due_on?(date, repeat: repeat, start_date: start_date, end_date: end_date)
+          end
         end
 
         private

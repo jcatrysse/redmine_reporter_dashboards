@@ -64,8 +64,23 @@ class CreateReporterDashboardsSchedules < ActiveRecord::Migration[6.1]
               name: 'index_rd_schedules_on_template_id'
     add_index :reporter_dashboards_schedules, :project_id,
               name: 'index_rd_schedules_on_project_id'
-    # The runner's own query: "which enabled schedules are due?". Without it the scheduler
-    # scans every schedule on every tick, which is the shape FR-48 exists to forbid.
+    # --- THIS COMMENT SAID SOMETHING FALSE UNTIL T-25 WAS BUILT AND MEASURED ---
+    #
+    # It read: "The runner's own query: 'which enabled schedules are due?'. Without it the
+    # scheduler scans every schedule on every tick, which is the shape FR-48 exists to
+    # forbid." T-25's runner does not read `next_run_on` at all, and it does scan — the
+    # emitted statement is `WHERE enabled = $1 ORDER BY id`.
+    #
+    # AND THAT IS DELIBERATE, not an omission. Due-ness is a question about the schedule's
+    # OWN local date (`Scheduling::Runner#today_for`), so a SQL prefilter on `next_run_on`
+    # would be wrong by a day for any schedule more than a few hours from the server's
+    # zone — it would silently skip exactly the schedules the `timezone` column exists for.
+    # FR-48 is a bound on query count against ISSUE count, and this is one query against
+    # the schedule count, which no installation has a lot of.
+    #
+    # The index still belongs here rather than in a later migration: §7 rule 6 forbids
+    # adding it later, so it exists now or never, and the schedule list UI and any future
+    # prefilter (a coarse `next_run_on <= today + 1`, narrowed in Ruby) both want it.
     add_index :reporter_dashboards_schedules, [:enabled, :next_run_on],
               name: 'index_rd_schedules_on_enabled_and_next_run'
   end

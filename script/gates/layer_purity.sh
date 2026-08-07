@@ -79,6 +79,7 @@ LAYERS=(
   "charts|$BASE/charts|(Reporter|RedmineReporter)Dashboards::(Render|Liquid)|the chart layer is named by BOTH the Liquid and the render layer, so it must name neither — or the boundary between them holds only until somebody follows the two hops"
   "assets|$BASE/assets|(Reporter|RedmineReporter)Dashboards::(Render|Liquid)|the asset layer holds the network and runs UPSTREAM of the render layer; Render::AssetBinding is the seam, and it lives in render/ precisely so this directory does not have to name it"
   "reporting|$BASE/reporting|Net::HTTP|Faraday|cookie|session([^I]|$)|the composition root may name BOTH layers - that is what it is for - but it must not become a third render path or a second place that knows about HTTP; a fetcher belongs in assets/ and request state belongs in a controller"
+  "scheduling|$BASE/scheduling|(Reporter|RedmineReporter)Dashboards::(Render|Liquid)|Net::HTTP|Faraday|cookie|session([^I]|$)|the scheduler runs from a rake task with no request behind it, so a cookie or a session here is not a leak across a layer but a value that cannot exist; and it names NEITHER the Liquid layer nor the render layer, which is what the required delivery: port is for - occurrences.rb claims that property in as many words, so it is enforced rather than asserted"
 )
 
 # Search, and DIE if the search itself failed.

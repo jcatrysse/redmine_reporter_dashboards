@@ -210,6 +210,104 @@ RSpec.describe RedmineReporterDashboards::Scheduling::Occurrences do
     end
   end
 
+  describe '#next_occurrence — the only forward-looking question, and `next_run_on`s only source' do
+    it 'answers the next day the rule fires on, not today' do
+      # Strictly AFTER. A `next_run_on` that keeps pointing at the day just delivered is
+      # the shape that makes an operator think the scheduler is stuck.
+      nxt = described_class.next_occurrence(after: d('2026-03-10'), repeat: 'daily',
+                                            start_date: d('2026-03-01'))
+
+      expect(nxt).to eq(d('2026-03-11'))
+    end
+
+    it 'skips forward to the rule`s own phase' do
+      nxt = described_class.next_occurrence(after: d('2026-03-10'), repeat: 'weekly',
+                                            start_date: d('2026-03-03')) # a Tuesday
+
+      expect(nxt).to eq(d('2026-03-17'))
+    end
+
+    # THE PROPERTY THAT MATTERS: it asks `due_on?`, so the two can never disagree. A
+    # `next_run_on` saying Tuesday while the runner fires on Wednesday is a lie in the UI
+    # that no test of either half alone would catch — so the clamp is asserted through
+    # BOTH doors on the same date.
+    it 'agrees with due_on? on the clamped month' do
+      nxt = described_class.next_occurrence(after: d('2026-01-31'), repeat: 'monthly',
+                                            start_date: d('2026-01-31'))
+
+      expect(nxt).to eq(d('2026-02-28'))
+      expect(described_class.due_on?(nxt, repeat: 'monthly',
+                                     start_date: d('2026-01-31'))).to be(true)
+    end
+
+    it 'finds a start date that is still years away rather than scanning past it' do
+      nxt = described_class.next_occurrence(after: d('2026-03-10'), repeat: 'yearly',
+                                            start_date: d('2030-06-01'))
+
+      expect(nxt).to eq(d('2030-06-01'))
+    end
+
+    it 'answers nil for a schedule whose end date has passed' do
+      # Which is what an ended schedule should show: no next run, rather than a date it
+      # will never reach.
+      nxt = described_class.next_occurrence(after: d('2026-03-10'), repeat: 'daily',
+                                            start_date: d('2026-01-01'),
+                                            end_date: d('2026-03-05'))
+
+      expect(nxt).to be_nil
+    end
+
+    it 'answers nil on the last day rather than pointing one day past the end' do
+      nxt = described_class.next_occurrence(after: d('2026-03-05'), repeat: 'daily',
+                                            start_date: d('2026-01-01'),
+                                            end_date: d('2026-03-05'))
+
+      expect(nxt).to be_nil
+    end
+
+    it 'clears the widest gap the rules can produce — a leap-day yearly, 364 days' do
+      nxt = described_class.next_occurrence(after: d('2024-03-01'), repeat: 'yearly',
+                                            start_date: d('2024-02-29'))
+
+      expect(nxt).to eq(d('2025-02-28'))
+    end
+
+    it 'pins the horizon, because the example above does not' do
+      # THIS EXAMPLE EXISTS BECAUSE THE ONE ABOVE USED TO CLAIM IT. Its comment said it
+      # stopped anybody trimming the constant to a round 365 "and silently losing leap
+      # years". Measured: at 365 and at 363 the whole file stays green, and 365 is in fact
+      # sufficient. So the constant is pinned here on purpose, with the argument in the
+      # message rather than in prose nothing checks.
+      expect(described_class::DEFAULT_HORIZON_DAYS).to eq(397),
+                                                       '365 is the sufficient bound (a leap-day yearly is 364 days out); ' \
+                                                       '397 is deliberate headroom. Changing it is a decision — take it here.'
+    end
+
+    it 'terminates on a rule that has no next occurrence at all' do
+      # The property the "is bounded" title used to promise and never exercised: a rule the
+      # scan can never satisfy has to come back, not run to the end of time.
+      nxt = described_class.next_occurrence(after: d('2026-03-10'), repeat: 'yearly',
+                                            start_date: d('2020-01-01'),
+                                            end_date: d('2026-06-01'))
+
+      expect(nxt).to be_nil
+    end
+
+    it 'answers nil when the horizon is too short to reach the next occurrence' do
+      nxt = described_class.next_occurrence(after: d('2026-03-10'), repeat: 'yearly',
+                                            start_date: d('2026-01-01'), horizon_days: 30)
+
+      expect(nxt).to be_nil
+    end
+
+    it 'refuses an unknown rule here too' do
+      expect do
+        described_class.next_occurrence(after: d('2026-03-10'), repeat: 'fortnightly',
+                                        start_date: d('2026-03-01'))
+      end.to raise_error(described_class::UnknownRepeat)
+    end
+  end
+
   describe 'an unknown repeat rule' do
     # A schedule that silently never fires is the failure an operator cannot see. T-22
     # deliberately left `repeat` unvalidated and left the vocabulary to this file, so an

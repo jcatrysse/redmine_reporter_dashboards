@@ -50,6 +50,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/asset_bind
 # its repeat vocabulary at class-definition time, and a model that loaded before it would
 # raise on a NameError that reads as a missing constant rather than a missing require.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/occurrences'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/runner'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/diagnostic'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/exchange'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'
