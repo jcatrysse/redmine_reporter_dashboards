@@ -46,6 +46,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/asset_bind
 # LoadError has to surface on the branch that broke it rather than on the first request
 # that happens to reach a controller. Zeitwerk would resolve these lazily (Redmine puts a
 # plugin's lib on the main loader), and lazily is precisely when nobody is watching.
+# T-25 — the scheduler's date arithmetic. Required at boot because `Schedule` re-exports
+# its repeat vocabulary at class-definition time, and a model that loaded before it would
+# raise on a NameError that reads as a missing constant rather than a missing require.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/occurrences'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/diagnostic'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/exchange'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'

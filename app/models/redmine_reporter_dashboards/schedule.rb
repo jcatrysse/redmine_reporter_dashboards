@@ -22,6 +22,16 @@ module RedmineReporterDashboards
     STATUS_SKIPPED = 'skipped'
     STATUSES = [STATUS_SUCCESS, STATUS_FAILED, STATUS_SKIPPED].freeze
 
+    # T-25's repeat vocabulary, DEFINED IN ONE PLACE and re-exported here.
+    #
+    # T-22 left `repeat` unvalidated on purpose — "nothing here decides when a schedule is
+    # due" — and `Scheduling::Occurrences` is what decides it. The constant lives there,
+    # with the arithmetic that consumes it, so the validation below and the enumerator can
+    # never come to disagree about what "quarterly" is. A model that accepted a fifth value
+    # the enumerator does not implement would produce a schedule that is valid, saved,
+    # enabled, and silently never due.
+    REPEATS = RedmineReporterDashboards::Scheduling::Occurrences::REPEATS
+
     # Who the report is rendered as. The POLICY; `render_as_user_id` carries the identity
     # it resolved to, which is what FR-45 means by "explicit, stored and auditable".
     RENDER_AS_AUTHOR = 'author'
@@ -59,6 +69,9 @@ module RedmineReporterDashboards
     validates :email_subject, :repeat, :query_type, :render_as, :timezone, :last_status,
               length: { maximum: MAX_STRING }, allow_nil: true
     validates :last_status, inclusion: { in: STATUSES }, allow_nil: true
+    # `allow_nil` because the column is nullable and a half-built schedule is a legitimate
+    # draft; a NAMED rule that this plugin cannot enumerate is not.
+    validates :repeat, inclusion: { in: REPEATS }, allow_nil: true
     validates :render_as, inclusion: { in: RENDER_AS }, allow_nil: true
     validates :consecutive_failures,
               numericality: { only_integer: true, greater_than_or_equal_to: 0 }
