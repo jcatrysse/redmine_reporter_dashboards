@@ -86,3 +86,55 @@ en:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Occurrence date"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "Schedule"
   field_redmine_reporter_dashboards_document_expires_at: "Expires"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "Reports"
+  permission_view_reporter_dashboards_reports: "View report templates and documents"
+  permission_add_reporter_dashboards_templates: "Author report templates (executes server-side code)"
+  permission_edit_own_reporter_dashboards_templates: "Edit and delete own report templates (executes server-side code)"
+  permission_edit_reporter_dashboards_templates: "Edit and delete any report template (executes server-side code)"
+  permission_manage_public_reporter_dashboards_templates: "Manage public report templates (executes server-side code)"
+  field_redmine_reporter_dashboards_template_enabled: "Enabled"
+  label_reporter_template: "Report template"
+  label_reporter_template_plural: "Report templates"
+  label_reporter_template_new: "New report template"
+  label_reporter_template_output_per_record: "One document per issue"
+  label_reporter_template_output_combined: "One document for the whole set"
+  label_reporter_template_orientation_portrait: "Portrait"
+  label_reporter_template_orientation_landscape: "Landscape"
+  label_reporter_template_disabled: "Disabled"
+  label_reporter_template_download_pdf: "Download as PDF"
+  label_reporter_template_export: "Export"
+  label_reporter_template_import: "Import a report template"
+  label_reporter_template_import_file: "Template file"
+  label_reporter_preview_pdf: "PDF preview"
+  label_reporter_preview_html: "HTML preview"
+  label_reporter_preview_degradations: "The engine reported these degradations"
+  label_reporter_report_failed_template: "This template could not be rendered"
+  label_reporter_report_failed_engine: "The render engine could not produce this document"
+  label_reporter_report_refused: "This export was refused"
+  label_reporter_report_frame: "Report output"
+  label_reporter_report_diagnostic_code: "Code"
+  label_reporter_report_diagnostic_line: "Line"
+  label_reporter_report_diagnostic_correlation_id: "Correlation id"
+  button_reporter_template_import: "Import"
+  text_reporter_template_output_info: "One document per issue produces one PDF for every issue in the scope; one document for the whole set produces a single PDF."
+  text_reporter_template_margins_info: "Top, right, bottom and left in millimetres, separated by commas - for example 20,15,20,15. Leave empty for the default."
+  text_reporter_template_content_executes: "A report template is executed on the server. Anyone who can edit one can run code as the application."
+  text_reporter_template_visibility_private_only: "Only somebody holding \"Manage public report templates\" can share a template more widely, so this one stays visible to you alone."
+  text_reporter_template_import_info: "A JSON file exported from this plugin, or a YAML template exported from the Reporter plugin. The imported template is always private to you at first."
+  text_reporter_template_per_record_html: "This template produces one document per issue, so the page below shows all %{count} of them one after another. A PDF download needs an archive, which this version cannot yet build."
+  text_reporter_preview_bounded: "Preview of %{shown} of %{total} issues"
+  text_reporter_preview_pdf_ok: "Rendered by %{engine} in %{duration} ms."
+  text_reporter_preview_no_html: "This template produced no output at all."
+  text_reporter_template_no_issues: "This report covers no issues, so it produced no document. Widen the issue selection, or choose a different saved query."
+  error_reporter_template_import_no_file: "Please choose a file to import."
+  error_reporter_template_archive_not_available: "This export produces %{count} documents, and serving several as one archive is not available in this version. Choose a template that produces a single document, or narrow the issue selection."

@@ -80,7 +80,10 @@ module RedmineReporterDashboards
     RUBY
 
     # The three calls `init.rb` made before T-40 turned them into a loop, transcribed from
-    # the v0.5.0-era source. This is the oracle.
+    # the v0.5.0-era source. This is the oracle, and it stays EXACTLY as it was: T-23
+    # registers five more permissions in a second module, and the thing worth asserting
+    # is that doing so left the original three untouched — same order, same action maps,
+    # same options. A rewritten oracle would assert that the new code matches itself.
     LITERAL_CALLS = [
       [:reporter_project_dashboards, :view_reporter_project_page,
        { reporter_project_pages: [:show, :report_pdf] }, { read: true }],
@@ -113,12 +116,27 @@ module RedmineReporterDashboards
                                                'Update REGISTRATION_LOOP with init.rb.'
     end
 
-    it 'registers exactly the three calls the literals made, in order' do
-      expect(record).to eq(LITERAL_CALLS)
+    it 'still registers exactly the three literal calls first, in order' do
+      # `first(3)` and not `==`: T-23 appends a second module. The dashboards module is
+      # declared first in `Permissions::ENTRIES` and the spec for that ordering lives in
+      # `permission_map_spec.rb`, so what this file has to prove is narrower and older —
+      # that the loop reproduces the three calls the literals made.
+      expect(record.first(3)).to eq(LITERAL_CALLS)
     end
 
     it 'sets the project module on every call, which is what the roles screen groups by' do
-      expect(record.map(&:first).uniq).to eq([:reporter_project_dashboards])
+      expect(record.map(&:first).uniq)
+        .to eq([:reporter_project_dashboards, :reporter_dashboards_reports])
+    end
+
+    it 'declares each module ONCE, in a single contiguous run' do
+      # `registrations_by_module` groups, so two runs of one module would mean the loop
+      # opened `project_module` twice — which Redmine accepts and which silently reorders
+      # the roles screen relative to `ENTRIES`. Cheap to assert, invisible otherwise.
+      modules = record.map(&:first)
+
+      expect(modules.chunk_while { |a, b| a == b }.map(&:first))
+        .to eq(modules.uniq)
     end
 
     it 'survives `instance_eval` rebinding self — the closure is over the loop, not the plugin' do
@@ -126,7 +144,8 @@ module RedmineReporterDashboards
       # `project_module` block rather than the array the loop is iterating. This is the whole
       # reason the recorder exists.
       expect { record }.not_to raise_error
-      expect(record.size).to eq(3)
+      expect(record.size)
+        .to eq(RedmineReporterDashboards::Permissions::REGISTERED.size)
     end
 
     it 'passes an options Hash Redmine can read, never a nil third argument' do

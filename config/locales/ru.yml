@@ -86,3 +86,55 @@ ru:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Дата запуска"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "Расписание"
   field_redmine_reporter_dashboards_document_expires_at: "Истекает"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "Отчёты"
+  permission_view_reporter_dashboards_reports: "Просмотр шаблонов отчётов и документов"
+  permission_add_reporter_dashboards_templates: "Создание шаблонов отчётов (выполняет код на сервере)"
+  permission_edit_own_reporter_dashboards_templates: "Изменение и удаление собственных шаблонов отчётов (выполняет код на сервере)"
+  permission_edit_reporter_dashboards_templates: "Изменение и удаление любых шаблонов отчётов (выполняет код на сервере)"
+  permission_manage_public_reporter_dashboards_templates: "Управление общедоступными шаблонами отчётов (выполняет код на сервере)"
+  field_redmine_reporter_dashboards_template_enabled: "Включён"
+  label_reporter_template: "Шаблон отчёта"
+  label_reporter_template_plural: "Шаблоны отчётов"
+  label_reporter_template_new: "Новый шаблон отчёта"
+  label_reporter_template_output_per_record: "Один документ на каждую задачу"
+  label_reporter_template_output_combined: "Один документ на весь набор"
+  label_reporter_template_orientation_portrait: "Книжная"
+  label_reporter_template_orientation_landscape: "Альбомная"
+  label_reporter_template_disabled: "Отключён"
+  label_reporter_template_download_pdf: "Скачать в формате PDF"
+  label_reporter_template_export: "Экспорт"
+  label_reporter_template_import: "Импорт шаблона отчёта"
+  label_reporter_template_import_file: "Файл шаблона"
+  label_reporter_preview_pdf: "Предпросмотр PDF"
+  label_reporter_preview_html: "Предпросмотр HTML"
+  label_reporter_preview_degradations: "Механизм сообщил о следующих ограничениях"
+  label_reporter_report_failed_template: "Не удалось обработать этот шаблон"
+  label_reporter_report_failed_engine: "Механизм отрисовки не смог создать этот документ"
+  label_reporter_report_refused: "Этот экспорт отклонён"
+  label_reporter_report_frame: "Вывод отчёта"
+  label_reporter_report_diagnostic_code: "Код"
+  label_reporter_report_diagnostic_line: "Строка"
+  label_reporter_report_diagnostic_correlation_id: "Идентификатор корреляции"
+  button_reporter_template_import: "Импорт"
+  text_reporter_template_output_info: "«Один документ на каждую задачу» создаёт отдельный PDF для каждой задачи в выборке; «один документ на весь набор» — один PDF."
+  text_reporter_template_margins_info: "Верхнее, правое, нижнее и левое поля в миллиметрах через запятую — например 20,15,20,15. Оставьте пустым для значения по умолчанию."
+  text_reporter_template_content_executes: "Шаблон отчёта выполняется на сервере. Тот, кто может его изменять, может выполнять код с правами приложения."
+  text_reporter_template_visibility_private_only: "Расширить видимость шаблона может только тот, у кого есть право «Управление общедоступными шаблонами отчётов», поэтому этот шаблон останется виден только вам."
+  text_reporter_template_import_info: "Файл JSON, экспортированный из этого плагина, либо шаблон YAML из плагина Reporter. Импортированный шаблон сначала всегда виден только вам."
+  text_reporter_template_per_record_html: "Этот шаблон создаёт по документу на задачу, поэтому ниже показаны все %{count} подряд. Для скачивания PDF потребовался бы архив, который эта версия пока не умеет собирать."
+  text_reporter_preview_bounded: "Предпросмотр: %{shown} из %{total} задач"
+  text_reporter_preview_pdf_ok: "Обработано механизмом %{engine} за %{duration} мс."
+  text_reporter_preview_no_html: "Этот шаблон не создал никакого вывода."
+  text_reporter_template_no_issues: "Этот отчёт не охватывает ни одной задачи, поэтому документ не создан. Расширьте выборку задач или выберите другой сохранённый запрос."
+  error_reporter_template_import_no_file: "Выберите файл для импорта."
+  error_reporter_template_archive_not_available: "Этот экспорт создаёт %{count} документов, а эта версия не умеет отдавать несколько документов одним архивом. Выберите шаблон, создающий один документ, либо сузьте выборку задач."

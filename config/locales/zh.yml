@@ -86,3 +86,55 @@ zh:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "发生日期"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "计划"
   field_redmine_reporter_dashboards_document_expires_at: "过期时间"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "报表"
+  permission_view_reporter_dashboards_reports: "查看报表模板和文档"
+  permission_add_reporter_dashboards_templates: "创建报表模板（会在服务器上执行代码）"
+  permission_edit_own_reporter_dashboards_templates: "编辑和删除自己的报表模板（会在服务器上执行代码）"
+  permission_edit_reporter_dashboards_templates: "编辑和删除任意报表模板（会在服务器上执行代码）"
+  permission_manage_public_reporter_dashboards_templates: "管理公开的报表模板（会在服务器上执行代码）"
+  field_redmine_reporter_dashboards_template_enabled: "已启用"
+  label_reporter_template: "报表模板"
+  label_reporter_template_plural: "报表模板"
+  label_reporter_template_new: "新建报表模板"
+  label_reporter_template_output_per_record: "每个问题一份文档"
+  label_reporter_template_output_combined: "整个集合一份文档"
+  label_reporter_template_orientation_portrait: "纵向"
+  label_reporter_template_orientation_landscape: "横向"
+  label_reporter_template_disabled: "已停用"
+  label_reporter_template_download_pdf: "下载为 PDF"
+  label_reporter_template_export: "导出"
+  label_reporter_template_import: "导入报表模板"
+  label_reporter_template_import_file: "模板文件"
+  label_reporter_preview_pdf: "PDF 预览"
+  label_reporter_preview_html: "HTML 预览"
+  label_reporter_preview_degradations: "引擎报告了以下降级"
+  label_reporter_report_failed_template: "无法渲染此模板"
+  label_reporter_report_failed_engine: "渲染引擎无法生成此文档"
+  label_reporter_report_refused: "此导出已被拒绝"
+  label_reporter_report_frame: "报表输出"
+  label_reporter_report_diagnostic_code: "代码"
+  label_reporter_report_diagnostic_line: "行号"
+  label_reporter_report_diagnostic_correlation_id: "关联标识"
+  button_reporter_template_import: "导入"
+  text_reporter_template_output_info: "“每个问题一份文档”会为范围内的每个问题生成一份 PDF；“整个集合一份文档”只生成一份 PDF。"
+  text_reporter_template_margins_info: "上、右、下、左边距，单位为毫米，以逗号分隔 — 例如 20,15,20,15。留空则使用默认值。"
+  text_reporter_template_content_executes: "报表模板在服务器上执行。能够编辑模板的人可以以应用程序的权限运行代码。"
+  text_reporter_template_visibility_private_only: "只有拥有“管理公开的报表模板”权限的人才能更广泛地共享模板，因此此模板仅对您可见。"
+  text_reporter_template_import_info: "从本插件导出的 JSON 文件，或从 Reporter 插件导出的 YAML 模板。导入的模板最初总是仅对您可见。"
+  text_reporter_template_per_record_html: "此模板为每个问题生成一份文档，因此下方依次显示全部 %{count} 份。PDF 下载需要压缩包，而本版本尚不能生成。"
+  text_reporter_preview_bounded: "预览 %{total} 个问题中的 %{shown} 个"
+  text_reporter_preview_pdf_ok: "由 %{engine} 在 %{duration} 毫秒内渲染。"
+  text_reporter_preview_no_html: "此模板没有产生任何输出。"
+  text_reporter_template_no_issues: "此报表未涵盖任何问题，因此没有生成文档。请扩大问题选择范围，或选择其他已保存的查询。"
+  error_reporter_template_import_no_file: "请选择要导入的文件。"
+  error_reporter_template_archive_not_available: "此导出会生成 %{count} 份文档，而本版本无法将多份文档作为一个压缩包提供。请选择只生成一份文档的模板，或缩小问题选择范围。"

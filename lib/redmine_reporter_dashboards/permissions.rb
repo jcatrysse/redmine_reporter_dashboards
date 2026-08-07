@@ -179,27 +179,48 @@ module RedmineReporterDashboards
     DASHBOARDS_MODULE = :reporter_project_dashboards
     REPORTS_MODULE = :reporter_dashboards_reports
 
-    # Declared, live, and guarding a controller action that exists today.
+    # The one controller T-23 adds, named ONCE. Redmine builds its action strings as
+    # `"#{controller}/#{action}"` and compares them against `params[:controller]`, which
+    # for a controller in a subdirectory is the namespaced path — so the key has to carry
+    # the slash. Written as a constant because a typo in it produces a permission that
+    # guards nothing and looks perfectly correct on the roles screen.
+    TEMPLATES_CONTROLLER = :'reporter_dashboards/templates'
+
+    # --- ONE ORDERED LIST, AND WHY IT REPLACED TWO -----------------------------------
     #
-    # These three are UNCHANGED by T-40, including the absence of `require: :member` on the
-    # two `manage_` ones. Neither is a code-execution privilege, so the rule that derives
-    # `:member` for authoring does not reach them — and adding it by hand would do something
-    # worse than warn. **The mechanism, stated precisely, because the first version of this
-    # comment got it wrong:** nothing is revoked. `Role#permissions=` writes whatever it is
-    # given, with no filtering and no validation, and `Role#allowed_to?` keeps honouring an
-    # existing grant. What changes is that `app/views/roles/_form.html.erb` renders only
-    # `@role.setable_permissions`, so the grant becomes **invisible on the roles screen while
-    # still active**, and is then dropped the next time anybody saves that role for an
-    # unrelated reason. An active-but-unmanageable permission that disappears later without a
-    # trace is a worse failure than either revoking it or leaving it, which is why these two
-    # are left exactly as they are. Deliberate, not overlooked.
+    # This was `REGISTERED` and `PLANNED` as two literal arrays with
+    # `ALL = REGISTERED + PLANNED`. That shape has a defect that only shows up at the
+    # moment it matters: promoting an entry MOVES it from the second array to the first,
+    # so `ALL`'s order changes — and `ALL`'s order is asserted equal to §4.1's table.
+    # T-23 promotes five of the eight authoring/consuming rows but not
+    # `view_reporter_dashboards_schedules`, which sits between them in the table, so the
+    # concatenation would have reordered a document to suit an implementation detail.
     #
-    # The cost of leaving them, said out loud: a permission with neither `require:` nor
-    # `public:` **is** offerable to the Anonymous and Non-member roles, so an administrator
-    # can grant "Manage project dashboard widgets" to Anonymous today. That is pre-existing
-    # behaviour and not a new decision of T-40's; it is written here so the next person weighs
-    # it rather than rediscovers it.
-    REGISTERED = [
+    # So the declaration order IS §4.1's table order, once, and the two constants are
+    # derived from it. Promotion now changes exactly the four things §4.1 says it
+    # changes — `actions`, `lands_in`, and the labels — and moves nothing.
+    ENTRIES = [
+      # --- the three that pre-date T-40, live since v0.5.0 ------------------------------
+      #
+      # UNCHANGED, including the absence of `require: :member` on the two `manage_` ones.
+      # Neither is a code-execution privilege, so the rule that derives `:member` for
+      # authoring does not reach them — and adding it by hand would do something worse
+      # than warn. **The mechanism, stated precisely, because the first version of this
+      # comment got it wrong:** nothing is revoked. `Role#permissions=` writes whatever it
+      # is given, with no filtering and no validation, and `Role#allowed_to?` keeps
+      # honouring an existing grant. What changes is that `app/views/roles/_form.html.erb`
+      # renders only `@role.setable_permissions`, so the grant becomes **invisible on the
+      # roles screen while still active**, and is then dropped the next time anybody saves
+      # that role for an unrelated reason. An active-but-unmanageable permission that
+      # disappears later without a trace is a worse failure than either revoking it or
+      # leaving it, which is why these two are left exactly as they are. Deliberate, not
+      # overlooked.
+      #
+      # The cost of leaving them, said out loud: a permission with neither `require:` nor
+      # `public:` **is** offerable to the Anonymous and Non-member roles, so an
+      # administrator can grant "Manage project dashboard widgets" to Anonymous today.
+      # Pre-existing behaviour and not a new decision; written here so the next person
+      # weighs it rather than rediscovers it.
       Entry.new(
         name: :view_reporter_project_page,
         project_module: DASHBOARDS_MODULE,
@@ -231,35 +252,23 @@ module RedmineReporterDashboards
         group: :dashboards,
         authoring: false,
         covers: 'Create, rename, reorder and delete the tabs of a project dashboard'
-      )
-    ].freeze
-
-    # Designed, agreed, and NOT registered: each waits for the task that ships the
-    # controller it guards. `actions` is deliberately `nil` — inventing controller and
-    # action names for code that does not exist would be a contract written by whoever
-    # happened to be holding the pen, and the promoting task owns those names. `covers`
-    # carries the meaning in the meantime, which is what a reviewer needs.
-    #
-    # Promotion is one move with four parts: fill in `actions`, drop `lands_in`, add the nine
-    # `permission_<name>` locale labels — and, for the FIRST entry promoted, the nine
-    # `project_module_reporter_dashboards_reports` labels, because `REPORTS_MODULE` is a new
-    # module and both `roles/_form` and `projects/settings/_modules` render its legend through
-    # `l_or_humanize(mod, prefix: 'project_module_')`. Without them an administrator reads a
-    # humanised English string in every locale. The parity spec asserts all four, and fails
-    # until they hold.
-    PLANNED = [
+      ),
       # --- consuming a report ----------------------------------------------------------
+      #
+      # PROMOTED BY T-23. `#document` is the PDF, and it is deliberately the same grant as
+      # `#show`: §4.1 rejected a separate export permission because Redmine does not
+      # separate "see the issue list" from "export it as CSV", and the cost of a render is
+      # bounded by FR-32's caps and `Render::BatchGuard`, not by a role grant.
       Entry.new(
         name: :view_reporter_dashboards_reports,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        actions: { TEMPLATES_CONTROLLER => [:index, :show, :document] },
         read: true,
         requires: nil,
         group: :reports_consume,
         authoring: false,
         covers: 'See the report templates available in a project, and open or download ' \
-                'the document one produces',
-        lands_in: 'T-23'
+                'the document one produces'
       ),
       Entry.new(
         name: :view_reporter_dashboards_schedules,
@@ -274,48 +283,69 @@ module RedmineReporterDashboards
         lands_in: 'T-25'
       ),
       # --- authoring: every one of these is a code-execution privilege (INV-9) ----------
+      #
+      # `#preview` is mapped by all three of the authoring template permissions and by
+      # nothing else, because a preview RUNS the template — it is the editor's own
+      # execution of code the author is writing, and giving it to a consumer would hand
+      # `view_…_reports` a code-execution path through the request body.
+      #
+      # `#import` is mapped by `add_…` and `edit_…` and the controller then requires
+      # BOTH (§4.1: "Import **is** authoring… a weaker permission of its own would be a
+      # way around the authoring one"). Redmine's `authorize` passes on *any* mapped
+      # permission, so the conjunction cannot be expressed in this table — it is a
+      # `before_action` in the controller and a test that holds one without the other.
       Entry.new(
         name: :add_reporter_dashboards_templates,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        actions: { TEMPLATES_CONTROLLER => [:new, :create, :preview, :import] },
         read: false,
         group: :reports_author,
         authoring: true,
         covers: 'Create a report template. A template is executed server-side, so this ' \
                 'is a code-execution privilege',
-        lands_in: 'T-23'
+        lands_in: nil
       ),
       Entry.new(
         name: :edit_own_reporter_dashboards_templates,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        actions: {
+          TEMPLATES_CONTROLLER => [:edit, :update, :destroy, :preview, :export]
+        },
         read: false,
         group: :reports_author,
         authoring: true,
-        covers: 'Edit and delete the report templates you authored',
-        lands_in: 'T-23'
+        covers: 'Edit and delete the report templates you authored'
       ),
       Entry.new(
         name: :edit_reporter_dashboards_templates,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        actions: {
+          TEMPLATES_CONTROLLER => [:edit, :update, :destroy, :preview, :export, :import]
+        },
         read: false,
         group: :reports_author,
         authoring: true,
         covers: "Edit and delete any report template in the project, including other " \
-                "people's",
-        lands_in: 'T-23'
+                "people's"
       ),
+      # THE SAME ACTION SET REDMINE GIVES `manage_public_queries`
+      # (`lib/redmine/preparation.rb:49`) minus `destroy`, which makes no visibility
+      # decision. Mapping it here is what lets `authorize` pass — and on its own that
+      # would be a hole, because Redmine's `authorize` is satisfied by ANY mapped
+      # permission, so a role holding only this one could reach `#create`. It cannot:
+      # the controller additionally requires `add_…` for new/create and an edit
+      # permission for edit/update, and a functional test holds this permission ALONE
+      # and asserts 403 on both. Core has the same shape and does not close it; here the
+      # actions being reached are a code-execution privilege, so it is closed.
       Entry.new(
         name: :manage_public_reporter_dashboards_templates,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        actions: { TEMPLATES_CONTROLLER => [:new, :create, :edit, :update] },
         read: false,
         group: :reports_author,
         authoring: true,
         covers: 'Give a report template a visibility wider than its author — the same ' \
-                "decision Redmine's manage_public_queries governs for saved queries",
-        lands_in: 'T-23'
+                "decision Redmine's manage_public_queries governs for saved queries"
       ),
       # --- scheduling ------------------------------------------------------------------
       Entry.new(
@@ -367,8 +397,21 @@ module RedmineReporterDashboards
         lands_in: 'T-28'
       )
     ].freeze
+    # REGISTERED and PLANNED are DERIVED from ENTRIES, in ENTRIES' order, so that
+    # promoting an entry is a two-field edit inside the list above and never a move
+    # between two lists. `registered?` is `lands_in.nil?`, which is the same question
+    # both constants used to answer by which array they were written in.
+    #
+    # Frozen, and each is a fresh Array rather than a filtered view: `select` returns a
+    # new object every call, so a caller that mutated the result would otherwise be
+    # mutating nothing and thinking it had.
+    REGISTERED = ENTRIES.select(&:registered?).freeze
+    PLANNED = ENTRIES.reject(&:registered?).freeze
 
-    ALL = (REGISTERED + PLANNED).freeze
+    # §4.1's table order, which is ENTRIES' order. It was `REGISTERED + PLANNED`, and
+    # that is exactly the concatenation the comment on ENTRIES explains T-23 could not
+    # keep.
+    ALL = ENTRIES
 
     # Actions that are guarded, and deliberately not by a permission of this plugin's.
     # Both are recorded with the guard they REALLY use, so the parity spec can check the

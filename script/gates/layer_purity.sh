@@ -78,6 +78,7 @@ LAYERS=(
   "liquid|$BASE/liquid|(Reporter|RedmineReporter)Dashboards::Render|the Liquid layer binds a scope and renders tags; it must not reach into the render path"
   "charts|$BASE/charts|(Reporter|RedmineReporter)Dashboards::(Render|Liquid)|the chart layer is named by BOTH the Liquid and the render layer, so it must name neither — or the boundary between them holds only until somebody follows the two hops"
   "assets|$BASE/assets|(Reporter|RedmineReporter)Dashboards::(Render|Liquid)|the asset layer holds the network and runs UPSTREAM of the render layer; Render::AssetBinding is the seam, and it lives in render/ precisely so this directory does not have to name it"
+  "reporting|$BASE/reporting|Net::HTTP|Faraday|cookie|session([^I]|$)|the composition root may name BOTH layers - that is what it is for - but it must not become a third render path or a second place that knows about HTTP; a fetcher belongs in assets/ and request state belongs in a controller"
 )
 
 # Search, and DIE if the search itself failed.

@@ -590,12 +590,12 @@ asks that question). `Req` is Redmine's `require:`; `read` is Redmine's `read: t
 | `view_reporter_project_page` | D | ✓ | — | Open a project dashboard, and export it as a PDF | **live** |
 | `manage_reporter_project_page` | D | — | — | Add, remove, move and configure dashboard widgets | **live** |
 | `manage_reporter_project_tabs` | D | — | — | Create, rename, reorder and delete dashboard tabs | **live** |
-| `view_reporter_dashboards_reports` | R | ✓ | — | See the templates a project offers; open or download the document one produces | T-23 |
+| `view_reporter_dashboards_reports` | R | ✓ | — | See the templates a project offers; open or download the document one produces | **live** |
 | `view_reporter_dashboards_schedules` | R | ✓ | — | See a schedule and its run state — last run, status, duration, error — without changing it | T-25 |
-| **`add_reporter_dashboards_templates`** | R | — | `member` | **Create a report template. Code execution (INV-9)** | T-23 |
-| **`edit_own_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete the templates you authored** | T-23 |
-| **`edit_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete any template in the project** | T-23 |
-| **`manage_public_reporter_dashboards_templates`** | R | — | `member` | **Give a template a visibility wider than its author** — Redmine's `manage_public_queries` decision, for templates | T-23 |
+| **`add_reporter_dashboards_templates`** | R | — | `member` | **Create a report template. Code execution (INV-9)** | **live** |
+| **`edit_own_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete the templates you authored** | **live** |
+| **`edit_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete any template in the project** | **live** |
+| **`manage_public_reporter_dashboards_templates`** | R | — | `member` | **Give a template a visibility wider than its author** — Redmine's `manage_public_queries` decision, for templates | **live** |
 | `manage_reporter_dashboards_schedules` | R | — | `member` | Create, edit, disable and delete schedules, choose recipients, send a test run | T-25 |
 | `mail_reporter_dashboards_reports` | R | — | `loggedin` | Send a report by e-mail on demand, to Redmine users | T-32 |
 | `share_reporter_dashboards_reports` | R | — | `member` | Create a share link: an expiring, revocable URL serving a snapshot to whoever holds it | T-28 |
@@ -613,9 +613,14 @@ or renaming one costs a migration and an upgrade note because permission names a
 **A `visibility` column on the template model is a consequence of row 9** and belongs to **T-22**,
 the tables task — not to T-23 and not to a later retrofit. `manage_public_…` has nothing to govern
 without it, and §7 rule 6 requires a column to be created in the same migration as its table, so
-assigning it anywhere else licenses exactly the second migration that rule forbids. Private / roles
-/ project, the three values Redmine's saved queries already use, so an administrator meets one
-concept rather than two.
+assigning it anywhere else licenses exactly the second migration that rule forbids.
+**Private / roles / public** — corrected 2026-08-07, finding **S-4**: this line said
+*"private / roles / project"*, and Redmine's third value is `VISIBILITY_PUBLIC`, labelled *"to any
+users"* (`app/models/query.rb:261`, `config/locales/en.yml:1076`). The three values Redmine's saved
+queries already use, so an administrator meets one concept rather than two — which is only true if
+the words are core's as well as the integers, so T-23's form renders core's own
+`label_visibility_private` / `_roles` / `_public` rather than adding a key of its own. Only the
+prose was ever wrong; T-22's constants were core's from the start.
 
 **`read: true` on `view_reporter_dashboards_reports` is a decision, recorded rather than left
 implicit.** It means the permission still applies in a **closed** project, and opening a report runs

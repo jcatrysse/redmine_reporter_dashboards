@@ -86,3 +86,55 @@ pt-BR:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Data da ocorrência"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "Agendamento"
   field_redmine_reporter_dashboards_document_expires_at: "Expira em"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "Relatórios"
+  permission_view_reporter_dashboards_reports: "Ver modelos de relatório e documentos"
+  permission_add_reporter_dashboards_templates: "Criar modelos de relatório (executa código no servidor)"
+  permission_edit_own_reporter_dashboards_templates: "Editar e excluir os próprios modelos de relatório (executa código no servidor)"
+  permission_edit_reporter_dashboards_templates: "Editar e excluir qualquer modelo de relatório (executa código no servidor)"
+  permission_manage_public_reporter_dashboards_templates: "Gerenciar modelos de relatório públicos (executa código no servidor)"
+  field_redmine_reporter_dashboards_template_enabled: "Ativado"
+  label_reporter_template: "Modelo de relatório"
+  label_reporter_template_plural: "Modelos de relatório"
+  label_reporter_template_new: "Novo modelo de relatório"
+  label_reporter_template_output_per_record: "Um documento por tarefa"
+  label_reporter_template_output_combined: "Um documento para todo o conjunto"
+  label_reporter_template_orientation_portrait: "Retrato"
+  label_reporter_template_orientation_landscape: "Paisagem"
+  label_reporter_template_disabled: "Desativado"
+  label_reporter_template_download_pdf: "Baixar como PDF"
+  label_reporter_template_export: "Exportar"
+  label_reporter_template_import: "Importar um modelo de relatório"
+  label_reporter_template_import_file: "Arquivo do modelo"
+  label_reporter_preview_pdf: "Pré-visualização em PDF"
+  label_reporter_preview_html: "Pré-visualização em HTML"
+  label_reporter_preview_degradations: "O motor relatou estas limitações"
+  label_reporter_report_failed_template: "Não foi possível renderizar este modelo"
+  label_reporter_report_failed_engine: "O motor de renderização não conseguiu produzir este documento"
+  label_reporter_report_refused: "Esta exportação foi recusada"
+  label_reporter_report_frame: "Saída do relatório"
+  label_reporter_report_diagnostic_code: "Código"
+  label_reporter_report_diagnostic_line: "Linha"
+  label_reporter_report_diagnostic_correlation_id: "Identificador de correlação"
+  button_reporter_template_import: "Importar"
+  text_reporter_template_output_info: "Um documento por tarefa gera um PDF para cada tarefa do escopo; um documento para todo o conjunto gera um único PDF."
+  text_reporter_template_margins_info: "Superior, direita, inferior e esquerda em milímetros, separados por vírgulas — por exemplo 20,15,20,15. Deixe vazio para o padrão."
+  text_reporter_template_content_executes: "Um modelo de relatório é executado no servidor. Quem puder editá-lo pode executar código com as permissões da aplicação."
+  text_reporter_template_visibility_private_only: "Somente quem tem \"Gerenciar modelos de relatório públicos\" pode compartilhar um modelo mais amplamente, portanto este permanece visível apenas para você."
+  text_reporter_template_import_info: "Um arquivo JSON exportado deste plugin, ou um modelo YAML exportado do plugin Reporter. O modelo importado é sempre privado para você no início."
+  text_reporter_template_per_record_html: "Este modelo gera um documento por tarefa, então a página abaixo mostra todos os %{count} em sequência. O download em PDF precisa de um arquivo compactado, que esta versão ainda não sabe criar."
+  text_reporter_preview_bounded: "Pré-visualização de %{shown} de %{total} tarefas"
+  text_reporter_preview_pdf_ok: "Renderizado por %{engine} em %{duration} ms."
+  text_reporter_preview_no_html: "Este modelo não produziu nenhuma saída."
+  text_reporter_template_no_issues: "Este relatório não abrange nenhuma tarefa, portanto não gerou documento algum. Amplie a seleção de tarefas ou escolha outra consulta salva."
+  error_reporter_template_import_no_file: "Escolha um arquivo para importar."
+  error_reporter_template_archive_not_available: "Esta exportação gera %{count} documentos, e esta versão não pode entregar vários como um único arquivo compactado. Escolha um modelo que gere um único documento ou restrinja a seleção de tarefas."

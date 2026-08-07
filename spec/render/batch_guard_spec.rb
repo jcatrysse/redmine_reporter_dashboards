@@ -83,6 +83,53 @@ module RedmineReporterDashboards
         end
       end
 
+      # T-23 made the cap check public and added a count-only form. The guarantee this
+      # class makes is unchanged — `render_all` still asks before it iterates, and the
+      # iteration is still in here — but the first real caller has a pipeline of its own
+      # in FRONT of the renderer: a per-record report renders one Liquid template per
+      # issue before there is a `DocumentRequest` to hand over. A cap that only guards the
+      # second half of a pipeline is not a cap.
+      describe 'the cap asked in advance' do
+        subject(:guard) { described_class.new(max_documents: 5) }
+
+        it 'answers nil at the cap and a refusal one past it, from a count alone' do
+          expect(guard.cap_refusal_for_count(5)).to be_nil
+          expect(guard.cap_refusal_for_count(6)).to be_a(RedmineReporterDashboards::Render::Failure)
+        end
+
+        it 'names both numbers, exactly as the list form does' do
+          from_count = guard.cap_refusal_for_count(84)
+          from_list = guard.cap_refusal(Array.new(84))
+
+          expect(from_count.message).to eq(from_list.message)
+          expect(from_count.message).to include('84 documents', 'the limit is 5')
+        end
+
+        it 'is the SAME check `render_all` makes, so the two cannot drift' do
+          # If `render_all` grew its own copy of the comparison, a caller that asked in
+          # advance and a caller that did not would disagree about the cap — and the one
+          # that asked would look like the broken one.
+          refused = guard.render_all(Array.new(6), renderer: CountingRenderer.new)
+
+          expect(refused.refusal.message).to eq(guard.cap_refusal_for_count(6).message)
+        end
+
+        it 'answers nil for a count of zero rather than treating it as special' do
+          expect(guard.cap_refusal_for_count(0)).to be_nil
+        end
+
+        it 'takes a correlation id from the caller, because the caller has one' do
+          expect(guard.cap_refusal_for_count(9, correlation_id: 'cid-7').correlation_id)
+            .to eq('cid-7')
+        end
+
+        it 'refuses a count it cannot read as an integer rather than comparing a string' do
+          # `'6' > 5` raises in Ruby and `Integer('six')` says why. Silently coercing
+          # would make a cap of 5 pass a batch of "60".
+          expect { guard.cap_refusal_for_count('six') }.to raise_error(ArgumentError)
+        end
+      end
+
       describe 'the batch deadline' do
         # A DIFFERENT FAILURE FROM THE CAP, and the difference is whether the limit was
         # knowable in advance. The cap refuses the whole batch before any work; the

@@ -394,8 +394,21 @@ module RedmineReporterDashboards
 
       it 'sees every controller in the plugin' do
         expect(ControllerSource.all.map(&:name))
-          .to eq(%w[reporter_preflight reporter_project_pages reporter_project_tabs
-                    sql_stats])
+          .to eq(%w[reporter_dashboards/templates reporter_preflight
+                    reporter_project_pages reporter_project_tabs sql_stats])
+      end
+
+      # T-23's controller is the first one in a subdirectory, which is the case the
+      # recursive glob was written for before there was anything to find. This pins the
+      # answer so a reader that stopped descending would fail loudly instead of reporting
+      # four controllers and full coverage.
+      it 'reads the namespaced controller T-23 added, with its exact action set' do
+        templates = ControllerSource.new('reporter_dashboards/templates')
+
+        expect(templates.exist?).to be(true)
+        expect(templates.public_actions.sort)
+          .to eq(%i[create destroy document edit export import index new preview show
+                    update])
       end
 
       it 'sees a controller in a SUBDIRECTORY, under its namespaced name' do
@@ -823,7 +836,12 @@ module RedmineReporterDashboards
     # expectation, so "the loop registers exactly what the literals did" is an assertion
     # rather than a claim in a commit message.
     describe '.registrations_by_module' do
-      it 'reproduces the three registrations init.rb used to make literally' do
+      # THE DASHBOARDS HALF IS STILL THE THREE LITERALS, VERBATIM. T-40 turned three
+      # `permission` calls into a loop and this is what proved the loop changed nothing;
+      # T-23 adds a second module and must not disturb the first, so the first block below
+      # is unchanged from T-40's expectation and the second is the new registration.
+      it 'reproduces the three registrations init.rb used to make literally, and adds ' \
+         "T-23's five" do
         expect(described_class.registrations_by_module).to eq(
           reporter_project_dashboards: [
             [:view_reporter_project_page,
@@ -836,8 +854,39 @@ module RedmineReporterDashboards
             [:manage_reporter_project_tabs,
              { reporter_project_tabs: [:create, :update, :destroy, :order] },
              {}]
+          ],
+          reporter_dashboards_reports: [
+            [:view_reporter_dashboards_reports,
+             { :'reporter_dashboards/templates' => [:index, :show, :document] },
+             { read: true }],
+            [:add_reporter_dashboards_templates,
+             { :'reporter_dashboards/templates' => [:new, :create, :preview, :import] },
+             { require: :member }],
+            [:edit_own_reporter_dashboards_templates,
+             { :'reporter_dashboards/templates' => [:edit, :update, :destroy, :preview,
+                                                    :export] },
+             { require: :member }],
+            [:edit_reporter_dashboards_templates,
+             { :'reporter_dashboards/templates' => [:edit, :update, :destroy, :preview,
+                                                    :export, :import] },
+             { require: :member }],
+            [:manage_public_reporter_dashboards_templates,
+             { :'reporter_dashboards/templates' => [:new, :create, :edit, :update] },
+             { require: :member }]
           ]
         )
+      end
+
+      # T-23. The action key has to carry the namespace, because Redmine compares
+      # `"#{controller}/#{action}"` against `params[:controller]` and for a controller in
+      # a subdirectory that is `reporter_dashboards/templates`. A key of `:templates`
+      # would produce a permission that guards nothing and looks perfectly correct on the
+      # roles screen — the exact failure this whole file exists to make impossible.
+      it 'names a namespaced controller with its full path, not its basename' do
+        keys = described_class::REGISTERED.flat_map { |entry| entry.actions.keys }.uniq
+
+        expect(keys).to include(:'reporter_dashboards/templates')
+        expect(keys).not_to include(:templates)
       end
 
       it 'registers nothing that is only planned' do
@@ -958,6 +1007,74 @@ module RedmineReporterDashboards
                                                                     'does not run for that ' \
                                                                     'action'
           expect(note[:why].to_s.strip).not_to be_empty, "#{endpoint} has no reason"
+        end
+      end
+
+      # ------------------------------------------------------------------
+      # T-23. `authorize` is necessary and NOT sufficient on the templates controller,
+      # and these examples are the mechanical half of saying so.
+      #
+      # Redmine's `authorize` passes when the actor holds ANY permission mapping the
+      # action. Three consequences follow on this controller and each one is a hole
+      # unless a second guard closes it:
+      #
+      #   * `manage_public_…` maps `#create`, so it alone would reach a code-execution
+      #     endpoint — `require_create_permission` is what refuses it;
+      #   * `import` needs `add_…` AND `edit_…`, a conjunction the permission model
+      #     cannot express at all — `require_import_permissions` is that conjunction;
+      #   * `edit_own_…` maps `#update`, and "own" is a property of the RECORD, which no
+      #     permission can see — `require_edit_permission` asks the record.
+      #
+      # The functional suite proves each one by holding the permission and reading the
+      # status code. This proves the guard is WIRED TO THE RIGHT ACTIONS, which is the
+      # half a functional test passes vacuously if somebody narrows an `only:`.
+      describe 'the second guard on the templates controller' do
+        let(:templates) { ControllerSource.new('reporter_dashboards/templates') }
+
+        it 'runs `authorize` for every action, unscoped' do
+          # nil means "no only:, no except:, no skip_before_action" — which is the shape
+          # the review of T-40 defeated when it was merely "authorize appears somewhere".
+          expect(templates.actions_guarded_by(:authorize)).to be_nil
+        end
+
+        it 'requires add_… for exactly the two actions that create a template' do
+          expect(templates.actions_guarded_by(:require_create_permission))
+            .to eq(%i[new create])
+        end
+
+        it 'requires an edit permission for everything that changes or reveals content' do
+          expect(templates.actions_guarded_by(:require_edit_permission))
+            .to eq(%i[edit update destroy export])
+        end
+
+        it 'requires BOTH authoring permissions for import' do
+          expect(templates.actions_guarded_by(:require_import_permissions))
+            .to eq([:import])
+        end
+
+        it 'requires an authoring permission for preview, which executes the request body' do
+          expect(templates.actions_guarded_by(:require_preview_permission))
+            .to eq([:preview])
+        end
+
+        it 'resolves the preview base for exactly the same action as it guards' do
+          # The preview guard is split across two filters with an ivar between them:
+          # `find_preview_base` sets `@preview_base` and `require_preview_permission`
+          # branches on it. If the two `only:` lists ever drift, the guard silently falls
+          # through to the WEAKER id-less branch — which is the disclosure hole this pair
+          # was written to close.
+          expect(templates.actions_guarded_by(:find_preview_base))
+            .to eq(templates.actions_guarded_by(:require_preview_permission))
+        end
+
+        it 'never lets a consuming-only action fall under an authoring guard' do
+          # `index`, `show` and `document` are what `view_…_reports` maps, and a second
+          # guard on any of them would silently require authoring to READ a report.
+          authoring_guards = %i[require_create_permission require_edit_permission
+                                require_import_permissions require_preview_permission]
+          covered = authoring_guards.flat_map { |g| templates.actions_guarded_by(g) || [] }
+
+          expect(covered & %i[index show document]).to be_empty
         end
       end
 
@@ -1096,10 +1213,23 @@ module RedmineReporterDashboards
       end
 
       it 'finds a planned entry and reports it as not registered' do
-        entry = described_class.find(:add_reporter_dashboards_templates)
+        # `add_…` used to be this example's subject and T-23 registered it, which is the
+        # promotion working. A still-planned entry replaces it rather than the example
+        # being deleted: "PLANNED entries answer registered? => false" is the property,
+        # not the particular permission that happened to be planned in 2026-08.
+        entry = described_class.find(:share_reporter_dashboards_reports)
 
         expect(entry.registered?).to be(false)
-        expect(entry.lands_in).to eq('T-23')
+        expect(entry.lands_in).to eq('T-28')
+      end
+
+      it 'finds a permission T-23 promoted and reports it as registered' do
+        entry = described_class.find(:add_reporter_dashboards_templates)
+
+        expect(entry.registered?).to be(true)
+        expect(entry.lands_in).to be_nil
+        expect(entry.actions).to eq(:'reporter_dashboards/templates' =>
+                                      [:new, :create, :preview, :import])
       end
 
       it 'answers nil for a name it does not have' do

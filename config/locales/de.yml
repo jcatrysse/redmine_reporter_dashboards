@@ -86,3 +86,55 @@ de:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Termindatum"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "Zeitplan"
   field_redmine_reporter_dashboards_document_expires_at: "Läuft ab am"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "Berichte"
+  permission_view_reporter_dashboards_reports: "Berichtsvorlagen und Dokumente ansehen"
+  permission_add_reporter_dashboards_templates: "Berichtsvorlagen erstellen (führt serverseitigen Code aus)"
+  permission_edit_own_reporter_dashboards_templates: "Eigene Berichtsvorlagen bearbeiten und löschen (führt serverseitigen Code aus)"
+  permission_edit_reporter_dashboards_templates: "Beliebige Berichtsvorlagen bearbeiten und löschen (führt serverseitigen Code aus)"
+  permission_manage_public_reporter_dashboards_templates: "Öffentliche Berichtsvorlagen verwalten (führt serverseitigen Code aus)"
+  field_redmine_reporter_dashboards_template_enabled: "Aktiviert"
+  label_reporter_template: "Berichtsvorlage"
+  label_reporter_template_plural: "Berichtsvorlagen"
+  label_reporter_template_new: "Neue Berichtsvorlage"
+  label_reporter_template_output_per_record: "Ein Dokument pro Ticket"
+  label_reporter_template_output_combined: "Ein Dokument für die gesamte Menge"
+  label_reporter_template_orientation_portrait: "Hochformat"
+  label_reporter_template_orientation_landscape: "Querformat"
+  label_reporter_template_disabled: "Deaktiviert"
+  label_reporter_template_download_pdf: "Als PDF herunterladen"
+  label_reporter_template_export: "Exportieren"
+  label_reporter_template_import: "Berichtsvorlage importieren"
+  label_reporter_template_import_file: "Vorlagendatei"
+  label_reporter_preview_pdf: "PDF-Vorschau"
+  label_reporter_preview_html: "HTML-Vorschau"
+  label_reporter_preview_degradations: "Die Engine meldet folgende Einschränkungen"
+  label_reporter_report_failed_template: "Diese Vorlage konnte nicht gerendert werden"
+  label_reporter_report_failed_engine: "Die Render-Engine konnte dieses Dokument nicht erzeugen"
+  label_reporter_report_refused: "Dieser Export wurde abgelehnt"
+  label_reporter_report_frame: "Berichtsausgabe"
+  label_reporter_report_diagnostic_code: "Code"
+  label_reporter_report_diagnostic_line: "Zeile"
+  label_reporter_report_diagnostic_correlation_id: "Korrelations-ID"
+  button_reporter_template_import: "Importieren"
+  text_reporter_template_output_info: "Ein Dokument pro Ticket erzeugt für jedes Ticket im Bereich ein eigenes PDF; ein Dokument für die gesamte Menge erzeugt ein einziges PDF."
+  text_reporter_template_margins_info: "Oben, rechts, unten und links in Millimetern, durch Kommas getrennt — zum Beispiel 20,15,20,15. Leer lassen für den Standardwert."
+  text_reporter_template_content_executes: "Eine Berichtsvorlage wird auf dem Server ausgeführt. Wer eine bearbeiten darf, kann Code mit den Rechten der Anwendung ausführen."
+  text_reporter_template_visibility_private_only: "Nur wer \"Öffentliche Berichtsvorlagen verwalten\" besitzt, kann eine Vorlage weiter freigeben; diese bleibt daher nur für Sie sichtbar."
+  text_reporter_template_import_info: "Eine aus diesem Plugin exportierte JSON-Datei oder eine aus dem Reporter-Plugin exportierte YAML-Vorlage. Die importierte Vorlage ist zunächst immer nur für Sie sichtbar."
+  text_reporter_template_per_record_html: "Diese Vorlage erzeugt ein Dokument pro Ticket, daher zeigt die Seite unten alle %{count} nacheinander. Für einen PDF-Download wäre ein Archiv nötig, das diese Version noch nicht erstellen kann."
+  text_reporter_preview_bounded: "Vorschau von %{shown} von %{total} Tickets"
+  text_reporter_preview_pdf_ok: "Gerendert von %{engine} in %{duration} ms."
+  text_reporter_preview_no_html: "Diese Vorlage hat überhaupt keine Ausgabe erzeugt."
+  text_reporter_template_no_issues: "Dieser Bericht umfasst keine Tickets und hat daher kein Dokument erzeugt. Erweitern Sie die Ticketauswahl oder wählen Sie eine andere gespeicherte Abfrage."
+  error_reporter_template_import_no_file: "Bitte wählen Sie eine Datei zum Importieren aus."
+  error_reporter_template_archive_not_available: "Dieser Export erzeugt %{count} Dokumente, und die Auslieferung mehrerer Dokumente als Archiv ist in dieser Version nicht verfügbar. Wählen Sie eine Vorlage, die ein einzelnes Dokument erzeugt, oder schränken Sie die Ticketauswahl ein."

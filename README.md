@@ -421,9 +421,10 @@ working offline is not the thing a report author points at.
    - `manage_reporter_project_tabs` — create and rename tabs
 3. A **Project dashboard** link appears in the project menu. The first visit automatically creates a default tab.
 
-Those three are the only permissions this plugin declares today; the reporting features
-still being built arrive with their own, per role and per project, rather than switching on
-through a plugin setting. Two things worth knowing either way.
+Those three cover the dashboard. **Report templates are a separate module with five
+permissions of their own** — see *Report templates* below. The remaining reporting
+features still being built arrive the same way, per role and per project, rather than
+switching on through a plugin setting. Two things worth knowing either way.
 
 **This plugin never grants a permission to a role — but Redmine's default configuration
 does.** Nothing here ticks a box for you; administrators bypass permission checks, everyone
@@ -442,6 +443,85 @@ validated before they are stored: a setting whose value is not of the expected s
 is dropped rather than saved, with one line in `log/production.log` naming the widget
 and the setting. Widgets contributed by other plugins keep working — their own
 setting names are accepted, as bounded values.
+
+## Report templates
+
+A **report template** is a Liquid document that this plugin renders against a project's
+issues, as a web page and as a PDF. It is a second project module, separate from the
+dashboard, because *"we want dashboards, not the reporting surface"* is a real answer.
+
+1. Open **Project → Settings → Modules** and enable **Reports**.
+2. Assign permissions to the relevant roles.
+3. A **Report templates** link appears in the project menu.
+
+| Permission | What it allows |
+|---|---|
+| `view_reporter_dashboards_reports` | See the templates a project offers, open one, download its PDF |
+| `add_reporter_dashboards_templates` | Create a template |
+| `edit_own_reporter_dashboards_templates` | Edit and delete the templates you authored |
+| `edit_reporter_dashboards_templates` | Edit and delete any template in the project |
+| `manage_public_reporter_dashboards_templates` | Give a template a visibility wider than yourself |
+
+**The four authoring permissions execute code, and their labels say so.** A template is
+Liquid that runs on your server: whoever can write one can make the application do what
+that template says. Redmine will not offer these to the *Anonymous* or *Non-member* role,
+and they are not permitted in a closed project. Treat granting one the way you would treat
+giving somebody a shell.
+
+**A report is displayed inside a sandboxed frame, and that is load-bearing.** A template's
+output is not part of the Redmine page around it: it is parsed as a separate document in a
+frame with no access to your session, your cookies or the page it sits in, and with the
+network switched off for everything except images already embedded in the document. Without
+that, any member who can author a template could write one line of JavaScript and have it
+run with the privileges of whoever opens the report — including an administrator. If you
+are reviewing this plugin's security, that frame and the permission list above are the two
+things to look at.
+
+**Visibility works exactly like a saved query's** — *to me only*, *to these roles only*, or
+*to any users* — and uses Redmine's own words for the three, so it is one concept rather
+than two. Choosing anything wider than *to me only* needs
+`manage_public_reporter_dashboards_templates`; without it, a template you create stays
+private, silently in the sense that the form tells you so up front rather than refusing
+your submission.
+
+**Which issues a report covers.** By default, every issue in the project you can see. Pass
+a saved query with `?query_id=…` and the report resolves through that query instead — and
+only through queries you could already open, so a report can never show you issues the
+issue list would not.
+
+### Preview
+
+The editor's **Preview** button renders the content in the form — not the saved version —
+in **both** bindings: the HTML inline, and a PDF through the configured engine. Both,
+always, because *"it looked fine in the browser and broke in the PDF"* is the failure this
+plugin exists to remove; if no engine is installed or the PDF fails, the page says so with
+the engine, the version and a correlation id rather than showing you the HTML and letting
+you assume. Preview is bounded to **50 issues** and prints *"Preview of 50 of 1 284
+issues"* when there are more.
+
+### Import and export
+
+**Export** writes a JSON file containing the template only — no ids, no project, no
+author, no version history. **Import** reads that JSON, and also reads the YAML a
+`redmine_reporter` export produces, mapping its three template types onto this plugin's
+`source` and `output` fields through a fixed table. A file naming a Ruby class, or using a
+YAML alias, is refused with a message rather than loaded. Importing requires **both**
+`add_…` and `edit_…`: import is authoring, and a weaker permission of its own would be a
+way around the authoring one. An imported template is always private to whoever imported
+it, whatever the file asks for.
+
+### Two limits, and two things this version does not do yet
+
+* **A PDF export is capped at 50 documents.** It matters only for *one document per
+  issue* templates: asking for more is refused before anything is rendered, with a message
+  naming both the number you asked for and the limit.
+* **A *one document per issue* template cannot be downloaded as a PDF when it covers more
+  than one issue.** That needs a zip archive, which this version does not build; the page
+  renders all the documents as HTML and the download button is not offered. Combined
+  templates — one document for the whole set — download normally.
+* **`source: time_entries` is not renderable yet.** The field exists and survives import
+  and export, but only issue reporting has a data source today. A template carrying it is
+  refused with a message rather than reported against the wrong table.
 
 ## Using the `{% sql_aggregate %}` tag
 

@@ -71,3 +71,17 @@
 .rrd-mermaid[data-rd-mermaid-state="refused"] {
   min-height: 1.5em;
 }
+
+/* T-23 - the sandboxed report frame (technical-spec.md SS4, INV-9).
+   The frame is an opaque origin, so the parent cannot measure its content and there is
+   no height-fit script: a fixed, resizable, scrolling box is the honest shape rather
+   than a frame that silently clips a long report. SS4's postMessage replacement is
+   described for the host plugin's widget path and is owed here only if auto-height is
+   asked for. */
+.reporter-report-frame {
+  width: 100%;
+  min-height: 40em;
+  border: 1px solid #ddd;
+  background: #fff;
+  resize: vertical;
+}

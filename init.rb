@@ -88,6 +88,23 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
        { controller: 'reporter_preflight', action: 'show' },
        caption: :label_reporter_preflight
 
+  # T-23. A SECOND project menu item, because the reports module is a second module: a
+  # project can have dashboards without the reporting surface, which is the question
+  # `:reporter_dashboards_reports` exists to ask. Both conditions are checked — the module
+  # AND the permission — because `module_enabled?` alone would show the link to somebody
+  # the controller then refuses, and `allowed_to?` alone would show it in a project that
+  # has the feature switched off.
+  menu :project_menu, :reporter_dashboards_templates,
+       { controller: 'reporter_dashboards/templates', action: 'index' },
+       caption: :label_reporter_template_plural,
+       after: :reporter_project_page,
+       param: :project_id,
+       if: proc { |project|
+         project.module_enabled?(:reporter_dashboards_reports) &&
+           (User.current.admin? ||
+             User.current.allowed_to?(:view_reporter_dashboards_reports, project))
+       }
+
   menu :project_menu, :reporter_project_page,
        { controller: 'reporter_project_pages', action: 'show' },
        caption: :label_reporter_project_page,

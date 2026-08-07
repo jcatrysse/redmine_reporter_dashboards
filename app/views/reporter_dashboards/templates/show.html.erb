@@ -1,0 +1,57 @@
+<% content_for :header_tags do %>
+  <%= stylesheet_link_tag 'redmine_reporter_dashboards', plugin: 'redmine_reporter_dashboards' %>
+<% end %>
+
+<%#
+  T-23 — one report, rendered.
+
+  The body goes through `reporter_report_frame`, which puts it in an opaque-origin
+  sandbox — `technical-spec.md` §4, INV-9's third mechanism. It is NOT markup in this
+  page and must never become markup in this page: a template is written by an ordinary
+  project member holding a code-execution permission, and inlining its output would run
+  their JavaScript in the viewer's session. Read the helper's comment before changing
+  anything here.
+%>
+<div class="contextual">
+  <% if @template.editable_by?(User.current) %>
+    <%= link_to reporter_dashboard_icon('edit', l(:button_edit)),
+                edit_project_reporter_template_path(@project, @template),
+                class: 'icon icon-edit' %>
+  <% end %>
+  <%# THE DOWNLOAD IS OFFERED ONLY WHEN IT CAN SUCCEED. A per-record run over more than
+      one issue produces an archive, and building one is still owed (finding E-6). The
+      controller refuses it with a 501 for a hand-written URL; here the honest thing is
+      not to draw a button that cannot work. %>
+  <% if @outcome && @outcome.ok? && @outcome.sections.length == 1 %>
+    <%= link_to reporter_dashboard_icon('download', l(:label_reporter_template_download_pdf)),
+                document_project_reporter_template_path(@project, @template,
+                                                        query_id: params[:query_id]),
+                class: 'icon icon-download' %>
+  <% end %>
+</div>
+
+<h2><%= @template.name %></h2>
+
+<% if @diagnostic %>
+  <%= render partial: 'diagnostics', locals: { diagnostic: @diagnostic } %>
+<% else %>
+  <%# NO TRUNCATION NOTICE HERE. `#show` runs with no issue bound, so `truncated?` is
+      `total > total` — permanently false — and the copy it would print says "Preview of",
+      which a report page is not. The branch was dead and the sentence would have been
+      wrong if it ever fired. %>
+  <% if @outcome.sections.length > 1 %>
+    <p class="warning">
+      <%= l(:text_reporter_template_per_record_html, count: @outcome.sections.length) %>
+    </p>
+  <% end %>
+
+  <% if @outcome.sections.empty? %>
+    <%# A per-record template over a scope that matched nothing. An empty page with no
+        sentence on it reads as a broken report; this says which of the two it is. %>
+    <p class="nodata"><%= l(:text_reporter_template_no_issues) %></p>
+  <% end %>
+
+  <% @outcome.sections.each do |section| %>
+    <%= reporter_report_frame(section) %>
+  <% end %>
+<% end %>

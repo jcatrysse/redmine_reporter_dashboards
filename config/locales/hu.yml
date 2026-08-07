@@ -86,3 +86,55 @@ hu:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Esedékesség dátuma"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "Ütemezés"
   field_redmine_reporter_dashboards_document_expires_at: "Lejárat"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "Jelentések"
+  permission_view_reporter_dashboards_reports: "Jelentéssablonok és dokumentumok megtekintése"
+  permission_add_reporter_dashboards_templates: "Jelentéssablonok létrehozása (kiszolgálóoldali kódot futtat)"
+  permission_edit_own_reporter_dashboards_templates: "Saját jelentéssablonok szerkesztése és törlése (kiszolgálóoldali kódot futtat)"
+  permission_edit_reporter_dashboards_templates: "Bármely jelentéssablon szerkesztése és törlése (kiszolgálóoldali kódot futtat)"
+  permission_manage_public_reporter_dashboards_templates: "Nyilvános jelentéssablonok kezelése (kiszolgálóoldali kódot futtat)"
+  field_redmine_reporter_dashboards_template_enabled: "Engedélyezve"
+  label_reporter_template: "Jelentéssablon"
+  label_reporter_template_plural: "Jelentéssablonok"
+  label_reporter_template_new: "Új jelentéssablon"
+  label_reporter_template_output_per_record: "Egy dokumentum feladatonként"
+  label_reporter_template_output_combined: "Egy dokumentum a teljes halmazhoz"
+  label_reporter_template_orientation_portrait: "Álló"
+  label_reporter_template_orientation_landscape: "Fekvő"
+  label_reporter_template_disabled: "Letiltva"
+  label_reporter_template_download_pdf: "Letöltés PDF-ként"
+  label_reporter_template_export: "Exportálás"
+  label_reporter_template_import: "Jelentéssablon importálása"
+  label_reporter_template_import_file: "Sablonfájl"
+  label_reporter_preview_pdf: "PDF-előnézet"
+  label_reporter_preview_html: "HTML-előnézet"
+  label_reporter_preview_degradations: "A megjelenítő a következő korlátozásokat jelezte"
+  label_reporter_report_failed_template: "Ezt a sablont nem sikerült megjeleníteni"
+  label_reporter_report_failed_engine: "A megjelenítő motor nem tudta előállítani ezt a dokumentumot"
+  label_reporter_report_refused: "Ezt az exportálást a rendszer elutasította"
+  label_reporter_report_frame: "A jelentés kimenete"
+  label_reporter_report_diagnostic_code: "Kód"
+  label_reporter_report_diagnostic_line: "Sor"
+  label_reporter_report_diagnostic_correlation_id: "Korrelációs azonosító"
+  button_reporter_template_import: "Importálás"
+  text_reporter_template_output_info: "Az „egy dokumentum feladatonként” a hatókör minden feladatához külön PDF-et készít; az „egy dokumentum a teljes halmazhoz” egyetlen PDF-et."
+  text_reporter_template_margins_info: "Felső, jobb, alsó és bal margó milliméterben, vesszővel elválasztva — például 20,15,20,15. Hagyja üresen az alapértelmezett értékhez."
+  text_reporter_template_content_executes: "A jelentéssablon a kiszolgálón fut le. Aki szerkesztheti, az az alkalmazás jogaival futtathat kódot."
+  text_reporter_template_visibility_private_only: "Csak a „Nyilvános jelentéssablonok kezelése” jogosultsággal lehet egy sablont szélesebb körben megosztani, ezért ez csak az Ön számára marad látható."
+  text_reporter_template_import_info: "Egy ebből a bővítményből exportált JSON-fájl vagy a Reporter bővítményből exportált YAML-sablon. Az importált sablon kezdetben mindig csak az Öné."
+  text_reporter_template_per_record_html: "Ez a sablon feladatonként egy dokumentumot készít, ezért az alábbi oldal mind a(z) %{count} darabot egymás után mutatja. A PDF-letöltéshez archívumra lenne szükség, amelyet ez a verzió még nem tud előállítani."
+  text_reporter_preview_bounded: "Előnézet: %{total} feladatból %{shown}"
+  text_reporter_preview_pdf_ok: "Megjelenítette: %{engine}, %{duration} ms alatt."
+  text_reporter_preview_no_html: "Ez a sablon semmilyen kimenetet nem állított elő."
+  text_reporter_template_no_issues: "Ez a jelentés egyetlen feladatra sem terjed ki, ezért nem készült dokumentum. Bővítse a feladatok kiválasztását, vagy válasszon másik mentett szűrőt."
+  error_reporter_template_import_no_file: "Válasszon egy importálandó fájlt."
+  error_reporter_template_archive_not_available: "Ez az exportálás %{count} dokumentumot készítene, és ez a verzió nem tud többet egyetlen archívumként átadni. Válasszon egyetlen dokumentumot készítő sablont, vagy szűkítse a feladatok kiválasztását."

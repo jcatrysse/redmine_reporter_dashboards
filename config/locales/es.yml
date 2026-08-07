@@ -86,3 +86,55 @@ es:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Fecha de ejecución"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "Programación"
   field_redmine_reporter_dashboards_document_expires_at: "Caduca el"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "Informes"
+  permission_view_reporter_dashboards_reports: "Ver plantillas de informe y documentos"
+  permission_add_reporter_dashboards_templates: "Crear plantillas de informe (ejecuta código en el servidor)"
+  permission_edit_own_reporter_dashboards_templates: "Editar y eliminar las plantillas de informe propias (ejecuta código en el servidor)"
+  permission_edit_reporter_dashboards_templates: "Editar y eliminar cualquier plantilla de informe (ejecuta código en el servidor)"
+  permission_manage_public_reporter_dashboards_templates: "Gestionar plantillas de informe públicas (ejecuta código en el servidor)"
+  field_redmine_reporter_dashboards_template_enabled: "Activada"
+  label_reporter_template: "Plantilla de informe"
+  label_reporter_template_plural: "Plantillas de informe"
+  label_reporter_template_new: "Nueva plantilla de informe"
+  label_reporter_template_output_per_record: "Un documento por petición"
+  label_reporter_template_output_combined: "Un documento para todo el conjunto"
+  label_reporter_template_orientation_portrait: "Vertical"
+  label_reporter_template_orientation_landscape: "Horizontal"
+  label_reporter_template_disabled: "Desactivada"
+  label_reporter_template_download_pdf: "Descargar como PDF"
+  label_reporter_template_export: "Exportar"
+  label_reporter_template_import: "Importar una plantilla de informe"
+  label_reporter_template_import_file: "Archivo de plantilla"
+  label_reporter_preview_pdf: "Vista previa en PDF"
+  label_reporter_preview_html: "Vista previa en HTML"
+  label_reporter_preview_degradations: "El motor ha comunicado estas limitaciones"
+  label_reporter_report_failed_template: "No se ha podido representar esta plantilla"
+  label_reporter_report_failed_engine: "El motor de representación no ha podido producir este documento"
+  label_reporter_report_refused: "Esta exportación ha sido rechazada"
+  label_reporter_report_frame: "Salida del informe"
+  label_reporter_report_diagnostic_code: "Código"
+  label_reporter_report_diagnostic_line: "Línea"
+  label_reporter_report_diagnostic_correlation_id: "Identificador de correlación"
+  button_reporter_template_import: "Importar"
+  text_reporter_template_output_info: "Un documento por petición genera un PDF para cada petición del ámbito; un documento para todo el conjunto genera un único PDF."
+  text_reporter_template_margins_info: "Superior, derecho, inferior e izquierdo en milímetros, separados por comas — por ejemplo 20,15,20,15. Déjelo vacío para el valor por defecto."
+  text_reporter_template_content_executes: "Una plantilla de informe se ejecuta en el servidor. Quien pueda editarla puede ejecutar código con los permisos de la aplicación."
+  text_reporter_template_visibility_private_only: "Solo quien tenga \"Gestionar plantillas de informe públicas\" puede compartir una plantilla más ampliamente, así que esta seguirá siendo visible solo para usted."
+  text_reporter_template_import_info: "Un archivo JSON exportado desde este plugin, o una plantilla YAML exportada desde el plugin Reporter. La plantilla importada siempre es privada para usted al principio."
+  text_reporter_template_per_record_html: "Esta plantilla genera un documento por petición, por lo que la página inferior muestra los %{count} uno tras otro. La descarga en PDF necesita un archivo comprimido, que esta versión todavía no puede crear."
+  text_reporter_preview_bounded: "Vista previa de %{shown} de %{total} peticiones"
+  text_reporter_preview_pdf_ok: "Representado por %{engine} en %{duration} ms."
+  text_reporter_preview_no_html: "Esta plantilla no ha producido ninguna salida."
+  text_reporter_template_no_issues: "Este informe no abarca ninguna petición, por lo que no ha generado ningún documento. Amplíe la selección de peticiones o elija otra consulta guardada."
+  error_reporter_template_import_no_file: "Elija un archivo para importar."
+  error_reporter_template_archive_not_available: "Esta exportación genera %{count} documentos, y esta versión no puede entregar varios como un único archivo comprimido. Elija una plantilla que genere un solo documento o reduzca la selección de peticiones."

@@ -1,0 +1,80 @@
+<% content_for :header_tags do %>
+  <%= stylesheet_link_tag 'redmine_reporter_dashboards', plugin: 'redmine_reporter_dashboards' %>
+<% end %>
+
+<%#
+  T-23 / §9b.2 — the preview, in BOTH bindings.
+
+  --- WHY THE PDF HALF IS ALWAYS REPORTED, EVEN WHEN IT COULD NOT RUN ---
+
+  §9b.2: *"a preview that only proves the easy path is a false signal"* — "it looked fine
+  in the browser and broke in the PDF" is the defect class the whole dossier exists to
+  remove. So this page never renders the HTML alone and stays quiet about the other half:
+  either the PDF was produced (and its engine, version and duration are named), or it was
+  not, and the diagnostics panel says why with the correlation id to quote. There is no
+  third state in which the reader is left to assume.
+%>
+<h2><%= l(:label_preview) %><% if @template.name.present? %>: <%= @template.name %><% end %></h2>
+
+<div class="contextual">
+  <%# `@preview_base` AND NOT `@template`. The subject of a preview is a `dup` of the
+      stored record, and `dup` drops the id — deliberately, so a preview cannot save over
+      the original — which also means it is never `persisted?` and a link built from it
+      would have nowhere to go. The first version of this block tested `@template` and
+      therefore never rendered at all. %>
+  <% if @preview_base %>
+    <%= link_to l(:button_back),
+                edit_project_reporter_template_path(@project, @preview_base),
+                class: 'icon icon-edit' %>
+  <% end %>
+</div>
+
+<%# NO OUTCOME MEANS THE SUBJECT WAS REFUSED BEFORE IT RAN — bad page geometry in the
+    request body, which reaches `Integer()` and a closed list further down. The errors
+    are the whole page in that case; there is nothing to preview. %>
+<% if @outcome.nil? %>
+  <%= error_messages_for 'template' %>
+<% else %>
+
+<% if @outcome.truncated? %>
+  <%# NEVER SILENTLY TRUNCATED (INV-4's spirit, §9b.2's words): the number shown and the
+      number that exists, both, in the reader's own locale formatting. %>
+  <p class="warning"><%= reporter_preview_bound_notice(@outcome) %></p>
+<% end %>
+
+<div class="box">
+  <h3><%= l(:label_reporter_preview_pdf) %></h3>
+  <% if @diagnostic %>
+    <%= render partial: 'diagnostics', locals: { diagnostic: @diagnostic } %>
+  <% else %>
+    <p class="icon icon-ok">
+      <%= l(:text_reporter_preview_pdf_ok,
+            engine: "#{@outcome.engine_id} #{@outcome.engine_version}".strip,
+            duration: @outcome.duration_ms) %>
+    </p>
+    <% if @outcome.degradations.any? %>
+      <%# A DEGRADATION IS NOT A FAILURE AND IS NOT SILENT EITHER (INV-4). wkhtmltopdf
+          stamps `legacy_engine` on every render by design; an unresolved asset is a real
+          hole in the document. Both are printed, because the author is the only person
+          who can decide which of the two they are looking at. %>
+      <p><strong><%= l(:label_reporter_preview_degradations) %></strong></p>
+      <ul>
+        <% @outcome.degradations.each do |degradation| %>
+          <li><%= degradation.to_s %></li>
+        <% end %>
+      </ul>
+    <% end %>
+  <% end %>
+</div>
+
+<div class="box">
+  <h3><%= l(:label_reporter_preview_html) %></h3>
+  <% if @outcome.sections.any? %>
+    <% @outcome.sections.each do |section| %>
+      <%= reporter_report_frame(section) %>
+    <% end %>
+  <% else %>
+    <p class="nodata"><%= l(:text_reporter_preview_no_html) %></p>
+  <% end %>
+</div>
+<% end %>

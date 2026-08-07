@@ -18,6 +18,24 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**REDMINE SETS `include_all_helpers = false`, so a controller sees its OWN helper and nothing
+else.** `config/application.rb:73`. Every core controller lists what it needs (`helper :journals`,
+`helper :projects`, …) and this plugin's own `ReporterPreflightController` does too — which reads
+as boilerplate until a view calls a helper from a different controller and 500s in production.
+T-23's views used `reporter_dashboard_icon` (the D-3 `sprite_icon` shim, which lives in
+`ReporterProjectPagesHelper`) and were fine in every controller test that had not been re-run,
+because a controller test renders with the same helper set. **The integration test found it.** If
+a view uses a helper the controller does not own, declare it.
+
+**A `formmethod="post"` SUBMIT DOES NOT REMOVE THE FORM'S HIDDEN `_method`, and `Rack::MethodOverride`
+reads the body.** A Rails form with `method: :patch` is a POST carrying `<input type="hidden"
+name="_method" value="patch">`. A second submit button with `formaction`/`formmethod: 'post'`
+changes the HTTP verb of the request and leaves that field where it is, so the middleware rewrites
+`REQUEST_METHOD` back to PATCH before routing and a POST-only route 404s — for every user, every
+time. T-23's Preview button did exactly this. **No `ActionController::TestCase` can see it**:
+`post :preview` calls the action directly and never renders the form, sends its hidden fields or
+passes through middleware. Route both verbs, and test a two-button form at the INTEGRATION level.
+
 **A CONSTANT ASSIGNED INSIDE AN `RSpec.describe` BLOCK IS A GLOBAL, and the collision passes in
 isolation.** The block is a closure whose lexical scope is the file's top level, so
 `FIXTURES = File.join(__dir__, 'fixtures')` inside `describe` defines **`Object::FIXTURES`** for the
@@ -479,6 +497,8 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-22 + T-36: the schema and the rollback — THE FULL-APPLICATION SUITE, LOCALLY** | **yes (2026-08-07), and this is the first session to run it** | A real Redmine 6.1.3 checkout was obtainable after all (see §3): `rake redmine:plugins:migrate` in both directions, `rails runner` against a booted app, and **`rake redmine:plugins:test` — 258 runs, 1565 assertions, 0 failures, 0 errors, 4 skips**. That run is what found **§Findings E-21**: two of T-33's tests had been erroring since they were written, because the class calls `l(...)` without `Redmine::I18n`, so `test_the_partial_uses_locale_keys_and_not_hardcoded_english` had never asserted anything |
 | **T-22 + T-36: gate G11, up → VERSION=0 → up → reinstall** | **yes, locally (2026-08-07), Rails 7.2 / PostgreSQL 16 ONLY** | `script/migrate_updown.sh`, both arms. **NEGATIVE-TESTED with five plants**: a non-unique occurrence index, a down that leaves its table behind, a 001 whose down DROPS `reporter_project_tabs` (both arms catch it), a leftover plugin table poisoning the baseline, and a residue whose NAME merely contains `reporter_project_tabs`. **5.1, 6.0 and 7.0 are the `migrate-updown` CI job's to answer and have never been run** — INV-7 applies to this exactly as much as to an engine |
 | **T-22 + T-36: DB-less** | **yes, locally (2026-08-07)** | **1996 rspec examples, 0 failures, 116 pending** (was 1933/0/116 — **skip count unchanged**). All eight gates green, `layer_purity` strict included, `zero_reporter` still **16/16**. The new gate's eight rules each have a committed fixture that fires them, and **eight of those fixtures are bypasses an independent review walked through** while the first reader reported nothing |
+| **T-23: template CRUD, preview and the permission promotion — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07)** | `rake redmine:plugins:test` — **340 runs, 1810 assertions, 0 failures, 0 errors, 4 skips** (was 258/4 at T-22, 260/4 at the start of this session; the skip count has not moved). 58 functional, 19 unit and 3 integration runs are new. **2042 DB-less rspec, 0 failures, 75 pending**; `spec/golden` 166 examples 0 pending from the PLUGIN CHECKOUT (G7); all eight gates green with `LAYER_PURITY_MODE=strict`, `zero_reporter` still **16/16**; `script/migrate_updown.sh` green on both arms. **The functional suite is the only thing that can prove a controller guards anything**, and it is where every authorization assertion in T-23 lives |
+| **T-23: the layer_purity `reporting` arm** | **yes, locally (2026-08-07), negative-tested in four directions** | A planted `Net::HTTP`, a planted `cookies` and a trailing comment on a CODE line each fail it; a whole-line comment naming `Net::HTTP`, `Faraday` and `cookies` does not. The composition root may name BOTH layers — that is what it is for — and may not hold the network or read request state |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -699,6 +719,56 @@ of a CI that runs on fork pull requests.
    `Liquid::Filters::Escaping` keeps the constants as aliases. Two copies of a
    security-bearing escaper was the alternative, and the copy that drifts is always the one
    without a test.
+
+19. **T-23 is done — the first owned HTTP entry point, and the first producer for four
+   layers.** `app/controllers/reporter_dashboards/templates_controller.rb`,
+   `lib/redmine_reporter_dashboards/reporting/`, five views, `Template`'s visibility and
+   ownership, `patches/role_patch.rb`, and five permissions promoted. Six things a later
+   session should know, and the first two will cost real time if they are not known.
+
+   **THE REPORT BODY IS NEVER MARKUP IN THE VIEWER'S PAGE, and reverting that is a privilege
+   escalation rather than a simplification.** It goes into an `srcdoc` ATTRIBUTE inside
+   `sandbox="allow-scripts"` with no `allow-same-origin` (§4's opaque origin, INV-9's third
+   mechanism). The review of T-23 refused the first version for inlining it, and the escalation is
+   one sentence: an ordinary member holding `edit_own_…` writes a `<script>` and the next
+   administrator to open the report runs it in their own session. `reporter_report_frame` carries
+   the whole argument, and the deviation from §4's wording (the CSP is a `<meta>`, because a
+   preview has no URL to put a header on) is **reported and open** — §Findings E-22.
+
+   **`authorize` IS NECESSARY AND NOT SUFFICIENT ON THIS CONTROLLER.** Redmine's `authorize`
+   passes on ANY permission mapping the action, so `manage_public_…` — which MUST map `#create`,
+   because that is where the visibility decision is made, and it is core's own shape for
+   `manage_public_queries` — would reach a code-execution endpoint on its own. Four second guards
+   close that and the two things the permission model cannot say at all: "import needs `add_…`
+   **and** `edit_…`" is a conjunction, and "own" is a property of the RECORD. Do not delete a
+   `require_*_permission` because `authorize` is already there.
+
+   **THE NAME `require_add_permission` IS TAKEN AND MUST NOT BE USED.** `permission_map_spec.rb`
+   asserts no file under `app/`, `lib/`, `db/` or `init.rb` mentions Redmine's role-granting API,
+   and that method name contains it as a substring. It is `require_create_permission` for that
+   reason and the controller says so; renaming it back turns a security check red for a reason
+   that looks nothing like the name.
+
+   **`Template.visible` IS HAND-WRITTEN SQL AND IT RAN ON POSTGRESQL ONLY.** Finding S-9's shape
+   exactly: it lives in the `minitest` job, which is one engine. It was ALSO two clauses short of
+   core's roles arm on its first version — no `projects` join, no
+   `templates.project_id = m.project_id` — which let a role held in ANOTHER project satisfy a
+   ROLES-visible template here. Re-diff it against `redmine/app/models/query.rb:377` if you touch
+   it, and disbelieve any comment claiming it matches core.
+
+   **A SCOPE AND A PREDICATE ANSWERING ONE QUESTION WILL DRIFT, and the matrix is what catches
+   it.** `test_the_scope_and_the_predicate_agree_for_every_actor_and_every_template` found two
+   real disagreements on its first two runs — an administrator, then Anonymous — and both were in
+   the code rather than the test. **But a matrix is only as good as its actors**: the version that
+   missed the cross-project leak had a role granted to nobody, so both sides said "no" for the
+   wrong reason. When you add a row, ask what would still pass if the rule were deleted.
+
+   **WHAT IS DELIBERATELY NOT BUILT.** A per-record export of more than one document is refused
+   with a **501** — the zip is E-6's third owed bullet and belongs to whoever builds streamed
+   archives. `source: time_entries` is refused with a message naming **T-31**; the column accepts
+   it, the picker does not offer it, and nothing reports time entries against the issue scope. And
+   a per-record PREVIEW draws exactly ONE document (`PREVIEW_MAX_DOCUMENTS`), because fifty
+   synchronous PDF renders is a worker any member can hold for five minutes.
 
 18. **T-40 is done — the permission model, and `[OQ-F]` is CLOSED because the SETTING is gone.**
    `lib/redmine_reporter_dashboards/permissions.rb`, `spec/permissions/permission_map_spec.rb` and

@@ -116,27 +116,64 @@ module RedmineReporterDashboards
                         duration_ms: (monotonic_ms - started).round)
       end
 
-      private
+      # PUBLIC SINCE T-23, AND THE REASON IS THE HALF OF THE PIPELINE THIS CLASS CANNOT
+      # SEE.
+      #
+      # `render_all` still calls it, so the guarantee above is unchanged: the check
+      # happens before the iteration and the iteration is in here. What changed is that
+      # the first caller turned out to have expensive work of its OWN in front of the
+      # renderer — a per-record report renders one Liquid template per issue before there
+      # is a `DocumentRequest` to hand over, and rendering 4 000 Liquid bodies and then
+      # refusing to draw them is the same defect as drawing 200 PDFs before refusing.
+      # `technical-spec.md` §7's phrasing covers both: *"a refusal that first renders 200
+      # PDFs is not a refusal"*.
+      #
+      # So a caller with its own pipeline asks FIRST and refuses, and then hands what
+      # survives to `render_all`, which asks again. Asking twice is free and costs one
+      # `Array#length`; not being able to ask at all cost the caller its own cap.
+      #
+      # NO `Array(list)`. It looks defensive and is not: `Array(struct)` calls `to_a` and
+      # expands a Struct into its MEMBERS, so a caller passing one `DocumentRequest`-shaped
+      # value object would get a length equal to its field count instead of 1 — a cap that
+      # refuses a single document. A non-Array argument should fail loudly here.
+      def cap_refusal(list)
+        cap_refusal_for_count(list.length, correlation_id: correlation_id_for(list))
+      end
 
+      # THE SAME CHECK, ASKED WITHOUT THE LIST, and the difference is not cosmetic.
+      #
+      # A caller whose documents are produced one per database row can only build the
+      # list by loading every row — so `cap_refusal(list)` would refuse a batch of 40 000
+      # only after 40 000 records were in memory. The cap exists to stop work, and
+      # materialising the collection IS work. A `COUNT(*)` answers the same question for
+      # the price of one query.
       # AT the cap is allowed; one past it is not. Written as `>` rather than `>=` on
       # purpose, and tested at both — an off-by-one here is the difference between a
       # documented cap of 50 and a real cap of 49, and the person who finds that out is
       # a user whose export of exactly 50 reports stopped working.
-      def cap_refusal(list)
-        return nil unless list.length > max_documents
+      def cap_refusal_for_count(count, correlation_id: 'batch')
+        count = Integer(count)
+        return nil unless count > max_documents
 
-        warn_line("[render] refusing a batch of #{list.length}; the cap is #{max_documents}")
+        # THE ID IS IN THE LOG LINE TOO. FR-58's property is that the id in the
+        # diagnostics panel is the id in the log line, and the first version of this
+        # method logged neither — so the panel showed the literal word "batch" and there
+        # was nothing to correlate it with anyway.
+        warn_line("[render] refusing a batch of #{count}; the cap is #{max_documents} " \
+                  "(correlation_id=#{correlation_id})")
         Failure.new(
           code: :resource_limit,
           # NAMES BOTH NUMBERS. "Too many documents" tells a user nothing they can act
           # on; "you asked for 84 and the limit is 50" tells them to select fewer, and
           # tells their administrator what to raise.
-          message: "this export asks for #{list.length} documents and the limit is " \
+          message: "this export asks for #{count} documents and the limit is " \
                    "#{max_documents}; select fewer, or ask an administrator to raise the limit",
-          detail: "requested=#{list.length} max_documents=#{max_documents}",
-          correlation_id: correlation_id_for(list)
+          detail: "requested=#{count} max_documents=#{max_documents}",
+          correlation_id: correlation_id
         )
       end
+
+      private
 
       def deadline_refusals(remaining, rendered, total)
         remaining.map do |request|

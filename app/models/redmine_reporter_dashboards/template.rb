@@ -38,14 +38,22 @@ module RedmineReporterDashboards
     # Redmine's own three values and integers, from `app/models/query.rb:259-261`, so an
     # administrator meets ONE concept rather than two (technical-spec.md:617-618).
     #
-    # NOTE for whoever writes the labels in T-23: the specs call the third value
-    # "project", Redmine calls it PUBLIC and labels it "to any users"
-    # (`config/locales/en.yml:1076`). The integer and the semantics are core's; only the
-    # spec's prose differs, and the PR reports that.
+    # **Finding S-4, settled by T-23.** The specs called the third value "project"; core
+    # calls it PUBLIC and labels it *"to any users"* (`config/locales/en.yml:1076`). The
+    # integer and the semantics were always core's — only the prose differed — and the
+    # prose is now corrected in both documents. The labels this plugin shows are core's
+    # own three keys (`label_visibility_private` / `_roles` / `_public`), so an
+    # administrator reads the identical words on the template form and on the saved-query
+    # form, already translated in every locale Redmine ships.
     VISIBILITY_PRIVATE = 0
     VISIBILITY_ROLES   = 1
     VISIBILITY_PUBLIC  = 2
     VISIBILITIES = [VISIBILITY_PRIVATE, VISIBILITY_ROLES, VISIBILITY_PUBLIC].freeze
+
+    # The permission that lets somebody see a template at all. Named once: it is used by
+    # the scope, by `#visible?`, and by `Project.allowed_to_condition`, and three
+    # spellings of one permission name is three chances to guard nothing.
+    VIEW_PERMISSION = :view_reporter_dashboards_reports
 
     # The two axes reporter's single `type` conflated — see migration 002's comment.
     SOURCES     = %w[issues time_entries].freeze
@@ -143,6 +151,181 @@ module RedmineReporterDashboards
 
     def visibility_public?
       visibility == VISIBILITY_PUBLIC
+    end
+
+    # ------------------------------------------------------------------------------
+    # VISIBILITY — T-23. Core's shape, deliberately, down to the SQL.
+    #
+    # --- WHY THE ACTOR IS A REQUIRED ARGUMENT AND NOT `User.current` ---
+    #
+    # `Query.visible(*args)` defaults to `User.current` (`app/models/query.rb:384`) and
+    # this one refuses to. INV-1 is the invariant this project loses most easily, and a
+    # default argument is exactly how: a caller that forgets gets a plausible answer for
+    # whoever happens to be logged in, which in a scheduled run at 06:00 is the Anonymous
+    # user and in a preview is the author. A missing argument here is an ArgumentError at
+    # the call site instead.
+    #
+    # --- WHY THE SQL IS COPIED RATHER THAN IMPROVED ---
+    #
+    # HANDOVER §1 records that MySQL 8 evaluates `projects.<col> IN (SELECT …)` inside a
+    # LEFT JOIN's ON clause as TRUE (finding E-1) — an entitlement check written that way
+    # passes for everyone, on that engine only. The rule that came out of it is: copy
+    # Redmine's shape rather than inventing an equivalent one.
+    #
+    # This is `Query.visible`'s body (`redmine/app/models/query.rb:377`) with the view
+    # permission and the join table substituted, and **one deliberate divergence in the
+    # admin arm**, argued where it happens. The first version of this comment claimed
+    # "and nothing else" while the roles arm was in fact two clauses short of core's —
+    # a false statement about a security-bearing query is worse than no comment, because
+    # it is what the next reader checks instead of the SQL. If you change this method,
+    # re-diff it against core and re-write this paragraph.
+    #
+    # **NOT COVERED BY ANY MySQL OR MariaDB RUN** — finding S-9's shape exactly. This is
+    # hand-written SQL with an EXISTS subquery and it executes only in the `minitest` job,
+    # which is PostgreSQL only. Recorded rather than implied.
+    def self.visible(user)
+      raise ArgumentError, 'Template.visible needs an actor (INV-1)' if user.nil?
+
+      base = Project.allowed_to_condition(user, VIEW_PERMISSION)
+      scope = joins("LEFT OUTER JOIN #{Project.table_name} ON " \
+                    "#{table_name}.project_id = #{Project.table_name}.id")
+              .where("#{table_name}.project_id IS NULL OR (#{base})")
+
+      if user.admin?
+        # THE ONE PLACE THIS DELIBERATELY DIVERGES FROM `Query.visible`, and the
+        # divergence was found by a test rather than chosen in the abstract.
+        #
+        # Core's admin arm is `visibility <> PRIVATE OR user_id = ?`, so an administrator's
+        # query LIST hides other people's private queries while `Query#visible?` answers
+        # `true if user.admin?` for the same row. The two disagree, and core can afford it
+        # because a saved query is cheap to reach another way.
+        #
+        # Here they must not, because `#editable_by?` also answers `true` for an
+        # administrator: with core's arm an admin could edit and DELETE a template that
+        # their own index does not list and whose page 404s. A list that hides rows the
+        # same person may destroy is a worse surprise than a longer list, so an
+        # administrator sees every template in the project — which is what the predicate,
+        # the editability rule and Redmine's own "admin bypasses permissions" all already
+        # say.
+        scope
+      elsif user.memberships.any?
+        # ALL FOUR LINES OF CORE'S EXISTS SUBQUERY, and the two that were missing were a
+        # cross-project leak. The independent review of T-23 found it, and it is worth
+        # writing down because the shape is so plausible:
+        #
+        #   the `projects` join       an ARCHIVED project's roles stop counting
+        #   `templates.project_id
+        #    = m.project_id`          the membership that satisfies the role must be a
+        #                             membership OF THIS TEMPLATE'S PROJECT
+        #
+        # Without the second line, a user who is a Manager in an unrelated project B and
+        # merely a Reporter in project A satisfied a ROLES-visible template in A that
+        # named Manager — the `EXISTS` matched through their membership in B. `#visible?`
+        # asks `roles_for_project(project)` and correctly said no, so the index listed a
+        # template whose page then 404'd: a disclosure AND the scope/predicate divergence
+        # the matrix test exists to prevent.
+        scope.where(
+          "#{table_name}.visibility = ?" \
+          " OR (#{table_name}.visibility = ? AND EXISTS (SELECT 1" \
+          " FROM reporter_dashboards_templates_roles tr" \
+          " INNER JOIN #{MemberRole.table_name} mr ON mr.role_id = tr.role_id" \
+          " INNER JOIN #{Member.table_name} m ON m.id = mr.member_id AND m.user_id = ?" \
+          " INNER JOIN #{Project.table_name} p ON p.id = m.project_id AND p.status <> ?" \
+          " WHERE tr.template_id = #{table_name}.id" \
+          " AND (#{table_name}.project_id IS NULL" \
+          " OR #{table_name}.project_id = m.project_id)))" \
+          " OR #{table_name}.author_id = ?",
+          VISIBILITY_PUBLIC, VISIBILITY_ROLES, user.id, Project::STATUS_ARCHIVED, user.id
+        )
+      elsif user.logged?
+        scope.where("#{table_name}.visibility = ? OR #{table_name}.author_id = ?",
+                    VISIBILITY_PUBLIC, user.id)
+      else
+        # ANONYMOUS HAS NO `author_id` TO MATCH, and writing one would be a hole rather
+        # than a shortcut: `User.anonymous.id` is a real row id, so a template authored
+        # by the anonymous user — which nothing can create, but a database restore or a
+        # user deletion could produce — would become visible to every unauthenticated
+        # visitor. Public only.
+        scope.where("#{table_name}.visibility = ?", VISIBILITY_PUBLIC)
+      end
+    end
+
+    # The per-record answer. Not derived from the scope, and the duplication is core's
+    # too (`Query#visible?`, `app/models/query.rb:412`): a scope answers "which rows may
+    # this actor see" in SQL and this answers "may this actor see THIS row" in Ruby, and
+    # a controller holding one record must not have to run a query to find out.
+    #
+    # A test asserts the two agree over a fixed matrix of actors and templates, because
+    # two implementations of one rule is exactly the shape that drifts.
+    def visible?(user)
+      return false if user.nil?
+      return true if user.admin?
+      return false unless project.nil? || user.allowed_to?(VIEW_PERMISSION, project)
+
+      case visibility
+      when VISIBILITY_PUBLIC
+        true
+      when VISIBILITY_ROLES
+        # `user.roles_for_project` answers the built-in Non-member / Anonymous role for a
+        # non-member, so this is not "any role" — it is the roles this user actually holds
+        # here, intersected with the ones the author named.
+        project ? user.roles_for_project(project).intersect?(roles) : false
+      else
+        # `authored_by?` AND NOT `author_id == user.id`, because the second one matches
+        # for the ANONYMOUS user. `User.anonymous` is a real row with a real id, so a
+        # template whose `author_id` happens to be it — nothing can create one, but a
+        # database restore or a user deletion can produce one — would become visible to
+        # every unauthenticated visitor. The scope's anonymous arm never matched on
+        # authorship; this one did, and the two disagreeing is what the agreement matrix
+        # caught.
+        authored_by?(user)
+      end
+    end
+
+    # --- EDITING: TWO PERMISSIONS, AND THE SECOND ONE IS THE INTERESTING ONE ---
+    #
+    # `edit_reporter_dashboards_templates` edits anything in the project.
+    # `edit_own_reporter_dashboards_templates` edits what you authored, and "own" is
+    # `author_id`, never "a template you can see" or "a private template". A template
+    # somebody else authored and made public is emphatically not yours to rewrite —
+    # rewriting it changes code that runs server-side under everyone else's report.
+    #
+    # `authored_by?` is separate from the permission test so the functional suite can
+    # assert the case that looks right until it is tried: a holder of `edit_own_…`
+    # against a template with a different author.
+    def authored_by?(user)
+      !user.nil? && user.logged? && author_id == user.id
+    end
+
+    def editable_by?(user)
+      return false if user.nil?
+      return true if user.admin?
+      # A template with no project is admin-only by construction: Redmine has no role
+      # grant outside a project, so there is nothing to check a permission against
+      # (technical-spec.md §4.1, "Deliberately not permissions").
+      return false if project.nil?
+
+      return true if user.allowed_to?(:edit_reporter_dashboards_templates, project)
+
+      authored_by?(user) &&
+        user.allowed_to?(:edit_own_reporter_dashboards_templates, project)
+    end
+
+    # Deleting is the same grant as editing — §4.1's rows say "Edit **and delete**" for
+    # both. An alias would hide that this is a decision; a method saying so does not.
+    def deletable_by?(user)
+      editable_by?(user)
+    end
+
+    # Whether this actor may give the template a visibility wider than themselves. The
+    # same question `manage_public_queries` answers for a saved query, and the reason the
+    # column exists at all (§4.1, row 9).
+    def visibility_editable_by?(user)
+      return false if user.nil?
+      return true if user.admin?
+      return false if project.nil?
+
+      user.allowed_to?(:manage_public_reporter_dashboards_templates, project)
     end
 
     # Whether the running database actually has the column. §7 rule 5: a user who rolls

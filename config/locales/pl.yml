@@ -86,3 +86,55 @@ pl:
   field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Data wystąpienia"
   field_redmine_reporter_dashboards_schedule_recipient_schedule: "Harmonogram"
   field_redmine_reporter_dashboards_document_expires_at: "Wygasa"
+
+# T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
+# left PLANNED. `permission_*` and `project_module_*` are read by
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# missing one - an absent key falls back to English silently, which reads as a bug to a
+# reader in another language and hides the gap from review (CLAUDE.md SS10).
+#
+# The three visibility LABELS are deliberately not here: they are Redmine's own
+# `label_visibility_private` / `_roles` / `_public`, already translated in every locale
+# core ships, so an administrator meets one concept rather than two (finding S-4).
+  project_module_reporter_dashboards_reports: "Raporty"
+  permission_view_reporter_dashboards_reports: "Przeglądanie szablonów raportów i dokumentów"
+  permission_add_reporter_dashboards_templates: "Tworzenie szablonów raportów (uruchamia kod po stronie serwera)"
+  permission_edit_own_reporter_dashboards_templates: "Edycja i usuwanie własnych szablonów raportów (uruchamia kod po stronie serwera)"
+  permission_edit_reporter_dashboards_templates: "Edycja i usuwanie dowolnych szablonów raportów (uruchamia kod po stronie serwera)"
+  permission_manage_public_reporter_dashboards_templates: "Zarządzanie publicznymi szablonami raportów (uruchamia kod po stronie serwera)"
+  field_redmine_reporter_dashboards_template_enabled: "Włączony"
+  label_reporter_template: "Szablon raportu"
+  label_reporter_template_plural: "Szablony raportów"
+  label_reporter_template_new: "Nowy szablon raportu"
+  label_reporter_template_output_per_record: "Jeden dokument na zagadnienie"
+  label_reporter_template_output_combined: "Jeden dokument dla całego zbioru"
+  label_reporter_template_orientation_portrait: "Pionowa"
+  label_reporter_template_orientation_landscape: "Pozioma"
+  label_reporter_template_disabled: "Wyłączony"
+  label_reporter_template_download_pdf: "Pobierz jako PDF"
+  label_reporter_template_export: "Eksportuj"
+  label_reporter_template_import: "Importuj szablon raportu"
+  label_reporter_template_import_file: "Plik szablonu"
+  label_reporter_preview_pdf: "Podgląd PDF"
+  label_reporter_preview_html: "Podgląd HTML"
+  label_reporter_preview_degradations: "Silnik zgłosił następujące ograniczenia"
+  label_reporter_report_failed_template: "Nie udało się wyrenderować tego szablonu"
+  label_reporter_report_failed_engine: "Silnik renderujący nie zdołał utworzyć tego dokumentu"
+  label_reporter_report_refused: "Ten eksport został odrzucony"
+  label_reporter_report_frame: "Wynik raportu"
+  label_reporter_report_diagnostic_code: "Kod"
+  label_reporter_report_diagnostic_line: "Wiersz"
+  label_reporter_report_diagnostic_correlation_id: "Identyfikator korelacji"
+  button_reporter_template_import: "Importuj"
+  text_reporter_template_output_info: "Jeden dokument na zagadnienie tworzy osobny PDF dla każdego zagadnienia w zakresie; jeden dokument dla całego zbioru tworzy pojedynczy PDF."
+  text_reporter_template_margins_info: "Marginesy górny, prawy, dolny i lewy w milimetrach, oddzielone przecinkami — na przykład 20,15,20,15. Pozostaw puste, aby użyć wartości domyślnej."
+  text_reporter_template_content_executes: "Szablon raportu jest wykonywany na serwerze. Kto może go edytować, może uruchomić kod z uprawnieniami aplikacji."
+  text_reporter_template_visibility_private_only: "Tylko osoba z uprawnieniem \"Zarządzanie publicznymi szablonami raportów\" może udostępnić szablon szerzej, więc ten pozostaje widoczny tylko dla Ciebie."
+  text_reporter_template_import_info: "Plik JSON wyeksportowany z tej wtyczki albo szablon YAML wyeksportowany z wtyczki Reporter. Zaimportowany szablon jest na początku zawsze prywatny."
+  text_reporter_template_per_record_html: "Ten szablon tworzy jeden dokument na zagadnienie, dlatego poniżej pokazano wszystkie %{count} jeden po drugim. Pobranie PDF wymaga archiwum, którego ta wersja jeszcze nie potrafi utworzyć."
+  text_reporter_preview_bounded: "Podgląd %{shown} z %{total} zagadnień"
+  text_reporter_preview_pdf_ok: "Wyrenderowano przez %{engine} w %{duration} ms."
+  text_reporter_preview_no_html: "Ten szablon nie utworzył żadnych danych wyjściowych."
+  text_reporter_template_no_issues: "Ten raport nie obejmuje żadnych zagadnień, więc nie utworzył dokumentu. Poszerz wybór zagadnień lub wybierz inne zapisane zapytanie."
+  error_reporter_template_import_no_file: "Wybierz plik do zaimportowania."
+  error_reporter_template_archive_not_available: "Ten eksport tworzy %{count} dokumentów, a ta wersja nie potrafi dostarczyć kilku jako jednego archiwum. Wybierz szablon tworzący pojedynczy dokument lub zawęż wybór zagadnień."

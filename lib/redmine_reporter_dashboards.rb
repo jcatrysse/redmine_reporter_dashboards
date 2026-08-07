@@ -41,6 +41,14 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/wk
 # render layer, nothing calls it yet: T-23 onward build the producer that does.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/assets'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/asset_binding'
+
+# T-23 — the composition root, required at boot for the same reason `render/` is: a
+# LoadError has to surface on the branch that broke it rather than on the first request
+# that happens to reach a controller. Zeitwerk would resolve these lazily (Redmine puts a
+# plugin's lib on the main loader), and lazily is precisely when nobody is watching.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/diagnostic'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/exchange'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards
@@ -48,6 +56,7 @@ module RedmineReporterDashboards
   # Loaded from after_plugins_loaded so the target classes are present.
   PATCH_FILES = %w[
     redmine_reporter_dashboards/patches/project_patch
+    redmine_reporter_dashboards/patches/role_patch
   ].freeze
 
   # Patches that touch redmine_reporter's own classes. Split out from PATCH_FILES

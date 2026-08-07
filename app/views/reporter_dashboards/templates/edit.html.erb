@@ -1,0 +1,32 @@
+<div class="contextual">
+  <%= link_to reporter_dashboard_icon('download', l(:label_reporter_template_export)),
+              export_project_reporter_template_path(@project, @template),
+              class: 'icon icon-download' %>
+</div>
+
+<h2><%= l(:label_reporter_template) %>: <%= @template.name %></h2>
+
+<%= labelled_form_for :template, @template,
+                      url: project_reporter_template_path(@project, @template),
+                      html: { method: :patch, id: 'reporter-template-form' } do |f| %>
+  <%= render partial: 'form', locals: { f: f } %>
+  <p>
+    <%= submit_tag l(:button_save) %>
+    <%#
+      PREVIEW IS A SEPARATE SUBMIT ON THE SAME FORM, so it carries the editor's unsaved
+      content — which is the only thing that makes it a preview rather than a second way
+      of opening the report.
+
+      `formmethod: 'post'` changes the HTTP verb and NOT the form body, and this form's
+      body contains Rails' hidden `_method=patch`. `Rack::MethodOverride` reads that field
+      and rewrites the request to PATCH before it reaches the router, so the preview route
+      accepts both verbs — see the comment on it in `config/routes.rb`. Getting this wrong
+      is a 404 on every press, which is what the first version of this did.
+    %>
+    <%= submit_tag l(:label_preview),
+                   name: 'preview',
+                   formaction: preview_project_reporter_template_path(@project, @template),
+                   formmethod: 'post' %>
+    <%= link_to l(:button_cancel), project_reporter_templates_path(@project) %>
+  </p>
+<% end %>
