@@ -403,6 +403,25 @@ Auckland → America/Los_Angeles between two ticks one UTC hour apart produced r
 both 10 and 11 March and walked `last_run_on` backwards, which also drops the catch-up
 floor. A uniqueness constraint is only as strong as the stability of the value it is on.
 
+**A DIAGNOSTIC BUILT ON A COLUMN THE HAPPY PATH DOES NOT WRITE IS RED ON A HEALTHY
+INSTALL.** T-25's FR-44 heartbeat asked `last_attempted_at IS NULL` to mean "no tick has
+run". The runner writes that column only when it CLAIMS an occurrence — a monthly schedule
+is claimable one day in thirty — so a correctly configured installation printed *"it looks
+like nothing is calling it"* every morning for a month, and `schedules:status` exited 1 the
+whole time. Caught as a BLOCKER by an independent review, measured over four consecutive
+daily ticks. Before deriving a health signal from a column, ask which code paths write it
+and how often; the right column here was `next_run_on`, which every tick refreshes whether
+it delivers or not. And when the derivation has known blind spots, enumerate them as
+conditions rather than describing them in a comment: this one needed three, and each removes
+a false positive that was measured.
+
+**AN OPTIONAL LOG LINE IS A RESCUE PATH.** The same review found `warn_line` raising
+(`Errno::EPIPE` from a closed pipe, `ENOSPC` from a full log volume) escaping a rescue
+clause and embargoing every later schedule. That is the second time in one task the pattern
+bit: **anything a rescue body calls is part of the rescue's correctness**, including
+logging, including a second rescue's own logging. The fix is one non-throwing choke point,
+not six `begin`s.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
@@ -561,6 +580,8 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-25 (parts 1 and 2): the scheduler's arithmetic and its runner — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07), and these are the POST-REVIEW figures** | `rake redmine:plugins:test` — **390 runs, 2042 assertions, 0 failures, 0 errors, 4 skips** (was 340/0/0/4 — **skip count unchanged**). 36 new Minitest examples driving the tick against a real database, because every claim the runner makes is about a WRITE: that the unique index refuses a second claim, that `update_columns` leaves an untouched column alone, that a run row stops saying `running`. A double cannot fail an index. DB-less: **2123 rspec examples, 0 failures, 126 pending** (was 2042). Nine gates green including `layer_purity` strict, G11 both arms, `zero_reporter` still 16/16, and the 2.7 floor |
 | **T-25: every guard in the runner, negative-tested one at a time — TWICE, before and after an independent review** | **yes, locally (2026-08-07)** | Each guard removed in the mirrored copy, the one test that names it re-run, and confirmed RED: the at-most-once claim, the delivery contract (a port answering `nil` must not read as a success), `last_run_on` not advancing on a failure, the guarded recording of a failure (an exception in a rescue clause is not caught by that clause — FR-41 violated by the code written for it), the bounded error text, the schedule's own timezone, draft-versus-failure, S-7's `update_columns` in three mutations, and rule 5's column filtering in two. **Three of the first ten were GREEN under mutation and the examples were rewritten** — see the §1 traps. A fresh-subagent review then REJECTED the result with one blocker and five majors, every one backed by a probe it ran; the eight fixes were negative-tested the same way (14 mutations, 13 red) and the one that stayed green — a `[date, last_run_on].max` that `#regressed?` makes provably unreachable — was DELETED rather than kept as a second mechanism for one property. Two clauses survive as documented redundancy rather than load-bearing guards: `logged?` in the render identity (`AnonymousUser`'s status already fails `active?`) and nothing else |
 | **T-25: the layer_purity `scheduling` arm** | **yes, locally (2026-08-07)** | Same pattern as the `reporting` arm and the same forbidden set. The scheduler runs from a rake task with no request behind it, so a cookie or a session there is not a leak across a boundary but a value that cannot exist |
+| **T-25 (part 3): the delivery, the mailer, the rake task and FR-44 — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07), POST-REVIEW figures** | `rake redmine:plugins:test` — **451 runs, 2256 assertions, 0 failures, 0 errors, 4 skips** (was 390/0/0/4 before T-25 part 2 — **skip count unchanged throughout**). DB-less unchanged at **2123 examples, 0 failures, 126 pending** — the delivery is application layer and has no DB-less half. Nine gates green, `layer_purity` strict, locale parity **129 keys x 9 files** with identical interpolation placeholders in every language |
+| **T-25 part 3's independent review: a second REJECT, 1 blocker + 5 majors + 6 minors + 3 nits, every one probe-backed** | **yes, locally (2026-08-07)** | The blocker was the heartbeat crying wolf on a healthy install (see §1). The majors: the owner's failure notice quoted a correlation id that existed nowhere else (`ReportRun` mints its own per document — run row `3a8cd94c…`, owner mail `23688ef7…`); **no owner notice at all** for the three failures that happen BEFORE `delivery.call`, of which a locked render identity is the likeliest in production, while the README said otherwise; an empty per-record report mailed as a success **with no attachment**; `#as`'s `ensure` unenforced (deleting it left the suite green); and the query-count bound set to the pre-change value, so it could not detect the regression it was written for. All 15 fixed and **16 mutations run, 16 red** — two examples were rewritten after mutation showed them vacuous. A test written for a MINOR then found an unlisted defect: a dangling `template_id` was a `NoMethodError` on nil rather than a failure |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -885,6 +906,22 @@ of a CI that runs on fork pull requests.
    back one minor while keeping the DATA and every newer policy reverts. Close the set the
    way `Occurrences` closes the repeat rule. The same shape is worth checking anywhere a
    stored string selects behaviour.
+
+   **T-25 IS NOW THREE PARTS AND ONLY THE UI IS LEFT.** Part 3 added
+   `reporting/scheduled_delivery.rb` (render + mail), `ReporterDashboardsMailer`,
+   `scheduling/{heartbeat,run_command}.rb`, two rake tasks and 7 keys x 9 locales. Four
+   things to know. **The delivery lives in `reporting/` and moving it would fail the
+   gate** — `scheduling/` may not name Render or Liquid, which is only true because the
+   composition root does the rendering. **`User.current` is deliberately set around the
+   render**, because `IssueQuery#statement` reads it and there is no argument to pass
+   instead; a rake task runs as Anonymous, so without it a saved query resolves to nothing
+   and the report is empty rather than wrong. **The runner has TWO ports now** — `delivery:`
+   and `notify:` — because three failures (locked identity, unknown policy, unknown repeat)
+   raise before the delivery is reached, and FR-43's owner notice lives behind the delivery.
+   `Delivered#reported?` stops one failure producing two mails. **An empty per-record run
+   sends nothing and is not a failure**: zero is the good outcome for "my overdue issues"
+   and a breakage for a weekly status report, the plugin cannot tell which, so the run row
+   records `document_count: 0` and nobody is paged.
 
    **S-7's OBLIGATION IS PAID, AND READING THE ROW BACK CANNOT PROVE IT.** See the three new §1
    traps. The run state goes through `update_columns`; the example that establishes it subscribes to

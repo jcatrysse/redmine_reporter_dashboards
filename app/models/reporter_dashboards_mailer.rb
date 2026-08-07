@@ -16,7 +16,11 @@
 #     text: "a report over any issue in the instance, mailed anywhere, with a forged
 #     sender". THE SENDER IS SERVER-CONTROLLED HERE BECAUSE THERE IS NO CODE PATH THAT
 #     COULD SET IT — not because a validation rejects one.
-#   * It honours `no_self_notified` and `Setting.plain_text_mail?`.
+#   * It honours `Setting.plain_text_mail?`. It does NOT honour `no_self_notified`, and
+#     that is deliberate rather than inherited: Redmine gates that branch on `@author`,
+#     which this mailer never sets, because a scheduled report has no author-of-the-action
+#     — the schedule's owner is a legitimate recipient of their own schedule and should not
+#     be silently dropped from a list they put themselves on.
 #   * `.deliver_mail` refuses a message with no recipient rather than raising deep inside
 #     the delivery stack.
 #
@@ -45,7 +49,10 @@ class ReporterDashboardsMailer < Mailer
 
     @user = user
     @schedule = schedule
-    @template_name = schedule.template&.name
+    # `report_name`, not the bare association: with a dangling `template_id` the subject
+    # fell back to "Scheduled report" while the body read "Here is the  report for …".
+    # Two fallbacks for one value is one too many.
+    @template_name = report_name(schedule)
     @occurrence_date = occurrence_date
     @rendered_as = rendered_as
     @correlation_id = correlation_id
@@ -70,7 +77,7 @@ class ReporterDashboardsMailer < Mailer
 
     @user = user
     @schedule = schedule
-    @template_name = schedule.template&.name
+    @template_name = report_name(schedule)
     @occurrence_date = occurrence_date
     @diagnostic = diagnostic
     @project = schedule.project

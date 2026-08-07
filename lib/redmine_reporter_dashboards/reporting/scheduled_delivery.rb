@@ -75,11 +75,71 @@ module RedmineReporterDashboards
                                 no_recipients_diagnostic(correlation_id), [])
         end
 
+        if schedule.template.nil?
+          # A SCHEDULE WHOSE TEMPLATE IS GONE, which crashes rather than failing without
+          # this guard: `ReportRun#call` opens with `template.source` and gets a
+          # `NoMethodError` on nil. `Runner`'s rescue would catch it and record something
+          # accurate but ugly, and the owner would be told "NoMethodError: undefined method
+          # `source' for nil" — a stack-trace fragment where a sentence belongs.
+          #
+          # `dependent: :destroy` normally prevents the state, but `delete_all` and a
+          # DB-level delete bypass callbacks, and this plugin uses `delete_all` elsewhere.
+          # Found by a test written for the mailer's fallback name, which could never be
+          # reached on the success path because the render died first.
+          return notify_failure(schedule, occurrence_date,
+                                missing_template_diagnostic(correlation_id), recipients)
+        end
+
         outcome = render(schedule, actor)
-        return notify_failure(schedule, occurrence_date, outcome.diagnostic, recipients) if
-          outcome.diagnostic
+        if outcome.diagnostic
+          # RESTAMPED WITH THE RUN'S ID, and the first version was not. FR-58's whole point
+          # is that the id the owner is told to quote is the id in the log line and in the
+          # run row — and every diagnostic out of `ReportRun` mints its OWN uuid, so the
+          # notice named something no operator could search for. Measured by the
+          # independent review: run row `3a8cd94c…`, owner mail `23688ef7…`.
+          return notify_failure(schedule, occurrence_date,
+                                restamp(outcome.diagnostic, correlation_id), recipients)
+        end
+
+        # A PER-RECORD REPORT OVER ZERO ISSUES PRODUCES ZERO DOCUMENTS, and it is neither a
+        # failure nor something to mail.
+        #
+        # `documents: []` with `diagnostic: nil` is a SUCCESSFUL outcome — the template is
+        # fine, the scope is simply empty. The first version sent it anyway: every recipient
+        # got "Here is the Weekly report for 10 March" with nothing attached, and the run
+        # recorded success. That is §7b.3's "an e-mail that looks successful" with the
+        # attachment removed instead of broken.
+        #
+        # It is NOT reported as a failure either, and that is the harder call. For "issues
+        # assigned to me that are overdue", zero is the good outcome and a daily failure
+        # notice would be noise nobody can act on; for a weekly status report it means
+        # something broke. The plugin cannot tell which, so it does the honest, quiet thing:
+        # nothing is sent, and the run row records `document_count: 0, recipients_count: 0`,
+        # which is exactly what happened and is what an operator sees when they go looking.
+        if outcome.documents.empty?
+          info_line("[scheduler] schedule #{schedule.id} produced no document for " \
+                    "#{occurrence_date} — the scope is empty. Nothing was sent " \
+                    "to the #{recipients.length} recipient(s).")
+          return Delivered.new(recipients_count: 0, document_count: 0, bytes_total: 0,
+                               correlation_id: correlation_id)
+        end
 
         deliver(schedule, occurrence_date, outcome, recipients, actor, correlation_id)
+      end
+
+      # THE RUNNER'S SECOND PORT (FR-43). Called for a failure the delivery never saw — a
+      # locked render identity, a policy this version cannot honour, a repeat rule it cannot
+      # interpret. All three raise inside `Runner` before `#call` is reached, and without
+      # this the owner is told nothing while the README says they are told.
+      #
+      # It is the same notice, so an operator cannot tell from the mail whether the report
+      # broke before or during the render — which is right: what they need is the schedule,
+      # the day, the reason and an id, and those are the same either way.
+      def notify_failure(schedule:, occurrence_date:, correlation_id:, message:)
+        notify_owner(schedule, occurrence_date,
+                     Diagnostic.new(origin: :template, code: :schedule_unusable,
+                                    message: message.to_s,
+                                    correlation_id: correlation_id || SecureRandom.uuid))
       end
 
       private
@@ -189,14 +249,37 @@ module RedmineReporterDashboards
         # It is a class attribute, so this is process-global for the duration. Acceptable
         # here and stated rather than hidden: the scheduler is a rake-task component, and
         # the window is one occurrence's sends. It is restored in an `ensure`.
-        with_delivery_errors_raised do
-          recipients.each do |recipient|
-            mailer.deliver_scheduled_report(recipient, schedule, occurrence_date,
-                                            attachments, actor, correlation_id)
+        # THE PARTIAL COUNT SURVIVES A FAILURE HALFWAY DOWN THE LIST, and it has to.
+        #
+        # If the relay refuses recipient 5 of 20, the run row must be able to say that four
+        # people already have the report — that is the fact an operator needs before
+        # deciding whether to re-run, and re-running would mail those four twice. The first
+        # version let the exception escape with no counts at all, so `finish_run` wrote
+        # nulls and the row said only "failed".
+        sent = 0
+        begin
+          with_delivery_errors_raised do
+            recipients.each do |recipient|
+              mailer.deliver_scheduled_report(recipient, schedule, occurrence_date,
+                                              attachments, actor, correlation_id)
+              sent += 1
+            end
           end
+        rescue StandardError => e
+          notify_failure(schedule, occurrence_date,
+                         partial_delivery_diagnostic(sent, recipients.length, e,
+                                                     correlation_id),
+                         recipients)
+          return Delivered.new(recipients_count: sent,
+                               document_count: outcome.documents.length,
+                               bytes_total: bytes, correlation_id: correlation_id,
+                               reported: true,
+                               error: "partial_delivery: #{sent} of " \
+                                      "#{recipients.length} recipient(s) received it " \
+                                      "before #{e.class}: #{e.message}")
         end
 
-        Delivered.new(recipients_count: recipients.length,
+        Delivered.new(recipients_count: sent,
                       document_count: outcome.documents.length,
                       bytes_total: bytes,
                       correlation_id: correlation_id)
@@ -217,29 +300,71 @@ module RedmineReporterDashboards
       # §7b.3 makes it "configurable" rather than default. The schedule owner is the one
       # person who can act, so they are the one person mailed.
       #
-      # `recipients` is passed only so the count can be recorded — nothing is sent to them.
+      # `recipients` is NOT sent anything; it is here so the log line can say how many
+      # people did not get a report, which is the number an operator asks for first. The
+      # first version took the parameter and never read it, and said in a comment that it
+      # recorded the count. Renaming it `_recipients` left the suite green.
       def notify_failure(schedule, occurrence_date, diagnostic, recipients)
-        owner = schedule.author
-        if owner&.active? && owner.mail.present?
-          begin
-            with_delivery_errors_raised do
-              mailer.deliver_scheduled_report_failure(owner, schedule, occurrence_date,
-                                                      diagnostic)
-            end
-          rescue StandardError => e
-            # The report failed AND the notice could not be sent. Both facts belong in the
-            # recorded error, because "we told the owner" and "we could not tell anybody"
-            # are different operational situations.
-            warn_line("[scheduler] schedule #{schedule.id} failed and its owner could " \
-                      "not be notified: #{e.class}: #{e.message}")
-          end
-        end
+        warn_line("[scheduler] schedule #{schedule.id} could not deliver " \
+                  "#{occurrence_date} to #{recipients.length} recipient(s) " \
+                  "[#{diagnostic.correlation_id}]: #{diagnostic.code}")
+        notify_owner(schedule, occurrence_date, diagnostic)
 
+        # `reported: true` — the owner has been told, so `Runner` must not send a second
+        # notice for the same failure.
         Delivered.new(recipients_count: 0,
                       document_count: 0,
                       bytes_total: 0,
                       correlation_id: diagnostic.correlation_id,
+                      reported: true,
                       error: "#{diagnostic.code}: #{diagnostic.message}")
+      end
+
+      def notify_owner(schedule, occurrence_date, diagnostic)
+        owner = schedule.author
+        return unless owner&.active? && owner.mail.present?
+
+        with_delivery_errors_raised do
+          mailer.deliver_scheduled_report_failure(owner, schedule, occurrence_date,
+                                                  diagnostic)
+        end
+      rescue StandardError => e
+        # The report failed AND the notice could not be sent. Both facts belong in the log,
+        # because "we told the owner" and "we could not tell anybody" are different
+        # operational situations.
+        warn_line("[scheduler] schedule #{schedule.id} failed and its owner could not be " \
+                  "notified: #{e.class}: #{e.message}")
+      end
+
+      # A diagnostic wearing the run's correlation id instead of its own. `Diagnostic` is
+      # frozen, so this is a new one rather than a mutation.
+      def restamp(diagnostic, correlation_id)
+        Diagnostic.new(origin: diagnostic.origin, code: diagnostic.code,
+                       message: diagnostic.message, correlation_id: correlation_id,
+                       line: diagnostic.line, engine: diagnostic.engine,
+                       engine_version: diagnostic.engine_version, detail: diagnostic.detail)
+      end
+
+      def partial_delivery_diagnostic(sent, total, error, correlation_id)
+        Diagnostic.new(
+          origin: :engine,
+          code: :partial_delivery,
+          message: "#{sent} of #{total} recipient(s) received this report before " \
+                   'delivery failed. Re-running would send it to them a second time, so ' \
+                   'the occurrence stays claimed — check the mail log before deciding',
+          correlation_id: correlation_id,
+          detail: "#{error.class}: #{error.message}"
+        )
+      end
+
+      def missing_template_diagnostic(correlation_id)
+        Diagnostic.new(
+          origin: :template,
+          code: :template_missing,
+          message: 'the report template this schedule points at no longer exists. Point ' \
+                   'the schedule at another template, or disable it',
+          correlation_id: correlation_id
+        )
       end
 
       def no_recipients_diagnostic(correlation_id)
@@ -307,6 +432,12 @@ module RedmineReporterDashboards
 
       def warn_line(line)
         logger.warn(line) if logger.respond_to?(:warn)
+      rescue StandardError
+        nil
+      end
+
+      def info_line(line)
+        logger.info(line) if logger.respond_to?(:info)
       rescue StandardError
         nil
       end

@@ -176,7 +176,67 @@ class ReporterDashboardsScheduleCommandTest < ActiveSupport::TestCase
 
     assert status.never_run?
     assert status.warning?
-    assert_match(/has ever been attempted/, Heartbeat.warnings(status).join)
+    assert_match(/never been reached by a run/, Heartbeat.warnings(status).join)
+  end
+
+  def test_a_monthly_schedule_on_a_ticked_install_does_not_warn
+    # THE BLOCKER. `never_run?` used to ask `last_attempted_at IS NULL`, which is not "no
+    # tick has run": the runner writes that column only when it CLAIMS an occurrence, and a
+    # monthly schedule is claimable one day in thirty. So a perfectly healthy install
+    # printed "it looks like nothing is calling it" every morning for a month, and
+    # `schedules:status` exited 1 the whole time. Found by an independent review, measured
+    # over four consecutive daily ticks.
+    build_schedule(repeat: 'monthly', start_date: Date.new(2026, 1, 15))
+
+    run_command # the cron entry IS running; today is simply not the 15th
+
+    status = Heartbeat.status(today: TODAY)
+    assert_equal 0, ScheduleRun.count, 'precondition: nothing was due today'
+    assert_nil Schedule.first.last_attempted_at, 'precondition: so nothing was attempted'
+    assert_not status.never_run?, 'but a tick plainly reached it — it has a forecast'
+    assert_not status.warning?
+    assert_empty Heartbeat.warnings(status)
+  end
+
+  def test_an_ended_schedule_stops_warning_once_a_tick_has_seen_it
+    # The second form of the same defect, and this one was PERMANENT: an enabled schedule
+    # past its end date correctly has no forecast, for ever, so `next_run_on IS NULL` alone
+    # warns no matter how often the scheduler runs.
+    build_schedule(start_date: Date.new(2026, 1, 1), end_date: Date.new(2026, 2, 1))
+
+    run_command
+    status = Heartbeat.status(today: TODAY)
+
+    assert_nil Schedule.first.next_run_on, 'precondition: an ended schedule has no next run'
+    assert_not status.never_run?
+    assert_not status.warning?
+  end
+
+  def test_a_schedule_with_no_further_occurrence_before_its_end_date_does_not_warn
+    # The third false positive: a yearly schedule whose end date arrives before its next
+    # anniversary has no forecast because there is none to have. Asked of `Occurrences`
+    # rather than assumed from an empty column.
+    build_schedule(repeat: 'yearly', start_date: Date.new(2026, 1, 5),
+                   end_date: Date.new(2026, 6, 1))
+
+    status = Heartbeat.status(today: TODAY)
+
+    assert_not status.never_run?
+  end
+
+  def test_a_schema_without_next_run_on_says_so_rather_than_answering_no
+    # §7 rule 5's third state. Answering `false` here would be the silent green the whole
+    # module exists to prevent — CLAUDE.md §7's "a gate you could not check is UNVERIFIED,
+    # never PASS", applied to a diagnostic.
+    Schedule.stubs(:next_run_on_supported?).returns(false)
+    build_schedule
+
+    status = Heartbeat.status(today: TODAY)
+
+    assert status.undetermined?
+    assert status.warning?
+    assert_not status.never_run?
+    assert_match(/cannot be determined/, Heartbeat.warnings(status).join)
   end
 
   def test_a_schedule_that_only_starts_next_month_does_not_warn

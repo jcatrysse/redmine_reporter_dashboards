@@ -244,6 +244,121 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
     assert_includes result.error, 'no active recipient'
   end
 
+  def test_the_owner_notice_quotes_the_id_the_run_row_and_the_log_carry
+    # FR-58: the id in the notice is the id an operator searches for. Every diagnostic out
+    # of `ReportRun` mints its OWN uuid, so the first version told the owner something that
+    # matched nothing — run row `3a8cd94c…`, owner mail `23688ef7…`. The previous assertion
+    # here was `assert_not_nil`, which `SecureRandom.uuid` can never fail.
+    add_recipient(@recipient)
+    @template.update_columns(content: '{% this is not a tag %}')
+
+    result = deliver
+
+    assert_equal @run.correlation_id, @mailer.failures.first[:diagnostic].correlation_id
+    assert_equal @run.correlation_id, result.correlation_id
+  end
+
+  def test_a_per_record_report_over_no_issues_sends_nothing_rather_than_an_empty_envelope
+    # `documents: []` with no diagnostic is a SUCCESSFUL outcome — the template is fine and
+    # the scope is empty. The first version mailed it: "Here is the Weekly report for 10
+    # March", nothing attached, run recorded success. §7b.3's "an e-mail that looks
+    # successful", with the attachment removed instead of broken.
+    add_recipient(@recipient)
+    @template.update_columns(output: 'per_record')
+    empty = IssueQuery.create!(name: 'Nothing', project: @project, user: @author,
+                               visibility: Query::VISIBILITY_PUBLIC,
+                               filters: { 'issue_id' => { operator: '=', values: ['0'] } })
+    @schedule.update_columns(query_id: empty.id, query_type: 'IssueQuery')
+
+    result = deliver
+
+    assert result.ok?, "not a failure either: #{result.error}"
+    assert_empty @mailer.reports, 'nobody receives an envelope with nothing in it'
+    assert_empty @mailer.failures, 'and nobody is paged about an empty week'
+    assert_equal 0, result.document_count
+    assert_equal 0, result.recipients_count
+  end
+
+  def test_a_combined_report_over_no_issues_is_still_sent
+    # The boundary on the other side: a combined template renders one document whatever the
+    # scope holds — "0 issues" is a report — so the rule above must not swallow it.
+    add_recipient(@recipient)
+    empty = IssueQuery.create!(name: 'Nothing at all', project: @project, user: @author,
+                               visibility: Query::VISIBILITY_PUBLIC,
+                               filters: { 'issue_id' => { operator: '=', values: ['0'] } })
+    @schedule.update_columns(query_id: empty.id, query_type: 'IssueQuery')
+
+    result = deliver
+
+    assert result.ok?, result.error
+    assert_equal 1, result.document_count
+    assert_equal 1, @mailer.reports.length
+  end
+
+  def test_a_per_record_run_names_its_documents_distinctly
+    # The `[[name, bytes]]`-rather-than-a-Hash comment exists to stop a filename collision
+    # silently dropping a document. Collapsing the numbering left the suite green.
+    add_recipient(@recipient)
+    @template.update_columns(output: 'per_record')
+
+    deliver
+
+    names = @mailer.reports.first[:attachments].map(&:first)
+    assert_operator names.length, :>, 1, 'precondition: this really is a per-record run'
+    assert_equal names.length, names.uniq.length
+    assert_match(/weekly-numbers-2026-03-10-001\.pdf/, names.first)
+  end
+
+  def test_a_recipient_with_no_address_is_dropped
+    # Redmine allows a user with no e-mail address. Mailing one raises deep inside the
+    # delivery stack; counting one as a recipient is a lie in the run row.
+    silent = User.find(4)
+    EmailAddress.where(user_id: silent.id).delete_all
+    silent.reload
+    add_recipient(silent)
+    add_recipient(@recipient)
+
+    result = deliver
+
+    assert_equal 1, result.recipients_count
+    assert_equal [@recipient], @mailer.reports.map { |r| r[:user] }
+  end
+
+  def test_a_delivery_that_breaks_halfway_records_who_already_received_it
+    # Re-running would mail those people twice, so the run row has to be able to say how
+    # many already have it. The first version let the exception escape with no counts, and
+    # `finish_run` wrote nulls.
+    [@recipient, User.find(4), User.find(8)].each { |u| add_recipient(u) }
+    sent = 0
+    mailer = Object.new
+    mailer.define_singleton_method(:deliver_scheduled_report) do |*|
+      sent += 1
+      raise Net::SMTPFatalError, 'the relay refused it' if sent > 2
+    end
+    mailer.define_singleton_method(:deliver_scheduled_report_failure) { |*| nil }
+
+    result = deliver(mailer: mailer)
+
+    assert_not result.ok?
+    assert_equal 2, result.recipients_count, 'two people already have it'
+    assert_includes result.error, 'partial_delivery'
+  end
+
+  def test_the_ambient_actor_is_restored_even_when_the_render_raises
+    # `#as`'s `ensure`. The file calls this "the part that is easy to get subtly wrong" and
+    # the only example on it covered the happy path — deleting the `ensure` left the whole
+    # suite green. `ScopeUnavailable` is rescued OUTSIDE the block, so this is a live path.
+    add_recipient(@recipient)
+    @schedule.update_columns(query_id: 999_999, query_type: 'IssueQuery')
+    User.current = @recipient
+
+    deliver(actor: @author)
+
+    assert_equal @recipient, User.current
+  ensure
+    User.current = User.anonymous
+  end
+
   # --- FR-45 / INV-1: whose visibility produced the numbers -------------------------------
 
   def test_the_scope_is_built_as_the_render_identity_and_not_as_the_process_user
@@ -350,22 +465,41 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
 
   # --- an SMTP failure is a failure -----------------------------------------------------------
 
-  def test_a_delivery_error_is_raised_rather_than_logged_and_forgotten
+  def test_a_delivery_error_becomes_a_recorded_failure_rather_than_a_log_line
     # Redmine's `Mailer.deliver_mail` swallows delivery errors unless `raise_delivery_errors`
     # is set, so an SMTP server that is down produces a log line nobody reads and a run row
-    # that says success. `ScheduledDelivery` sets the flag the way `deliver_test_email` does.
+    # that says success. `ScheduledDelivery` sets the flag the way `deliver_test_email` does,
+    # then turns the exception into a `Delivered` carrying the partial count — an escaping
+    # raise would lose the one number an operator needs before re-running.
     add_recipient(@recipient)
 
-    assert_raises(Net::SMTPFatalError) do
-      deliver(mailer: RecordingMailer.new(raising: true))
-    end
+    result = deliver(mailer: RecordingMailer.new(raising: true))
+
+    assert_not result.ok?
+    assert_includes result.error, 'partial_delivery'
+    assert_includes result.error, 'Net::SMTPFatalError'
+    assert_equal 0, result.recipients_count, 'nobody got it'
   end
 
   def test_the_delivery_errors_flag_is_restored_afterwards
     add_recipient(@recipient)
     before = ActionMailer::Base.raise_delivery_errors
 
-    assert_raises(Net::SMTPFatalError) { deliver(mailer: RecordingMailer.new(raising: true)) }
+    deliver(mailer: RecordingMailer.new(raising: true))
+
+    assert_equal before, ActionMailer::Base.raise_delivery_errors
+  end
+
+  def test_the_delivery_errors_flag_is_restored_when_the_block_raises_past_the_rescue
+    # `with_delivery_errors_raised`'s own `ensure`, exercised by something the recipient
+    # loop's `rescue StandardError` does not catch.
+    add_recipient(@recipient)
+    before = ActionMailer::Base.raise_delivery_errors
+    exploding = Object.new
+    exploding.define_singleton_method(:deliver_scheduled_report) { |*| raise NotImplementedError }
+    exploding.define_singleton_method(:deliver_scheduled_report_failure) { |*| nil }
+
+    assert_raises(NotImplementedError) { deliver(mailer: exploding) }
 
     assert_equal before, ActionMailer::Base.raise_delivery_errors
   end
@@ -445,6 +579,37 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
     end
 
     assert_includes mail_body(ActionMailer::Base.deliveries.last), @author.name
+  end
+
+  def test_a_schedule_whose_template_is_gone_fails_in_a_sentence_rather_than_crashing
+    # WRITTEN FOR THE MAILER'S FALLBACK NAME, AND IT FOUND SOMETHING ELSE. `ReportRun#call`
+    # opens with `template.source`, so a dangling `template_id` was a `NoMethodError` on nil
+    # rather than a failure — the owner would have been told "undefined method `source' for
+    # nil", a stack-trace fragment where a sentence belongs. `dependent: :destroy` normally
+    # prevents the state; `delete_all` and a DB-level delete bypass callbacks.
+    add_recipient(@recipient)
+    @schedule.update_columns(template_id: 999_999)
+
+    result = nil
+    assert_nothing_raised do
+      with_engine(FakeEngine) do
+        result = Delivery.new.call(schedule: @schedule.reload, occurrence_date: OCCURRENCE,
+                                   actor: @author, run: @run)
+      end
+    end
+
+    assert_not result.ok?
+    assert_includes result.error, 'template_missing'
+    assert_empty ActionMailer::Base.deliveries.select { |m| m.to == [@recipient.mail] }
+
+    # And the fallback name is used consistently: the subject fell back to "Scheduled
+    # report" while the body read "Here is the  report for …" — two fallbacks for one value,
+    # one of them empty.
+    mail = ActionMailer::Base.deliveries.last
+    fallback = I18n.t(:label_reporter_schedule)
+    assert_equal [@author.mail], mail.to
+    assert_includes mail.subject, fallback
+    assert_includes mail_body(mail), fallback
   end
 
   def test_a_failure_notice_is_addressed_to_the_owner_and_carries_no_attachment

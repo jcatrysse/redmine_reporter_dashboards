@@ -142,6 +142,6 @@ it:
   mail_subject_reporter_schedule_report: "%{name} - %{date}"
   mail_subject_reporter_schedule_failed: "Non è stato possibile generare %{name} per %{date}"
   text_reporter_schedule_mail_intro: "Ecco il report %{name} per %{date}."
-  text_reporter_schedule_mail_rendered_as: "Questi dati sono stati prodotti con la visibilità di %{user} e possono differire dalla tua."
+  text_reporter_schedule_mail_rendered_as: "Questi dati sono stati prodotti con la visibilità di %{user} e possono differire dalla Sua."
   text_reporter_schedule_mail_failed_intro: "Non è stato possibile generare il report %{name} per %{date}, quindi a questo messaggio non è stato allegato nulla."
-  text_reporter_schedule_mail_failed_recipients: "Ricevi questo messaggio perché sei il proprietario della pianificazione. I destinatari non sono stati avvisati e non hanno ricevuto nulla."
+  text_reporter_schedule_mail_failed_recipients: "Riceve questo messaggio perché è il proprietario della pianificazione. I destinatari non sono stati avvisati e non hanno ricevuto nulla."

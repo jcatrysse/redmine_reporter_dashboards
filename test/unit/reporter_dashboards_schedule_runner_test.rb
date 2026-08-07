@@ -535,6 +535,107 @@ class ReporterDashboardsScheduleRunnerTest < ActiveSupport::TestCase
     assert_includes schedule.reload.last_error, 'not an active account'
   end
 
+  # --- FR-43 for the failures the delivery never sees ---------------------------------
+
+  # The runner's second port. `ScheduledDelivery` implements both; here it only records.
+  class RecordingNotifier
+    attr_reader :calls
+
+    def initialize
+      @calls = []
+    end
+
+    def notify_failure(schedule:, occurrence_date:, correlation_id:, message:)
+      @calls << { schedule: schedule, occurrence_date: occurrence_date,
+                  correlation_id: correlation_id, message: message }
+    end
+  end
+
+  def test_a_locked_render_identity_notifies_the_owner
+    # THE MOST LIKELY SCHEDULED-REPORT FAILURE IN PRODUCTION: an employee leaves and their
+    # account is locked. It raises inside the runner BEFORE `delivery.call`, so the owner
+    # notice that lives behind the delivery port could never be sent — while the README told
+    # the reader they would get one. Found by an independent review, measured at 0 mails.
+    schedule = build_schedule(render_as: Schedule::RENDER_AS_USER, render_as_user_id: 5)
+    notifier = RecordingNotifier.new
+
+    run_now(notify: notifier)
+
+    assert_equal 1, notifier.calls.length
+    assert_equal schedule.id, notifier.calls.first[:schedule].id
+    assert_equal TODAY, notifier.calls.first[:occurrence_date]
+    assert_includes notifier.calls.first[:message], 'not an active account'
+    assert_not_nil notifier.calls.first[:correlation_id]
+  end
+
+  def test_an_uninterpretable_repeat_rule_notifies_the_owner_too
+    schedule = build_schedule
+    schedule.update_columns(repeat: 'fortnightly')
+    notifier = RecordingNotifier.new
+
+    run_now(notify: notifier)
+
+    # THE OUTER RESCUE'S notice, and the only example that reaches it. A locked identity
+    # raises INSIDE `deliver_claimed`'s begin, so it travels the `fail_occurrence` path;
+    # only a schedule that breaks before any occurrence is claimed exercises this one.
+    # Measured: deleting `notify_owner` from the outer rescue left the locked-identity
+    # example green.
+    assert_equal 1, notifier.calls.length
+    assert_nil notifier.calls.first[:occurrence_date], 'it failed before reaching a day'
+    assert_includes notifier.calls.first[:message], 'UnknownRepeat'
+  end
+
+  def test_a_failure_the_delivery_already_reported_is_not_notified_twice
+    # `ScheduledDelivery` mails the owner itself and says so with `reported: true`. Without
+    # that flag one broken render produces two identical mails, which is how a diagnostic
+    # becomes something people filter.
+    build_schedule
+    notifier = RecordingNotifier.new
+    delivery = RecordingDelivery.new do
+      Runner::Delivered.new(error: 'the engine is missing', reported: true)
+    end
+
+    summary = run_now(delivery: delivery, notify: notifier)
+
+    assert_equal 1, summary.failed
+    assert_empty notifier.calls
+  end
+
+  def test_a_failure_the_delivery_did_not_report_is_notified
+    build_schedule
+    notifier = RecordingNotifier.new
+    delivery = RecordingDelivery.new { raise IOError, 'the printer is on fire' }
+
+    run_now(delivery: delivery, notify: notifier)
+
+    assert_equal 1, notifier.calls.length
+  end
+
+  def test_a_notifier_that_raises_does_not_embargo_the_rest
+    # Same rule as everything else in the rescue path: this runs inside a rescue clause on
+    # one of the two paths, and a raise there escapes the clause.
+    build_schedule
+    build_schedule
+    exploding = Object.new
+    exploding.define_singleton_method(:notify_failure) { |**| raise IOError, 'no mail' }
+    delivery = RecordingDelivery.new { raise 'boom' }
+
+    summary = nil
+    assert_nothing_raised { summary = run_now(delivery: delivery, notify: exploding) }
+
+    assert_equal 2, summary.considered
+    assert_equal 2, summary.failed
+  end
+
+  def test_the_notify_port_is_optional
+    # `Runner`'s own examples drive it without one; a required second port would make every
+    # one of them about wiring.
+    build_schedule
+    delivery = RecordingDelivery.new { raise 'boom' }
+
+    assert_nothing_raised { run_now(delivery: delivery) }
+  end
+
   # --- S-7: the runner and the form must not overwrite each other ---------------------
 
   def test_the_run_state_update_names_only_the_run_state_columns
@@ -958,9 +1059,11 @@ class ReporterDashboardsScheduleRunnerTest < ActiveSupport::TestCase
 
     per_schedule = two - one
     assert_operator per_schedule, :>, 0, 'precondition: each schedule costs something'
-    assert_operator per_schedule, :<=, 4,
-                    'a tick costs an INSERT and two UPDATEs per schedule; a fourth ' \
-                    'statement means something is being loaded in the loop'
+    assert_operator per_schedule, :<=, 3,
+                    'a tick costs an INSERT and two UPDATEs per schedule. This was <= 4 ' \
+                    'when the preload that removed the fourth was added in the same diff, ' \
+                    'so it could not detect the regression it was written for: measured ' \
+                    'with the preload 3, without it 4, both green'
     assert_equal one + (3 * per_schedule), four,
                  "queries are not linear in the schedule count: 1 -> #{one}, " \
                  "2 -> #{two}, 4 -> #{four}"

@@ -62,11 +62,19 @@ check() {
 # and therefore adjacent to it (`def foo=(v)`). So the pattern demands either a closing
 # paren or whitespace immediately before the `=`, which is the same rule the parser uses.
 #
-# Negative-tested in both directions before being trusted: `def foo = 1`,
-# `def self.foo(x) = y` and `def foo() = 1` still FAIL; `def foo=(v)`, `def self.foo=(v)`
-# and `def foo(a = 1)` pass.
+# THE ARGUMENT LIST IS MATCHED GREEDILY, which closes a hole the first version of this
+# check also had: `\([^)]*\)` stops at the FIRST `)`, so an endless method with a
+# parenthesised default — `def h(a = (1)) = 2` — slipped straight past. Greedy `\(.*\)`
+# reaches the last one. It cannot over-match a plain definition, because a plain one has
+# no `=` after its closing paren.
+#
+# Negative-tested in both directions before being trusted. FAIL: `def foo = 1`,
+# `def self.foo(x) = y`, `def foo() = 1`, `def g   = 2`, `def valid? = true`,
+# `def bang! = 1`, `def i(a = [2]) = 3`, `def j(a = {k: 1}) = 4`, `def k(*) = 5`,
+# `def h(a = (1)) = 2`, `def self.l(a = (b)) = 6`. PASS: `def foo=(v)`,
+# `def self.foo=(v)`, `def foo(a = 1)`, `def foo(a = (1))`.
 check 'endless method definition — needs Ruby 3.0, the floor is 2.7' \
-      '^\s*def\s+[A-Za-z_][\w.]*[!?]?(\([^)]*\)\s*|\s+)=(?!=|~)'
+      '^\s*def\s+[A-Za-z_][\w.]*[!?]?(\(.*\)\s*|\s+)=(?!=|~)'
 
 # Hash#except is Ruby 3.0 core. ActiveSupport backports it, so this only bites where
 # ActiveSupport is absent — which is exactly how the pure-unit specs run.

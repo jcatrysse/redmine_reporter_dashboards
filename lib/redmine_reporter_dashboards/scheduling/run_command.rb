@@ -65,9 +65,16 @@ module RedmineReporterDashboards
 
       attr_reader :logger
 
+      # ONE OBJECT, BOTH PORTS. `ScheduledDelivery` answers `#call` (render and mail) and
+      # `#notify_failure` (tell the owner about something that broke before either), so the
+      # notice a locked render identity produces is the same notice a broken template
+      # produces — same wording, same correlation id, same inbox.
       def runner
+        port = @delivery || default_delivery
+
         Runner.new(now: now,
-                   delivery: @delivery || default_delivery,
+                   delivery: port,
+                   notify: port,
                    schedules: scope,
                    catch_up: @catch_up,
                    max_catchup_days: @max_catchup_days,

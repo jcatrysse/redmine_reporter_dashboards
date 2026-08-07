@@ -140,7 +140,7 @@ hu:
   error_reporter_template_archive_not_available: "Ez az exportálás %{count} dokumentumot készítene, és ez a verzió nem tud többet egyetlen archívumként átadni. Válasszon egyetlen dokumentumot készítő sablont, vagy szűkítse a feladatok kiválasztását."
   label_reporter_schedule: "Ütemezett jelentés"
   mail_subject_reporter_schedule_report: "%{name} - %{date}"
-  mail_subject_reporter_schedule_failed: "A(z) %{name} nem készíthető el a következő dátumra: %{date}"
+  mail_subject_reporter_schedule_failed: "A(z) %{name} nem készült el a következő dátumra: %{date}"
   text_reporter_schedule_mail_intro: "Itt a(z) %{name} jelentés a következő dátumra: %{date}."
   text_reporter_schedule_mail_rendered_as: "Ezek az adatok %{user} láthatóságával készültek, ami eltérhet az Önétől."
   text_reporter_schedule_mail_failed_intro: "A(z) %{name} jelentés nem készült el a következő dátumra: %{date}, ezért ehhez az üzenethez nem csatoltunk semmit."

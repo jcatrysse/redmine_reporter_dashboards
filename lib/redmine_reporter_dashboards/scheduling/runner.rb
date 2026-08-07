@@ -52,10 +52,17 @@ module RedmineReporterDashboards
       # The counts are what `reporter_dashboards_schedule_runs` stores, and they come from
       # the deliverer rather than being counted here because this class never sees a
       # document or a recipient.
+      # `reported` — the deliverer has ALREADY told the schedule's owner about this failure.
+      # Without it the runner's own notice fires as well and one broken render produces two
+      # mails, which is how a diagnostic becomes something people filter.
       Delivered = Struct.new(:recipients_count, :document_count, :bytes_total,
-                             :correlation_id, :error, keyword_init: true) do
+                             :correlation_id, :error, :reported, keyword_init: true) do
         def ok?
           error.nil?
+        end
+
+        def reported?
+          reported ? true : false
         end
       end
 
@@ -111,7 +118,8 @@ module RedmineReporterDashboards
       #                   this class growing a second entry point.
       # catch_up          FR-40. False is a plain tick and answers today only.
       def initialize(now:, delivery:, schedules: nil, catch_up: false,
-                     max_catchup_days: Occurrences::DEFAULT_MAX_CATCHUP_DAYS, logger: nil)
+                     max_catchup_days: Occurrences::DEFAULT_MAX_CATCHUP_DAYS, logger: nil,
+                     notify: nil)
         raise ArgumentError, 'a scheduler run needs a clock reading (now:)' if now.nil?
         raise ArgumentError, 'a scheduler run needs a delivery port' if delivery.nil?
 
@@ -121,6 +129,19 @@ module RedmineReporterDashboards
         @catch_up = catch_up ? true : false
         @max_catchup_days = Integer(max_catchup_days)
         @logger = logger
+        # THE SECOND HALF OF FR-43, and the first version did not have it.
+        #
+        # `notify` is told about a failure the DELIVERY never saw. Three of them exist and
+        # the most likely one in production is the first: a render identity that has been
+        # locked (an employee left), a policy this version cannot honour, and a repeat rule
+        # it cannot interpret. All three raise before `delivery.call`, so the owner notice
+        # that lives behind the port could never be sent — while the README told the reader
+        # they would get one. Measured by an independent review: `MAILS SENT = 0`.
+        #
+        # Optional, because `Runner`'s own examples drive it with a bare delivery double and
+        # a required second port would make every one of them about wiring. Production
+        # always passes one: `RunCommand` hands it the same `ScheduledDelivery`.
+        @notify = notify
         @today = {}
       end
 
@@ -198,6 +219,7 @@ module RedmineReporterDashboards
       rescue StandardError => e
         record_failure(summary, schedule, @current&.first, @current&.last, e)
         record_failure_state(schedule, describe(e))
+        notify_owner(schedule, @current&.first, @current&.last, describe(e))
       ensure
         @current = nil
       end
@@ -401,6 +423,24 @@ module RedmineReporterDashboards
                    duration)
         write_schedule_state(schedule, failure_state(schedule, result.error, duration))
         record_failure(summary, schedule, date, run.correlation_id, result.error)
+        # Only for what the delivery did NOT report on. A `Delivered` carrying an error
+        # came from the deliverer, which has already told the owner; notifying again here
+        # would send two mails for one failure.
+        notify_owner(schedule, date, run.correlation_id, result.error) unless
+          result.reported?
+      end
+
+      # FR-43 for the failures the delivery never saw. Guarded for the same reason
+      # `record_failure_state` is: this runs inside a rescue clause on one path, and a raise
+      # there escapes the clause and embargoes every later schedule.
+      def notify_owner(schedule, date, correlation_id, message)
+        return if @notify.nil?
+
+        @notify.notify_failure(schedule: schedule, occurrence_date: date,
+                               correlation_id: correlation_id, message: message)
+      rescue StandardError => e
+        warn_line("[scheduler] schedule #{schedule.id} failed AND its owner could not be " \
+                  "notified: #{describe(e)}")
       end
 
       # --- run state -------------------------------------------------------------------
