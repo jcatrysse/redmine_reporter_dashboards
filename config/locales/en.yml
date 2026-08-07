@@ -64,3 +64,25 @@ en:
   text_reporter_asset_max_bytes_info: "A hard limit. An asset larger than this is refused and the report names it, rather than being rendered with a gap in it."
   text_reporter_asset_policy_collapsed: "The asset host allowlist is empty, so %{mode} currently behaves exactly as Bundled and nothing is fetched over the network. Add at least one host name for it to take effect."
   text_reporter_asset_settings_dropped: "Some saved values could not be used, and the defaults are in force instead:"
+
+# T-22 - model attribute labels. Redmine's human_attribute_name tries
+# field_<class_prefix>_<attr> before field_<attr>, and the class-prefixed form is used
+# throughout: a bare field_visibility would relabel Redmine's own saved queries too,
+# which is not this plugin's to change.
+  field_redmine_reporter_dashboards_template_visibility: "Visibility"
+  field_redmine_reporter_dashboards_template_source: "Data source"
+  field_redmine_reporter_dashboards_template_output: "Output"
+  field_redmine_reporter_dashboards_template_orientation: "Orientation"
+  field_redmine_reporter_dashboards_template_page_size: "Page size"
+  field_redmine_reporter_dashboards_template_margins: "Margins (mm)"
+  field_redmine_reporter_dashboards_template_engine_hint: "Preferred render engine"
+  field_redmine_reporter_dashboards_schedule_template: "Report template"
+  field_redmine_reporter_dashboards_schedule_end_date: "End date"
+  field_redmine_reporter_dashboards_schedule_render_as: "Render as"
+  field_redmine_reporter_dashboards_schedule_render_as_user: "Render as user"
+  field_redmine_reporter_dashboards_schedule_last_status: "Last status"
+  field_redmine_reporter_dashboards_schedule_consecutive_failures: "Consecutive failures"
+  field_redmine_reporter_dashboards_schedule_run_schedule: "Schedule"
+  field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Occurrence date"
+  field_redmine_reporter_dashboards_schedule_recipient_schedule: "Schedule"
+  field_redmine_reporter_dashboards_document_expires_at: "Expires"

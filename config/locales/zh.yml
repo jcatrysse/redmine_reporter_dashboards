@@ -64,3 +64,25 @@ zh:
   text_reporter_asset_max_bytes_info: "\u786C\u6027\u4E0A\u9650\u3002\u8D85\u8FC7\u8BE5\u5927\u5C0F\u7684\u8D44\u6E90\u5C06\u88AB\u62D2\u7EDD\uFF0C\u5E76\u5728\u62A5\u8868\u4E2D\u6307\u51FA\uFF0C\u800C\u4E0D\u662F\u751F\u6210\u4E00\u4EFD\u5E26\u6709\u7A7A\u7F3A\u7684\u62A5\u8868\u3002"
   text_reporter_asset_policy_collapsed: "\u8D44\u6E90\u4E3B\u673A\u5141\u8BB8\u5217\u8868\u4E3A\u7A7A\uFF0C\u56E0\u6B64 %{mode} \u76EE\u524D\u4E0E\u201C\u5185\u7F6E\u201D\u5B8C\u5168\u4E00\u81F4\uFF0C\u4E0D\u4F1A\u901A\u8FC7\u7F51\u7EDC\u83B7\u53D6\u4EFB\u4F55\u5185\u5BB9\u3002\u8BF7\u81F3\u5C11\u6DFB\u52A0\u4E00\u4E2A\u4E3B\u673A\u540D\u4F7F\u5176\u751F\u6548\u3002"
   text_reporter_asset_settings_dropped: "\u90E8\u5206\u5DF2\u4FDD\u5B58\u7684\u503C\u65E0\u6CD5\u4F7F\u7528\uFF0C\u73B0\u6309\u9ED8\u8BA4\u503C\u751F\u6548\uFF1A"
+
+# T-22 - model attribute labels. Redmine's human_attribute_name tries
+# field_<class_prefix>_<attr> before field_<attr>, and the class-prefixed form is used
+# throughout: a bare field_visibility would relabel Redmine's own saved queries too,
+# which is not this plugin's to change.
+  field_redmine_reporter_dashboards_template_visibility: "可见性"
+  field_redmine_reporter_dashboards_template_source: "数据源"
+  field_redmine_reporter_dashboards_template_output: "输出"
+  field_redmine_reporter_dashboards_template_orientation: "方向"
+  field_redmine_reporter_dashboards_template_page_size: "页面大小"
+  field_redmine_reporter_dashboards_template_margins: "页边距（毫米）"
+  field_redmine_reporter_dashboards_template_engine_hint: "首选渲染引擎"
+  field_redmine_reporter_dashboards_schedule_template: "报表模板"
+  field_redmine_reporter_dashboards_schedule_end_date: "结束日期"
+  field_redmine_reporter_dashboards_schedule_render_as: "渲染身份"
+  field_redmine_reporter_dashboards_schedule_render_as_user: "渲染身份用户"
+  field_redmine_reporter_dashboards_schedule_last_status: "最后状态"
+  field_redmine_reporter_dashboards_schedule_consecutive_failures: "连续失败次数"
+  field_redmine_reporter_dashboards_schedule_run_schedule: "计划"
+  field_redmine_reporter_dashboards_schedule_run_occurrence_date: "发生日期"
+  field_redmine_reporter_dashboards_schedule_recipient_schedule: "计划"
+  field_redmine_reporter_dashboards_document_expires_at: "过期时间"

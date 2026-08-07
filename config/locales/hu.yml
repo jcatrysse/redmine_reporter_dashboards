@@ -64,3 +64,25 @@ hu:
   text_reporter_asset_max_bytes_info: "Szigor\u00FA korl\u00E1t. Az enn\u00E9l nagyobb er\u0151forr\u00E1st a rendszer elutas\u00EDtja, \u00E9s a jelent\u00E9s megnevezi, ahelyett hogy hi\u00E1nnyal k\u00E9sz\u00FClne el."
   text_reporter_asset_policy_collapsed: "Az enged\u00E9lyezett g\u00E9pek list\u00E1ja \u00FCres, ez\u00E9rt a %{mode} jelenleg pontosan \u00FAgy m\u0171k\u00F6dik, mint a \u201EBe\u00E9p\u00EDtett\u201D, \u00E9s semmi sem t\u00F6lt\u0151dik le a h\u00E1l\u00F3zatr\u00F3l. Adjon meg legal\u00E1bb egy g\u00E9pnevet, hogy \u00E9rv\u00E9nybe l\u00E9pjen."
   text_reporter_asset_settings_dropped: "N\u00E9h\u00E1ny mentett \u00E9rt\u00E9k nem haszn\u00E1lhat\u00F3; helyett\u00FCk az alap\u00E9rtelmez\u00E9sek vannak \u00E9rv\u00E9nyben:"
+
+# T-22 - model attribute labels. Redmine's human_attribute_name tries
+# field_<class_prefix>_<attr> before field_<attr>, and the class-prefixed form is used
+# throughout: a bare field_visibility would relabel Redmine's own saved queries too,
+# which is not this plugin's to change.
+  field_redmine_reporter_dashboards_template_visibility: "Láthatóság"
+  field_redmine_reporter_dashboards_template_source: "Adatforrás"
+  field_redmine_reporter_dashboards_template_output: "Kimenet"
+  field_redmine_reporter_dashboards_template_orientation: "Tájolás"
+  field_redmine_reporter_dashboards_template_page_size: "Oldalméret"
+  field_redmine_reporter_dashboards_template_margins: "Margók (mm)"
+  field_redmine_reporter_dashboards_template_engine_hint: "Előnyben részesített megjelenítő motor"
+  field_redmine_reporter_dashboards_schedule_template: "Jelentéssablon"
+  field_redmine_reporter_dashboards_schedule_end_date: "Befejezés dátuma"
+  field_redmine_reporter_dashboards_schedule_render_as: "Megjelenítés mint"
+  field_redmine_reporter_dashboards_schedule_render_as_user: "Megjelenítő felhasználó"
+  field_redmine_reporter_dashboards_schedule_last_status: "Utolsó állapot"
+  field_redmine_reporter_dashboards_schedule_consecutive_failures: "Egymást követő hibák"
+  field_redmine_reporter_dashboards_schedule_run_schedule: "Ütemezés"
+  field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Esedékesség dátuma"
+  field_redmine_reporter_dashboards_schedule_recipient_schedule: "Ütemezés"
+  field_redmine_reporter_dashboards_document_expires_at: "Lejárat"

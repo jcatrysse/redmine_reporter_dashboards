@@ -374,6 +374,116 @@ jobs:
         working-directory: redmine
 
   # ------------------------------------------------------------------
+  # T-36 — up -> VERSION=0 -> up, per Rails branch. Gate G11's other half.
+  #
+  # `technical-spec.md` §7 rule 4: "The down path is TESTED, not asserted … A plugin that
+  # cannot be uninstalled cleanly cannot honestly be recommended for a trial install, and a
+  # trial install is the whole A/B argument." `implementation-plan.md:2136`: "Failing this
+  # job blocks a release."
+  #
+  # ONE JOB PER RAILS BRANCH, and not because the plugin's migrations differ — they do not.
+  # The MIGRATOR differs: three Rails majors record versions, invert commands and dump
+  # schemas differently, and `ActiveRecord::Migration::CommandRecorder`'s reversible-method
+  # list has changed inside this span. A rollback proven on Rails 7.2 says nothing about
+  # 6.1 or 8.1.
+  #
+  # It runs `script/migrate_updown.sh` and nothing else, so a red cell here is one command
+  # away from being reproduced on a developer machine instead of being read out of YAML.
+  # That script carries the full argument for its two arms, including the FR-69 reading
+  # they implement.
+  #
+  # PostgreSQL only, deliberately. The question this job asks is about the MIGRATOR, which
+  # is engine-independent; the engine-dependent halves — identifier length limits, whether
+  # a unique index refuses a duplicate, `date` versus `datetime` round-tripping — are
+  # asserted in `test/unit/reporter_dashboards_schema_test.rb`, which runs in the `adapter`
+  # and `minitest` jobs across all three engines. Running this one three more times would
+  # buy a longer CI and no new information.
+  # ------------------------------------------------------------------
+  migrate-updown:
+    name: Migrate up/down (Redmine ${{ matrix.redmine }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { redmine: '5.1-stable', ruby: '3.2' }
+          - { redmine: '6.0-stable', ruby: '3.3' }
+          - { redmine: '6.1-stable', ruby: '3.4' }
+          - { redmine: '7.0-stable', ruby: '3.4' }
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+    env:
+      RAILS_ENV: test
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Redmine ${{ matrix.redmine }}
+        run: |
+          git clone --depth 1 --branch ${{ matrix.redmine }} \
+            https://github.com/redmine/redmine.git plugin/redmine
+          mkdir -p plugin/redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ --exclude redmine/ \
+            plugin/ plugin/redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: postgresql
+            database: redmine_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+            encoding: unicode
+          EOF
+        working-directory: plugin/redmine
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: false
+          working-directory: plugin/redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: plugin/redmine
+
+      # Core only. The plugin's own migrations are what the next step exercises, and
+      # running them here would take away the pre-install baseline the 'fresh' arm needs.
+      - name: Migrate Redmine core
+        run: |
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+        working-directory: plugin/redmine
+
+      # THE PLUGIN CHECKOUT, and it needs saying every time — HANDOVER §1 records the
+      # corpus job losing a step to a missing `working-directory`, which failed for the one
+      # reason a step must never fail for: having found nothing to check.
+      - name: up -> VERSION=0 -> up
+        run: ./script/migrate_updown.sh
+        working-directory: plugin
+
+  # ------------------------------------------------------------------
   # Corpus reference checks — from the PLUGIN CHECKOUT, where git history exists.
   #
   # Deliberately not folded into the rspec job: that one runs from inside the Redmine
@@ -599,7 +709,7 @@ jobs:
   # Non-test gates. A green suite says nothing about any of these.
   # ------------------------------------------------------------------
   gates:
-    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, single_parse)
+    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, single_parse, migration_reversibility)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -652,6 +762,18 @@ jobs:
       # decision, but because those are Liquid's defaults.
       - name: single_parse
         run: ./script/gates/single_parse.sh
+
+      # G11, static half — technical-spec.md §7's reversibility rules, parsed rather than
+      # grepped. STRICT by default, unlike its neighbours: the others ratchet down a
+      # pre-existing violation, and this one arrives in the same release as the migrations
+      # it governs, so there is no backlog to be lenient about.
+      #
+      # The OTHER half of G11 is the `migrate-updown` job below, which runs a real
+      # up -> VERSION=0 -> up cycle. Neither replaces the other: this one asks whether a
+      # migration's reverse is DECLARED, that one whether it actually restores the
+      # database. A migration can pass either and fail the other.
+      - name: migration_reversibility
+        run: ./script/gates/migration_reversibility.sh
 
       # Not a gate, and deliberately not failing the build: the number that has to
       # reach zero by 1.0, printed where a reviewer sees it move.

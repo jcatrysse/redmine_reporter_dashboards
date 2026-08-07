@@ -64,3 +64,25 @@ de:
   text_reporter_asset_max_bytes_info: "Eine harte Grenze. Ein gr\u00F6\u00DFeres Asset wird abgelehnt und im Bericht benannt, anstatt den Bericht mit einer L\u00FCcke zu erzeugen."
   text_reporter_asset_policy_collapsed: "Die Positivliste f\u00FCr Asset-Hosts ist leer, daher verh\u00E4lt sich %{mode} derzeit genau wie \u201EGeb\u00FCndelt\u201C und es wird nichts \u00FCber das Netzwerk geladen. F\u00FCgen Sie mindestens einen Hostnamen hinzu, damit die Einstellung wirksam wird."
   text_reporter_asset_settings_dropped: "Einige gespeicherte Werte konnten nicht verwendet werden; stattdessen gelten die Standardwerte:"
+
+# T-22 - model attribute labels. Redmine's human_attribute_name tries
+# field_<class_prefix>_<attr> before field_<attr>, and the class-prefixed form is used
+# throughout: a bare field_visibility would relabel Redmine's own saved queries too,
+# which is not this plugin's to change.
+  field_redmine_reporter_dashboards_template_visibility: "Sichtbarkeit"
+  field_redmine_reporter_dashboards_template_source: "Datenquelle"
+  field_redmine_reporter_dashboards_template_output: "Ausgabe"
+  field_redmine_reporter_dashboards_template_orientation: "Ausrichtung"
+  field_redmine_reporter_dashboards_template_page_size: "Seitengröße"
+  field_redmine_reporter_dashboards_template_margins: "Seitenränder (mm)"
+  field_redmine_reporter_dashboards_template_engine_hint: "Bevorzugte Rendering-Engine"
+  field_redmine_reporter_dashboards_schedule_template: "Berichtsvorlage"
+  field_redmine_reporter_dashboards_schedule_end_date: "Enddatum"
+  field_redmine_reporter_dashboards_schedule_render_as: "Rendern als"
+  field_redmine_reporter_dashboards_schedule_render_as_user: "Rendern als Benutzer"
+  field_redmine_reporter_dashboards_schedule_last_status: "Letzter Status"
+  field_redmine_reporter_dashboards_schedule_consecutive_failures: "Aufeinanderfolgende Fehler"
+  field_redmine_reporter_dashboards_schedule_run_schedule: "Zeitplan"
+  field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Termindatum"
+  field_redmine_reporter_dashboards_schedule_recipient_schedule: "Zeitplan"
+  field_redmine_reporter_dashboards_document_expires_at: "Läuft ab am"

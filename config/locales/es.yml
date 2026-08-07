@@ -64,3 +64,25 @@ es:
   text_reporter_asset_max_bytes_info: "Un l\u00EDmite estricto. Un recurso mayor se rechaza y el informe lo nombra, en lugar de generarse con un hueco."
   text_reporter_asset_policy_collapsed: "La lista de equipos permitidos est\u00E1 vac\u00EDa, por lo que %{mode} se comporta actualmente igual que \u00ABIncluidos\u00BB y no se descarga nada por la red. A\u00F1ada al menos un nombre de equipo para que surta efecto."
   text_reporter_asset_settings_dropped: "Algunos valores guardados no se pudieron usar; en su lugar se aplican los predeterminados:"
+
+# T-22 - model attribute labels. Redmine's human_attribute_name tries
+# field_<class_prefix>_<attr> before field_<attr>, and the class-prefixed form is used
+# throughout: a bare field_visibility would relabel Redmine's own saved queries too,
+# which is not this plugin's to change.
+  field_redmine_reporter_dashboards_template_visibility: "Visibilidad"
+  field_redmine_reporter_dashboards_template_source: "Origen de datos"
+  field_redmine_reporter_dashboards_template_output: "Salida"
+  field_redmine_reporter_dashboards_template_orientation: "Orientación"
+  field_redmine_reporter_dashboards_template_page_size: "Tamaño de página"
+  field_redmine_reporter_dashboards_template_margins: "Márgenes (mm)"
+  field_redmine_reporter_dashboards_template_engine_hint: "Motor de renderizado preferido"
+  field_redmine_reporter_dashboards_schedule_template: "Plantilla de informe"
+  field_redmine_reporter_dashboards_schedule_end_date: "Fecha de fin"
+  field_redmine_reporter_dashboards_schedule_render_as: "Generar como"
+  field_redmine_reporter_dashboards_schedule_render_as_user: "Usuario para generar"
+  field_redmine_reporter_dashboards_schedule_last_status: "Último estado"
+  field_redmine_reporter_dashboards_schedule_consecutive_failures: "Fallos consecutivos"
+  field_redmine_reporter_dashboards_schedule_run_schedule: "Programación"
+  field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Fecha de ejecución"
+  field_redmine_reporter_dashboards_schedule_recipient_schedule: "Programación"
+  field_redmine_reporter_dashboards_document_expires_at: "Caduca el"

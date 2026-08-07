@@ -64,3 +64,25 @@ pl:
   text_reporter_asset_max_bytes_info: "Twardy limit. Wi\u0119kszy zas\u00F3b zostaje odrzucony i raport go nazywa, zamiast zosta\u0107 wygenerowany z luk\u0105."
   text_reporter_asset_policy_collapsed: "Lista dozwolonych host\u00F3w jest pusta, wi\u0119c %{mode} zachowuje si\u0119 obecnie dok\u0142adnie jak \u201EWbudowane\u201D i nic nie jest pobierane z sieci. Dodaj co najmniej jedn\u0105 nazw\u0119 hosta, aby ustawienie zadzia\u0142a\u0142o."
   text_reporter_asset_settings_dropped: "Niekt\u00F3rych zapisanych warto\u015Bci nie uda\u0142o si\u0119 u\u017Cy\u0107; obowi\u0105zuj\u0105 warto\u015Bci domy\u015Blne:"
+
+# T-22 - model attribute labels. Redmine's human_attribute_name tries
+# field_<class_prefix>_<attr> before field_<attr>, and the class-prefixed form is used
+# throughout: a bare field_visibility would relabel Redmine's own saved queries too,
+# which is not this plugin's to change.
+  field_redmine_reporter_dashboards_template_visibility: "Widoczność"
+  field_redmine_reporter_dashboards_template_source: "Źródło danych"
+  field_redmine_reporter_dashboards_template_output: "Wyjście"
+  field_redmine_reporter_dashboards_template_orientation: "Orientacja"
+  field_redmine_reporter_dashboards_template_page_size: "Rozmiar strony"
+  field_redmine_reporter_dashboards_template_margins: "Marginesy (mm)"
+  field_redmine_reporter_dashboards_template_engine_hint: "Preferowany silnik renderowania"
+  field_redmine_reporter_dashboards_schedule_template: "Szablon raportu"
+  field_redmine_reporter_dashboards_schedule_end_date: "Data zakończenia"
+  field_redmine_reporter_dashboards_schedule_render_as: "Renderuj jako"
+  field_redmine_reporter_dashboards_schedule_render_as_user: "Użytkownik renderowania"
+  field_redmine_reporter_dashboards_schedule_last_status: "Ostatni status"
+  field_redmine_reporter_dashboards_schedule_consecutive_failures: "Kolejne niepowodzenia"
+  field_redmine_reporter_dashboards_schedule_run_schedule: "Harmonogram"
+  field_redmine_reporter_dashboards_schedule_run_occurrence_date: "Data wystąpienia"
+  field_redmine_reporter_dashboards_schedule_recipient_schedule: "Harmonogram"
+  field_redmine_reporter_dashboards_document_expires_at: "Wygasa"

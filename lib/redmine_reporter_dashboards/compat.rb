@@ -61,5 +61,40 @@ module RedmineReporterDashboards
     def self.svg_icons?
       ::Redmine::VERSION::MAJOR >= 6
     end
+
+    # Whether the running DATABASE has a column, asked without raising.
+    #
+    #   `technical-spec.md` §7 rule 5, verbatim: "A user who rolls **the plugin** back one
+    #   minor version while keeping the schema must not crash: models never `SELECT
+    #   *`-depend on a column's presence, and `compat/` carries a
+    #   `column_present?(:table, :col)` guard for the three columns added after 0.6
+    #   (`engine_hint`, `next_run_on`, `consecutive_failures`). Cheap, and it converts a
+    #   support incident into a degraded feature."
+    #
+    # This is a *schema* divergence rather than a Rails-version one, and it lives here for
+    # the same reason every other divergence does: so there is one of it. A scattered
+    # `rescue ActiveRecord::StatementInvalid` around each reader is the shape §1.2's E4
+    # exists to stop, and it is also the shape CLAUDE.md §5 forbids — a swallowed error
+    # around a *use* hides the absence, where a question answered once makes it visible.
+    #
+    # ASKED OF THE SCHEMA CACHE, NOT WITH A QUERY. `connection.columns` is memoised by
+    # Rails' schema cache, so a model calling this on every read costs one query per table
+    # per process rather than one per call — which matters because FR-48 forbids a query
+    # count that scales with anything.
+    #
+    # THE RESCUE IS NARROW ON PURPOSE. Three states have to be told apart:
+    #   * the column is absent          -> false, and the caller degrades (the point)
+    #   * the TABLE is absent           -> false; the plugin is mid-install or rolled back
+    #   * the database is unreachable   -> false is WRONG, and this must not answer it
+    # `StatementInvalid` covers the first two on every adapter. `ConnectionNotEstablished`
+    # is deliberately NOT rescued: answering "no such column" when the truth is "no
+    # database" would turn an outage into a silently smaller report, which is precisely
+    # the failure this project keeps naming.
+    def self.column_present?(table, column)
+      name = column.to_s
+      ::ActiveRecord::Base.connection.columns(table.to_s).any? { |c| c.name == name }
+    rescue ::ActiveRecord::StatementInvalid
+      false
+    end
   end
 end
