@@ -14,6 +14,24 @@ got past the permission check four times with ordinary controller code — and t
 there was the same as the answer here: a directory of fixtures the reader must be able to
 see.
 
+**Eight of these are bypasses an independent review walked straight through** — `021`…`028`
+were each CLEAN against the first version of the reader, which reported nothing at all:
+
+| fixture | what it does | why the first reader missed it |
+|---|---|---|
+| `021` | `define_method(:down)` | the `def` scan only sees `DEFN` nodes |
+| `022` | `c = connection; c.update(…)`, `send(:execute, …)` | the data rule required a *receiverless* call |
+| `023` | `"…".constantize.update_all` | reaches a model without ever writing a constant |
+| `024` | `create_table …, if_not_exists: true` | not an `if`, and its **down is unconditional** — it drops a table it did not create |
+| `025` | `t.index` inside `create_table` | the length rule only looked at `add_index` |
+| `026` | `add_index …, name: <a variable>` | fell back to measuring the *derived* name, which the database never sees |
+| `027` | `change_column`, blockless `drop_table` | Rails raises `IrreversibleMigration` at down-time; nothing checked for it |
+| `sub/028` | a migration in a **subdirectory** | Rails globs `**/[0-9]*_*.rb`; the reader globbed one level |
+
+`024` is the sharpest of them. It reads like a safe guard and it is the exact hazard FR-69
+clause 2 exists to prevent, wearing a keyword argument: Rails records the `create_table` and
+inverts it to a plain `drop_table`, so the guard applies to the up direction only.
+
 **Three of the reader's own bugs were found by these files and by nothing else**, all
 during T-36 and all silent:
 

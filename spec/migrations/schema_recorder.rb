@@ -64,6 +64,14 @@ module ActiveRecord
       end
 
       @recorded_tables[name.to_s] = { 'columns' => columns, 'id' => options[:id] != false }
+
+      recorder.indexes.each do |index|
+        @recorded_indexes << index.merge(
+          'table' => name.to_s,
+          'name' => index['name'] ||
+                    "index_#{name}_on_#{index['columns'].join('_and_')}"
+        )
+      end
     end
 
     def add_index(table, columns, **options)
@@ -89,8 +97,19 @@ module ActiveRecord
       yield DirectionStub.new if block_given?
     end
 
+    # `dir.up { ... }` must RUN its block, and `dir.down { ... }` must not.
+    #
+    # §7 rule 1 explicitly sanctions `reversible do |dir| ... end` as the second legal form
+    # of a migration, so it is a form this recorder will meet. The first version stubbed
+    # BOTH directions as no-ops, so a migration written that way recorded **zero tables**
+    # and `schema_contract_spec.rb` would have asserted happily against a schema it could
+    # not see. The recorder describes the UP direction — that is what "the schema this
+    # migration describes" means — so `up` yields and `down` does not.
     class DirectionStub
-      def up; end
+      def up
+        yield if block_given?
+      end
+
       def down; end
     end
   end
@@ -103,10 +122,11 @@ class TableRecorder
     references belongs_to
   ].freeze
 
-  attr_reader :columns
+  attr_reader :columns, :indexes
 
   def initialize
     @columns = []
+    @indexes = []
   end
 
   TYPES.each do |type|
@@ -123,7 +143,18 @@ class TableRecorder
     @columns << column('updated_at', :datetime, options)
   end
 
-  def index(*_args, **_options); end
+  # `t.index` inside `create_table` is the same statement as `add_index`, and ignoring it
+  # made every inline index invisible to `schema_contract_spec.rb` — including its name,
+  # which is the thing that aborted migration 002 on PostgreSQL the first time it ran.
+  # Recorded onto the table being built; the caller stitches the table name in.
+  def index(columns, **options)
+    @indexes << {
+      'columns' => Array(columns).map(&:to_s),
+      'unique' => options.fetch(:unique, false),
+      'name' => options[:name] && options[:name].to_s,
+      'explicit_name' => !options[:name].nil?
+    }
+  end
 
   private
 
@@ -138,7 +169,9 @@ class TableRecorder
 end
 
 dirs = ARGV.empty? ? ['db/migrate'] : ARGV
-files = dirs.flat_map { |dir| Dir[File.join(dir, '*.rb')] }
+# Recursive, because `ActiveRecord::MigrationContext` is — see the same note in
+# `script/gates/migration_reversibility.rb`.
+files = dirs.flat_map { |dir| Dir[File.join(dir, '**', '*.rb')] }
             .select { |path| File.basename(path) =~ /\A\d+_/ }
             .sort_by { |path| File.basename(path).to_i }
 
@@ -152,8 +185,21 @@ files.each do |path|
 
   eval(source, TOPLEVEL_BINDING, path) # rubocop:disable Security/Eval
 
-  klass = (ActiveRecord::Migration.subclasses - before).first
-  raise "#{path}: defined no ActiveRecord::Migration subclass" unless klass
+  defined_here = ActiveRecord::Migration.subclasses - before
+  # Rails runs exactly one migration class per file — `MigrationProxy#migration` takes the
+  # constant named after the filename. Two subclasses in one file means one of them never
+  # runs, and picking one arbitrarily (`.first`, i.e. whatever order `Class#subclasses`
+  # happens to return) would make this recorder describe a schema the database will not
+  # have. Refused rather than guessed.
+  raise "#{path}: defined no ActiveRecord::Migration subclass" if defined_here.empty?
+
+  if defined_here.size > 1
+    raise "#{path}: defines #{defined_here.size} ActiveRecord::Migration subclasses " \
+          "(#{defined_here.map(&:name).join(', ')}). Rails runs one per file, so this " \
+          'recorder cannot say which schema the database will end up with.'
+  end
+
+  klass = defined_here.first
 
   instance = klass.new
   instance.change

@@ -5,13 +5,32 @@ module RedmineReporterDashboards
   #
   # `technical-spec.md:1199` calls the table **append-only**, and this class is the second
   # half of that: the migration withholds `updated_at`, and `readonly?` withholds `UPDATE`.
-  # Either alone is a convention; together they are a property. FR-21's audit trail exists
-  # because authoring a template is a code-execution privilege (INV-9), and an audit trail
-  # that can be edited answers no question anybody would ask it.
+  # FR-21's audit trail exists because authoring a template is a code-execution privilege
+  # (INV-9), and an audit trail that can be edited answers no question anybody would ask it.
   #
-  # `destroy` is deliberately NOT blocked. A template's versions are deleted with the
-  # template (`dependent: :delete_all`), because keeping the content of a deleted template
-  # would keep executable code an operator believed they had removed.
+  # --- WHAT "APPEND-ONLY" DOES AND DOES NOT BUY, STATED PRECISELY ---
+  #
+  # An earlier version of this comment claimed the two mechanisms "together are a property",
+  # and the review of T-36 refuted it by running the obvious bypasses. What is actually true:
+  #
+  #   BLOCKED by `readonly?`   save, update, update!, update_attribute, touch, increment!,
+  #                            decrement! — and `destroy` — all raise
+  #                            `ActiveRecord::ReadOnlyRecord` on a persisted row
+  #   NOT BLOCKED              `TemplateVersion.where(id: x).update_all(content: '…')`,
+  #                            `update_column`/`update_columns`, and raw SQL
+  #
+  # That is not a hole peculiar to this class: `update_all` and `update_column` bypass every
+  # model-level control Rails has, by design, on every model in every application. Saying so
+  # is the point — a claim of tamper-proofing that a one-line console command defeats is
+  # worse than no claim. The honest statement is that nothing in this plugin's own code can
+  # rewrite a version, and that a database-level guarantee would need a trigger this plugin
+  # does not install.
+  #
+  # `destroy` being blocked is a CONSEQUENCE rather than a decision — Rails routes it through
+  # the same `readonly?` check, and an earlier version of this comment said the opposite.
+  # Deleting a template still removes its versions, because `dependent: :delete_all` issues
+  # one bulk DELETE and never instantiates a row; that is what keeps a deleted template's
+  # executable content from outliving it.
   class TemplateVersion < RedmineReporterDashboards::Compat.base_record
     self.table_name = 'reporter_dashboards_template_versions'
 
@@ -29,12 +48,16 @@ module RedmineReporterDashboards
 
     validates :template_id, presence: true
 
-    before_validation :stamp_created_at, on: :create
-    before_validation :stamp_content_digest
+    # `before_save`, NOT `before_validation`. `created_at` is NOT NULL in the migration, and
+    # `save(validate: false)` — a Redmine idiom, used in core's own `Project#copy` — skips
+    # every validation callback, so stamping there turned a supported call into a
+    # `NotNullViolation` from the database. `before_save` runs either way.
+    before_save :stamp_created_at
+    before_save :stamp_content_digest
 
-    # Blocks `save`, `update`, `update_attribute` and `touch` on a persisted row —
-    # `ActiveRecord::ReadOnlyRecord` is raised rather than silently ignored. A new record
-    # is still writable, which is what makes the table append-ONLY rather than read-only.
+    # A new record is still writable, which is what makes the table append-ONLY rather than
+    # read-only. See the class comment for exactly which write paths this closes and which
+    # two it does not.
     def readonly?
       persisted?
     end
@@ -58,8 +81,12 @@ module RedmineReporterDashboards
       self.created_at ||= Time.zone.now
     end
 
+    # Distinguishes a NULL content from an empty one. `digest_for(nil)` and `digest_for('')`
+    # are otherwise the same SHA-256, so an audit trail could not tell "the author saved an
+    # empty template" from "no content was recorded" — two different events for anybody
+    # reading the trail to answer a question.
     def stamp_content_digest
-      self.content_digest = self.class.digest_for(content)
+      self.content_digest = content.nil? ? nil : self.class.digest_for(content)
     end
   end
 end

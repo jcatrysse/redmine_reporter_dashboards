@@ -57,11 +57,32 @@ connection.tables.sort.each do |table|
   end
 end
 
+# WHERE THE MIGRATION BOOKKEEPING LIVES MOVED INSIDE THE SUPPORT SPAN, and getting this
+# wrong would have failed exactly one CI cell.
+#
+#   Rails 6.1 (Redmine 5.1)   `ActiveRecord::Base.connection.schema_migration`
+#   Rails 7.1+ (Redmine 6.0+) `ActiveRecord::Base.connection.pool.schema_migration`
+#
+# Redmine's own migrator tracks the move: 5.1-stable's `lib/redmine/plugin.rb:518` passes
+# `connection.schema_migration`, 6.1-stable's `:529` passes `connection.pool.schema_migration`.
+# The first version of this file used the pool form unconditionally, so the `migrate-updown`
+# job would have raised `NoMethodError` on Redmine 5.1 — the one branch nothing else here
+# can exercise locally, and therefore the one where a version-specific mistake survives.
+#
+# Asked with `respond_to?` rather than of `Rails::VERSION`, because the question is "does
+# this object answer" and that is what the two branches actually differ on.
+schema_migration =
+  if connection.pool.respond_to?(:schema_migration)
+    connection.pool.schema_migration
+  elsif connection.respond_to?(:schema_migration)
+    connection.schema_migration
+  else
+    ActiveRecord::SchemaMigration
+  end
+
 # Deliberately only this plugin's rows: another plugin's migrations are not this job's
 # business, and including them would make the comparison fail for somebody else's reason.
-sm_table = connection.quote_table_name(
-  ActiveRecord::Base.connection.pool.schema_migration.table_name
-)
+sm_table = connection.quote_table_name(schema_migration.table_name)
 connection.select_values("SELECT version FROM #{sm_table}")
           .select { |v| v.to_s.end_with?("-#{PLUGIN_ID}") }
           .sort

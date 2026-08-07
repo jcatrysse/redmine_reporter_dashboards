@@ -46,7 +46,9 @@ module MigrationReversibility
     'no_data_statement'  => 'never reads or writes rows (§7 rule 3)',
     'no_model_constant'  => 'never names a model constant (§7 rule 3)',
     'index_name_length'  => 'every index name fits the shortest engine limit',
-    'no_conditional_ddl' => 'no `if`/`unless`/`case` around DDL in a `change` block'
+    'no_conditional_ddl' => 'no `if`/`unless`/`case` around DDL in a `change` block',
+    'no_dynamic_dispatch' => 'no send/define_method/eval/constantize — a name a parser cannot read',
+    'no_uninvertible_ddl' => 'no DDL Rails cannot invert, and no if_not_exists/if_exists'
   }.freeze
 
   # The newest `ActiveRecord::Migration[...]` version declarable on EVERY Rails in the
@@ -74,10 +76,45 @@ module MigrationReversibility
   # Row-level reads and writes. §7 rule 3: "A schema migration may not read or write
   # template content" — enforced as "may not read or write ROWS at all", which is stronger,
   # simpler to check, and costs nothing because no migration in this plugin needs to.
-  DATA_METHODS = %i[
+  #
+  # SPLIT BY RECEIVER, and the split is a real finding rather than tidiness. The first
+  # version required a receiverless call, so `connection.update("UPDATE …")` and
+  # `Foo.connection.insert(…)` — the two forms anyone actually writes — were invisible.
+  # Names that unambiguously touch rows fire on ANY receiver; names that a migration might
+  # legitimately call on an Array (`first`, `select`, `count`) fire only when receiverless,
+  # where the receiver can only be the migration itself.
+  DATA_METHODS_ANY_RECEIVER = %i[
     update_all delete_all destroy_all insert insert_all upsert upsert_all
-    create create! new save save! update update! destroy find find_by find_by!
-    find_each find_in_batches first last pluck where count exists? select
+    create create! save save! update update! find_by find_by! find_each find_in_batches
+  ].to_set.freeze
+
+  DATA_METHODS_RECEIVERLESS = %i[
+    destroy find first last pluck where count exists? select
+  ].to_set.freeze
+
+  # A name a parser cannot follow. `define_method(:down)` defines a method this reader's
+  # `DEFN` scan cannot see; `send(:execute, …)` reaches a forbidden method by a computed
+  # name; `constantize`/`const_get` reach a model without ever writing a constant. Each is
+  # a hole the review of T-36 walked through, and none has a legitimate use in a migration
+  # that only creates tables. Refused outright — the same call `technical-spec.md` §4.1
+  # makes about `define_method` in a controller: "its name can be computed, so no parser
+  # can promise to know" what it does.
+  DYNAMIC_DISPATCH = %i[
+    send public_send __send__ define_method define_singleton_method
+    eval instance_eval class_eval module_eval instance_exec class_exec
+    constantize safe_constantize const_get const_set
+  ].to_set.freeze
+
+  # DDL whose inverse Rails cannot compute. `CommandRecorder` raises
+  # `IrreversibleMigration` for these at down-time — which is §7 rule 1's forbidden outcome
+  # arriving by accident rather than by declaration, and only on the day somebody rolls
+  # back. Named here so it arrives at review time instead.
+  #
+  # `change_column` has no recorded inverse at all. `remove_column` is invertible only when
+  # the type is given. `drop_table` is invertible only with a block describing the table.
+  # `change_column_default` needs `from:`/`to:`.
+  UNINVERTIBLE_DDL = %i[
+    change_column change_column_null remove_columns remove_belongs_to
   ].to_set.freeze
 
   # Constants a migration may legitimately name, as FULL paths.
@@ -100,10 +137,18 @@ module MigrationReversibility
 
   module_function
 
-  # Every `NN_name.rb` under the given directories, sorted by their numeric prefix so a
-  # finding list reads in migration order.
+  # Every migration under the given directories, sorted by numeric prefix so a finding list
+  # reads in migration order.
+  #
+  # `**` IS LOAD-BEARING. `ActiveRecord::MigrationContext#migration_files` globs
+  # `"#{paths}/**/[0-9]*_*.rb"` — recursively — and Redmine's plugin migrator inherits it
+  # (`lib/redmine/plugin.rb`, `MigrationContext < ActiveRecord::MigrationContext`). A reader
+  # that globs one level therefore reports CLEAN on a tree where `db/migrate/sub/008.rb`
+  # runs on every install: the gate would not be wrong about that file, it would not know
+  # it exists. Same fix in `spec/migrations/schema_recorder.rb` and in the shell wrapper's
+  # `find`, because all three have to agree with Rails about what a migration is.
   def migration_files(dirs)
-    Array(dirs).flat_map { |dir| Dir[File.join(dir, '*.rb')] }
+    Array(dirs).flat_map { |dir| Dir[File.join(dir, '**', '*.rb')] }
                .select { |path| File.basename(path) =~ /\A\d+_/ }
                .sort_by { |path| File.basename(path).to_i }
   end
@@ -221,7 +266,8 @@ module MigrationReversibility
         )
       end
 
-      if DATA_METHODS.include?(method) && receiverless?(node)
+      if DATA_METHODS_ANY_RECEIVER.include?(method) ||
+         (DATA_METHODS_RECEIVERLESS.include?(method) && receiverless?(node))
         findings << Finding.new(
           file: path, line: node.first_lineno, rule: 'no_data_statement',
           message: "calls `#{method}`. §7 rule 3: a schema migration may not read or write " \
@@ -230,9 +276,79 @@ module MigrationReversibility
                    'imported data (FR-70).'
         )
       end
+
+      if DYNAMIC_DISPATCH.include?(method)
+        findings << Finding.new(
+          file: path, line: node.first_lineno, rule: 'no_dynamic_dispatch',
+          message: "calls `#{method}`. A migration that dispatches by a computed name is a " \
+                   'migration no parser can read: `define_method(:down)` defines a method ' \
+                   "this reader's `def` scan cannot see, `send(:execute, …)` reaches a " \
+                   'forbidden method without naming it, and `constantize` reaches a model ' \
+                   'without ever writing a constant. None of the three has a use in a ' \
+                   'migration that creates tables.'
+        )
+      end
+
+      if UNINVERTIBLE_DDL.include?(method) && receiverless?(node)
+        findings << Finding.new(
+          file: path, line: node.first_lineno, rule: 'no_uninvertible_ddl',
+          message: "calls `#{method}`, which Rails' CommandRecorder cannot invert — it raises " \
+                   '`IrreversibleMigration` at down-time. That is §7 rule 1\'s forbidden ' \
+                   'outcome arriving by accident rather than by declaration, and only on ' \
+                   'the day somebody rolls back. Use `reversible do |dir|` and say what ' \
+                   'each direction does.'
+        )
+      end
+
+      if %i[remove_column drop_table].include?(method) && receiverless?(node)
+        findings.concat(check_recoverable_removal(path, node, method))
+      end
+
+      if receiverless?(node) && DDL_METHODS.include?(method)
+        args = call_arguments(node)
+        %i[if_not_exists if_exists].each do |flag|
+          next unless args && hash_argument_present?(args, flag)
+
+          findings << Finding.new(
+            file: path, line: node.first_lineno, rule: 'no_uninvertible_ddl',
+            message: "passes `#{flag}:` to `#{method}`. Rails records the command and inverts " \
+                     'it UNCONDITIONALLY, so the guard applies to the up direction only: ' \
+                     "`create_table :x, if_not_exists: true` becomes a plain `drop_table :x` " \
+                     'on the way down, and drops a table this migration did not create. ' \
+                     'That is the exact hazard FR-69 clause 2 exists to prevent, one table over.'
+          )
+        end
+      end
     end
 
     findings
+  end
+
+  # `remove_column :t, :c` without a type, and `drop_table :t` without a block, are both
+  # irreversible: the recorder has nothing to rebuild from. Rails raises at down-time, which
+  # is the wrong time to find out.
+  def check_recoverable_removal(path, node, method)
+    args = call_arguments(node)
+    positional = args ? args.children.compact.count { |c| c.is_a?(RubyVM::AbstractSyntaxTree::Node) && c.type != :HASH } : 0
+
+    case method
+    when :remove_column
+      return [] if positional >= 3
+
+      [Finding.new(file: path, line: node.first_lineno, rule: 'no_uninvertible_ddl',
+                   message: 'calls `remove_column` without a type. Rails can only invert it ' \
+                            'when the column type is given — otherwise the down direction ' \
+                            'raises IrreversibleMigration.')]
+    when :drop_table
+      return [] if node.children.compact.any? { |c| c.is_a?(RubyVM::AbstractSyntaxTree::Node) && c.type == :ITER }
+
+      [Finding.new(file: path, line: node.first_lineno, rule: 'no_uninvertible_ddl',
+                   message: 'calls `drop_table` without a block. Rails can only invert it when ' \
+                            'the block describes the table to rebuild — otherwise the down ' \
+                            'direction raises IrreversibleMigration.')]
+    else
+      []
+    end
   end
 
   # Every constant the file names, as a FULL path, each reported once.
@@ -293,16 +409,55 @@ module MigrationReversibility
     findings = []
 
     each_call(tree) do |node, method|
-      next unless method == :add_index && receiverless?(node)
+      # `t.index` inside a `create_table` block is the SAME statement as `add_index`, and
+      # the first version of this rule could not see it — it required a receiverless
+      # `add_index`, so a 74-character name written as `t.index` sailed through and aborted
+      # the migration on PostgreSQL at install time.
+      inline = method == :index && node.type == :CALL
+      next unless (method == :add_index && receiverless?(node)) || inline
 
       args = call_arguments(node)
       next unless args && args.type == :LIST
 
-      table = literal_value(args.children[0])
-      explicit = hash_argument_value(args, :name)
+      # `t.index [:a, :b]` has no table argument — the table is the block's own. Its derived
+      # name therefore cannot be computed here, so an inline index MUST carry a literal
+      # `name:`; that is stricter than Rails and deliberately so.
+      table = inline ? nil : literal_value(args.children[0])
+      columns_node = inline ? args.children[0] : args.children[1]
 
-      name = explicit || derived_index_name(table, args.children[1])
-      next if name.nil?
+      if hash_argument_present?(args, :name)
+        explicit = hash_argument_value(args, :name)
+        if explicit.nil?
+          findings << Finding.new(
+            file: path, line: node.first_lineno, rule: 'index_name_length',
+            message: 'passes a computed `name:` to an index. This reader cannot measure a ' \
+                     'name it cannot read, and a name nobody measured is how a migration ' \
+                     'that installs on MySQL aborts on PostgreSQL. Use a literal.'
+          )
+          next
+        end
+        name = explicit
+      elsif inline
+        findings << Finding.new(
+          file: path, line: node.first_lineno, rule: 'index_name_length',
+          message: '`t.index` inside `create_table` with no `name:`. The name Rails derives ' \
+                   'depends on the enclosing table, which this reader cannot see from the ' \
+                   'call — and an unmeasured index name is exactly how migration 002 first ' \
+                   'aborted on PostgreSQL. Pass an explicit short `name:`.'
+        )
+        next
+      else
+        name = derived_index_name(table, columns_node)
+        if name.nil?
+          findings << Finding.new(
+            file: path, line: node.first_lineno, rule: 'index_name_length',
+            message: 'passes a non-literal table or column list to `add_index`, so the name ' \
+                     'Rails will derive cannot be measured here. Pass an explicit short ' \
+                     '`name:`.'
+          )
+          next
+        end
+      end
 
       next if name.length <= MAX_INDEX_NAME
 
@@ -455,6 +610,20 @@ module MigrationReversibility
     end
   end
 
+  # Whether a trailing keyword hash carries the key AT ALL, literal value or not. Separate
+  # from `hash_argument_value` because "absent" and "present but unreadable" have to lead to
+  # different findings: the first is fine for `add_index`, the second is a name nobody
+  # measured.
+  def hash_argument_present?(args, key)
+    hash = args.children.compact.find { |c| c.is_a?(RubyVM::AbstractSyntaxTree::Node) && c.type == :HASH }
+    return false unless hash
+
+    list = hash.children[0]
+    return false unless list && list.type == :LIST
+
+    list.children.compact.each_slice(2).any? { |k, _| k && literal_value(k) == key.to_s }
+  end
+
   # The `name:` value of a trailing keyword hash, when it is a literal.
   def hash_argument_value(args, key)
     hash = args.children.compact.find { |c| c.is_a?(RubyVM::AbstractSyntaxTree::Node) && c.type == :HASH }
@@ -495,7 +664,10 @@ module MigrationReversibility
   def load_allowlist(path)
     return {} unless File.exist?(path)
 
-    allow = Hash.new { |h, k| h[k] = Set.new }
+    # A plain Hash. `Hash.new { |h, k| h[k] = Set.new }` looks convenient and makes every
+    # LOOKUP a write, so a caller that loads the allowlist, scans, and then inspects it sees
+    # an entry for every file scanned — which reads as "these are all exempt".
+    allow = {}
     File.readlines(path, encoding: 'UTF-8').each_with_index do |line, index|
       stripped = line.strip
       next if stripped.empty? || stripped.start_with?('#')
@@ -513,7 +685,7 @@ module MigrationReversibility
                              "known ids: #{RULES.keys.join(', ')}"
       end
 
-      allow[file] << rule
+      (allow[file] ||= Set.new) << rule
     end
     allow
   end

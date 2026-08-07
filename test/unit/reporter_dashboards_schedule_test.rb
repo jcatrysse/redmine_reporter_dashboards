@@ -282,6 +282,79 @@ class ReporterDashboardsScheduleTest < ActiveSupport::TestCase
     end
   end
 
+  def test_an_immortal_document_is_refused_and_a_bounded_one_is_not
+    # "Persistence is opt-in with a mandatory TTL … bounded when on" (§7). Presence alone
+    # gives the first half only: expires_at = 9999-12-31 satisfies a presence check, reports
+    # expired? false for ever and is never collected. At the bound and one past it.
+    travel_to(Time.zone.parse('2026-06-01 12:00')) do
+      at_bound = Document.new(template_id: @template.id,
+                              expires_at: Time.zone.now + Document::MAX_RETENTION)
+      past = Document.new(template_id: @template.id,
+                          expires_at: Time.zone.now + Document::MAX_RETENTION + 1)
+      immortal = Document.new(template_id: @template.id, expires_at: Time.zone.parse('9999-12-31'))
+
+      assert at_bound.valid?
+      assert_not past.valid?
+      assert_not immortal.valid?
+    end
+  end
+
+  def test_a_version_written_with_validate_false_still_gets_its_created_at
+    # created_at is NOT NULL and used to be stamped in a before_validation callback, so
+    # save(validate: false) — a Redmine idiom — hit the database constraint instead.
+    version = TemplateVersion.new(template_id: @template.id, content: 'x')
+
+    assert version.save(validate: false)
+    assert_not_nil version.reload.created_at
+  end
+
+  def test_a_recipient_written_with_validate_false_still_gets_its_created_at
+    recipient = ScheduleRecipient.new(schedule_id: @schedule.id, user_id: @recipient.id)
+
+    assert recipient.save(validate: false)
+    assert_not_nil recipient.reload.created_at
+  end
+
+  def test_a_nil_content_and_an_empty_content_get_different_digests
+    # Otherwise the audit trail cannot tell "the author saved an empty template" from "no
+    # content was recorded", which are two different events.
+    empty = TemplateVersion.create!(template_id: @template.id, content: '')
+    absent = TemplateVersion.create!(template_id: @template.id, content: nil)
+
+    assert_not_nil empty.content_digest
+    assert_nil absent.content_digest
+  end
+
+  def test_update_all_is_NOT_blocked_and_the_class_comment_says_so
+    # Pinned as it is, rather than claimed away. `readonly?` closes every model-level write
+    # path; `update_all` bypasses the model entirely, on every model in every Rails app. A
+    # test that asserted the opposite would be a claim of tamper-proofing that a one-line
+    # console command defeats.
+    version = TemplateVersion.create!(template_id: @template.id, content: 'original')
+    TemplateVersion.where(id: version.id).update_all(content: 'rewritten')
+
+    assert_equal 'rewritten', version.reload.content
+  end
+
+  def test_destroy_IS_blocked_on_a_persisted_version_and_delete_all_still_works
+    version = TemplateVersion.create!(template_id: @template.id, content: 'x')
+
+    assert_raises(ActiveRecord::ReadOnlyRecord) { version.destroy }
+    assert_difference 'RedmineReporterDashboards::TemplateVersion.count', -1 do
+      @template.versions.delete_all
+    end
+  end
+
+  def test_schedule_string_columns_are_length_validated
+    at_limit = 'x' * Schedule::MAX_STRING
+
+    @schedule.email_subject = at_limit
+    assert @schedule.valid?
+
+    @schedule.email_subject = "#{at_limit}x"
+    assert_not @schedule.valid?
+  end
+
   def test_a_purged_document_is_in_neither_scope
     travel_to(Time.zone.parse('2026-06-01 12:00')) do
       document = Document.create!(template_id: @template.id, expires_at: 1.hour.ago,

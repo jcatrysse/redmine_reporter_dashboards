@@ -233,6 +233,42 @@ bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 
 Restart Redmine after installation.
 
+### Uninstalling, and what a rollback does and does not touch
+
+```bash
+bundle exec rake redmine:plugins:migrate NAME=redmine_reporter_dashboards VERSION=0 RAILS_ENV=production
+```
+
+That removes every table this plugin's reporting schema adds — templates, their version
+history, schedules, schedule runs, recipients and stored documents — together with their
+indexes, and it removes the plugin's own row from `schema_migrations`.
+
+**It deliberately leaves `reporter_project_tabs` in place**, which is where your project
+dashboards live: their tabs, their layout and their widget settings. That table pre-dates
+the reporting work, has no export path, and is the one thing a rollback could destroy that
+you could not get back — so the down-migration does not touch it. Reinstalling adopts it
+again, with the dashboards intact. If you genuinely want it gone, drop it by hand, and
+take a backup first.
+
+**This is tested rather than asserted, and here is exactly how far the testing goes.**
+`script/migrate_updown.sh` runs a real up → `VERSION=0` → up → reinstall cycle and compares
+the schema at each step; you can run it yourself against a Redmine checkout. It has been
+executed on **Redmine 6.1 (Rails 7.2) with PostgreSQL 16**. The `migrate-updown` CI job runs
+the same script on all four supported Redmine branches — 5.1, 6.0, 6.1 and 7.0 — and that
+job is **new in this release, so its first run is its first evidence**. Until that run
+exists, treat 5.1, 6.0 and 7.0 as untested for rollback specifically, the same way this
+project treats every other unmeasured claim.
+
+It is the difference between "it installed fine" and "it uninstalls without wrecking the
+database", and only the first of those was ever being checked.
+
+**Both plugins can be installed at the same time.** Every table this plugin adds is
+prefixed `reporter_dashboards_`, and every model class is namespaced under
+`RedmineReporterDashboards::`, so nothing collides with `redmine_reporter`'s
+`report_templates`/`report_schedules` or with its top-level `ReportTemplate`. That is what
+makes it possible to install this alongside your existing setup and compare the two,
+rather than migrating and hoping.
+
 ## Surveying your existing Reporter templates
 
 ```bash

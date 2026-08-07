@@ -53,7 +53,12 @@ if [ ! -d "$MIGRATIONS" ]; then
   exit 2
 fi
 
-migration_count="$(find "$MIGRATIONS" -maxdepth 1 -name '[0-9]*_*.rb' | wc -l | tr -d ' ')"
+# NO -maxdepth. `ActiveRecord::MigrationContext#migration_files` globs
+# `<path>/**/[0-9]*_*.rb` recursively and Redmine's plugin migrator inherits it, so a
+# migration in a subdirectory RUNS on every install. A wrapper that counts one level would
+# report "0 migrations, nothing to check" for a tree that has some, or — worse — report a
+# clean count while the reader looked somewhere else.
+migration_count="$(find "$MIGRATIONS" -name '[0-9]*_*.rb' | wc -l | tr -d ' ')"
 if [ "$migration_count" -eq 0 ]; then
   echo "ERROR: db/migrate contains no migrations — nothing was checked." >&2
   exit 2

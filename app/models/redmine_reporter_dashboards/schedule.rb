@@ -49,8 +49,15 @@ module RedmineReporterDashboards
              inverse_of: :schedule
     has_many :recipient_users, through: :recipients, source: :user
 
+    # See `Template::MAX_STRING` for why every string column is length-validated: `t.string`
+    # is unlimited on PostgreSQL and varchar(255) on MySQL/MariaDB, so without this an
+    # over-long e-mail subject saves on one engine and raises `ValueTooLong` on another.
+    MAX_STRING = 255
+
     validates :template_id, presence: true
     validates :author_id, presence: true
+    validates :email_subject, :repeat, :query_type, :render_as, :timezone, :last_status,
+              length: { maximum: MAX_STRING }, allow_nil: true
     validates :last_status, inclusion: { in: STATUSES }, allow_nil: true
     validates :render_as, inclusion: { in: RENDER_AS }, allow_nil: true
     validates :consecutive_failures,

@@ -181,6 +181,41 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
     end
   end
 
+  def test_a_template_created_private_WITH_roles_does_not_keep_them
+    # The hole in core's own callback, closed deliberately. `saved_change_to_visibility?` is
+    # false here because 0 is the column default, so core's form would leave the join row —
+    # inert while the template is private, and LIVE the moment somebody switches it to ROLES,
+    # granting a role nobody chose in that edit.
+    template = Template.new(project: @project, author_id: @author.id, name: 'x',
+                            visibility: Template::VISIBILITY_PRIVATE)
+    template.roles << @role
+    template.save!
+
+    assert_equal [], template.reload.roles.to_a
+  end
+
+  def test_a_public_template_does_not_keep_a_role_list_either
+    template = Template.new(project: @project, author_id: @author.id, name: 'x',
+                            visibility: Template::VISIBILITY_PUBLIC)
+    template.roles << @role
+    template.save!
+
+    assert_equal [], template.reload.roles.to_a
+  end
+
+  def test_string_columns_are_length_validated_so_the_answer_does_not_depend_on_the_engine
+    # `t.string` is unlimited `character varying` on PostgreSQL and `varchar(255)` on
+    # MySQL/MariaDB, so without a validation an over-long value saves on one engine and
+    # raises ActiveRecord::ValueTooLong on another. At the limit and one past it.
+    at_limit = 'x' * Template::MAX_STRING
+    past = 'x' * (Template::MAX_STRING + 1)
+
+    assert Template.new(project: @project, author_id: @author.id, name: at_limit).valid?
+    assert_not Template.new(project: @project, author_id: @author.id, name: past).valid?
+    assert_not Template.new(project: @project, author_id: @author.id, name: 'x',
+                            engine_hint: past).valid?
+  end
+
   def test_engine_hint_guard_answers_true_when_the_column_is_there
     assert Template.engine_hint_supported?
   end

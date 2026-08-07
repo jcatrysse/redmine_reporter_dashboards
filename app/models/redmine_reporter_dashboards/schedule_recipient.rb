@@ -34,7 +34,9 @@ module RedmineReporterDashboards
     # the validation gives a form a message, the index survives two concurrent submissions.
     validates :user_id, uniqueness: { scope: :schedule_id }
 
-    before_validation :stamp_created_at, on: :create
+    # `before_save`, not `before_validation` — see TemplateVersion for the measurement.
+    # `save(validate: false)` skips validation callbacks and would hit the NOT NULL.
+    before_save :stamp_created_at
 
     private
 

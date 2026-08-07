@@ -31,7 +31,20 @@ module RedmineReporterDashboards
     # whose numbers the document contains.
     belongs_to :rendered_as_user, class_name: 'User', optional: true
 
+    # `technical-spec.md:1215`: "Persistence is opt-in with a **mandatory TTL** and a purge
+    # task. That converts an unmanaged indefinite store into 'off by default, **bounded when
+    # on**'." Presence alone delivers the first half and not the second: `expires_at =
+    # 9999-12-31` satisfies a presence check, reports `expired?` false for ever, and the
+    # purge task never collects it — an immortal row wearing a TTL. Bounded is the word the
+    # spec uses, so there is a bound.
+    #
+    # A year, because the capability this store exists for is a share link (§7b.1), whose own
+    # default expiry is proposed at 30 days — so a year is two orders of magnitude of slack
+    # for a snapshot, and still a number a purge task will actually reach.
+    MAX_RETENTION = 366 * 24 * 60 * 60
+
     validates :expires_at, presence: true
+    validate :expiry_within_the_retention_bound
 
     # Expired but not yet purged. The purge task's scope, named here so the task and any
     # diagnostic agree on the definition rather than each writing their own `where`.
@@ -44,6 +57,19 @@ module RedmineReporterDashboards
 
     def purged?
       purged_at.present?
+    end
+
+    private
+
+    # Measured from `created_at` on a persisted row and from now on a new one, so that
+    # re-saving an old document does not fail for having been created a long time ago.
+    def expiry_within_the_retention_bound
+      return if expires_at.blank?
+
+      origin = created_at || Time.zone.now
+      return if expires_at <= origin + MAX_RETENTION
+
+      errors.add(:expires_at, :less_than_or_equal_to, count: origin + MAX_RETENTION)
     end
   end
 end

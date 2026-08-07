@@ -18,6 +18,19 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**A CONSTANT ASSIGNED INSIDE AN `RSpec.describe` BLOCK IS A GLOBAL, and the collision passes in
+isolation.** The block is a closure whose lexical scope is the file's top level, so
+`FIXTURES = File.join(__dir__, 'fixtures')` inside `describe` defines **`Object::FIXTURES`** for the
+whole process. `spec/charts/golden_svg_spec.rb:50` already defines `FIXTURES` (a Hash of chart
+fixtures) and `spec/shipped_templates_lint_spec.rb:36` already defines `ROOT`. T-36's first draft
+added both names, and two of T-16's examples went red in the randomised full run for a reason that
+had nothing to do with charts — `rspec spec/charts/golden_svg_spec.rb` on its own passed, every
+time. Ruby prints no "already initialized constant" warning because the assignment happens in a
+different file at load time and the values differ in type, not in constancy.
+
+Use methods (`def fixtures_dir`) or `let`. And when a spec fails only in the full run, suspect a
+constant before suspecting an ordering bug in the code.
+
 **Minitest silently does not run test methods defined after `private`.**
 `test/functional/reporter_project_pages_controller_test.rb` has a `private` section
 partway down. Ten tests appended below it were never executed, and the file reported
@@ -395,6 +408,29 @@ plugin or the vendor gem, each listed with its reason in
 - **`mise` is usually absent.** `.codex/ruby_version.sh` therefore prefers the Ruby
   already on `PATH` whenever it satisfies Redmine's own Gemfile — which covers 6.0,
   6.1 and 7.0 on a 3.3/3.4 container.
+- **A FULL REDMINE CHECKOUT IS USUALLY OBTAINABLE, AND SEVERAL ENTRIES IN THIS FILE ASSUMED IT
+  WAS NOT.** Done on 2026-08-07 in a cloud session that had been told there was no way to make one.
+  `mise` is indeed absent — and `detect_ruby_version` returns **empty** for 6.1-stable on a 3.3
+  container, meaning *use the Ruby on PATH*, so `mise` is never consulted. The only real blocker was
+  `rsync`, which is one `apt-get install` away (see the first bullet in this section). Four commands:
+
+      apt-get update && apt-get install -y rsync
+      REPORTER_PLUGIN_PATH=/nonexistent ./.codex/redmine_clone.sh 6.1-stable
+      REQUIRE_REPORTER_PLUGIN=0 ./.codex/test_setup.sh
+      # ~6 minutes, mostly `bundle install`
+
+  What that buys is the difference between arguing and measuring: the full-application Minitest
+  suite, `rake redmine:plugins:migrate` in both directions, and `rails runner` against a booted app.
+  T-36's whole acceptance rests on it, and it was expected to be `UNVERIFIED`.
+  **`/opt/rbenv/versions/3.3.6/` also carries 3.1.6 and 3.2.6**, so 5.1-stable (which needs
+  `< 3.3.0`) is reachable too by putting `/opt/rbenv/versions/3.2.6/bin` first on `PATH` — not tried
+  yet, and worth a try before writing "CI only" again.
+- **`rspec` and `activerecord` are NOT installed in a fresh container**, so
+  `/opt/rbenv/versions/3.3.6/bin/rspec -I spec spec` fails with *"command not found"* and the
+  adapter specs fail to LOAD with `cannot load such file -- active_support` (which reads like a
+  broken spec, not a missing gem). `gem install rspec activesupport activerecord pg liquid
+  --no-document` fixes both. The rspec-from-inside-Redmine path CI uses does not need them because
+  Redmine's own bundle supplies them.
 - **Switching Redmine branches** used to fail silently because `test_setup.sh` dirties
   Redmine's Gemfile. `redmine_clone.sh` now discards that and asserts `HEAD`. If you
   see a run reporting one Redmine version while behaving like another, check this first
@@ -440,6 +476,9 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-35 end to end, both engines** | **yes, locally (2026-08-06)** | One document through the tag, the T-33 resolver and both adapters. `chromium_cdp` Chrome/141: diagram **drawn** — node labels and the interpolated value extract from the PDF, the literal source is gone, no degradations. `wkhtmltopdf` 0.12.6.1 patched: **source still visible** and marked unsupported, only the expected `legacy_engine` degradation. The resolver inlined all three scripts, the 3.5 MB bundle via its `data:` fallback. Support matrix REGENERATED from a real run: one new row, `:modern_javascript` yes/yes/— |
 | **T-33 under both Liquid majors** | **yes, locally (2026-08-06)** | 278 `spec_liquid` examples under 4.0.4 and under 5.13.0, unchanged from T-20 — the asset layer touches no Liquid surface, and that is the point of it naming neither layer |
 | **T-40: the permission model, DB-less** | **yes, locally (2026-08-06)** | **1933 rspec examples, 0 failures** (was 1852), 92 pending — unchanged skip count. All seven gates green. **Fourteen negative tests, each observed to fail an intended example**: the four bypasses T-40's review used (an unguarded action in a NAMESPACED controller; `authorize` scoped away from three of four mapped actions by `only:` plus `skip_before_action`; a `define_method` in a controller body; a `def` inside a version conditional), plus a new unguarded action, a DELETED `before_action :authorize`, a `permission_*` key removed from `ru.yml`, an authoring entry that types `requires` instead of deriving it, a locale label added for an unregistered permission, a mapped action that does not exist, a `lands_in` naming a task absent from the plan, and three against §4.1's table — a drifted name, a wrong task, and the heading removed, which must fail LOUDLY rather than quietly extract nothing. **Several fail two or three examples rather than one** (the coverage check and the AST meta-test both, which is the pair working as designed); an earlier claim of "the intended example and only it" was wrong and is withdrawn. **One of them found a hole in the fix itself** — a guard that was absent answered `nil`, i.e. "covers every action", so deleting `before_action :authorize` outright passed the per-action check; absent is now `[]` and the case has its own example. **NOT RUN HERE: the functional suite, which EXISTS and covers this** — `test/functional/reporter_project_{pages,tabs}_controller_test.rb` grant and withhold these permissions and assert 200/403, and they are the only thing that proves the registration loop registered anything in a booted Redmine. No Redmine checkout in this container, so CI is their first execution against the loop |
+| **T-22 + T-36: the schema and the rollback — THE FULL-APPLICATION SUITE, LOCALLY** | **yes (2026-08-07), and this is the first session to run it** | A real Redmine 6.1.3 checkout was obtainable after all (see §3): `rake redmine:plugins:migrate` in both directions, `rails runner` against a booted app, and **`rake redmine:plugins:test` — 258 runs, 1565 assertions, 0 failures, 0 errors, 4 skips**. That run is what found **§Findings E-21**: two of T-33's tests had been erroring since they were written, because the class calls `l(...)` without `Redmine::I18n`, so `test_the_partial_uses_locale_keys_and_not_hardcoded_english` had never asserted anything |
+| **T-22 + T-36: gate G11, up → VERSION=0 → up → reinstall** | **yes, locally (2026-08-07), Rails 7.2 / PostgreSQL 16 ONLY** | `script/migrate_updown.sh`, both arms. **NEGATIVE-TESTED with five plants**: a non-unique occurrence index, a down that leaves its table behind, a 001 whose down DROPS `reporter_project_tabs` (both arms catch it), a leftover plugin table poisoning the baseline, and a residue whose NAME merely contains `reporter_project_tabs`. **5.1, 6.0 and 7.0 are the `migrate-updown` CI job's to answer and have never been run** — INV-7 applies to this exactly as much as to an engine |
+| **T-22 + T-36: DB-less** | **yes, locally (2026-08-07)** | **1996 rspec examples, 0 failures, 116 pending** (was 1933/0/116 — **skip count unchanged**). All eight gates green, `layer_purity` strict included, `zero_reporter` still **16/16**. The new gate's eight rules each have a committed fixture that fires them, and **eight of those fixtures are bypasses an independent review walked through** while the first reader reported nothing |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |

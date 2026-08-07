@@ -88,15 +88,54 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-SNAPSHOT_SRC="$ROOT/script/schema_snapshot.rb"
-SNAPSHOT_DST="$REDMINE_DIR/.rrd_schema_snapshot.rb"
-cp "$SNAPSHOT_SRC" "$SNAPSHOT_DST"
-trap 'rm -rf "$WORK"; rm -f "$ROOT/$SNAPSHOT_DST"' EXIT
+# NOTHING IS COPIED INTO THE REDMINE CHECKOUT, and the first version did.
+#
+# It wrote `redmine/.rrd_schema_snapshot.rb` and removed it in an EXIT trap. `rails runner`
+# takes an absolute path, so the copy bought nothing — and it cost a real failure: two runs
+# sharing one Redmine checkout share that one filename, so whichever finishes first deletes
+# the file the other is still using, and the second reports "the file could not be found".
+# Reproduced by two concurrent runs during review. A developer running this twice, or a CI
+# matrix with two cells against one checkout, hits the same thing.
+SNAPSHOT_SCRIPT="$ROOT/script/schema_snapshot.rb"
+
+# ===========================================================================
+# EXIT CODES ARE THREE-VALUED, and the third one is the point
+#
+#   0  every arm passed
+#   1  a REVERSIBILITY FAILURE — the schema did not come back
+#   2  the script could not run: no checkout, no database, a rake that would not start,
+#      a snapshot that came back empty. NOTHING was verified.
+#
+# Collapsing 2 into 1 is the failure this repository keeps naming: a gate that reports a
+# verdict it did not compute. HANDOVER §1 puts it as "treat a search's exit status as
+# three-valued", and this is the same rule one layer up.
+# ===========================================================================
+INFRASTRUCTURE_FAILURE=0
+
+infrastructure() {
+  INFRASTRUCTURE_FAILURE=1
+  echo >&2
+  echo "ERROR: $1" >&2
+  echo "       Nothing was verified. Gate G11 is UNKNOWN, not failed." >&2
+}
 
 # `rails runner` rather than `rake`: no task to register, and the exit status is the
-# script's own.
+# script's own. An EMPTY snapshot is treated as a failure rather than as a schema with no
+# tables — a Redmine that booted far enough to run the script but not far enough to see a
+# database would otherwise produce two identical empty snapshots and a green run.
 snapshot() {
-  ( cd "$REDMINE_DIR" && bundle exec rails runner .rrd_schema_snapshot.rb "$1" >/dev/null )
+  ( cd "$REDMINE_DIR" && bundle exec rails runner "$SNAPSHOT_SCRIPT" "$1" \
+      >"$WORK/snapshot.log" 2>&1 ) || {
+    infrastructure "rails runner could not take a schema snapshot. Output:
+$(sed 's/^/    /' "$WORK/snapshot.log")"
+    return 1
+  }
+
+  if [ ! -s "$1" ]; then
+    infrastructure "the schema snapshot came back EMPTY. A snapshot with no tables in it
+       compares equal to any other empty snapshot, so this must never be treated as data."
+    return 1
+  fi
 }
 
 migrate() {
@@ -110,27 +149,91 @@ migrate() {
   }
 }
 
-# Runs Ruby inside the Redmine environment and prints its stdout. Used only for the two
-# fixture operations the arms need, so that they go through ActiveRecord and work on
-# PostgreSQL, MySQL and MariaDB alike.
+# Runs Ruby inside the Redmine environment and prints its stdout. stderr is NOT discarded:
+# the safety refusal below is written to stderr by `abort`, and an earlier version swallowed
+# it — so a refusal looked exactly like a silent success.
 in_app() {
-  ( cd "$REDMINE_DIR" && bundle exec rails runner "$1" 2>/dev/null )
+  ( cd "$REDMINE_DIR" && bundle exec rails runner "$1" )
 }
 
-# The `fresh` arm has to reach a genuinely pre-install database, and the only object left
-# after VERSION=0 is `reporter_project_tabs`. Dropping it is a FIXTURE operation, and it
-# destroys dashboards — so it refuses any database whose name does not say "test", the same
-# guard `spec/adapter/adapter_helper.rb:198-207` uses for the same reason.
-drop_tabs_table() {
-  in_app '
+# THE SAFETY CHECK RUNS ONCE, FOR THE WHOLE SCRIPT, not beside the one destructive call.
+#
+# Every arm here migrates a database up and down repeatedly, and the `fresh` arm drops
+# `reporter_project_tabs` outright. Guarding only the drop protected the least of it: an
+# operator who pointed this at production would still have had their reporting schema
+# migrated to VERSION=0 before the guard was ever reached. Same rule as
+# `spec/adapter/adapter_helper.rb:198-207`, applied to the whole run.
+assert_test_database() {
+  local answer
+  answer="$(in_app '
     name = ActiveRecord::Base.connection_db_config.database.to_s
-    unless name.include?("test")
-      abort("REFUSING to drop reporter_project_tabs in database #{name.inspect}: " \
-            "migrate_updown.sh only runs against a database whose name contains \"test\".")
-    end
-    ActiveRecord::Base.connection.drop_table(:reporter_project_tabs, if_exists: true)
-    puts "dropped"
-  '
+    puts(name.include?("test") ? "ok #{name}" : "refuse #{name}")
+  ' 2>"$WORK/dbcheck.log")" || {
+    infrastructure "could not ask Redmine which database it is connected to. Output:
+$(sed 's/^/    /' "$WORK/dbcheck.log")"
+    return 1
+  }
+
+  case "$answer" in
+    ok\ *) echo "migrate_updown: database=${answer#ok }" ;;
+    *)
+      infrastructure "REFUSING to run against database '${answer#refuse }'.
+       This script migrates a database to VERSION=0 and drops reporter_project_tabs.
+       It only runs where the database name contains \"test\"."
+      return 1
+      ;;
+  esac
+}
+
+drop_tabs_table() {
+  in_app 'ActiveRecord::Base.connection.drop_table(:reporter_project_tabs, if_exists: true)' \
+    >"$WORK/drop.log" 2>&1 || {
+    infrastructure "could not drop reporter_project_tabs to reach a pre-install state. Output:
+$(sed 's/^/    /' "$WORK/drop.log")"
+    return 1
+  }
+}
+
+# ===========================================================================
+# THE BASELINE HAS TO BE PROVEN CLEAN, OR THE WHOLE TEST IS A TAUTOLOGY
+#
+# This is the sharpest thing the review of T-36 found, and it made the gate worthless on
+# every run after the first. The arms take their baseline AFTER `migrate VERSION=0` — so a
+# migration whose `down` leaves its table behind leaves it behind in the BASELINE too, and
+# the final comparison then finds the two snapshots identical and reports success. On a
+# fresh database the defect is caught; on a re-run of the same database it is not, and CI
+# re-uses databases.
+#
+# So the state after `VERSION=0` is asserted rather than assumed: no table this plugin's
+# reporting schema adds may exist. A leftover is reported as what it is — a previous run's
+# down-migration that did not complete — rather than being quietly adopted as the baseline.
+# ===========================================================================
+assert_no_plugin_tables() {
+  local snapshot_file="$1" context="$2" leftovers
+  leftovers="$(awk '$1 == "TABLE" && $2 ~ /^reporter_dashboards_/ { print $2 }' "$snapshot_file")"
+
+  [ -z "$leftovers" ] && return 0
+
+  echo >&2
+  echo "FAIL: after VERSION=0 ($context) these tables still exist:" >&2
+  echo "$leftovers" | sed 's/^/    /' >&2
+  echo >&2
+  echo "A down-migration did not remove its own table. If this is left over from an earlier" >&2
+  echo "failed run rather than from the migrations as they stand, drop them by hand and run" >&2
+  echo "again — but do not skip this: adopting them as the baseline is what would make every" >&2
+  echo "later comparison pass by comparing the damage with itself." >&2
+  return 1
+}
+
+# The table a snapshot line is about. `TABLE x`, `COLUMN x.col …` and `INDEX x.name …` all
+# name it in field 2, so one rule reads all three.
+#
+# An earlier version filtered the residue with `grep -v reporter_project_tabs`, a SUBSTRING
+# match over the whole line — so a future table called `reporter_project_tabs_archive`, or
+# any column or index whose NAME merely contained that string, would have been accepted as
+# permitted residue. Compare the table name exactly.
+snapshot_line_table() {
+  awk '{ split($2, parts, "."); print parts[1] }'
 }
 
 # The six tables `technical-spec.md` §7 marks "new", plus the visibility join table 002
@@ -172,6 +275,13 @@ run_arm() {
   # ---------------------------------------------------------------- baseline
   migrate 0 || { report_arm_failure "$arm" "could not reach VERSION=0 before the run"; return; }
 
+  # The baseline is PROVEN clean rather than assumed. See the long note on
+  # assert_no_plugin_tables: without this, a broken down-migration poisons the baseline on
+  # every run after the first and the final comparison passes by comparing the damage with
+  # itself.
+  snapshot "$WORK/zero.txt" || return
+  assert_no_plugin_tables "$WORK/zero.txt" "before arm '$arm'" || { STATUS=1; return; }
+
   case "$arm" in
     preseeded)
       # "in the state ITS OWN MIGRATION created" — so 001 creates it, not a hand-written
@@ -179,10 +289,7 @@ run_arm() {
       migrate 1 || { report_arm_failure "$arm" "could not migrate to VERSION=1"; return; }
       ;;
     fresh)
-      drop_tabs_table >/dev/null || {
-        report_arm_failure "$arm" "could not drop reporter_project_tabs to reach a pre-install state"
-        return
-      }
+      drop_tabs_table || return
       ;;
     *)
       report_arm_failure "$arm" "unknown arm (expected 'preseeded' or 'fresh')"
@@ -190,11 +297,11 @@ run_arm() {
       ;;
   esac
 
-  snapshot "$WORK/a.txt"
+  snapshot "$WORK/a.txt" || return
 
   # ---------------------------------------------------------------- up
   migrate || { report_arm_failure "$arm" "migrating up failed"; return; }
-  snapshot "$WORK/b.txt"
+  snapshot "$WORK/b.txt" || return
 
   local missing=()
   local table
@@ -217,18 +324,9 @@ run_arm() {
     }
   done
 
-  # -------------------------------------------------- up again is idempotent
-  migrate || { report_arm_failure "$arm" "a second 'migrate' (idempotency) failed"; return; }
-  snapshot "$WORK/b2.txt"
-  if ! diff -u "$WORK/b.txt" "$WORK/b2.txt" >"$WORK/idem.diff"; then
-    report_arm_failure "$arm" "migrating up twice changed the schema — it is not idempotent:"
-    sed 's/^/    /' "$WORK/idem.diff" >&2
-    return
-  fi
-
   # ---------------------------------------------------------------- down
   migrate 0 || { report_arm_failure "$arm" "migrating down to VERSION=0 failed"; return; }
-  snapshot "$WORK/c.txt"
+  snapshot "$WORK/c.txt" || return
 
   # FR-69's bookkeeping clause, asserted against the mechanism that exists.
   if grep -q '^PLUGINMIGRATION ' "$WORK/c.txt"; then
@@ -249,7 +347,7 @@ $(grep '^PLUGINMIGRATION ' "$WORK/c.txt" | sed 's/^/    /')"
         sed 's/^/    /' "$WORK/down.diff" >&2
         return
       fi
-      echo "migrate_updown: arm 'preseeded' OK — post-rollback schema identical to pre-install,"
+      echo "migrate_updown: arm 'preseeded' — post-rollback schema identical to pre-install,"
       echo "                and no plugin row left in schema_migrations."
       ;;
     fresh)
@@ -265,14 +363,16 @@ $(sed 's/^/    /' "$WORK/removed.txt")"
         return
       fi
 
-      # Every remaining line must belong to reporter_project_tabs. Anything else is a
-      # table, column or index a down-migration forgot.
-      if grep -v 'reporter_project_tabs' "$WORK/added.txt" >"$WORK/stray.txt"; then
-        if [ -s "$WORK/stray.txt" ]; then
-          report_arm_failure "$arm" "VERSION=0 left objects behind that are not reporter_project_tabs:
-$(sed 's/^/    /' "$WORK/stray.txt")"
-          return
-        fi
+      # Every remaining line must be ABOUT reporter_project_tabs — matched on the table
+      # name in field 2, never as a substring of the whole line. Anything else is a table,
+      # column or index a down-migration forgot.
+      local stray
+      stray="$(paste -d' ' <(snapshot_line_table <"$WORK/added.txt") "$WORK/added.txt" \
+                 | awk '$1 != "reporter_project_tabs" { $1 = ""; sub(/^ /, ""); print }')"
+      if [ -n "$stray" ]; then
+        report_arm_failure "$arm" "VERSION=0 left objects behind that are not reporter_project_tabs:
+$(echo "$stray" | sed 's/^/    /')"
+        return
       fi
 
       if ! grep -qx 'TABLE reporter_project_tabs' "$WORK/added.txt"; then
@@ -282,18 +382,83 @@ $(sed 's/^/    /' "$WORK/stray.txt")"
         return
       fi
 
-      echo "migrate_updown: arm 'fresh' OK — the only residue of VERSION=0 is"
+      echo "migrate_updown: arm 'fresh' — the only residue of VERSION=0 is"
       echo "                reporter_project_tabs and its index, which FR-69 requires to survive:"
       sed 's/^/                  /' "$WORK/added.txt"
       ;;
   esac
+
+  # ------------------------------------------ up again, AFTER the rollback
+  #
+  # §7 rule 4's order, and it is the order for a reason: "migrate up from empty -> assert
+  # the full schema -> migrate VERSION=0 -> assert the schema is byte-comparable to the
+  # pre-install dump -> migrate up again -> assert idempotent."
+  #
+  # The reinstall is the operationally interesting half. A user who rolls back to escape a
+  # bad release and then reinstalls must get the same schema they had — and on this plugin
+  # that is a real question rather than a formality, because 001 left `reporter_project_tabs`
+  # standing and its `unless table_exists?` has to ADOPT it rather than fail.
+  migrate || { report_arm_failure "$arm" "reinstalling after the rollback failed"; return; }
+  snapshot "$WORK/d.txt" || return
+
+  if ! diff -u "$WORK/b.txt" "$WORK/d.txt" >"$WORK/reinstall.diff"; then
+    report_arm_failure "$arm" "reinstalling after a rollback did NOT restore the same schema:"
+    sed 's/^/    /' "$WORK/reinstall.diff" >&2
+    return
+  fi
+
+  # And once more, so "up is idempotent" is asserted rather than assumed.
+  migrate || { report_arm_failure "$arm" "a second 'migrate' (idempotency) failed"; return; }
+  snapshot "$WORK/d2.txt" || return
+
+  if ! diff -u "$WORK/d.txt" "$WORK/d2.txt" >"$WORK/idem.diff"; then
+    report_arm_failure "$arm" "migrating up twice changed the schema — it is not idempotent:"
+    sed 's/^/    /' "$WORK/idem.diff" >&2
+    return
+  fi
+
+  echo "migrate_updown: arm '$arm' OK — rollback restored the pre-install schema, reinstall"
+  echo "                restored the full one, and a second migrate changed nothing."
 }
 
 echo "migrate_updown: plugin=$PLUGIN_NAME  redmine=$REDMINE_DIR  RAILS_ENV=$RAILS_ENV  arms=$MODE_ARMS"
 
+assert_test_database || {
+  echo >&2
+  echo "migrate_updown: could not establish a safe database to run against." >&2
+  exit 2
+}
+
+# EVERY arm runs even if an earlier one failed, and each re-establishes its own baseline
+# from VERSION=0 — so arm order carries no information and a first failure cannot mask a
+# second. That is CLAUDE.md §6's `fail-fast: false` rule applied inside one script: a run
+# that stops at the first red cell cannot tell you whether the others were red too.
 for arm in $MODE_ARMS; do
-  run_arm "$arm"
+  # `|| true`, and an explicit `if` rather than `[ … ] && break`. TWO `set -e` interactions,
+  # both found by watching the script exit 1 where it had to exit 2:
+  #
+  #   * `run_arm` reports a failure by returning non-zero, and a bare non-zero command in a
+  #     loop body terminates the shell — so the second arm never ran and the summary below
+  #     never printed.
+  #   * `[ cond ] && break` returns 1 when the condition is false, and as the LAST command
+  #     of a loop body that terminates the shell too.
+  #
+  # Both would have shown up only on a failing run, which is the one run whose output has to
+  # be trustworthy: the exit code that separates "reversibility failed" from "the script
+  # could not run" was being thrown away exactly when it mattered.
+  run_arm "$arm" || true
+
+  if [ "$INFRASTRUCTURE_FAILURE" -eq 1 ]; then
+    break
+  fi
 done
+
+if [ "$INFRASTRUCTURE_FAILURE" -eq 1 ]; then
+  echo >&2
+  echo "migrate_updown: DID NOT RUN TO COMPLETION. Gate G11 is UNVERIFIED — not passed, and" >&2
+  echo "                not failed either. Fix the error above and run again." >&2
+  exit 2
+fi
 
 # Leave the database installed. A developer running this by hand almost always wants to
 # keep working, and a CI job that ends with the plugin uninstalled would hide an "up" that

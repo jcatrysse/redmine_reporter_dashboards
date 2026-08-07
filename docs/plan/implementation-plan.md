@@ -74,7 +74,8 @@ fact that CI has not yet run on this work at all.
 | T-33 | **done** — `assets/` (policy, origin, reference, content types, bundled assets, local store, fetcher, document scanner, resolver, resolution) plus `render/asset_binding.rb`, the plugin's first `settings` block and its admin partial, and two new `layer_purity` arms. **Its review found four blockers and they are fixed** — a stylesheet's own `url()`/`@import` reaching the engine live (which made the whole `:bundled` promise false), an `ArgumentError` out of a method documented never to raise, `<style/>` hiding an entire stylesheet from the scanner, and a production transport with no test at all. §Findings **E-17**. **`:bundled` is the default and `:asset_http` is never selected** — not "off wherever the engine supports upload", but off in every mode for every capability shape, asserted against an engine declaring all three. An **empty allowlist collapses any upgraded mode to `:bundled`** and the collapse is asserted as an equality of body, refusals, counts and models — the fail-closed clause T-33 flags as most likely to be got wrong. The fetcher's closed header set is proven by a **recording double**, not by reading the file; the resolved-IP check runs **after** DNS and the connection is made to the checked address via `ipaddr=`, which is the only version that closes the rebinding window; size, time, redirect and inline caps each have an AT-and-one-past test. Containment is `realpath`, tested against a literal `..`, a percent-encoded one, a **double**-encoded one and a **symlink** inside the root pointing out of it. **Structural inlining falls back to base64 on `</style` / `</script`**, which is an injection rather than a rendering bug. 201 new DB-less examples; **1768 total, 0 failures**; all seven gates green, `layer_purity` strict, and both new arms **negative-tested**. It settled **F-13, F-13b, F-14** and answered **F-15**, and left **F-16** and **T-39** |
 | T-35 | **done, re-scoped** — vendored Mermaid 11.16.1 (3.5 MB, digest in `THIRD_PARTY.md`, byte-identical across THREE independent origins), `liquid/tags/mermaid_tag.rb`, `assets/javascripts/mermaid_boot.js`, `:modern_javascript` in the closed vocabulary, and the regenerated support matrix. **No sanitiser, no `MermaidSpec`, no collector, no `:mermaid` capability** — §Findings F-17 is why, and the tag is 210 lines against `{% chart %}`'s 324 as a result. `{% mermaid %}` inherits `Liquid::Raw` so `B{Choice}` and `-->|yes|` survive; `interpolate: true` substitutes VALUES and escapes them, with no second `Template.parse` (the gate forbids one) and no `{% %}` execution. **The boot script is ES5 and that is load-bearing** — one arrow function and it dies at parse time on the very engine whose fallback it exists to produce, so it is asserted by a real ES5 parse plus 14 node-driven behaviour examples. **MEASURED end to end on both engines**: Chromium draws the diagram (labels present, source gone, interpolated value present, no degradations); wkhtmltopdf leaves the source visible and marks it unsupported. **Three cross-major defects found by running it under both Liquid majors** — §Findings **E-19** |
 | T-40 | **done** — `lib/redmine_reporter_dashboards/permissions.rb`, `spec/permissions/permission_map_spec.rb` and `spec/permissions/registration_dsl_spec.rb`, closing `[OQ-F]` the way the curator decided on 2026-08-06: **the `template_authoring` setting is deleted, not defaulted**, and replaced by 13 role permissions in two project modules (`technical-spec.md` §4.1). Three are live and unchanged, and the loop that replaced their three literal `permission` calls is asserted **twice** — once as data, once by a committed recorder that mimics `Redmine::Plugin#project_module`'s `instance_eval` and receives the same three calls argument for argument. Ten are declared as **design and deliberately not registered**, because a permission an administrator can tick that guards nothing is a lie in the interface. **Its review found four blockers and a refuted claim, and all five are fixed** — §Findings **E-20**: the coverage gate could not see a controller in a subdirectory, `authorize` was asserted per controller so `only:` plus `skip_before_action` hollowed it out, `define_method` and a `def` inside a version conditional were invisible, the "no grant" glob never scanned `init.rb` at all, and **`:admins_only` is not a construction guarantee** — core's `DefaultData::Loader` gives Manager every setable permission on a fresh install. `require: :member` is now genuinely **derived** from `authoring: true` rather than typed and asserted to agree; coverage is **per action** and reads `config/routes.rb` too; the reader's answers about `only:`/`except:`/`skip_before_action`/`define_method`/nested `def` are asserted against **fixture controllers**, because the four real ones contain none of those constructs. 81 examples, **1933 total, 0 failures**, 92 pending (no new skips), all seven gates green, and **fourteen negative tests** — the four bypasses the review used, plus a deleted `before_action :authorize`, a missing locale label, an authoring entry that types `requires` instead of deriving it, a label for an unregistered permission, a mapped action that does not exist, a `lands_in` naming a task absent from the plan, and three against §4.1's table (a drifted name, a wrong task, and the heading gone — which must fail loudly rather than extract nothing). **The last of those found a hole in the fix itself**: `actions_guarded_by` returned `nil` for a guard that was *absent*, which reads as "covers every action", so DELETING `before_action :authorize` outright still passed the per-action check. Absent is now `[]` |
-| T-22 onward | not started |
+| T-22 + T-36 | **done, together, because CLAUDE.md §1 makes shipping them apart a refusal condition** — `db/migrate/002`…`007` (seven tables), six namespaced models under `app/models/redmine_reporter_dashboards/`, `Compat.column_present?`, gate `migration_reversibility.{rb,sh,allowlist}`, `script/migrate_updown.sh` + `script/schema_snapshot.rb`, the `migrate-updown` CI job, `spec/migrations/` (53 examples) and three `test/unit/` files (59 runs). **Both plugins can now be installed at once**, and that is not a slogan: `Object.const_defined?(:Document)` is already **true** on a stock Redmine, so the namespace is load-bearing. §7's security-motivated clauses are each asserted rather than commented — recipients are `user_id` only and **no table this plugin owns has a `to`/`cc`/`bcc`/`from` column**, `[schedule_id, occurrence_date]` is UNIQUE and proven by violating it, versions have no `updated_at` and are `readonly?` once persisted, a document cannot be created without an expiry. **T-36 is two halves that answer different questions**: the gate asks whether a reverse is DECLARED (it PARSES, because a regexp cannot tell `def down` from the word "down" in a comment explaining why there isn't one); `migrate_updown.sh` asks whether the reverse RESTORES the database, in two arms — the literal FR-69 assertion, and an honest statement of what a fresh install leaves behind. **Both were negative-tested before being trusted**: every one of the gate's eight rules has a committed fixture that fires it, and `migrate_updown.sh` was driven red by three plants including a down-migration that drops `reporter_project_tabs`. **Running it found three defects reading it did not** — a 64-character derived index name that aborts on PostgreSQL and would have SUCCEEDED on MySQL, a missing savepoint that let a refused occurrence claim poison the caller's transaction, and an RSpec constant leaking onto `Object` and breaking two of T-16's examples in the randomised full run while passing in isolation. **G11 is PASS on Rails 7.2 only**; 6.1 and 8.1 are the `migrate-updown` job's to answer. It raised **six spec findings, S-1…S-6**, none of them silently fixed |
+| T-23 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -93,6 +94,136 @@ A workflow cannot fork itself without reintroducing the very credential G1 remov
 a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
+
+**E-21 · Two of T-33's own tests have never asserted anything, and nothing could have told you.**
+Found by T-36, by the simple act of running the full-application suite locally for the first time.
+`test/functional/asset_policy_settings_test.rb:30` declares
+`class AssetPolicySettingsTest < ActionController::TestCase` and calls `l(:label_reporter_asset_policy)`
+in two tests — without including `Redmine::I18n`, which is what defines `l`. Both errored with
+`NoMethodError: undefined method 'l'`.
+
+One of the two is `test_the_partial_uses_locale_keys_and_not_hardcoded_english`, whose whole job is
+to catch a `translation missing` on the settings page in a locale nobody reads. It has been in the
+tree since T-33 landed and has never run. `docs/plan/HANDOVER.md` records that T-33's Minitest half
+had not been executed anywhere — this is what that was hiding, and it is the same shape as
+§Findings E-14 and the Minitest `private` trap: a test that does not exist and a test that passes
+look identical in a summary line.
+
+**Fixed here rather than filed**, because it is one line (`include Redmine::I18n`) and because
+CLAUDE.md's working agreement is that a locally red suite gets fixed. With the include, the file
+runs **14 tests, 46 assertions, 0 failures** — so the assertions were right all along and only
+unreachable. Worth generalising: any `ActionController::TestCase` in this plugin that calls a
+Redmine view helper needs the module, and no CI run would have said so, because those two errors
+were inside a suite nobody had executed.
+
+**S-1 · `plugin_schema_info` does not exist on any supported Redmine, and four documents assert
+against it.** Named by **FR-69** (`functional-spec.md:259`), `technical-spec.md:1232` and `:1241`,
+`implementation-plan.md:2133` (T-36's `Accept:`) and **CLAUDE.md gate G11**. Measured on the two
+branches whose source is on disk: the only occurrence of that name in Redmine 5.1-stable or
+6.1-stable is `lib/tasks/redmine.rake:88`, where it appears in a list of table names to **exclude**
+from a dump. Nothing writes it. The real bookkeeping is a `schema_migrations` row of the form
+`<version>-<plugin_id>` — here `1-redmine_reporter_dashboards` — written and deleted by
+`Redmine::Plugin::Migrator#record_version_state_after_migrating` (`lib/redmine/plugin.rb:553-555`,
+identical on 5.1, 6.0, 6.1 and 7.0).
+
+**Why this is not a nit.** A `migrate-updown` check written literally against FR-69 would assert
+that a table which never exists is empty, pass, and prove nothing — this repository's own favourite
+failure mode, and the exact thing HANDOVER §1 warns about. T-36 therefore asserts the requirement's
+INTENT ("no bookkeeping row survives `VERSION=0`") against the mechanism that exists, and
+`test/unit/reporter_dashboards_schema_test.rb` carries a tripwire that goes red if a future Redmine
+reintroduces `plugin_schema_info`, so the discrepancy cannot be forgotten. **The curator owes a
+one-word edit to four documents.** Nothing was silently rewritten.
+
+**S-2 · `technical-spec.md` §7 says the templates table has an `STI type`, and four other places
+forbid exactly that.** §7's cell (`:1198`) reads *"new. STI `type`, …"*. Against it:
+`implementation-plan.md:1979` (T-23's `Accept:`) — *"template types by `source` field (T-31),
+**not a subclass tree**"*; `technical-spec.md:1392` (§7b.4) — *"Do not reproduce the branch. Make
+the data source a field"*; **FR-60**; and **`[OQ-H]`, which is CLOSED** with *"as a `source` field,
+not a branch"* (`technical-spec.md:1657`). §7's cell is the older text — its three `type` values are
+inherited from the base plugin's own `ReportTemplate.available_types`
+(`docs/plan/reference/source-inventory.md:99`).
+
+There is a second problem underneath the first: reporter's three values conflate **two orthogonal
+axes**. *Output cardinality* — one document per issue versus one for the set (**FR-36**) — and
+*data source* — issues versus time entries (**FR-60**). One three-valued column cannot express a
+per-record report over time entries, and §7b.2's closed import map (`:1351`) collapses both into
+one field.
+
+**T-22 built `source` + `output` and no `type`**, because a column literally named `type` **is**
+Rails' STI discriminator whether or not anyone wants it to be, so writing one would build the
+subclass tree those four documents forbid. **`output` is a name no document uses, and it is the
+single most likely thing in T-22 the curator will want renamed** — it appears in exactly one
+migration, one model constant and three tests, so a rename is cheap while T-22 is unreleased. §7's
+cell needs a curator edit either way: it cannot stay as written.
+
+**S-3 · §7's table list has no roles join table, and `visibility` has a value that cannot work
+without one.** T-40 assigned `visibility` to T-22 (`technical-spec.md:613-618`) with Redmine's own
+three values. Redmine's `Query` backs `VISIBILITY_ROLES` with `has_and_belongs_to_many :roles`
+(`app/models/query.rb:265`) and validates that the list is non-blank (`:277`); without an equivalent
+table, an administrator can select a value the code can never honour. §7 rule 6 forbids adding it in
+a later migration than its column. T-22 therefore ships `reporter_dashboards_templates_roles`
+alongside the column, `id: false`, following core's `queries_roles`
+(`db/migrate/20130602092539_create_queries_roles.rb`). Note §7 rejects `id: false` for
+`report_schedules_users` — for a reason that does not reach a visibility pair, since a *recipient*
+row is a thing an operator wants to address and revoke. **Recorded so the curator can disagree in
+one place.**
+
+**S-4 · The specs call the three visibility values "private / roles / project" and claim they are
+"the three values Redmine's saved queries already use".** Both `technical-spec.md:617-618` and
+`implementation-plan.md:1974` say it. Redmine's third value is `VISIBILITY_PUBLIC`
+(`app/models/query.rb:261`), labelled *"to any users"* (`config/locales/en.yml:1076`). T-22 uses
+core's names and integers, and a Minitest asserts them **against `Query`'s own constants** rather
+than against literals — because the stated goal, *"an administrator meets one concept rather than
+two"*, is only met by core's. The prose needs correcting; the behaviour does not.
+
+**S-5 · §7 rule 5 names three columns "added after 0.6", and there is no 0.6 schema for them to be
+added after.** `engine_hint`, `next_run_on` and `consecutive_failures` (`technical-spec.md:1247`)
+all arrive in T-22's own migrations, in one release, because rule 6 requires it. The *guard* is
+still right and costs nothing — `Compat.column_present?` plus four model readers that degrade rather
+than raise — so it is built as specified and exercised by taking the column away in a test. Only
+rule 5's premise is stale.
+
+**S-7 · Only `reporter_dashboards_templates` carries `lock_version`, and the concurrently-written
+table is the OTHER one.** §7 lists `lock_version` on the templates row and on no other, so T-22
+followed it exactly. The review of T-36 pointed out what that costs: `reporter_dashboards_schedules`
+is the one table in this schema with two writers — an administrator editing the form while T-25's
+runner writes `last_status`, `consecutive_failures`, `last_run_on` and `next_run_on` — and a lost
+update there silently re-enables a schedule somebody just disabled.
+
+**Deliberately not added, and this is the entry that says why.** Optimistic locking on a row the
+runner writes from a background task means the runner raises `StaleObjectError` whenever an admin
+happened to be editing, and T-25's per-schedule rescue would then record a failure that is not one.
+The right shape is probably run-state columns written with `update_columns` and a `lock_version`
+guarding only the form — which is T-25's design to make, not T-22's. **But §7 rule 6 means the
+column cannot be added later**, so the curator has to choose now: add it in T-22 or accept that
+schedules never get one. Recorded rather than decided.
+
+**S-8 · Deleting a `Role`, a `Project` or a `User` orphans plugin rows, and the roles join table is
+NOT the same shape as Redmine's.** Core's `Role` declares the reciprocal
+`has_and_belongs_to_many :queries` (`app/models/role.rb`), which is what deletes `queries_roles`
+rows when a role goes. Nothing outside this plugin knows about
+`reporter_dashboards_templates_roles`, so its rows survive. The consequence is bounded — the
+association INNER-JOINs `roles`, so an orphan contributes nothing on read, and a ROLES-visible
+template with no surviving roles becomes invalid on its next save, which is a visible degradation
+rather than a silent grant — and Redmine does not reuse role ids. **Owed by T-23**, which builds the
+UI and can carry the reciprocal declaration; recorded here so it is a known gap rather than a
+discovery.
+
+**S-9 · G11's engine coverage is PostgreSQL only, and the CI comment first claimed otherwise.**
+The `migrate-updown` job runs four Redmine branches on PostgreSQL. The engine-dependent properties —
+identifier length limits (the defect that aborted migration 002 on PostgreSQL and would have
+SUCCEEDED on MySQL), a unique index over a nullable column, `date` round-tripping — live in
+`test/unit/reporter_dashboards_schema_test.rb`, which runs in the `minitest` job, which is also
+PostgreSQL only. Closing it means a database axis on one of those jobs or moving those assertions
+into `spec/adapter`, which already runs all three engines. **Owed, and named rather than implied.**
+
+**S-6 · `reporter_dashboards_documents` is marked "required" and no document states a single column
+of it.** `technical-spec.md:1203` requires the table; `:1213-1217` gives the policy (opt-in, a
+mandatory TTL, a purge task); `functional-spec.md:348` says in as many words that **"No retention
+model has an owner yet."** T-22 created it because §7 requires it, deriving every column from a
+stated requirement and naming that requirement in the migration. **The curator should either bless
+those columns or move the table to T-28**, whose share links are its only consumer: §7 rule 6 means
+a consumer needing a different column cannot add one in a later migration.
 
 **D-1 · `group_by: age` reported everything as `(none)` on MariaDB — FIXED 2026-08-05, in T-08.**
 Found by T-01's corpus on MariaDB 10.11, confirmed by the first CI run on MariaDB 11, and **measured

@@ -28,6 +28,15 @@ require File.expand_path('../test_helper', __dir__)
 # a time. HANDOVER §1 records the same shape twice — the registry reset with no restore, and the
 # fixture built on the absence of rows. So the value is saved and put back in `teardown`.
 class AssetPolicySettingsTest < ActionController::TestCase
+  # NOT T-22's, and fixed here because this session is the first to RUN this file.
+  #
+  # Two of its tests call `l(...)` and the class did not include the module that defines it,
+  # so both errored with `NoMethodError: undefined method 'l'` — meaning that since T-33
+  # landed, `test_the_partial_uses_locale_keys_and_not_hardcoded_english` has asserted
+  # nothing at all. `docs/plan/HANDOVER.md` records that T-33's Minitest half had never been
+  # executed anywhere; this is what it was hiding. §Findings E-21.
+  include Redmine::I18n
+
   tests SettingsController
 
   fixtures :users, :email_addresses, :roles

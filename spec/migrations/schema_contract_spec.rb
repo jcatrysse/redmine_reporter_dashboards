@@ -115,6 +115,64 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
       expect(tables.keys.sort).to eq(expected_tables.sort)
     end
 
+    # THE COLUMN LIST §7 ACTUALLY NAMES, table by table.
+    #
+    # The review of T-36 found this missing, and the finding was right: a file called "the
+    # schema contract (technical-spec.md §7)" asserted §7's TABLE list, several individual
+    # columns it cared about, and never the column list itself — so a migration could drop
+    # `email_template` or `page_size` and every example here would still pass.
+    #
+    # Only the columns §7 writes down are required. Extra columns are permitted and listed
+    # separately below, because four of them are deviations the pull request argues for and
+    # a reader should be able to see the whole set in one place.
+    def section_7_columns
+      {
+        'reporter_dashboards_templates' => %w[
+          name description content project_id author_id orientation page_size margins
+          engine_hint enabled lock_version
+        ],
+        'reporter_dashboards_template_versions' => %w[
+          template_id author_id content content_digest created_at
+        ],
+        'reporter_dashboards_schedules' => %w[
+          project_id template_id query_id query_type repeat start_date end_date
+          email_subject email_template render_as timezone enabled
+          last_run_on last_attempted_at last_status last_error last_duration_ms
+          consecutive_failures next_run_on
+        ],
+        'reporter_dashboards_schedule_runs' => %w[
+          schedule_id occurrence_date started_at finished_at status error duration_ms
+          recipients_count document_count bytes_total correlation_id
+        ],
+        'reporter_dashboards_schedule_recipients' => %w[user_id]
+      }
+    end
+
+    it 'creates every column technical-spec.md §7 names, table by table' do
+      missing = section_7_columns.each_with_object({}) do |(table, required), acc|
+        absent = required - column_names(table)
+        acc[table] = absent if absent.any?
+      end
+
+      expect(missing).to eq({})
+    end
+
+    it 'adds these columns beyond §7, and each one is argued in the pull request' do
+      # Pinned as an exact set so a later task cannot slip a column in without this spec
+      # going red and somebody having to say why. §7 names no column at all for
+      # `reporter_dashboards_documents`, so the whole of it is listed here.
+      extra = section_7_columns.each_with_object({}) do |(table, required), acc|
+        beyond = column_names(table) - required - %w[id created_at updated_at]
+        acc[table] = beyond.sort if beyond.any?
+      end
+
+      expect(extra).to eq(
+        'reporter_dashboards_templates' => %w[output source source_digest source_template_id visibility],
+        'reporter_dashboards_schedules' => %w[author_id render_as_user_id],
+        'reporter_dashboards_schedule_recipients' => %w[schedule_id]
+      )
+    end
+
     it 'prefixes every new table with reporter_dashboards_, so both plugins can be installed at once' do
       # `technical-spec.md:1266-1270`: "Namespaced classes + new tables mean both plugins
       # can be installed simultaneously … Decisive." The base plugin's tables are

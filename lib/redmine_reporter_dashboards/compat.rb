@@ -77,10 +77,17 @@ module RedmineReporterDashboards
     # exists to stop, and it is also the shape CLAUDE.md §5 forbids — a swallowed error
     # around a *use* hides the absence, where a question answered once makes it visible.
     #
-    # ASKED OF THE SCHEMA CACHE, NOT WITH A QUERY. `connection.columns` is memoised by
-    # Rails' schema cache, so a model calling this on every read costs one query per table
-    # per process rather than one per call — which matters because FR-48 forbids a query
-    # count that scales with anything.
+    # ASKED OF THE SCHEMA CACHE, AND THE FIRST VERSION OF THIS METHOD WAS WRONG ABOUT THAT.
+    #
+    # It called `connection.columns(table)`, whose comment here claimed Rails memoises it.
+    # It does not: `SchemaStatements#columns` calls `column_definitions` and issues a fresh
+    # catalogue query EVERY time. Measured by counting `sql.active_record` events — ten calls,
+    # ten queries. T-25's runner asks this once per schedule and a render asks it once per
+    # template, so the cost scaled with the row count, which is exactly what FR-48 forbids.
+    #
+    # `schema_cache.columns` is the memoised one, and where it LIVES moved inside the support
+    # span — on the connection through Rails 7.1, on the pool from 7.2 — which is why the
+    # lookup is `respond_to?`-guarded rather than written once and hoped for.
     #
     # THE RESCUE IS NARROW ON PURPOSE. Three states have to be told apart:
     #   * the column is absent          -> false, and the caller degrades (the point)
@@ -92,9 +99,21 @@ module RedmineReporterDashboards
     # the failure this project keeps naming.
     def self.column_present?(table, column)
       name = column.to_s
-      ::ActiveRecord::Base.connection.columns(table.to_s).any? { |c| c.name == name }
+      schema_cache_for(::ActiveRecord::Base.connection)
+        .columns(table.to_s)
+        .any? { |c| c.name == name }
     rescue ::ActiveRecord::StatementInvalid
       false
+    end
+
+    # Rails 7.2 moved the schema cache from the connection to the pool. Asked with
+    # `respond_to?` rather than of `Rails::VERSION`, because the question is which object
+    # answers, and that is what the two branches actually differ on.
+    def self.schema_cache_for(connection)
+      pool = connection.pool if connection.respond_to?(:pool)
+      return pool.schema_cache if pool.respond_to?(:schema_cache)
+
+      connection.schema_cache
     end
   end
 end

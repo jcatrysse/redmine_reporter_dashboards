@@ -392,12 +392,21 @@ jobs:
   # That script carries the full argument for its two arms, including the FR-69 reading
   # they implement.
   #
-  # PostgreSQL only, deliberately. The question this job asks is about the MIGRATOR, which
-  # is engine-independent; the engine-dependent halves — identifier length limits, whether
-  # a unique index refuses a duplicate, `date` versus `datetime` round-tripping — are
-  # asserted in `test/unit/reporter_dashboards_schema_test.rb`, which runs in the `adapter`
-  # and `minitest` jobs across all three engines. Running this one three more times would
-  # buy a longer CI and no new information.
+  # PostgreSQL only, and the first version of this comment justified that with a sentence
+  # that was false in both of its clauses. What is actually true:
+  #
+  #   * The question this job asks is about the MIGRATOR, and the migrator is what differs
+  #     across the four branches — so the matrix is by Redmine version rather than by engine.
+  #   * `test/unit/reporter_dashboards_schema_test.rb` runs in the `minitest` job, which is
+  #     **PostgreSQL only** (see its `services:` block), and NOT in `adapter`, which runs
+  #     `spec/adapter` and never loads `test/`.
+  #
+  # So the engine-dependent properties — identifier length limits, whether a unique index
+  # refuses a duplicate over a nullable column, `date` versus `datetime` round-tripping — are
+  # **verified on PostgreSQL only** today. That is a real gap and it is written down here
+  # rather than papered over: closing it means either a database axis on this job or moving
+  # those assertions into `spec/adapter`, which already runs on all three engines.
+  # `implementation-plan.md` §Findings records it as owed.
   # ------------------------------------------------------------------
   migrate-updown:
     name: Migrate up/down (Redmine ${{ matrix.redmine }})

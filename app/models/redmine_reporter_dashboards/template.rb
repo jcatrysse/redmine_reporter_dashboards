@@ -83,7 +83,15 @@ module RedmineReporterDashboards
                             foreign_key: 'template_id',
                             association_foreign_key: 'role_id'
 
-    validates :name, presence: true, length: { maximum: 255 }
+    # LENGTHS ARE VALIDATED ON EVERY STRING COLUMN, and that is a cross-engine requirement
+    # rather than politeness. `t.string` is `character varying` with NO limit on PostgreSQL
+    # and `varchar(255)` on MySQL and MariaDB, so an over-long value VALIDATES AND SAVES on
+    # one engine and raises `ActiveRecord::ValueTooLong` on the other — a form that works in
+    # development and 500s in production, decided by the database somebody chose.
+    MAX_STRING = 255
+
+    validates :name, presence: true, length: { maximum: MAX_STRING }
+    validates :engine_hint, :source_digest, length: { maximum: MAX_STRING }, allow_nil: true
     validates :author_id, presence: true
     validates :visibility, inclusion: { in: VISIBILITIES }
     validates :source, inclusion: { in: SOURCES }
@@ -98,12 +106,20 @@ module RedmineReporterDashboards
     # to the one an administrator sees on the saved-query form.
     validate :roles_present_when_visible_to_roles
 
-    # Mirrors `Query`'s `after_save` (`app/models/query.rb:280-284`) exactly, including its
-    # narrowness: the roles are cleared only when the visibility actually CHANGED away from
-    # ROLES. Clearing on every save would be a second concept for an administrator to
-    # learn, and this plugin's whole argument for reusing core's three values is that there
-    # is only one.
-    after_save :clear_roles_when_visibility_changed_away_from_roles
+    # Mirrors `Query`'s `after_save` (`app/models/query.rb:280-284`) — and then closes a hole
+    # in it, deliberately.
+    #
+    # Core clears the role list only when `saved_change_to_visibility?`. That misses CREATE:
+    # `Template.create!(visibility: VISIBILITY_PRIVATE, roles: [r])` never marks `visibility`
+    # dirty, because 0 is the column default — so the join row is written and survives. It is
+    # inert while the template is private, and it goes LIVE the moment somebody switches the
+    # template to ROLES, granting a role nobody chose in that edit. The review of T-36
+    # demonstrated it.
+    #
+    # So the condition is "the visibility is not ROLES and there are roles", which subsumes
+    # core's case. The extra cost is one `EXISTS` on a save that changed nothing else, and
+    # the divergence is written down here rather than left for a reader to notice.
+    after_save :clear_roles_unless_visible_to_roles
 
     def visibility_private?
       visibility == VISIBILITY_PRIVATE
@@ -140,9 +156,9 @@ module RedmineReporterDashboards
       errors.add(:base, "#{l(:label_role_plural)} #{l('activerecord.errors.messages.blank')}")
     end
 
-    def clear_roles_when_visibility_changed_away_from_roles
-      return unless saved_change_to_visibility?
+    def clear_roles_unless_visible_to_roles
       return if visibility == VISIBILITY_ROLES
+      return if roles.empty?
 
       roles.clear
     end

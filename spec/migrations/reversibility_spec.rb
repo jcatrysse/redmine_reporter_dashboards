@@ -127,7 +127,11 @@ RSpec.describe MigrationReversibility do
     end
 
     it 'rejects an up/down pair' do
-      expect(rules_for('010_up_down_pair.rb')).to contain_exactly('no_up_down')
+      # `include` rather than `contain_exactly`: that fixture's `down` is a blockless
+      # `drop_table`, which the uninvertible-DDL rule added later also — correctly — flags.
+      # Pinning the exact rule set here would make a fixture that breaks TWO rules a spec
+      # failure, which is the wrong incentive for a directory whose job is to break things.
+      expect(rules_for('010_up_down_pair.rb')).to include('no_up_down')
     end
 
     it 'rejects `execute` in a change block' do
@@ -167,6 +171,56 @@ RSpec.describe MigrationReversibility do
 
     it 'rejects a row-level write' do
       expect(rules_for('020_data_statement.rb')).to include('no_data_statement')
+    end
+
+    # ---------------------------------------------------------------------
+    # The eight bypasses the review of T-36 walked through. Every one of these was CLEAN
+    # against the first version of the reader — it reported nothing, which is the failure
+    # mode of an AST reader and the reason this whole directory exists.
+    # ---------------------------------------------------------------------
+    it 'rejects `define_method(:down)`, which no `def` scan can see' do
+      expect(rules_for('021_define_method_down.rb')).to include('no_dynamic_dispatch')
+    end
+
+    it 'rejects raw SQL reached through a local variable, and `send(:execute, …)`' do
+      rules = rules_for('022_send_execute.rb')
+
+      expect(rules).to include('no_data_statement')
+      expect(rules).to include('no_dynamic_dispatch')
+    end
+
+    it 'rejects a model reached by `constantize` rather than by naming it' do
+      expect(rules_for('023_constantize.rb')).to include('no_dynamic_dispatch')
+    end
+
+    it 'rejects `if_not_exists:`, whose down direction is UNconditional' do
+      # The sharpest of the eight. Rails records `create_table` and inverts it to a plain
+      # `drop_table` — so `create_table :reporter_project_tabs, if_not_exists: true` reads
+      # like a safe guard and drops, on the way down, a table it did not create. That is
+      # FR-69 clause 2's exact hazard wearing a keyword argument.
+      expect(rules_for('024_if_not_exists.rb')).to include('no_uninvertible_ddl')
+    end
+
+    it 'rejects `t.index` with no explicit name, which add_index-only checking never saw' do
+      expect(rules_for('025_inline_index.rb')).to include('index_name_length')
+    end
+
+    it 'rejects an index name it cannot read, rather than measuring the derived one instead' do
+      expect(rules_for('026_computed_index_name.rb')).to include('index_name_length')
+    end
+
+    it 'rejects DDL Rails cannot invert' do
+      expect(rules_for('027_uninvertible.rb')).to include('no_uninvertible_ddl')
+    end
+
+    it 'sees a migration in a SUBDIRECTORY, because Rails runs one' do
+      # `ActiveRecord::MigrationContext#migration_files` globs `**/[0-9]*_*.rb`, and
+      # Redmine's plugin migrator inherits it. A reader that globs one level does not
+      # disagree with Rails about this file — it does not know it exists.
+      findings = described_class.scan([fixtures_dir], allowlist: {})
+      nested = findings.select { |f| f.file.include?('sub/028_nested.rb') }
+
+      expect(nested.map(&:rule)).to include('no_execute')
     end
 
     # The meta-test that stops a new rule being added without a fixture. A rule with no
