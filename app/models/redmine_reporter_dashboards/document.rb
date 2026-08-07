@@ -69,7 +69,11 @@ module RedmineReporterDashboards
       origin = created_at || Time.zone.now
       return if expires_at <= origin + MAX_RETENTION
 
-      errors.add(:expires_at, :less_than_or_equal_to, count: origin + MAX_RETENTION)
+      # `.to_date`, so the message reads "… 2027-08-08" rather than
+      # "… 2027-08-08 14:08:29 UTC". The bound is a retention policy measured in days; a
+      # seconds-precision timestamp in a form error is noise a reader has to look past, and
+      # it is the one part of this message Rails interpolates verbatim in every locale.
+      errors.add(:expires_at, :less_than_or_equal_to, count: (origin + MAX_RETENTION).to_date)
     end
   end
 end

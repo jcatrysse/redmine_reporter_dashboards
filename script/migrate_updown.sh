@@ -277,11 +277,23 @@ $(sed 's/^/    /' "$WORK/recorder.log")"
   echo "      migrations create:" >&2
   echo "$leftovers" | sed 's/^/    /' >&2
   echo >&2
-  echo "A down-migration did not remove what its up-migration made. If this is left over from" >&2
-  echo "an earlier failed run rather than from the migrations as they stand, drop them by hand" >&2
-  echo "and run again — but do NOT skip this check. Adopting the damage as the baseline is what" >&2
-  echo "makes every later comparison pass by comparing the damage with itself, so a red G11" >&2
-  echo "would turn green by pressing the button a second time." >&2
+  echo "A down-migration did not remove what its up-migration made — OR the database was left" >&2
+  echo "in that state by something else. Two ordinary causes, in order of likelihood:" >&2
+  echo >&2
+  echo "  1. You have just run the test suite. \`rake redmine:plugins:test\` runs" >&2
+  echo "     \`db:test:prepare\`, which reloads db/schema.rb — that restores the plugin's" >&2
+  echo "     TABLES (they are in the dump) but NOT its schema_migrations rows (a plugin's" >&2
+  echo "     db/migrate is not on ActiveRecord::Migrator.migrations_paths). VERSION=0 then" >&2
+  echo "     has nothing to roll back and the tables stay. Drop them and run again:" >&2
+  echo >&2
+  echo "       cd $REDMINE_DIR && RAILS_ENV=$RAILS_ENV bundle exec rails runner \\" >&2
+  echo "         'c=ActiveRecord::Base.connection; c.tables.grep(/^reporter_dashboards_/).each { |t| c.drop_table(t) }'" >&2
+  echo >&2
+  echo "  2. An earlier run of this script failed part-way through." >&2
+  echo >&2
+  echo "Either way, do NOT skip this check. Adopting the leftovers as the baseline is what" >&2
+  echo "makes every later comparison pass by comparing the damage with itself — a red G11 that" >&2
+  echo "turns green by pressing the button a second time, which is what this guard exists for." >&2
   return 1
 }
 
