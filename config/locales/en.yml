@@ -268,3 +268,12 @@ en:
   text_reporter_mail_rate_limit_info: "The most reports one user may send, and the window in minutes. 0 switches ad-hoc mail off."
   text_reporter_mail_external_collapsed: "External addresses are enabled but the permitted-domain list is empty, so no external address will be accepted."
   permission_mail_reporter_dashboards_reports: "Send a report by e-mail"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "One or more of the issues you named is not in your visible scope, so nothing was sent."
+  error_reporter_adhoc_issue_ids_malformed: "One or more of the issue IDs you named is not a number. Use the bare number, without a # in front of it."
+  error_reporter_adhoc_query_unavailable: "The saved query this report is built on is no longer available to you, so nothing was sent."
+  error_reporter_adhoc_no_documents: "This report produced no document, so nothing was sent."
+  error_reporter_adhoc_external_not_permitted: "One or more addresses are not permitted by this installation."
+  error_reporter_adhoc_attachments_too_large: "The report is too large to send by e-mail. Narrow the selection, or use a template that produces one document."
+  error_reporter_adhoc_partial_delivery: "Some recipients received the report before delivery failed. Check the mail log before sending it again."
+  error_reporter_adhoc_render_failed: "The report could not be produced, so nothing was sent. The details are below."

@@ -190,7 +190,7 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
   # which is missing or why.
   def test_an_issue_the_requester_cannot_see_refuses_the_whole_send
     hidden = issue_the_requester_cannot_see
-    visible = Issue.visible(@requester).where(project_id: @project.id).first
+    visible = Issue.visible(@requester).where(project_id: @project.id).order(:id).first
     assert visible, 'the fixture must give the requester at least one visible issue'
 
     with_engine do
@@ -208,7 +208,7 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
   end
 
   def test_naming_only_visible_issues_sends
-    visible = Issue.visible(@requester).where(project_id: @project.id).first
+    visible = Issue.visible(@requester).where(project_id: @project.id).order(:id).first
 
     with_engine do
       post :create, params: send_params(issue_ids: visible.id.to_s)
@@ -216,6 +216,108 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
 
     assert_response :redirect
     assert_equal 1, ActionMailer::Base.deliveries.length
+  end
+
+  # BLOCKER B1. `ReportScope.build` was called without `on_missing_query:`, so it took the
+  # `:ignore` branch: the saved query was dropped, the report was rendered over the WHOLE
+  # project scope, mailed, and the audit recorded `success` under the query id it had
+  # ignored. `ReportScope#find_query`'s own message is the argument against that default —
+  # "the alternative is mailing a different report under the same name" — and this path was
+  # the third caller its comment was written to protect (§Findings S-15).
+  #
+  # Three ids, one rule: a query the requester cannot resolve refuses, and the refusal does
+  # not say WHICH of the three reasons applies.
+  def test_a_query_id_the_requester_cannot_resolve_refuses_rather_than_widening
+    others = IssueQuery.create!(name: 'Theirs', user_id: @colleague.id, project: @project,
+                                visibility: Query::VISIBILITY_PRIVATE)
+    assert_nil IssueQuery.visible(@requester).find_by(id: others.id),
+               'the fixture must give the requester a query it cannot see'
+
+    [others.id.to_s, '999999', 'abc'].each do |query_id|
+      ActionMailer::Base.deliveries.clear
+      before = MailSend.count
+
+      with_engine { post :create, params: send_params(query_id: query_id) }
+
+      assert_response :unprocessable_entity, "query_id=#{query_id} was not refused"
+      assert_equal 0, ActionMailer::Base.deliveries.length,
+                   "query_id=#{query_id} mailed a report over a scope nobody asked for"
+      row = MailSend.order(:id).last
+      assert_equal before + 1, MailSend.count
+      assert_equal MailSend::STATUS_FAILED, row.status,
+                   "query_id=#{query_id} was audited as a success"
+    end
+  end
+
+  def test_a_query_the_requester_can_see_still_works
+    mine = IssueQuery.create!(name: 'Mine', user_id: @requester.id, project: @project,
+                              visibility: Query::VISIBILITY_PRIVATE)
+
+    with_engine { post :create, params: send_params(query_id: mine.id.to_s) }
+
+    assert_response :redirect
+    assert_equal 1, ActionMailer::Base.deliveries.length
+  end
+
+  # BLOCKER B2. `filter_map { … if id.match?(/\A\d+\z/) }` discarded every non-numeric entry
+  # BEFORE the refusal rule was applied — under a 12-line comment explaining why dropping is
+  # a defect. The boundary case is the serious one: with `issue_ids=abc` the parsed list came
+  # out EMPTY, took the "no set was named" branch, and mailed a report over the requester's
+  # ENTIRE visible scope while the flash said "sent to 1 recipient".
+  def test_a_malformed_issue_id_refuses_rather_than_being_dropped
+    visible = Issue.visible(@requester).where(project_id: @project.id).order(:id).first
+
+    with_engine { post :create, params: send_params(issue_ids: "#{visible.id},abc") }
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length
+    assert_includes MailSend.order(:id).last.error.to_s, 'issue_ids_malformed'
+  end
+
+  # THE BOUNDARY: every id malformed. This is the one that mailed everything.
+  def test_only_malformed_issue_ids_do_not_silently_mail_the_whole_scope
+    with_engine { post :create, params: send_params(issue_ids: 'abc') }
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length
+  end
+
+  # `#42` is Redmine's own issue-reference syntax and the field is labelled "Issue IDs", so
+  # it is the shape somebody will actually type. Refused, not silently reinterpreted.
+  def test_a_hash_prefixed_issue_id_is_refused_with_a_sentence_naming_the_fix
+    with_engine { post :create, params: send_params(issue_ids: '#1') }
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length
+    assert_match(/without a #/, flash.now[:error].to_s)
+  end
+
+  # ------------------------------------------------------------------ the refusal is SAID
+
+  # MAJOR M1. Only `:render_failed` carried a diagnostic, so every other refusal redrew a
+  # blank form with a 422 and no message at all — the reason was computed, written to the
+  # audit row, and withheld from the one person standing in front of it. Found by an
+  # independent review. Walked over every code the delivery can produce that this suite can
+  # reach, because a per-code key is exactly the thing that gets forgotten one at a time.
+  def test_every_refusal_tells_the_requester_why
+    cases = {
+      issues_not_visible: -> { send_params(issue_ids: "#{issue_the_requester_cannot_see.id}") },
+      issue_ids_malformed: -> { send_params(issue_ids: 'abc') },
+      query_unavailable: -> { send_params(query_id: '999999') },
+      no_recipients: -> { send_params(recipient_user_ids: []) }
+    }
+
+    cases.each do |code, params|
+      with_engine { post :create, params: params.call }
+
+      assert_response :unprocessable_entity, "#{code} did not refuse"
+      message = flash.now[:error].to_s
+      assert_not message.strip.empty?, "#{code} refused with no message at all"
+      assert_not_includes message, 'translation missing',
+                          "#{code} has no locale key"
+      assert_not_includes message, code.to_s,
+                          "#{code} printed its raw symbol instead of a sentence"
+    end
   end
 
   # ------------------------------------------------------------------ the sender
@@ -309,6 +411,34 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
                  assigns(:mail_sends).map(&:author_id).uniq.sort
   end
 
+  # A RECIPIENT WHOSE ACCOUNT IS GONE STILL HAS TO RENDER AS SOMETHING.
+  #
+  # The first version was `link_to_user(recipient.user) || l(:label_user_deleted)`, which was
+  # two bugs stacked so that neither was visible: `link_to_user(nil)` returns `""` — truthy —
+  # so the `||` never fired and the cell rendered EMPTY, and underneath it
+  # `label_user_deleted` existed in neither core nor this plugin, so the guard working would
+  # have printed "Translation missing". Found by an independent review.
+  #
+  # It matters because this is the audit: a row saying a report went to somebody, with an
+  # empty space where the somebody should be, is the one cell on the page that must never be
+  # blank.
+  def test_the_audit_names_a_recipient_whose_account_has_been_deleted
+    with_engine { post :create, params: send_params }
+    row = MailSend.order(:id).last
+    row.recipients.first.update_columns(user_id: 999_999)
+
+    get :index, params: { project_id: @project.id }
+
+    assert_response :success
+    # `I18n.t`, NOT `l`. This class does not include `Redmine::I18n`, and §Findings E-21 is
+    # two T-33 tests that had been ERRORING since the day they were written for exactly
+    # that reason — so the assertion they carried had never run.
+    label = I18n.t(:label_reporter_adhoc_mail_user_gone)
+    assert_includes @response.body, label
+    assert_not_includes @response.body, 'translation missing'
+    assert_not_includes @response.body, 'Translation missing'
+  end
+
   # ------------------------------------------------------------------ external addresses
 
   def test_an_external_address_is_refused_when_the_setting_is_off
@@ -393,41 +523,15 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
   # future caller, and HANDOVER §1's rule is that the caller is not the check. This is the
   # test that makes it a live guard rather than a comment.
   def test_the_delivery_refuses_a_disallowed_address_on_its_own
-    # BRACED, and HANDOVER §1 is why: `from_settings(settings, logger: nil)` declares a
-    # keyword parameter, so a trailing BARE hash is parsed as keywords and the method is
-    # called with no positional argument at all. It cost T-16 two rounds in two files.
-    policy = RedmineReporterDashboards::Reporting::MailPolicy
-             .from_settings({ 'mail_external_addresses' => '1',
-                              'mail_external_domains' => 'example.com' })
-    # NOT an endless method definition (`def self.sent = …`). That is Ruby 3.0 syntax and
-    # this plugin's floor is 2.7 — `.codex/check_ruby_floor.sh` catches it, and HANDOVER
-    # records it catching exactly this in a T-31 test.
-    mailer = Class.new do
-      class << self
-        def sent
-          @sent ||= []
-        end
-
-        def deliver_adhoc_report(*)
-          sent << :user
-        end
-
-        def deliver_adhoc_report_to_address(*)
-          sent << :address
-        end
-      end
-    end
-    row = MailSend.claim(author_id: @requester.id, project_id: @project.id,
-                         template_id: @template.id, created_at: Time.now)
-
-    result = RedmineReporterDashboards::Reporting::AdhocDelivery
-             .new(mailer: mailer, policy: policy)
-             .call(template: @template, actor: @requester, project: @project,
-                   mail_send: row, recipient_addresses: ['someone@elsewhere.com'])
+    result = deliver_directly(
+      recipient_addresses: ['someone@elsewhere.com'],
+      policy: mail_policy_for_test('mail_external_addresses' => '1',
+                                   'mail_external_domains' => 'example.com')
+    )
 
     assert_not result.ok?
     assert_equal :external_not_permitted, result.code
-    assert_equal [], mailer.sent
+    assert_equal [], recording_mailer.sent
   end
 
   def test_an_address_outside_the_allowlist_is_refused
@@ -441,6 +545,122 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
 
     assert_response :unprocessable_entity
     assert_equal 0, ActionMailer::Base.deliveries.length
+  end
+
+  # ---------------------------------------------------- guards an independent review's
+  #                                                       mutations found untested
+  #
+  # Four survived deletion with the whole suite green. Each is driven at the DELIVERY
+  # rather than through the controller, because that is where each lives and three are
+  # unreachable from the controller (which refuses first) — which is precisely why they
+  # were dead.
+
+  # M9: `MAX_ATTACHMENT_BYTES`. An MTA does not care which button produced the message;
+  # without this a 40 MB send is recorded as a success and bounces where nobody reads.
+  def test_the_delivery_refuses_an_oversize_attachment
+    # THE REGISTRY TAKES THE CLASS AND CALLS `.new` ITSELF (`render/registry.rb`), the same
+    # way `FakeEngine` above is registered. Handing it an instance raises `NoMethodError:
+    # undefined method 'new'` from inside `ReportRun#with_pdf`, three frames from the cause.
+    big = Class.new do
+      def capabilities
+        []
+      end
+
+      def id
+        'fake'
+      end
+
+      def render(_request)
+        RedmineReporterDashboards::Render::Success.new(
+          bytes: "%PDF-1.4\n#{'0' * (11 * 1024 * 1024)}\n%%EOF",
+          engine: 'fake', engine_version: '1.0'
+        )
+      end
+    end
+
+    result = nil
+    RedmineReporterDashboards::Render::Registry.isolated do
+      RedmineReporterDashboards::Render::Registry.register(:fake, big)
+      result = deliver_directly(recipient_users: [@colleague])
+    end
+
+    assert_not result.ok?
+    assert_equal :attachments_too_large, result.code
+    assert_equal [], recording_mailer.sent
+  end
+
+  # N3: THE "nothing survived parsing" BRANCH, which mutation testing showed unreachable
+  # from the controller — `named_issue_ids` answers `nil` for a list that cleans away to
+  # nothing, so the malformed check always fires first and this branch never ran.
+  #
+  # It is kept rather than deleted, and tested here rather than through the controller,
+  # because it is the branch that decides "an empty list is not the whole scope". That is
+  # the boundary the second blocker turned on, and `AdhocDelivery` is a separate object
+  # whose contract must not assume its caller filtered. Untested it was a comment.
+  def test_the_delivery_refuses_a_list_that_cleans_away_to_nothing
+    result = with_engine do
+      deliver_directly(recipient_users: [@colleague], issue_ids: ['  ', ''])
+    end
+
+    assert_not result.ok?
+    assert_equal :issue_ids_malformed, result.code
+    assert_equal [], recording_mailer.sent
+  end
+
+  # M11: the delivery's own "nobody to send to" guard. Unreachable through the controller,
+  # which refuses first — so without this it was a guard no test could fail.
+  def test_the_delivery_refuses_when_it_is_given_nobody
+    result = with_engine { deliver_directly(recipient_users: [], recipient_addresses: []) }
+
+    assert_not result.ok?
+    assert_equal :no_recipients, result.code
+  end
+
+  # M12: a locked or address-less account is DROPPED by the delivery, not mailed. Same
+  # person `Runner`'s identity check refuses to render as; mailing them their old team's
+  # numbers is that leak from the other end.
+  def test_the_delivery_drops_a_locked_recipient_rather_than_mailing_them
+    @colleague.update_columns(status: User::STATUS_LOCKED)
+
+    result = with_engine { deliver_directly(recipient_users: [User.find(@colleague.id)]) }
+
+    assert_not result.ok?
+    assert_equal :no_recipients, result.code
+    assert_equal [], recording_mailer.sent
+  end
+
+  # M20: the caller's subject actually reaches the message. It survived deletion because
+  # nothing asserted the Subject at all — and it is attacker-controlled text on an envelope
+  # this installation signs, so both the use and the fallback are worth pinning.
+  def test_the_subject_is_the_requesters_when_given_and_the_report_name_otherwise
+    with_engine { post :create, params: send_params(subject: 'Monday numbers') }
+    assert_equal 'Monday numbers', ActionMailer::Base.deliveries.last.subject
+
+    ActionMailer::Base.deliveries.clear
+    with_engine { post :create, params: send_params(subject: '   ') }
+    assert_equal 'Report: Weekly', ActionMailer::Base.deliveries.last.subject
+  end
+
+  # THE RECIPIENT BOUND, PINNED RATHER THAN NARROWED — recorded as §Findings S-20.
+  #
+  # An independent review observed that `User.active.where(id: ids)` accepts ANY active
+  # account, including a non-member and an administrator, with an attacker-controlled
+  # Subject. FR-61 says only "recipients are Redmine users", and §4.1's `require: :loggedin`
+  # exists so a non-member can mail themselves — so narrowing this to project members is a
+  # decision the specs do not make, and I have not made it silently (CLAUDE.md §11.5). The
+  # bytes are the requester's own visibility either way; the question is about the envelope.
+  #
+  # This test does not endorse the bound. It makes it a DECISION: changing it now has to
+  # change a test that says what it is.
+  def test_the_recipient_bound_is_every_active_user_which_is_a_recorded_open_question
+    member_ids = @project.users.map(&:id)
+    outsider = User.active.where.not(id: member_ids).where.not(id: User.anonymous.id).first
+    assert outsider, 'the fixture set must contain an active non-member'
+
+    with_engine { post :create, params: send_params(recipient_user_ids: [outsider.id.to_s]) }
+
+    assert_response :redirect
+    assert_equal [outsider.mail], ActionMailer::Base.deliveries.last.to
   end
 
   # THE COLLAPSE, END TO END. Ticked box, empty allowlist: no external address is accepted.
@@ -543,6 +763,53 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
   end
 
   private
+
+  # A mailer that records instead of sending, so a delivery-level example can assert that
+  # NOTHING went out. `ActionMailer::Base.deliveries` cannot distinguish "refused" from
+  # "the mailer was never reached", and three of the guards below are about the second.
+  def recording_mailer
+    @recording_mailer ||= Class.new do
+      class << self
+        def sent
+          @sent ||= []
+        end
+
+        def deliver_adhoc_report(*)
+          sent << :user
+        end
+
+        def deliver_adhoc_report_to_address(*)
+          sent << :address
+        end
+      end
+    end
+  end
+
+  # Drives `AdhocDelivery` directly, with a claimed audit row and a recording mailer.
+  #
+  # Several of its guards are UNREACHABLE through the controller, which refuses first — so
+  # through the controller they are a second mechanism for a property the first one already
+  # holds, and mutation testing showed four of them dead. The delivery is a separate object
+  # with its own contract; this is what makes that contract testable.
+  def deliver_directly(recipient_users: [], recipient_addresses: [], policy: nil, **rest)
+    row = MailSend.claim(author_id: @requester.id, project_id: @project.id,
+                         template_id: @template.id, created_at: Time.now)
+
+    RedmineReporterDashboards::Reporting::AdhocDelivery
+      .new(mailer: recording_mailer, policy: policy || mail_policy_for_test)
+      .call(template: @template, actor: @requester, project: @project, mail_send: row,
+            recipient_users: recipient_users, recipient_addresses: recipient_addresses,
+            **rest)
+  end
+
+  # BRACED, and HANDOVER §1 is why: `from_settings(settings, logger: nil)` declares a
+  # keyword parameter, so a trailing BARE hash binds to `logger:` and the method is called
+  # with no positional argument at all. It cost T-16 two rounds in two files.
+  def mail_policy_for_test(overrides = {})
+    RedmineReporterDashboards::Reporting::MailPolicy
+      .from_settings({ 'mail_external_addresses' => '0',
+                       'mail_external_domains' => '' }.merge(overrides))
+  end
 
   # A PRIVATE issue in THIS project, authored by somebody else.
   #

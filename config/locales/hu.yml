@@ -268,3 +268,12 @@ hu:
   text_reporter_mail_rate_limit_info: "Egy felhasználó által küldhető jelentések maximális száma és az időablak percben. A 0 kikapcsolja a küldést."
   text_reporter_mail_external_collapsed: "A külső címek engedélyezve vannak, de az engedélyezett domainek listája üres, ezért egyetlen külső cím sem lesz elfogadva."
   permission_mail_reporter_dashboards_reports: "Jelentés küldése e-mailben"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "A megadott feladatok közül legalább egy kívül esik az Ön által látható körön, ezért semmi sem került elküldésre."
+  error_reporter_adhoc_issue_ids_malformed: "A megadott azonosítók közül legalább egy nem szám. Használja a puszta számot, # nélkül."
+  error_reporter_adhoc_query_unavailable: "A mentett szűrő, amelyre ez a jelentés épül, már nem érhető el Önnek, ezért semmi sem került elküldésre."
+  error_reporter_adhoc_no_documents: "Ez a jelentés nem hozott létre dokumentumot, ezért semmi sem került elküldésre."
+  error_reporter_adhoc_external_not_permitted: "Legalább egy cím nem engedélyezett ezen a telepítésen."
+  error_reporter_adhoc_attachments_too_large: "A jelentés túl nagy e-mailben küldeni. Szűkítse a kiválasztást, vagy használjon egyetlen dokumentumot előállító sablont."
+  error_reporter_adhoc_partial_delivery: "Néhány címzett megkapta a jelentést, mielőtt a küldés meghiúsult. Ellenőrizze a levelezési naplót, mielőtt újra küldi."
+  error_reporter_adhoc_render_failed: "A jelentést nem sikerült előállítani, ezért semmi sem került elküldésre. A részletek alább olvashatók."

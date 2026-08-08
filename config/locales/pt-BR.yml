@@ -268,3 +268,12 @@ pt-BR:
   text_reporter_mail_rate_limit_info: "O máximo de relatórios que um usuário pode enviar e a janela em minutos. 0 desativa o envio."
   text_reporter_mail_external_collapsed: "Endereços externos estão habilitados, mas a lista de domínios permitidos está vazia, portanto nenhum endereço externo será aceito."
   permission_mail_reporter_dashboards_reports: "Enviar um relatório por e-mail"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "Uma ou mais das tarefas indicadas não estão no seu escopo visível, portanto nada foi enviado."
+  error_reporter_adhoc_issue_ids_malformed: "Um ou mais dos IDs indicados não são números. Use o número puro, sem # na frente."
+  error_reporter_adhoc_query_unavailable: "A consulta salva na qual este relatório se baseia não está mais disponível para você, portanto nada foi enviado."
+  error_reporter_adhoc_no_documents: "Este relatório não produziu nenhum documento, portanto nada foi enviado."
+  error_reporter_adhoc_external_not_permitted: "Um ou mais endereços não são permitidos nesta instalação."
+  error_reporter_adhoc_attachments_too_large: "O relatório é grande demais para enviar por e-mail. Restrinja a seleção ou use um modelo que produza um único documento."
+  error_reporter_adhoc_partial_delivery: "Alguns destinatários receberam o relatório antes de a entrega falhar. Verifique o log de e-mail antes de enviar novamente."
+  error_reporter_adhoc_render_failed: "Não foi possível produzir o relatório, portanto nada foi enviado. Os detalhes estão abaixo."

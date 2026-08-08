@@ -268,3 +268,12 @@ pl:
   text_reporter_mail_rate_limit_info: "Maksymalna liczba raportów, jakie może wysłać jeden użytkownik, oraz okno w minutach. 0 wyłącza wysyłkę."
   text_reporter_mail_external_collapsed: "Adresy zewnętrzne są włączone, ale lista dozwolonych domen jest pusta, więc żaden adres zewnętrzny nie zostanie przyjęty."
   permission_mail_reporter_dashboards_reports: "Wysyłanie raportu e-mailem"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "Co najmniej jedno ze wskazanych zagadnień jest poza Twoim widocznym zakresem, więc nic nie zostało wysłane."
+  error_reporter_adhoc_issue_ids_malformed: "Co najmniej jeden ze wskazanych identyfikatorów nie jest liczbą. Użyj samej liczby, bez # z przodu."
+  error_reporter_adhoc_query_unavailable: "Zapisane zapytanie, na którym oparty jest ten raport, nie jest już dla Ciebie dostępne, więc nic nie zostało wysłane."
+  error_reporter_adhoc_no_documents: "Ten raport nie utworzył żadnego dokumentu, więc nic nie zostało wysłane."
+  error_reporter_adhoc_external_not_permitted: "Co najmniej jeden adres nie jest dozwolony w tej instalacji."
+  error_reporter_adhoc_attachments_too_large: "Raport jest zbyt duży, aby wysłać go e-mailem. Zawęź wybór lub użyj szablonu tworzącego jeden dokument."
+  error_reporter_adhoc_partial_delivery: "Część odbiorców otrzymała raport, zanim wysyłka się nie powiodła. Sprawdź dziennik poczty przed ponownym wysłaniem."
+  error_reporter_adhoc_render_failed: "Nie udało się utworzyć raportu, więc nic nie zostało wysłane. Szczegóły znajdują się poniżej."

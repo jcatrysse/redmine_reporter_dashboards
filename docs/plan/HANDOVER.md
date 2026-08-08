@@ -617,6 +617,46 @@ green, and D-1 live —
 against `agrees (keys [20, 21, nil], total 8.8)` on PostgreSQL. Three buckets collapsed into
 one and the figure was the last group's hours wearing the total's name.
 
+**A DEFAULT ARGUMENT IS A DECISION, AND `ReportScope.build`'s IS `:ignore`.** Both of T-32's
+review blockers were the same shape: a *silent fallback to a WIDER scope than the requester
+asked for*. `ReportScope.build` defaults to `on_missing_query: :ignore`, so an unresolvable
+`query_id` was dropped and the report rendered over the whole project — mailed, and audited
+as `success` **under the query id it had ignored**. The `:raise` mode existed, written for
+exactly this, and `find_query`'s own message is the argument for it: *"the alternative is
+mailing a different report under the same name."* §Findings S-15 is the same defect one
+caller earlier. **When a shared resolver offers two failure modes, the caller that has an
+audience must pick one explicitly**; taking the default is not picking.
+
+**AND THE SECOND BLOCKER WAS A DROP THAT HAPPENED ONE LINE ABOVE THE COMMENT FORBIDDING
+DROPS.** `filter_map { Integer(id) if id.match?(/\A\d+\z/) }` discarded every non-numeric
+issue id *before* the "refused, not silently included" rule ran — under a 12-line paragraph
+explaining why dropping is a defect. The boundary is what makes it serious rather than
+untidy: with `issue_ids=abc` the parsed list came out **empty**, took the "no set was named"
+branch, and mailed a report over the requester's entire visible scope while the flash said
+"sent to 1 recipient". **A parse step that can empty a list has to distinguish "nothing was
+asked for" from "nothing survived parsing"**, and the second one must not inherit the first
+one's meaning.
+
+**A REFUSAL CODE WITH NO LOCALE KEY IS A BLANK PAGE, NOT A FALLBACK.** T-32's controller
+rendered the diagnostics panel for `:render_failed` and nothing at all for the other seven
+codes — the reason was computed, written to the audit row, and withheld from the person
+standing in front of it, who saw an empty form and a 422. `:partial_delivery` was the worst:
+some recipients already hold the report, the obvious next action is to press send again, and
+nothing said so. The fix is T-31's `text_reporter_degradation_<code>` mechanism
+(`error_reporter_adhoc_<code>`, raw message as fallback) **plus an example that walks every
+code the class can emit** — the fallback alone would have hidden the next missing key.
+
+**`link_to_user(nil)` RETURNS `""`, WHICH IS TRUTHY, so `link_to_user(x) || l(:fallback)` is
+a guard that never fires.** Core's helper ends in `h(user.to_s)`. Use `.presence ||`. Worth
+knowing twice over: in T-32 the dead guard was sitting on top of a locale key that did not
+exist (`label_user_deleted`, in neither core nor this plugin) while the key that WAS
+translated into nine languages was referenced nowhere — one bug hiding the other, so the
+page showed an empty cell instead of "Translation missing" and neither was visible.
+
+**`Render::Registry.register` TAKES THE CLASS AND CALLS `.new` ITSELF.** Handing it an
+instance raises `NoMethodError: undefined method 'new'` from inside `ReportRun#with_pdf`,
+three frames from the cause and reading like a bug in the render layer.
+
 **`Mailer#mail` MERGES `From` WITH `reverse_merge!`, SO A CALLER-SUPPLIED HEADER WINS — the
 sender is server-controlled only because no parameter exists to carry one.** Redmine's
 `app/models/mailer.rb:693` does `headers.reverse_merge! 'From' => from`, and reverse-merge

@@ -268,3 +268,12 @@ es:
   text_reporter_mail_rate_limit_info: "El máximo de informes que un usuario puede enviar y la ventana en minutos. 0 desactiva el envío."
   text_reporter_mail_external_collapsed: "Las direcciones externas están habilitadas pero la lista de dominios permitidos está vacía, por lo que no se aceptará ninguna dirección externa."
   permission_mail_reporter_dashboards_reports: "Enviar un informe por correo"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "Una o más de las peticiones indicadas no están en su ámbito visible, por lo que no se envió nada."
+  error_reporter_adhoc_issue_ids_malformed: "Uno o más de los ID de petición indicados no son números. Use el número sin el # delante."
+  error_reporter_adhoc_query_unavailable: "La consulta guardada en la que se basa este informe ya no está disponible para usted, por lo que no se envió nada."
+  error_reporter_adhoc_no_documents: "Este informe no produjo ningún documento, por lo que no se envió nada."
+  error_reporter_adhoc_external_not_permitted: "Una o más direcciones no están permitidas en esta instalación."
+  error_reporter_adhoc_attachments_too_large: "El informe es demasiado grande para enviarlo por correo. Reduzca la selección o use una plantilla que produzca un solo documento."
+  error_reporter_adhoc_partial_delivery: "Algunos destinatarios recibieron el informe antes de que fallara el envío. Revise el registro de correo antes de volver a enviarlo."
+  error_reporter_adhoc_render_failed: "No se pudo generar el informe, por lo que no se envió nada. Los detalles están más abajo."

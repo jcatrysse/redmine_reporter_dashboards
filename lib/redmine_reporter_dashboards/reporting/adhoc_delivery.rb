@@ -132,9 +132,29 @@ module RedmineReporterDashboards
       # request, not a rake task, so unlike `ScheduledDelivery#as` there is nothing to set
       # and nothing to restore. Said explicitly because the absence of that method here is
       # the kind of difference a reader assumes is an omission.
+      # `on_missing_query: :raise`, AND THE DEFAULT WAS A BLOCKER.
+      #
+      # This called `ReportScope.build` without it, so an unresolvable `query_id` took the
+      # `:ignore` branch: the saved query was silently dropped, the report was rendered over
+      # the WHOLE project scope, mailed, and recorded as `success` under the query id it had
+      # ignored. Measured by an independent review against a private `IssueQuery` belonging
+      # to somebody else, a nonexistent id and the literal `abc` — all three delivered.
+      #
+      # `ReportScope#find_query`'s own message is the argument against that default and it
+      # was already written: *"Nothing was sent, because the alternative is mailing a
+      # different report under the same name."* That is §Findings S-15 exactly — a decision
+      # with two callers made twice and differently — on the third caller `ReportScope`'s
+      # comment was written to protect.
+      #
+      # The disclosure reasoning behind the interactive `:ignore` default does NOT transfer
+      # here. It exists so a picker cannot be used to probe for other people's private
+      # queries by telling "deleted" and "not yours" apart; this path answers ONE refusal
+      # for both, so it tells them apart no more than the picker does — and the alternative
+      # is mailing a report to other people under a name that does not describe it.
       def render(template, actor, project, query_id, issue_ids)
         scope, query = ReportScope.build(template: template, actor: actor,
-                                         project: project, query_id: query_id)
+                                         project: project, query_id: query_id,
+                                         on_missing_query: :raise)
 
         if scope && issue_ids.present?
           scope = narrow_to_named_issues(scope, issue_ids)
@@ -144,6 +164,11 @@ module RedmineReporterDashboards
         ReportRun.new(template: template, actor: actor, scope: scope, query: query,
                       guard: ::RedmineReporterDashboards::Render::BatchGuard.new(logger: logger),
                       output_class: :report, logger: logger).call(pdf: true)
+      rescue ReportScope::UnresolvableQuery => e
+        # ONE REFUSAL FOR "gone" AND "not yours" — `ReportScope` raises the same error for
+        # both, and this passes its message through rather than composing a second one, so
+        # the two cases stay indistinguishable from outside.
+        refusal(:query_unavailable, e.message)
       end
 
       # T-32's `Accept:` clause, and the word in it that decides the design is **refused**:
@@ -160,12 +185,37 @@ module RedmineReporterDashboards
       # exist and which the requester merely cannot see, which is the disclosure
       # `Template#visible?`'s 404 and `ReportScope#find_query`'s single answer both exist to
       # avoid.
+      # A MALFORMED ID IS REFUSED, NOT DROPPED, AND SKIPPING THIS WAS THE SECOND BLOCKER.
+      #
+      # The first version was `filter_map { Integer(id) if id.match?(/\A\d+\z/) }`, which
+      # discarded every entry that was not bare digits BEFORE the rule above was applied —
+      # so the paragraph explaining why dropping is a defect sat directly over code that
+      # dropped. Worse at the boundary: with `issue_ids=abc` the list came out EMPTY, took
+      # the "no set was named" branch, and mailed a report over the requester's entire
+      # visible scope while the flash said "sent to 1 recipient". Measured by an independent
+      # review.
+      #
+      # `#42` is the shape that makes this likely rather than theoretical: it is Redmine's
+      # own issue-reference syntax and the field is labelled "Issue IDs". It is still
+      # refused rather than accepted — being liberal about the input is a separate decision
+      # from being silent about it, and only the silence is a defect. The refusal names the
+      # count, and the message tells the requester what a valid entry looks like.
       def narrow_to_named_issues(scope, issue_ids)
-        wanted = Array(issue_ids).map { |id| id.to_s.strip }.reject(&:empty?)
-                                 .filter_map { |id| Integer(id, 10) if id.match?(/\A\d+\z/) }
-                                 .uniq
-        return scope if wanted.empty?
+        entries = Array(issue_ids).map { |id| id.to_s.strip }.reject(&:empty?)
+        # NOT `return scope`. An empty list here means the caller passed something that
+        # cleaned away to nothing; the controller answers `nil` for "no set was named", so
+        # reaching this method at all means a set WAS named. Falling back to the whole scope
+        # is the boundary case that made `issue_ids=abc` mail everything.
+        return refusal(:issue_ids_malformed, 'no issue ID was recognised') if entries.empty?
 
+        malformed = entries.reject { |id| id.match?(/\A\d+\z/) }
+        unless malformed.empty?
+          return refusal(:issue_ids_malformed,
+                         "#{malformed.length} of the #{entries.length} issue ID(s) named " \
+                         'are not numbers. Use the bare number, without a # in front of it')
+        end
+
+        wanted = entries.map { |id| Integer(id, 10) }.uniq
         narrowed = scope.where(id: wanted)
         # `pluck` and not `count`: the two questions are "how many are visible" and "which",
         # and only the second can be compared with what was asked for. A count would answer
@@ -175,11 +225,17 @@ module RedmineReporterDashboards
 
         return narrowed if missing.empty?
 
-        Result.new(ok: false, code: :issues_not_visible,
-                   message: "#{missing.length} of the #{wanted.length} issue(s) named " \
-                            'are not in your visible scope',
-                   recipients_count: 0, external_count: 0, document_count: 0,
-                   bytes_total: 0)
+        refusal(:issues_not_visible,
+                "#{missing.length} of the #{wanted.length} issue(s) named are not in " \
+                'your visible scope')
+      end
+
+      # A scope-resolution refusal, as a `Result` the caller recognises by class. One
+      # constructor rather than four literals, because every one of them has to carry the
+      # same four zeroes and a fifth copy is where one of them stops being zero.
+      def refusal(code, message)
+        Result.new(ok: false, code: code, message: message, recipients_count: 0,
+                   external_count: 0, document_count: 0, bytes_total: 0)
       end
 
       # --- delivery ------------------------------------------------------------------

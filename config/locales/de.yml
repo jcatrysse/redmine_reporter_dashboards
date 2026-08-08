@@ -268,3 +268,12 @@ de:
   text_reporter_mail_rate_limit_info: "Wie viele Berichte ein Benutzer höchstens senden darf, und das Zeitfenster in Minuten. 0 schaltet den Versand ab."
   text_reporter_mail_external_collapsed: "Externe Adressen sind aktiviert, aber die Liste erlaubter Domains ist leer, daher wird keine externe Adresse akzeptiert."
   permission_mail_reporter_dashboards_reports: "Bericht per E-Mail senden"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "Eines oder mehrere der genannten Tickets liegen außerhalb Ihres sichtbaren Bereichs, daher wurde nichts gesendet."
+  error_reporter_adhoc_issue_ids_malformed: "Eine oder mehrere der genannten Ticket-IDs sind keine Zahlen. Verwenden Sie die reine Nummer, ohne # davor."
+  error_reporter_adhoc_query_unavailable: "Die gespeicherte Abfrage, auf der dieser Bericht beruht, steht Ihnen nicht mehr zur Verfügung, daher wurde nichts gesendet."
+  error_reporter_adhoc_no_documents: "Dieser Bericht hat kein Dokument erzeugt, daher wurde nichts gesendet."
+  error_reporter_adhoc_external_not_permitted: "Eine oder mehrere Adressen sind auf dieser Installation nicht zulässig."
+  error_reporter_adhoc_attachments_too_large: "Der Bericht ist zu groß für den E-Mail-Versand. Schränken Sie die Auswahl ein oder verwenden Sie eine Vorlage, die ein einzelnes Dokument erzeugt."
+  error_reporter_adhoc_partial_delivery: "Einige Empfänger haben den Bericht erhalten, bevor der Versand fehlschlug. Prüfen Sie das Mail-Protokoll, bevor Sie erneut senden."
+  error_reporter_adhoc_render_failed: "Der Bericht konnte nicht erstellt werden, daher wurde nichts gesendet. Die Einzelheiten stehen unten."

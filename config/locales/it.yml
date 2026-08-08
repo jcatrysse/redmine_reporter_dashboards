@@ -268,3 +268,12 @@ it:
   text_reporter_mail_rate_limit_info: "Il numero massimo di report che un utente può inviare e la finestra in minuti. 0 disattiva l’invio."
   text_reporter_mail_external_collapsed: "Gli indirizzi esterni sono abilitati ma l’elenco dei domini consentiti è vuoto, quindi nessun indirizzo esterno sarà accettato."
   permission_mail_reporter_dashboards_reports: "Inviare un report per e-mail"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "Una o più delle segnalazioni indicate non rientrano nel tuo ambito visibile, quindi non è stato inviato nulla."
+  error_reporter_adhoc_issue_ids_malformed: "Uno o più degli ID indicati non sono numeri. Usa il numero puro, senza # davanti."
+  error_reporter_adhoc_query_unavailable: "La query salvata su cui si basa questo report non è più disponibile per te, quindi non è stato inviato nulla."
+  error_reporter_adhoc_no_documents: "Questo report non ha prodotto alcun documento, quindi non è stato inviato nulla."
+  error_reporter_adhoc_external_not_permitted: "Uno o più indirizzi non sono consentiti su questa installazione."
+  error_reporter_adhoc_attachments_too_large: "Il report è troppo grande per essere inviato per e-mail. Restringi la selezione o usa un modello che produca un solo documento."
+  error_reporter_adhoc_partial_delivery: "Alcuni destinatari hanno ricevuto il report prima che l’invio fallisse. Controlla il log della posta prima di inviarlo di nuovo."
+  error_reporter_adhoc_render_failed: "Non è stato possibile produrre il report, quindi non è stato inviato nulla. I dettagli sono qui sotto."

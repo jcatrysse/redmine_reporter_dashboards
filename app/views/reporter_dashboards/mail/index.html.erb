@@ -66,7 +66,19 @@
               <% if recipient.external? %>
                 <div><%= recipient.address %> <em class="info">(<%= l(:label_reporter_adhoc_mail_external) %>)</em></div>
               <% else %>
-                <div><%= link_to_user(recipient.user) || l(:label_user_deleted) %></div>
+                <%#
+                  `.presence`, AND THE `||` ALONE WAS A DEAD GUARD OVER A MISSING KEY —
+                  two bugs, one hiding the other, found by an independent review.
+
+                  `link_to_user(nil)` returns `""` (core's helper ends in `h(user.to_s)`),
+                  which is TRUTHY, so `||` never fired and a deleted account rendered an
+                  empty cell. Underneath it, `label_user_deleted` exists in neither core nor
+                  this plugin — it would have printed "Translation missing" the moment the
+                  guard worked — while `label_reporter_adhoc_mail_user_gone`, which IS
+                  translated into all nine locales, was referenced nowhere in the tree.
+                %>
+                <div><%= link_to_user(recipient.user).presence ||
+                         l(:label_reporter_adhoc_mail_user_gone) %></div>
               <% end %>
             <% end %>
             <% if send.recipients.empty? %>

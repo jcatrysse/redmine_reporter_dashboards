@@ -97,9 +97,15 @@ class ReporterDashboardsMailer < Mailer
   # Redmine's `Mailer#mail` builds `From` from `Setting.mail_from` and merges it with
   # `reverse_merge!`, so a caller passing its own `'From'` header would WIN. Nothing here
   # passes one, and nothing can: neither of these two methods takes a sender, an address to
-  # put in one, or a Hash that could carry one. `spec/reporting/adhoc_mailer_spec.rb`
-  # asserts that against the parameter list rather than against this comment, which is the
-  # same shape `DocumentRequest`'s "no field a credential could travel in" assertion takes.
+  # put in one, or a Hash that could carry one. Asserted in TWO places, because neither is
+  # sufficient alone and the first version of this comment cited a file that did not exist:
+  # `test/functional/reporter_dashboards_mail_controller_test.rb`'s
+  # `test_no_mailer_action_takes_anything_a_sender_could_travel_in` reads the parameter
+  # lists off the loaded class, and `spec/reporting/adhoc_delivery_spec.rb` asserts no
+  # `'From' =>` is built anywhere on the path. The functional test additionally asserts the
+  # `From` of a message that actually came out, which is the only one of the three that
+  # could see a header set somewhere else entirely. This is the same shape
+  # `DocumentRequest`'s "no field a credential could travel in" assertion takes.
   #
   # --- `Reply-To` IS THE REQUESTER, WHICH IS WHAT THE `from` FIELD WAS BEING USED FOR ---
   #

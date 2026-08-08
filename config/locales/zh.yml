@@ -268,3 +268,12 @@ zh:
   text_reporter_mail_rate_limit_info: "一位用户最多可发送的报表数，以及以分钟为单位的时间窗口。0 表示关闭发送。"
   text_reporter_mail_external_collapsed: "已启用外部地址，但允许的域名列表为空，因此不会接受任何外部地址。"
   permission_mail_reporter_dashboards_reports: "通过电子邮件发送报表"
+  # --- T-32 round 2: a sentence for every delivery refusal (was a blank form) ---
+  error_reporter_adhoc_issues_not_visible: "您指定的问题中有一个或多个不在您的可见范围内，因此未发送任何内容。"
+  error_reporter_adhoc_issue_ids_malformed: "您指定的问题编号中有一个或多个不是数字。请使用不带 # 的纯数字。"
+  error_reporter_adhoc_query_unavailable: "此报表所基于的已保存查询对您不再可用，因此未发送任何内容。"
+  error_reporter_adhoc_no_documents: "此报表未生成任何文档，因此未发送任何内容。"
+  error_reporter_adhoc_external_not_permitted: "有一个或多个地址在此安装中不被允许。"
+  error_reporter_adhoc_attachments_too_large: "报表过大，无法通过电子邮件发送。请缩小选择范围，或使用生成单个文档的模板。"
+  error_reporter_adhoc_partial_delivery: "部分收件人在发送失败前已收到报表。再次发送前请检查邮件日志。"
+  error_reporter_adhoc_render_failed: "无法生成此报表，因此未发送任何内容。详细信息见下方。"

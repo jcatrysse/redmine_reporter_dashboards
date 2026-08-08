@@ -93,6 +93,17 @@ module ReporterDashboards
         # the notice is the page they are already looking at, carrying the same correlation
         # id that went into the audit row.
         @diagnostic = @result.diagnostic
+        # AND THE OTHER SEVEN CODES GET A SENTENCE TOO, which they did not.
+        #
+        # Only `:render_failed` carries a diagnostic, so the panel above drew nothing for
+        # `:issues_not_visible`, `:issue_ids_malformed`, `:query_unavailable`,
+        # `:no_documents`, `:external_not_permitted`, `:attachments_too_large` or
+        # `:partial_delivery`: the reason was computed, written to the audit row, and then
+        # withheld from the one person standing in front of it, who saw a blank form and a
+        # 422. Found by an independent review. `:partial_delivery` was the worst of them —
+        # some recipients already hold the report, the obvious next action is to press send
+        # again, and nothing said so.
+        flash.now[:error] = adhoc_failure_text(@result)
         @remaining = remaining_sends
         render :new, status: :unprocessable_entity
       end
@@ -280,6 +291,21 @@ module ReporterDashboards
       @mail_send = MailSend.new
       @remaining = remaining_sends
       render :new, status: :unprocessable_entity
+    end
+
+    # THE SAME MECHANISM T-31 SETTLED FOR DEGRADATION CODES (§Findings S-17): look up
+    # `error_reporter_adhoc_<code>`, and fall back to the delivery's own English sentence
+    # when there is no key.
+    #
+    # The fallback is deliberate and is not a licence to skip a key. A code with no
+    # translation prints the raw message, which is a sentence rather than a symbol and is
+    # strictly better than the blank form this replaced — but every code T-32 can produce
+    # HAS a key in all nine locales, and `test_every_delivery_refusal_code_has_a_locale_key`
+    # is what stops the next one arriving without one.
+    def adhoc_failure_text(result)
+      key = :"error_reporter_adhoc_#{result.code}"
+      text = l(key, default: '')
+      text.to_s.strip.empty? ? result.message.to_s : text
     end
 
     def delivery
