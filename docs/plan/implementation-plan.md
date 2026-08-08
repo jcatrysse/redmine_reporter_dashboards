@@ -98,6 +98,32 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
+**S-14 · A time-entry report shows a smaller, entirely plausible number to most of the
+people who open it, and nothing says why. RAISED AND SETTLED 2026-08-08.** Nobody had written
+this requirement down: `TimeEntry.visible_condition`
+(`redmine/app/models/time_entry.rb:82-92`) does not merely check a permission, it branches on
+`Role#time_entries_visibility`, which has three states:
+
+| the actor's role | what a "team hours" report gives them |
+|---|---|
+| `time_entries_visibility == 'all'` | every entry in scope — correct |
+| `== 'own'` | **only their own hours, and the report looks fine** |
+| no `:view_time_entries` at all | `1=0`, so nothing — fail-closed and correct, but unexplained |
+
+The middle row is the defect. An ordinary member opens the team's hours report, sees a total
+that is smaller and completely believable, and has no way to know they are looking at their
+own timesheet. **There is no equivalent on the issue path** — `Issue.visible` narrows by
+project and by `Role#issues_visibility`, but it has no "your own issues only" mode that a
+whole-project report silently collapses into — so no existing test or invariant covers it.
+
+**Curator decision, 2026-08-08:** fail closed on both narrowing states AND **label the
+narrowing on the page**, following §9b.2's existing *"Preview of 50 of 1 284 issues"* pattern.
+Rejected: refusing the report outright unless the role has full visibility — "my own hours" is
+a legitimate report, it simply has to say that is what it is. Also rejected: adding a
+time-entry permission to §4.1's thirteen — core's `:view_time_entries` already exists, is
+already enforced by `TimeEntry.visible`, and a second permission over the same data is a
+second answer to one question. T-31's `Accept:` clause 8 carries it.
+
 **~~S-13~~ · CLOSED by curator decision, 2026-08-08 — and TWO decisions were taken, not one.**
 
 1. **The kernel stays frozen. No second G7 hunk.** Time entries get their own owned
@@ -123,9 +149,28 @@ a human artefact, and the grep is what keeps it true between artefacts.
    supporting it meant a second scope slot built for a requirement nobody wanted. A template
    body reports on **one** source.
 
-**The new module still needs its own frozen corpus** — that is the one cost of route (b), and
-it is the pattern T-01 established rather than a new burden. A calculator with no oracle is
-the untested half.
+**CORRECTED 2026-08-08, same day, and the error was mine rather than a change of plan.** This
+paragraph first read *"the new module still needs its own frozen corpus — that is the one cost
+of route (b)"*. That copied T-01's pattern onto a situation it does not fit. The corpus is a
+DRIFT DETECTOR for ported code — `spec/golden/README.md` says so in its own words: *"Nothing
+in this directory tests the plugin's behaviour. It tests that the behaviour has not moved."*
+There is no "before" for a new module, so snapshotting its answers on day one would freeze
+whatever it happens to output, bugs included, and turn fixing one into an apparent gate
+breach.
+
+**What the new module needs instead is an INDEPENDENT ORACLE**, and the curator's framing is
+the right one: compute each figure twice, once through the module's SQL and once by loading
+the rows and adding them up in Ruby. That is a correctness claim rather than a
+did-it-change claim, it explains itself, and it is engine-independent — which makes it the
+check that catches D-1's still-open `SUM`-on-a-grouped-relation defect. T-31's `Accept:`
+clauses 5, 6 and 7 carry it, and **no corpus file is to be added**.
+
+*(The curator also asked whether the new module could be verified against the plugin on
+`main`. It cannot: `main` carries no time-entry-sourced reporting — only
+`_report_by_spent_time.erb`, which renders a template belonging to the PRIVATE
+`redmine_reporter` plugin, and `_timelog.html.erb`, which is core Redmine. What does exist on
+`main` is `spent_hours` as a MEASURE over an issue scope, and that is already frozen in
+T-01's 176-case corpus, so that comparison has effectively already been made.)*
 
 The measurement that forced the decision follows, kept in full because it is also the
 regression this project would want to notice if anyone ever points the issue kernel at a
@@ -2506,7 +2551,8 @@ match them.** Read §Findings **S-13** before starting: the clause this task use
 (*"a `TimeEntryQuery`-backed scope feeds the same aggregation core"*) was measured and is
 false, and the answer is a second owned calculator rather than an edit to the frozen kernel.
 
-*Accept, as revised 2026-08-08:*
+*Accept, as revised 2026-08-08 (second revision — the corpus clause below replaced one that
+overstated it; see §Findings S-13's closing note):*
 
 1. **`source` ∈ `issues | time_entries` on the template model, and the column already
    exists** (migration 002, T-22). Nothing new in the schema.
@@ -2516,29 +2562,55 @@ false, and the answer is a second owned calculator rather than an edit to the fr
 3. **Two queries, and `source` is the switch.** `source: issues` resolves through
    `IssueQuery#base_scope` (as today); `source: time_entries` resolves through
    `TimeEntryQuery#base_scope`. Both start from their model's `visible` scope, so INV-1/INV-3
-   are held by construction on both paths, and a multi-actor test covers the time-entry path
-   the way `test/unit/multi_actor_visibility_test.rb` covers the issue one — **that test is
-   the one most likely to be skipped and it is the one that matters**, because `TimeEntry`
-   visibility is a different rule from `Issue` visibility.
+   are held by construction on both paths.
 4. **A NEW owned aggregation module for time entries** — a sibling of
    `aggregation/query_aggregator.rb`, never an edit to it. `KERNEL_FILES` unchanged, `RATCHET`
    stays 1, G7 untouched. It shares the RESULT VOCABULARY (bucket shape, `filter` payloads for
    drill-through, caps, the `(none)` bucket) and not the query builder. `SUM(hours)` is its
    defining measure, and `activity` and `user` are dimensions the issue kernel does not have.
-5. **Its own frozen corpus**, on T-01's pattern, with a pinned reference date. A calculator
-   with no oracle is the untested half, and this is the one real cost of not editing the
-   kernel — pay it in the same PR, not after.
-6. **`{% sql_aggregate from: time_entries %}` routes to the new module**, and a test asserts
-   that a time-entry scope **never** reaches `QueryAggregator` — the regression that would
-   otherwise silently reintroduce S-13's wrong numbers. The reverse guard too: an issue scope
-   never reaches the time-entry module.
-7. **`ReportRun` stops refusing `source: time_entries`.** Its `unsupported_source`
-   diagnostic and the 501-style message naming T-31 both go, and
-   `Drops::TimeEntriesDrop` — built in T-18 and still without a producer — gets one.
-8. **A template body reports on ONE source.** Mixing issue data and time data in one template
-   was **dropped by curator decision, not deferred** (S-13 clause 3), so there is no second
-   scope slot on `RenderContext` and no test for a mixed template. §7b.4's promise of it and
-   FR-60 have both been corrected; do not reintroduce it as a convenience.
+5. **EVERY GROUPED AGGREGATE IS READ POSITIONALLY. This is a correctness clause, not a style
+   one, and it is the single most important line in this task.** The MariaDB
+   column-label-truncation defect (§Findings D-1, HANDOVER §1) was fixed for the COUNT path
+   only: `grouped_counts` does `relation.pluck(*group_values, Arel.sql("COUNT(…)"))` and reads
+   the row by POSITION, while `raw_measure` still does `relation.sum(Arel.sql(expression))` on
+   a grouped relation — and ActiveRecord keys that Hash by the group expression's own TEXT,
+   which MariaDB truncates at 256 characters. Past that every key returns `NULL`, the buckets
+   collapse into one and the total is taken from whichever group the server returned last.
+   **`SUM(hours)` grouped by a dimension is this module's entire purpose, so it walks straight
+   into the one defect class this project has documented as still open and ungated** — the
+   handover says of it, in as many words, *"no gate in this project can catch it"*. Copy
+   `grouped_counts`' shape for sums and averages too; a `.sum`/`.average`/`.count` on a
+   grouped relation anywhere in the new module is a defect, and a test asserts the module's
+   source contains none.
+6. **CORRECTNESS IS PROVEN BY AN INDEPENDENT RUBY-SIDE ORACLE, NOT BY A SNAPSHOT.** For each
+   case the expected figure is computed TWICE: once by the module (SQL, `GROUP BY`, `SUM`) and
+   once by loading the rows and adding them up **in Ruby**. Two independent computations
+   agreeing is a stronger claim than a recorded file, it explains itself to a reader, and Ruby
+   arithmetic does not vary by engine — which is exactly what makes it the check that catches
+   clause 5's defect. **No golden-corpus file is required** and none should be added: T-01's
+   corpus exists to prove *ported* behaviour has not MOVED, and its own README says "nothing in
+   this directory tests the plugin's behaviour". Snapshotting new code on day one freezes
+   whatever it happens to answer, bugs included, and makes fixing one look like a gate breach.
+7. **IT RUNS ON ALL THREE ENGINES, AND THAT IS A HARD REQUIREMENT.** The oracle comparison
+   lives in `spec/adapter/`, which the `adapter` CI job already executes against PostgreSQL,
+   MySQL 8 and MariaDB 11. PostgreSQL-only would be finding **S-9**'s shape all over again, and
+   it would specifically miss clause 5 — the engine the defect lives on is the one a local run
+   in this container cannot install.
+8. **Time-entry VISIBILITY is a different rule from issue visibility, and the narrowing is
+   VISIBLE rather than silent** — see §Findings **S-14**, which the curator settled on
+   2026-08-08. `TimeEntry.visible_condition` reads `Role#time_entries_visibility`, so an actor
+   whose role says `own` gets only their own hours and an actor without `view_time_entries`
+   gets `1=0`. Fail closed on both, and **say so on the page** when the actor's role narrowed
+   the data — the pattern is §9b.2's *"Preview of 50 of 1 284 issues"*. A multi-actor test on
+   the time-entry path, mirroring `test/unit/multi_actor_visibility_test.rb`, covers all three
+   role states; it is the test most likely to be skipped and the one that matters most.
+9. **`ReportRun` stops refusing `source: time_entries`.** Its `unsupported_source`
+   diagnostic and the message naming T-31 both go, and `Drops::TimeEntriesDrop` — built in
+   T-18 and still without a producer — gets one.
+10. **A template body reports on ONE source.** Mixing issue data and time data in one template
+    was **dropped by curator decision, not deferred** (S-13 clause 3), so there is no second
+    scope slot on `RenderContext` and no test for a mixed template. §7b.4's promise of it and
+    FR-60 have both been corrected; do not reintroduce it as a convenience.
 
 **T-32 · Ad-hoc report mail, controlled** *(deps: T-23, T-30)*
 *Accept:* issues resolved through **`Issue.visible(User.current)`** — a test asserts an issue the

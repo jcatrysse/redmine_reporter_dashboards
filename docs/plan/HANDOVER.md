@@ -763,10 +763,34 @@ What was decided:
 | **S-12** | The streamed zip is **T-29's alone**. T-30 is released; `send_document`'s 501 is what T-29 deletes |
 | **S-13** | **The kernel stays frozen — no second G7 hunk.** Time entries get an owned sibling module. The separation is at the QUERY (`IssueQuery` vs `TimeEntryQuery`) and the CALCULATOR, and **nowhere above them**: one template model, one controller, one CRUD, one preview, one permission set. `[OQ-H]` still holds |
 | **S-13 (3)** | **Mixing issue data and time data in one template is DROPPED, not deferred.** No second scope slot on `RenderContext`, no mixed-template test. §7b.4 and FR-60 corrected. Do not reintroduce it as a convenience |
+| **S-14** | **A time-entry report silently shows most people only their own hours.** `TimeEntry.visible_condition` branches on `Role#time_entries_visibility` — `all` / `own` / none — and the `own` case produces a smaller, entirely believable total with nothing saying why. Decision: fail closed AND **label the narrowing on the page**, §9b.2's "Preview of 50 of 1 284" pattern. No new permission: core's `:view_time_entries` already governs it |
 
-**The cost of route (b), and pay it in the same PR:** the new module needs its OWN frozen
-corpus on T-01's pattern, with a pinned reference date. A calculator with no oracle is the
-untested half, and this project has a name for that.
+**DO NOT ADD A GOLDEN CORPUS FILE FOR THE NEW MODULE.** This paragraph said to, on the
+first pass, and it was wrong — `spec/golden/README.md` states its own purpose plainly:
+*"Nothing in this directory tests the plugin's behaviour. It tests that the behaviour has
+not moved."* That is a drift detector for PORTED code, and there is no "before" here.
+Snapshotting a new module on day one freezes whatever it answers, bugs included, and makes
+fixing one look like a G7-shaped breach.
+
+**What it needs instead — and this is the clause that carries the whole task:** compute every
+figure TWICE, once through the module's SQL and once by loading the rows and summing them **in
+Ruby**, and run the comparison on all three engines in `spec/adapter/`. Ruby arithmetic does
+not vary by engine, which is exactly why it is the check that catches the next item.
+
+**AND THE NEXT ITEM IS THE ONE THAT WILL BITE.** D-1's MariaDB column-label truncation (§1
+above) was fixed for COUNT only. Measured in the tree: `grouped_counts` reads positionally
+(`relation.pluck(*group_values, Arel.sql("COUNT(…)"))`), but `raw_measure` still calls
+`relation.sum(Arel.sql(expression))` on a GROUPED relation — and ActiveRecord keys that Hash
+by the group expression's own text, which MariaDB truncates at 256 characters. **`SUM(hours)`
+grouped by a dimension is the new module's entire purpose**, so it walks straight into the
+one defect class this project has documented as open and ungated. Copy `grouped_counts`'
+positional shape for sums and averages from the first line of code, not after a red CI cell.
+
+**Comparing against the plugin on `main` does not work for this**, and it was asked: `main`
+has no time-entry-sourced reporting. `_report_by_spent_time.erb` renders a template belonging
+to the PRIVATE `redmine_reporter` plugin (the reason for the four permanent skips) and
+`_timelog.html.erb` is core Redmine. What `main` does have is `spent_hours` as a MEASURE over
+an ISSUE scope — already frozen in T-01's corpus, so that comparison is already made.
 
 ---
 
