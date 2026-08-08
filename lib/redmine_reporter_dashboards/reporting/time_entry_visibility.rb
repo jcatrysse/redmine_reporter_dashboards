@@ -44,12 +44,33 @@ module RedmineReporterDashboards
       # if its `time_entries_visibility` column says `all`.
       def state(user, project)
         return :none if user.nil? || project.nil?
+
+        # THE MODULE GATE COMES BEFORE THE ADMIN FLAG, and the first version had no module
+        # gate at all. `Project.allowed_to_condition` (`redmine/app/models/project.rb:195`)
+        # adds an `enabled_modules` EXISTS clause for EVERYONE, administrators included, so
+        # with time tracking switched off `TimeEntry.visible` returns nothing while this
+        # answered `:all` — an empty hours report with no notice and no explanation. Measured
+        # by an independent review: `module DISABLED (admin): state=all visible=0`.
+        #
+        # `require_reports_module` does not cover it: that checks
+        # `reporter_dashboards_reports`, which is this plugin's module, not core's
+        # `time_tracking`.
+        return :none unless time_tracking_enabled?(project)
         return :all if user.respond_to?(:admin?) && user.admin?
 
         permitted = permitted_roles(user, project)
         return :none if permitted.empty?
         return :all if permitted.any? { |role| visibility_of(role) == 'all' }
-        return :own if permitted.any? { |role| visibility_of(role) == 'own' }
+
+        # `own` NEEDS A LOGGED-IN USER, because core's own branch does: `visible_condition`
+        # reads `role.time_entries_visibility == 'own' && user.id && user.logged?` and falls
+        # through to `1=0` otherwise. Anonymous with an `own` role therefore sees NOTHING,
+        # and announcing "only your own spent time" over an empty report would be a notice
+        # that is simply false. Low reachability — the role form hides the column for
+        # Anonymous — but `Role#safe_attributes` still permits it, so it is reachable.
+        if permitted.any? { |role| visibility_of(role) == 'own' }
+          return logged_in?(user) ? :own : :none
+        end
 
         :none
       end
@@ -59,6 +80,18 @@ module RedmineReporterDashboards
       # be told.
       def narrowed?(user, project)
         state(user, project) != :all
+      end
+
+      # `respond_to?` guarded like everything else core-owned here: a project object that
+      # cannot answer is treated as the narrowest thing it could be.
+      def time_tracking_enabled?(project)
+        return false unless project.respond_to?(:module_enabled?)
+
+        project.module_enabled?(:time_tracking) ? true : false
+      end
+
+      def logged_in?(user)
+        user.respond_to?(:logged?) && user.logged?
       end
 
       def permitted_roles(user, project)

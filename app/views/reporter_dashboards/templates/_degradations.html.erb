@@ -1,0 +1,27 @@
+<%#
+  A DEGRADATION IS NOT A FAILURE AND IS NOT SILENT EITHER (INV-4).
+
+  --- WHY THIS IS A PARTIAL, AND WHY IT IS RENDERED UNCONDITIONALLY ---
+
+  It used to be six lines inside `preview.html.erb`, nested inside the branch that only
+  runs when the PDF SUCCEEDED — so a degradation recorded by a Liquid tag, on a render
+  with no engine or a failed one, reached nobody. `show.html.erb` printed none at all.
+  An independent review measured the consequence for T-31's new refusal: the author got
+  `TOTAL=[0]` with no explanation on either page.
+
+  So it lives in one place, both pages render it, and neither wraps it in a condition
+  about something else. wkhtmltopdf stamps `legacy_engine` on every render by design; an
+  unresolved asset is a real hole in the document; a refused aggregation source is a
+  report that could not be computed. All are printed, because the author is the only
+  person who can decide which of the three they are looking at.
+%>
+<% if outcome && outcome.degradations.any? %>
+  <div class="reporter-degradations">
+    <p><strong><%= l(:label_reporter_preview_degradations) %></strong></p>
+    <ul>
+      <% outcome.degradations.each do |degradation| %>
+        <li><%= degradation.to_s %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>

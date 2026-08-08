@@ -50,6 +50,8 @@
   <p class="warning" id="reporter-time-entry-visibility"><%= rrd_notice %></p>
 <% end %>
   <h3><%= l(:label_reporter_preview_pdf) %></h3>
+  <%= render partial: 'degradations', locals: { outcome: @outcome } %>
+
   <% if @diagnostic %>
     <%= render partial: 'diagnostics', locals: { diagnostic: @diagnostic } %>
   <% else %>
@@ -58,18 +60,6 @@
             engine: "#{@outcome.engine_id} #{@outcome.engine_version}".strip,
             duration: @outcome.duration_ms) %>
     </p>
-    <% if @outcome.degradations.any? %>
-      <%# A DEGRADATION IS NOT A FAILURE AND IS NOT SILENT EITHER (INV-4). wkhtmltopdf
-          stamps `legacy_engine` on every render by design; an unresolved asset is a real
-          hole in the document. Both are printed, because the author is the only person
-          who can decide which of the two they are looking at. %>
-      <p><strong><%= l(:label_reporter_preview_degradations) %></strong></p>
-      <ul>
-        <% @outcome.degradations.each do |degradation| %>
-          <li><%= degradation.to_s %></li>
-        <% end %>
-      </ul>
-    <% end %>
   <% end %>
 </div>
 

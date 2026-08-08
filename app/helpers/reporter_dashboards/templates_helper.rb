@@ -41,6 +41,30 @@ module ReporterDashboards
       end
     end
 
+    # T-31 — THE COPY FOLLOWS THE SOURCE. An independent review measured an hours report
+    # telling its reader *"This template produces one document per issue"* and, on the empty
+    # state a `:none` actor lands on, *"This report covers no issues … Widen the issue
+    # selection"*. Both are wrong on a time-entry template, and the empty state is exactly
+    # where a confused reader ends up.
+    #
+    # AN EXPLICIT MAP RATHER THAN A DERIVED NAME. The first version suffixed the base key
+    # with the source and produced `…_no_issues_time_entries`, which is both ugly and a key
+    # that did not exist — a derived name fails by reaching for a translation nobody wrote,
+    # where a map falls back to the base string, which is at worst imprecise rather than
+    # missing. A source with no entry keeps the issue wording deliberately.
+    SOURCE_COPY = {
+      text_reporter_template_per_record_html: {
+        'time_entries' => :text_reporter_template_per_record_html_time_entries
+      },
+      text_reporter_template_no_issues: {
+        'time_entries' => :text_reporter_template_no_time_entries
+      }
+    }.freeze
+
+    def reporter_source_key(base, source)
+      SOURCE_COPY.dig(base, source.to_s) || base
+    end
+
     # T-31. One picker for both sources, from the model's own closed list.
     def reporter_template_source_options
       RedmineReporterDashboards::Template::SOURCES.map do |source|

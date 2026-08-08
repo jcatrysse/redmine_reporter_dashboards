@@ -157,6 +157,24 @@ module RedmineReporterDashboards
         @template_renderer = template_renderer
       end
 
+      # ONE DIAGNOSTICS COLLECTOR FOR THE WHOLE RUN, and it was one per job — which meant
+      # nothing a tag recorded ever reached a reader.
+      #
+      # An independent review measured it: `{% sql_aggregate %}` refusing a time-entry scope
+      # wrote `aggregation_source_unsupported` into the `Diagnostics` object its own
+      # `RenderContext` had built, `Outcome#degradations` was filled only from
+      # `batch.successes.flat_map(&:degradations)` — render-ENGINE degradations — and the
+      # per-job object was thrown away. The author got `0` with no explanation anywhere,
+      # while the code comment claimed the panel showed it. INV-4 not held.
+      #
+      # Sharing one collector across every job also fixes the same silence for
+      # `unbounded_collection`, which the drop layer has recorded into the void since T-18,
+      # and it is what makes a per-record run's degradations aggregate rather than the last
+      # document's winning.
+      def diagnostics
+        @diagnostics ||= ::RedmineReporterDashboards::Liquid::Diagnostics.new
+      end
+
       # The preview: bounded, both bindings, and honest about the second one.
       def self.preview(template:, actor:, scope:, guard:, query: nil, engine: nil,
                        logger: nil, template_renderer: nil)
@@ -302,6 +320,8 @@ module RedmineReporterDashboards
           query: query,
           correlation_id: job.correlation_id,
           output: output,
+          # THE SHARED COLLECTOR, so what a tag records survives the job it happened in.
+          diagnostics: diagnostics,
           # SAID, NOT SNIFFED — §Findings S-13. This is what stops `{% sql_aggregate %}`
           # handing a time-entry relation to the issue kernel and getting plausible,
           # wrong numbers back.
@@ -380,7 +400,8 @@ module RedmineReporterDashboards
         Outcome.new(sections: sections, documents: batch.successes, diagnostic: nil,
                     total_count: total, shown_count: shown_issue_count(total),
                     truncated: truncated?(total), duration_ms: elapsed(started),
-                    degradations: batch.successes.flat_map(&:degradations),
+                    degradations: diagnostics.degradations +
+                                  batch.successes.flat_map(&:degradations),
                     engine_id: batch.successes.first&.engine,
                     engine_version: batch.successes.first&.engine_version,
                     pdf_attempted: true)
@@ -475,21 +496,22 @@ module RedmineReporterDashboards
                     diagnostic: Diagnostic.from_batch_refusal(refusal,
                                                               template_name: template.name),
                     total_count: total, shown_count: 0, truncated: false,
-                    duration_ms: elapsed(started), degradations: [], pdf_attempted: false)
+                    duration_ms: elapsed(started), degradations: diagnostics.degradations,
+                    pdf_attempted: false)
       end
 
       def failed(diagnostic, total, started, sections: [], pdf_attempted: false)
         Outcome.new(sections: sections, documents: [], diagnostic: diagnostic,
                     total_count: total, shown_count: shown_issue_count(total),
                     truncated: truncated?(total), duration_ms: elapsed(started),
-                    degradations: [], pdf_attempted: pdf_attempted)
+                    degradations: diagnostics.degradations, pdf_attempted: pdf_attempted)
       end
 
       def html_only(sections, total, started)
         Outcome.new(sections: sections, documents: [], diagnostic: nil,
                     total_count: total, shown_count: shown_issue_count(total),
                     truncated: truncated?(total), duration_ms: elapsed(started),
-                    degradations: [], pdf_attempted: false)
+                    degradations: diagnostics.degradations, pdf_attempted: false)
       end
 
       # §9b.2's "never silently truncated". True whenever the reader is seeing fewer

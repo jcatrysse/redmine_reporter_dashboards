@@ -1327,8 +1327,12 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   end
 
   def test_a_time_entry_template_renders_through_the_same_show_action
+    # `{{ time_entries.size }}` and NOT `total_hours`: the first version of this example used
+    # the latter, which `TimeEntriesDrop` does not define — `CollectionDrop`'s
+    # `liquid_method_missing` swallowed it and the example passed on a blank while advertising
+    # surface nobody built. Totalling hours needs T-31's second increment.
     template = create_template(source: 'time_entries',
-                               content: 'HOURS=[{{ time_entries.total_hours }}]')
+                               content: 'COUNT=[{{ time_entries.size }}]')
     grant_time(:view_reporter_dashboards_reports)
 
     get :show, params: { project_id: @project.identifier, id: template.id }
@@ -1410,22 +1414,120 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   end
 
   # §Findings S-13 — the guard, at the entry point rather than only in the unit spec.
-  # `{% sql_aggregate %}` inside a time-entry template must report NOTHING rather than
-  # issue counts under time-entry labels.
+  #
+  # ASSERTED POSITIVELY, AND IN THE SHAPE THAT PRODUCED THE DEFECT. The first version only
+  # asserted the issue count was ABSENT, over a scope with no issues join — so with the guard
+  # neutered it still passed, and an independent review measured exactly that: `PROBE3 GUARD
+  # OFF: issue_count=7 body=TOTAL=[2]`, at HTTP 200, with the shipped assertion vacuous. S-13
+  # was measured against a `TimeEntryQuery#base_scope`, which carries `left_join_issue`, and
+  # that is the ONLY shape that answers plausibly rather than erroring.
   def test_sql_aggregate_in_a_time_entry_template_reports_nothing_rather_than_issue_counts
     template = create_template(
       source: 'time_entries',
       content: '{% sql_aggregate assign_to: stats %}TOTAL=[{{ stats.total }}]'
     )
     grant_time(:view_reporter_dashboards_reports)
-    issue_count = Issue.visible(@jsmith).where(project_id: @project.id).count
-    assert issue_count.positive?
 
     get :show, params: { project_id: @project.identifier, id: template.id }
 
     assert_response :success
-    assert_not_include ERB::Util.html_escape("TOTAL=[#{issue_count}]"), response.body,
-                       'S-13: the issue count reached a time-entry report'
+    assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body,
+                   'the refusal must assign the EMPTY result, not merely a different number'
+  end
+
+  # THE DANGEROUS SHAPE: a saved TimeEntryQuery, whose `base_scope` joins issues, with a
+  # `group_by` over an issue column. With the guard off this renders plausible issue-derived
+  # buckets at 200; with it on there are none.
+  def test_a_time_entry_query_with_an_issue_dimension_still_reports_nothing
+    query = TimeEntryQuery.create!(name: 'hours here', project: @project,
+                                   user: @jsmith, visibility: 2)
+    template = create_template(
+      source: 'time_entries',
+      content: '{% sql_aggregate group_by: tracker, assign_to: stats %}' \
+               'TOTAL=[{{ stats.total }}] N=[{{ stats.buckets.size }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id,
+                         query_id: query.id }
+
+    assert_response :success
+    assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body
+    assert_include ERB::Util.html_escape('N=[0]'), response.body
+  end
+
+  # AND THE REFUSAL IS VISIBLE TO THE AUTHOR — INV-4, which the first version claimed and did
+  # not deliver. An independent review measured it: the degradation went into a per-job
+  # `Diagnostics` object that `ReportRun` threw away, `Outcome#degradations` was filled only
+  # from render-ENGINE degradations, and the preview's degradation block sat inside the branch
+  # that only runs when the PDF succeeded. The author saw `TOTAL=[0]` and nothing else.
+  def test_the_refused_aggregation_source_is_reported_on_the_page
+    template = create_template(
+      source: 'time_entries',
+      content: '{% sql_aggregate assign_to: stats %}TOTAL=[{{ stats.total }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_select 'div.reporter-degradations'
+    assert_include 'aggregation_source_unsupported', response.body
+  end
+
+  def test_the_refused_aggregation_source_is_reported_in_the_preview_too
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates,
+          :view_time_entries)
+
+    post :preview, params: {
+      project_id: @project.identifier,
+      template: { name: 'Draft', source: 'time_entries', output: 'combined',
+                  content: '{% sql_aggregate assign_to: stats %}TOTAL=[{{ stats.total }}]' }
+    }
+
+    assert_response :success
+    assert_include 'aggregation_source_unsupported', response.body
+  end
+
+  # AND A CLEAN ISSUE RENDER SAYS NOTHING, so the block is not simply always drawn.
+  def test_a_clean_render_reports_no_degradations
+    template = create_template(content: 'x')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_select 'div.reporter-degradations', count: 0
+  end
+
+  # THE SECOND KERNEL ENTRY POINT. `{% version_rollup %}` reads `issues.fixed_version_id` and
+  # `issues.status_id`; over a time-entry relation the first binds by accident and the second
+  # raises into the tag's rescue, so the author got an empty table and no explanation. It now
+  # refuses through the same shared guard.
+  def test_version_rollup_in_a_time_entry_template_reports_nothing_rather_than_raising
+    template = create_template(
+      source: 'time_entries',
+      content: '{% version_rollup assign_to: rows %}N=[{{ rows.size }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include ERB::Util.html_escape('N=[0]'), response.body
+  end
+
+  # ...AND IT STILL ROLLS UP ON AN ISSUE TEMPLATE.
+  def test_version_rollup_still_works_in_an_issue_template
+    template = create_template(content: '{% version_rollup assign_to: rows %}OK=[{{ rows.size }}]')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    # A POSITIVE COUNT. `OK=[` alone is present for an empty rollup too — the mutation that
+    # made the guard refuse everything left this example green until it asserted a number.
+    assert_match(/OK=\[[1-9]/, response.body,
+                 'the rollup produced no rows, so this says nothing about it working')
   end
 
   # ...AND THE SAME TAG STILL WORKS ON AN ISSUE TEMPLATE. Without this the guard could be
@@ -1488,6 +1590,97 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     get :show, params: { project_id: @project.identifier, id: template.id }
 
     assert_select '#reporter-time-entry-visibility', count: 0
+  end
+
+  # A SAVED QUERY DOES NOT WIDEN THE REPORT PAST THE PROJECT SUBTREE YOU OPENED. Measured by
+  # an independent review before this bound existed: a GLOBAL TimeEntryQuery viewed at
+  # /projects/ecookbook returned rows from projects 1 AND 3.
+  #
+  # THE HOURS HAVE TO BE OUTSIDE THE SUBTREE, and the first version of this example put them
+  # in project 3 — which MEASURED as a DESCENDANT of project 1 (`p1.descendants.ids` is
+  # `[5, 6, 3, 4]`), so the bound was a no-op and the example passed with it deleted. Project
+  # 2 is a sibling, so it is the only place an out-of-bounds row can go.
+  def test_a_global_query_does_not_pull_hours_from_outside_this_project_subtree
+    outsider = Project.find(2)
+    outsider.enable_module!(:time_tracking)
+    # `find_or_create` — jsmith is ALREADY a member of project 2 in the fixture, and
+    # `Member.create!` raised "User has already been taken" on it.
+    unless Member.exists?(project_id: outsider.id, user_id: @jsmith.id)
+      Member.create!(project: outsider, principal: @jsmith, role_ids: [@role.id])
+    end
+    TimeEntry.create!(project: outsider, user: @jsmith, author: @jsmith,
+                      hours: 9.5, spent_on: Date.new(2026, 3, 11),
+                      activity: TimeEntryActivity.where(active: true).first)
+
+    query = TimeEntryQuery.create!(name: 'everywhere', project: nil,
+                                   user: @jsmith, visibility: 2)
+    template = create_template(source: 'time_entries',
+                               content: 'COUNT=[{{ time_entries.size }}]')
+    grant_time(:view_reporter_dashboards_reports)
+
+    subtree = [@project.id] + @project.descendants.ids
+    inside = TimeEntry.visible(@jsmith).where(project_id: subtree).count
+    everywhere = TimeEntry.visible(@jsmith).count
+    assert everywhere > inside,
+           "no hours outside the subtree (#{everywhere} vs #{inside}), so this proves nothing"
+
+    get :show, params: { project_id: @project.identifier, id: template.id,
+                         query_id: query.id }
+
+    assert_include ERB::Util.html_escape("COUNT=[#{inside}]"), response.body
+    assert_not_include ERB::Util.html_escape("COUNT=[#{everywhere}]"), response.body
+  end
+
+  # `source` IS IN `PREVIEW_BLOCKING_ATTRIBUTES`, and half the argument for deleting
+  # `report_scope`'s defensive `else` rests on it. Mutation showed nothing named the
+  # constant: dropping `source` from the list left the whole suite green.
+  def test_preview_refuses_an_unknown_source_before_rendering
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates)
+
+    post :preview, params: { project_id: @project.identifier,
+                             template: { name: 'Draft', content: 'x',
+                                         source: 'invoices', output: 'combined' } }
+
+    assert_response :unprocessable_entity
+  end
+
+  # THE COPY FOLLOWS THE SOURCE. Measured by an independent review: an hours report told its
+  # reader "This template produces one document per issue", and the empty state — which is
+  # exactly where an actor with no `:view_time_entries` lands — said "This report covers no
+  # issues … Widen the issue selection".
+  def test_an_empty_time_entry_report_does_not_talk_about_issues
+    # `per_record`, because the "no rows" sentence is on the branch that draws one document
+    # per record — a combined template always produces one section and never reaches it.
+    template = create_template(source: 'time_entries', output: 'per_record', content: 'x')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include l(:text_reporter_template_no_time_entries), response.body
+    assert_not_include l(:text_reporter_template_no_issues), response.body
+  end
+
+  def test_an_empty_issue_report_still_talks_about_issues
+    template = create_template(output: 'per_record')
+    grant(:view_reporter_dashboards_reports)
+    Issue.where(project_id: @project.id).destroy_all
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_include l(:text_reporter_template_no_issues), response.body
+  end
+
+  def test_a_per_record_time_entry_page_does_not_talk_about_issues
+    template = create_template(source: 'time_entries', output: 'per_record', content: 'x')
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include l(:text_reporter_template_per_record_html_time_entries,
+                     count: TimeEntry.visible(@jsmith).where(project_id: @project.id).count),
+                   response.body
   end
 
   # ------------------------------------------------------------------ T-31 / authoring

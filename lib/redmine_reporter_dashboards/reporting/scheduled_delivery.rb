@@ -195,7 +195,7 @@ module RedmineReporterDashboards
 
       def render(schedule, actor)
         as(actor) do
-          scope, query = issue_scope(schedule, actor)
+          scope, query = report_scope(schedule, actor)
 
           ReportRun.new(template: schedule.template,
                         actor: actor,
@@ -209,37 +209,38 @@ module RedmineReporterDashboards
         failed_outcome(e.message)
       end
 
-      # A saved query the render identity may not (or may no longer) use.
+      # A saved query the render identity may not (or may no longer) use. Kept as this
+      # class's own name so the rescue in `#render` reads locally; it is raised by
+      # `ReportScope` and re-raised under this name.
       class ScopeUnavailable < StandardError; end
 
-      # A SCHEDULE THAT CANNOT RESOLVE ITS QUERY FAILS, and this is a DELIBERATE difference
-      # from the interactive path.
+      # WHICH ROWS THIS SCHEDULE IS ABOUT — and it goes through `Reporting::ReportScope`,
+      # the same module the interactive path uses.
       #
-      # `TemplatesController#issue_scope` ignores an unresolvable query id and falls back to
-      # the project scope, with a stated reason: answering differently for "deleted" and
-      # "you may not see it" would turn the picker into a probe for other people's private
-      # queries. Nobody is probing here — there is no requester — and the fallback would be
-      # much worse: a schedule configured to report on "Blocked, high priority" would
-      # quietly start mailing every issue in the project instead. Same numbers, wrong report,
-      # no warning.
-      def issue_scope(schedule, actor)
-        return [project_scope(schedule, actor), nil] if schedule.query_id.blank?
-
-        query = ::IssueQuery.visible(actor).find_by(id: schedule.query_id)
-        if query.nil?
-          raise ScopeUnavailable,
-                "this schedule reports through saved query #{schedule.query_id}, which " \
-                "#{actor.login} cannot see — it was deleted, made private, or the " \
-                'permissions changed. Nothing was sent, because the alternative is ' \
-                'mailing a different report under the same name'
-        end
-
-        [query.base_scope, query]
-      end
-
-      def project_scope(schedule, actor)
-        scope = ::Issue.visible(actor)
-        schedule.project_id ? scope.where(project_id: schedule.project_id) : scope
+      # THIS METHOD WAS THE BLOCKER. It was `issue_scope`, it built `Issue.visible(actor)`
+      # unconditionally, and `TemplatesController` had meanwhile learned to branch on
+      # `template.source`. An independent review measured the consequence: a
+      # `source: time_entries` schedule rendered over the issue scope and mailed
+      # `COUNT=[7]`, the issue count, where the actor's visible entry count was 3 — with
+      # `ok=true`, no diagnostic and no notice. §Findings S-13 on the one path with an
+      # audience. Two callers deciding one thing separately is the shape that produced it.
+      #
+      # A SCHEDULE THAT CANNOT RESOLVE ITS QUERY FAILS, and that is a DELIBERATE difference
+      # from the interactive path rather than an inconsistency. `ReportScope` takes it as an
+      # argument for that reason. The interactive path ignores an unresolvable query id with
+      # a stated reason — answering differently for "deleted" and "you may not see it" would
+      # turn the picker into a probe for other people's private queries. Nobody is probing
+      # here, there is no requester, and the fallback would be much worse: a schedule
+      # configured to report on "blocked, high priority" would quietly start mailing every
+      # row in the project instead. Same numbers, wrong report, no warning.
+      def report_scope(schedule, actor)
+        ReportScope.build(template: schedule.template,
+                          actor: actor,
+                          project: schedule.project,
+                          query_id: schedule.query_id,
+                          on_missing_query: :raise)
+      rescue ReportScope::UnresolvableQuery => e
+        raise ScopeUnavailable, e.message
       end
 
       # --- delivery -----------------------------------------------------------------------

@@ -291,7 +291,11 @@ module ReporterDashboards
 
     # Strong params. `visibility` and `role_ids` are NOT in the list — they are applied by
     # `apply_visibility` after a permission check, the way core's
-    # `update_query_from_params` does it. Neither is `source`: see below.
+    # `update_query_from_params` does it. `source` IS in the list from T-31 on — it names a
+    # TABLE rather than an identity, and both tables are read through their own `visible`
+    # scope, so the `render_as_user_id` reasoning in HANDOVER §1 does not transfer. An
+    # independent review confirmed it: a non-owner PATCHing `source` onto somebody else's
+    # public template gets 403 and the column does not move.
     def template_params
       # `failure_document` IS SAFE TO PERMIT, and it is worth saying why rather than
       # assuming it. HANDOVER §1's rule is that a field NAMING A USER is a privilege field
@@ -315,12 +319,6 @@ module ReporterDashboards
     # rejected. Rejecting would be worse for the common case — a member without the
     # permission simply cannot publish — and forcing is the behaviour an administrator
     # already knows from saved queries.
-    #
-    # `source` is deliberately absent from the form and from the permitted params:
-    # `time_entries` has no scope builder until T-31, and a picker offering a value that
-    # cannot render is a promise the plugin does not keep. The COLUMN still accepts it, so
-    # an imported template keeps its value and the run refuses it with a message naming
-    # the task rather than quietly reporting on the wrong table.
     def apply_visibility(template)
       unless template.visibility_editable_by?(User.current)
         template.visibility = Template::VISIBILITY_PRIVATE
@@ -375,71 +373,26 @@ module ReporterDashboards
       :internal_server_error
     end
 
-    # T-31: WHICH TABLE, DECIDED BY THE TEMPLATE'S OWN `source` COLUMN.
+    # T-31: WHICH TABLE, DECIDED BY THE TEMPLATE'S OWN `source` COLUMN — and decided in
+    # `Reporting::ReportScope`, not here.
     #
-    # One controller serves both sources — that is `[OQ-H]`'s closure and §7b.4's whole
-    # argument — and the separation is here, at the query, because an issue report and a
-    # time report genuinely resolve through two different Redmine core classes with two
-    # different `base_scope` methods. Everything above this line is shared.
+    # It used to be decided here, and `ScheduledDelivery` decided it separately and got it
+    # wrong: a `source: time_entries` schedule rendered `Issue.visible` and mailed the issue
+    # count as a success. Two callers answering the same question is what produced that, so
+    # there is one answer now and this method is the thin half of it — the side effect on
+    # `@query`, which the view needs for its picker.
     #
-    # NO `else` BRANCH, AND ITS ABSENCE IS THE POINT. The first version had one — it set
-    # `@query = nil` and answered `nil`, so an unknown `source` could not fall through to
-    # the issue scope. Mutation testing then showed it was a SECOND MECHANISM for a property
-    # something else already holds: replacing it with `issue_scope` left the whole suite
-    # green, because both callers refuse an unknown source before the scope is ever read —
-    # `ReportRun#call` with a typed diagnostic (`known_source?`), and `#preview` with a 422,
-    # since `source` is in `PREVIEW_BLOCKING_ATTRIBUTES`. Deleted rather than kept as an
-    # untestable guard, which is what T-25 did with the one mutation that survived there.
-    #
-    # A `case` with no matching `when` answers nil, so the behaviour is unchanged; `@query`
-    # is cleared first so that answer carries no stale drill-through either.
+    # THE SCOPE THE PICKER OFFERS IS STILL THE SCOPE THE TEMPLATE RESOLVES THROUGH (T-23's
+    # `Accept:`): the picker lists queries this actor may already open, and `ReportScope`
+    # starts from the model's own `visible` scope either way, so the relation handed to the
+    # render is visibility-scoped before it leaves that module — which is what INV-1/INV-3
+    # ask of the application layer.
     def report_scope
-      @query = nil
-
-      case @template.source.to_s
-      when 'issues' then issue_scope
-      when 'time_entries' then time_entry_scope
-      end
-    end
-
-    # `TimeEntry.visible(User.current)` is the whole visibility decision, in SQL, where it
-    # belongs — and it is a DIFFERENT rule from `Issue.visible`: it branches on
-    # `Role#time_entries_visibility`, so an actor whose role says `own` gets their own hours
-    # only. That narrowing is real and correct; what would be wrong is not saying so, which
-    # is §Findings **S-14** and why `@time_entry_visibility` is assigned for the views.
-    def time_entry_scope
-      @query = nil
-      if params[:query_id].present?
-        @query = TimeEntryQuery.visible(User.current).find_by(id: params[:query_id])
-        # Same reasoning as the issue path: an id that does not resolve is IGNORED rather
-        # than answered differently, because "deleted" and "not yours" must look alike.
-        return @query.base_scope if @query
-      end
-
-      TimeEntry.visible(User.current).where(project_id: @project.id)
-    end
-
-    # THE SCOPE THE PICKER OFFERS IS THE SCOPE THE TEMPLATE RESOLVES THROUGH — T-23's
-    # `Accept:` in one sentence.
-    #
-    # The picker lists `IssueQuery.visible(User.current)`, so a query chosen there is one
-    # this actor may already use, and its `base_scope` starts from `Issue.visible`. With no
-    # query chosen it is the project's visible issues. Either way the relation handed to
-    # the render is visibility-scoped BEFORE it leaves this method, which is what
-    # INV-1/INV-3 ask of the application layer: the render path never makes a visibility
-    # decision because it never gets the chance.
-    def issue_scope
-      @query = nil
-      if params[:query_id].present?
-        @query = IssueQuery.visible(User.current).find_by(id: params[:query_id])
-        # A query id that does not resolve is IGNORED and the project scope used instead.
-        # It resolves to nothing for two different reasons — the query was deleted, or this
-        # actor may not see it — and answering differently would turn the picker into a
-        # probe for other people's private queries.
-        return @query.base_scope if @query
-      end
-
-      Issue.visible(User.current).where(project_id: @project.id)
+      scope, @query = Reporting::ReportScope.build(template: @template,
+                                                   actor: User.current,
+                                                   project: @project,
+                                                   query_id: params[:query_id])
+      scope
     end
 
     # The attributes `Reporting::ReportRun` reads on its way to a `DocumentRequest`. An
@@ -475,7 +428,8 @@ module ReporterDashboards
           # reader to quote the correlation id, and `-` identifies nothing while an empty
           # one drew the label with nothing beside it. `ReportRun` already mints one for
           # its own refusal (`cap_refusal_for_count`) for exactly this reason.
-          message: l(:text_reporter_template_no_issues),
+          message: l(helpers.reporter_source_key(:text_reporter_template_no_issues,
+                                                @template.source)),
           correlation_id: SecureRandom.uuid
         )
         return respond_to_failure(:unprocessable_entity)

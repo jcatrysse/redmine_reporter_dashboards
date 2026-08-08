@@ -17,7 +17,8 @@ require File.expand_path('../test_helper', __dir__)
 # owner is told when nothing can be produced.
 class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
   fixtures :projects, :users, :members, :member_roles, :roles, :issues, :issue_statuses,
-           :trackers, :enabled_modules, :projects_trackers, :enumerations, :queries
+           :trackers, :enabled_modules, :projects_trackers, :enumerations, :queries,
+           :time_entries
 
   Template = RedmineReporterDashboards::Template
   Schedule = RedmineReporterDashboards::Schedule
@@ -99,6 +100,28 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
     end
   end
 
+  # THE SAME ENGINE, BUT IT KEEPS WHAT IT WAS HANDED. `FakeEngine` answers canned bytes, so
+  # the attachment cannot show what the template actually rendered — the first version of the
+  # T-31 examples below asserted against the attachment and read half a kilobyte of `xxxx`.
+  # The claim those examples make is about the HTML that reached the engine, so that is what
+  # is recorded.
+  class BodyRecordingEngine < FakeEngine
+    class << self
+      def bodies
+        @bodies ||= []
+      end
+
+      def reset!
+        @bodies = []
+      end
+    end
+
+    def render(request)
+      self.class.bodies << request.body
+      super
+    end
+  end
+
   def setup
     @project = Project.find(1)
     @author = User.find(2)
@@ -145,6 +168,62 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
     registry.stubs(:registered?).returns(true)
     registry.stubs(:fetch).returns(engine)
     yield
+  end
+
+  # --- T-31 / §Findings S-13: the source the SCHEDULER renders ---------------------------
+  #
+  # THIS WAS A BLOCKER, and it is worth stating what it looked like rather than only that it
+  # is fixed. `ScheduledDelivery` built `Issue.visible(actor)` for every schedule while
+  # `TemplatesController` had learned to branch on `template.source`. An independent review
+  # measured a `source: time_entries` schedule mailing `COUNT=[7]` — the issue count — where
+  # the actor's visible entry count was 3, with `ok=true` and nobody told. Two callers
+  # deciding one thing separately is what produced it; `Reporting::ReportScope` is the one
+  # decision now, and these are the examples that would notice it splitting again.
+
+  def test_a_scheduled_time_entry_report_counts_time_entries_and_not_issues
+    add_recipient(@recipient)
+    Role.find(1).update_columns(time_entries_visibility: 'all')
+    @template.update_columns(source: 'time_entries',
+                             content: 'COUNT=[{{ time_entries.size }}]')
+
+    issues = Issue.visible(@author).where(project_id: @project.id).count
+    entries = TimeEntry.visible(@author).where(project_id: @project.id).count
+    assert issues != entries,
+           "the fixture cannot tell the two apart (#{issues} vs #{entries}), so this proves nothing"
+
+    BodyRecordingEngine.reset!
+    result = deliver(engine: BodyRecordingEngine)
+
+    assert result.ok?, "the render failed: #{result.error}"
+    body = BodyRecordingEngine.bodies.join
+    assert_include "COUNT=[#{entries}]", body
+    assert_not_include "COUNT=[#{issues}]", body
+  end
+
+  # AND THE ISSUE PATH IS UNCHANGED. Without this the fix could be routing everything to
+  # time entries and the example above would still pass.
+  def test_a_scheduled_issue_report_still_counts_issues
+    add_recipient(@recipient)
+    @template.update_columns(content: 'COUNT=[{{ issues.size }}]')
+
+    issues = Issue.visible(@author).where(project_id: @project.id).count
+    BodyRecordingEngine.reset!
+    result = deliver(engine: BodyRecordingEngine)
+
+    assert result.ok?
+    assert_include "COUNT=[#{issues}]", BodyRecordingEngine.bodies.join
+  end
+
+  # A SCHEDULE OVER A SOURCE THIS VERSION DOES NOT KNOW FAILS rather than mailing a report
+  # about whichever table the code happened to reach for.
+  def test_a_scheduled_unknown_source_fails_rather_than_mailing_anything
+    add_recipient(@recipient)
+    @template.update_columns(source: 'invoices')
+
+    result = deliver
+
+    assert_not result.ok?
+    assert_empty @mailer.reports, 'a report went out for a source nothing can render'
   end
 
   # --- FR-42: one render, N recipients --------------------------------------------------

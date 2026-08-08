@@ -59,6 +59,54 @@ module RedmineReporterDashboards
       end
 
       class << self
+        # --- THE ISSUE-KERNEL GUARD, SHARED BY BOTH TAGS THAT USE ONE ---
+        #
+        # `SqlAggregation::QueryAggregator` counts `DISTINCT issues.id` and reads issue
+        # columns throughout. Handed a TIME-ENTRY relation it does not raise —
+        # `TimeEntryQuery#base_scope` calls `.left_join_issue`, so the issue columns resolve
+        # and it answers issue counts under time-entry labels (§Findings **S-13**: four
+        # entries over two issues came back as `2` in every bucket).
+        #
+        # IT LIVES HERE BECAUSE THE FIRST VERSION LIVED IN ONE TAG AND THERE ARE TWO. An
+        # independent review measured `{% version_rollup %}` still handing a time-entry
+        # relation straight to the kernel, where the only thing saving it was an accident of
+        # which expressions ActiveRecord qualifies: `group(:fixed_version_id).count`
+        # SUCCEEDS (binding to `issues.fixed_version_id`), and the raise came one line later
+        # from a `where.not(status_id:)` that AR does qualify — landing in the tag's rescue
+        # as a log line and an empty list, with no degradation and nothing said to the
+        # author. `ScopeBinding` is what both tags already include, so it is where the one
+        # copy goes.
+        #
+        # `RenderContext.from` and NOT `TagContext.for`: the latter never answers nil and
+        # building its fallback reads `User.current`, and an ambient actor read on a path
+        # that needs no actor is what INV-1 is about. Nil is the answer this wants — no
+        # owned render context IS the legacy path, and the legacy path resolves issue scopes
+        # and nothing else.
+        #
+        # Asking the RELATION instead was considered and is worse than useless: every
+        # legacy-path scope is an issue scope and correctly carries no annotation, and the
+        # tag specs' scope doubles answer no `model`, `klass` or `table_name` at all — so a
+        # sniffing check would raise on the doubles and fail OPEN on exactly the object it
+        # could not identify. The producer knows, because `template.source` is a column.
+        def report_source(liquid_context)
+          RenderContext.from(liquid_context)&.source || :issues
+        end
+
+        # True when this scope may go to the issue kernel. False records the degradation on
+        # the way out, so a caller cannot refuse silently by forgetting to (INV-4).
+        def issue_kernel_permitted?(liquid_context, tag_name)
+          source = report_source(liquid_context)
+          return true if source == :issues
+
+          log("#{tag_name}: refusing a #{source} scope — this aggregation kernel counts " \
+              'issues, and answering would report issue counts under other labels ' \
+              '(finding S-13)')
+          RenderContext.from(liquid_context)
+            &.diagnostics
+            &.degrade(:aggregation_source_unsupported, source: source.to_s, tag: tag_name)
+          false
+        end
+
         def bind(raw_params, liquid_context)
           raw_params ||= {}
           render_context = RenderContext.from(liquid_context)

@@ -56,6 +56,8 @@
   <p class="warning" id="reporter-time-entry-visibility"><%= rrd_notice %></p>
 <% end %>
 
+<%= render partial: 'degradations', locals: { outcome: @outcome } %>
+
 <% if @diagnostic %>
   <%= render partial: 'diagnostics', locals: { diagnostic: @diagnostic } %>
 <% else %>
@@ -65,14 +67,16 @@
       wrong if it ever fired. %>
   <% if @outcome.sections.length > 1 %>
     <p class="warning">
-      <%= l(:text_reporter_template_per_record_html, count: @outcome.sections.length) %>
+      <%= l(reporter_source_key(:text_reporter_template_per_record_html, @template.source),
+             count: @outcome.sections.length) %>
     </p>
   <% end %>
 
   <% if @outcome.sections.empty? %>
     <%# A per-record template over a scope that matched nothing. An empty page with no
         sentence on it reads as a broken report; this says which of the two it is. %>
-    <p class="nodata"><%= l(:text_reporter_template_no_issues) %></p>
+    <p class="nodata"><%= l(reporter_source_key(:text_reporter_template_no_issues,
+                                                  @template.source)) %></p>
   <% end %>
 
   <% @outcome.sections.each do |section| %>

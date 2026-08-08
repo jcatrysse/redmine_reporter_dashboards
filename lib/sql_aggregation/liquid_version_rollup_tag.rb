@@ -73,6 +73,17 @@ module SqlAggregation
         return ''
       end
 
+      # THE SAME GUARD THE OTHER KERNEL ENTRY POINT HAS, and this one went without it for a
+      # commit. `QueryAggregator.version_rollup` reads `issues.fixed_version_id` and
+      # `issues.status_id`; over a time-entry relation the first binds by accident and the
+      # second raises, which landed here as a log line and an empty version list with
+      # nothing said to the author. See `ScopeBinding.issue_kernel_permitted?`.
+      unless RedmineReporterDashboards::Liquid::ScopeBinding
+             .issue_kernel_permitted?(context, 'version_rollup')
+        context.scopes.last[assign_to] = []
+        return ''
+      end
+
       statuses = str_param(@raw_params['closed_statuses'], context).split(/[;,]/).map(&:strip).reject(&:empty?)
       cost_ids = str_param(@raw_params['cost_fields'], context).split(/[;,]/).map(&:to_i).reject(&:zero?)
 

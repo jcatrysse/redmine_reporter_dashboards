@@ -153,6 +153,48 @@ class ReporterDashboardsTimeEntryVisibilityTest < ActiveSupport::TestCase
                  'said :none, but the scope returned rows'
   end
 
+  # THE TIME-TRACKING MODULE, WHICH THE FIRST VERSION DID NOT CONSULT AT ALL.
+  # `Project.allowed_to_condition` adds an `enabled_modules` EXISTS clause for EVERYONE,
+  # administrators included, so with the module off `TimeEntry.visible` returns nothing while
+  # this answered `:all` — an empty hours report with no notice and no explanation. Measured
+  # by an independent review: `module DISABLED (admin): state=all visible=0`.
+  def test_the_module_being_off_is_none_even_with_full_role_visibility
+    role_grants([:view_time_entries], 'all')
+    @project.disable_module!(:time_tracking)
+    # RE-FOUND, because `enabled_modules` is a cached association and `module_enabled?`
+    # reads it — the first version asserted against the object that still remembered the
+    # module being on, and read `:all`. Same family as the memoised-roles note above.
+    @project = Project.find(@project.id)
+
+    assert_equal :none, Subject.state(@jsmith, @project)
+    assert_equal 0, TimeEntry.visible(@jsmith).where(project_id: @project.id).count,
+                 'said :none, but the scope returned rows'
+  end
+
+  # ...AND FOR AN ADMINISTRATOR TOO, which is the case the admin short-circuit would
+  # otherwise skip straight past.
+  def test_the_module_being_off_is_none_for_an_administrator_as_well
+    @project.disable_module!(:time_tracking)
+    @project = Project.find(@project.id)
+
+    assert_equal :none, Subject.state(User.find(1), @project)
+    assert_equal 0, TimeEntry.visible(User.find(1)).where(project_id: @project.id).count
+  end
+
+  # AN `own` ROLE HELD BY SOMEBODY NOT LOGGED IN SEES NOTHING, because core's branch reads
+  # `user.id && user.logged?` and falls through to `1=0` otherwise. Announcing "only your own
+  # spent time" over an empty report would be a notice that is simply false.
+  def test_an_own_role_on_an_actor_who_is_not_logged_in_is_none
+    anonymous_role = Role.anonymous
+    anonymous_role.permissions = ['view_time_entries']
+    anonymous_role.time_entries_visibility = 'own'
+    anonymous_role.save!
+
+    assert_equal :none, Subject.state(User.anonymous, @project)
+    assert_equal 0, TimeEntry.visible(User.anonymous).where(project_id: @project.id).count,
+                 'said :none, but the scope returned rows'
+  end
+
   # FAIL CLOSED ON NIL, both ways. A caller with no project (a template outside a project,
   # which the schema permits — `project_id` is nullable) must not be told it may see
   # everything.
