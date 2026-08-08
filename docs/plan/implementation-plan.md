@@ -98,7 +98,40 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
-**S-13 · T-31's central premise is FALSE, and the kernel does not raise — it answers ISSUE
+**~~S-13~~ · CLOSED by curator decision, 2026-08-08 — and TWO decisions were taken, not one.**
+
+1. **The kernel stays frozen. No second G7 hunk.** Time entries get their own owned
+   aggregation module, a SIBLING of `aggregation/query_aggregator.rb` rather than an edit to
+   it, so `KERNEL_FILES` is untouched, `RATCHET` stays at 1 and the 176 corpus values keep
+   the oracle they were measured against. The curator's reasoning, which is worth keeping
+   because it answers the "two implementations" objection: **a time-entry report wants
+   different SQL** — `SUM(hours)` grouped by activity, user or an issue attribute — so the
+   duplication is smaller than it looks. What the two genuinely share is the RESULT
+   VOCABULARY (bucket shape, drill-through filters, caps), and that can be shared without
+   sharing the query builder.
+2. **The separation is at the QUERY and the CALCULATOR, and nowhere above them.** An issue
+   report resolves through `IssueQuery` and a time report through `TimeEntryQuery` — two
+   different Redmine core classes with different `base_scope` methods — and `source` is the
+   field that picks. Above that line **nothing** is duplicated: one template model, one
+   controller, one CRUD, one preview, one permission set. `[OQ-H]`'s closure ("as a `source`
+   field, not a branch") therefore still holds, and the base plugin's parallel world of
+   controllers, drops, permissions and views is still refused.
+3. **Mixing issue data and time data in one template body is DROPPED, not deferred.** It was
+   T-31's most-cited benefit and §7b.4 promised it in as many words; both have been corrected
+   (`technical-spec.md` §7b.4, FR-60). The reason: an issue report and a time report are two
+   different things to their author, and `RenderContext` carries a single `scope`, so
+   supporting it meant a second scope slot built for a requirement nobody wanted. A template
+   body reports on **one** source.
+
+**The new module still needs its own frozen corpus** — that is the one cost of route (b), and
+it is the pattern T-01 established rather than a new burden. A calculator with no oracle is
+the untested half.
+
+The measurement that forced the decision follows, kept in full because it is also the
+regression this project would want to notice if anyone ever points the issue kernel at a
+time-entry scope again.
+
+**T-31's central premise was FALSE, and the kernel does not raise — it answers ISSUE
 counts under time-entry labels. MEASURED 2026-08-08.** `technical-spec.md:1411` (§7b.4) and
 `implementation-plan.md`'s T-31 entry both say *"the aggregation core already takes a scope
 — so `{% sql_aggregate from: time_entries %}` works with every dimension that applies, and
@@ -168,8 +201,17 @@ template that puts issue data and time data side by side. **Recorded rather than
 and nothing was silently built against the false premise** — in particular, nothing hands a
 time-entry scope to `QueryAggregator`, because the measurement above is what that produces.
 
-**S-11 · §7b.3 says the failure-document opt-in is "per template/schedule", and T-30 built
-only the template half. REPORTED, NOT DECIDED.** `technical-spec.md:1393` reads *"Optional
+**~~S-11~~ · CLOSED by curator decision, 2026-08-08: the opt-in is PER TEMPLATE, and §7b.3
+was narrowed to say so.** The schedule half is not deferred, it is dropped — a schedule
+renders a template, so the template flag already governs every render, and the reason there
+was nothing to build is recorded below. `technical-spec.md:1393` now reads "per template"
+with the decision and its date inline. Nothing else changes: no column on
+`reporter_dashboards_schedules`, and if T-28 later wants a per-schedule override it adds one
+then, with a destination to point at. The original finding follows, kept because the
+argument is what the decision rests on.
+
+**§7b.3 said the failure-document opt-in is "per template/schedule", and T-30 built
+only the template half.** `technical-spec.md:1393` reads *"Optional
 failure document (per template/schedule, default off)"*. Migration 008 puts
 `failure_document` on `reporter_dashboards_templates` and nowhere else, and the reason is
 that the schedule half has **nowhere to deliver a document to**:
@@ -195,7 +237,13 @@ indexes, and this is neither), so it can be added later if T-28 gives it a desti
 **What the curator owes:** either a one-line edit to §7b.3 narrowing it to the template, or
 a decision that the schedule half is T-28's to finish. Nothing was silently rewritten.
 
-**S-12 · E-6's third bullet is STILL OWED after T-30, and T-30 was one of its two named
+**~~S-12~~ · CLOSED by curator decision, 2026-08-08: the streamed archive is T-29's, and
+T-30 is released from it.** E-6's third bullet named "T-29 or T-30"; it is now T-29 alone,
+which is also where the packaging machinery will already exist. T-29's `Accept:` carries it
+and the 501 refusal in `TemplatesController#send_document` is what T-29 deletes. The
+argument follows.
+
+**E-6's third bullet was still owed after T-30, and T-30 was one of its two named
 owners.** §Findings E-6 says of streamed archives: *"Whoever builds it (T-29 or T-30)
 deletes the refusal."* T-30 did not, and the reason is that a zip is not a failure report:
 it shares no code, no requirement (FR-59 is about one document that says a report failed)
@@ -2425,7 +2473,17 @@ URL"* and *"anyone on the internet"* are different decisions; revocation stays w
 creator, the template's owner and admins (FR-53), which is ownership rather than a permission, and a
 test asserts a third party holding **both** permissions still cannot revoke somebody else's link.
 
-**T-29 · Template exchange bundle** *(deps: T-23)*
+**T-29 · Template exchange bundle — AND the streamed archive** *(deps: T-23)*
+
+**The zip is T-29's alone as of 2026-08-08** (curator decision, closing §Findings S-12 and
+E-6's third bullet, which used to read "T-29 or T-30"). *Accept, added:* a per-record export of
+more than one document streams a **zip with no `Content-Length`**; the 501 refusal in
+`TemplatesController#send_document` and the un-drawn download button both go with it; the cap
+(`BatchGuard`) is still asked BEFORE anything is rendered, so a refused 40 000-document export
+still costs one `COUNT(*)`; and a test asserts the response is streamed rather than buffered,
+because the whole point of the missing `Content-Length` is that the worker does not hold the
+archive in memory.
+
 *Accept:* canonical **JSON** export with `format_version`; YAML accepted for reading via `safe_load`
 with `permitted_classes` and `aliases: false`; type resolved through a **closed map** —
 `constantize` appears nowhere; `import:plan` writes nothing and reports per-template new/updated/
@@ -2443,29 +2501,44 @@ with the correlation id and **no attachment**.
 
 **T-31 · Time-entry reporting as a `source` field** *(deps: T-23; replaces a third template type)*
 
-**BLOCKED ON A CURATOR DECISION as of 2026-08-08 — read §Findings S-13 before starting.** The
-clause *"a `TimeEntryQuery`-backed scope feeds the same aggregation core"* was checked by
-running it, and it is false in the way that matters: the kernel does **not** raise on a
-time-entry scope, it answers ISSUE counts under time-entry labels, because its unit of
-count is the constant `DISTINCT_ISSUES = 'DISTINCT issues.id'` and
-`TimeEntryQuery#base_scope` calls `.left_join_issue`, which makes the wrong answer
-available. `spent_hours` — the one measure this task exists for — answers nothing at all,
-and `activity`, `user` and `project` degrade to nil. Fixing it means changing
-`query_aggregator.rb`, which gate **G7** holds byte-identical to its `v0.5.0` blob plus
-exactly ONE declared hunk. **The choice between a second declared hunk and a second, owned
-aggregator is the curator's**; the measurement, both routes and their costs are in S-13.
+**UNBLOCKED 2026-08-08 — the curator took S-13's two decisions and this entry is rewritten to
+match them.** Read §Findings **S-13** before starting: the clause this task used to rest on
+(*"a `TimeEntryQuery`-backed scope feeds the same aggregation core"*) was measured and is
+false, and the answer is a second owned calculator rather than an edit to the frozen kernel.
 
-**The rest of the list does not depend on that decision and is what T-31 can start with**:
-`source` accepted end to end, one controller/CRUD/preview serving both, a
-`TimeEntryQuery`-backed scope bound to the render, `Drops::TimeEntriesDrop` (built in T-18,
-still without a producer) getting one, and a template putting issue data and time data side
-by side.
+*Accept, as revised 2026-08-08:*
 
-*Accept:* `source` ∈ `issues | time_entries` on the template model; **one** controller, CRUD and
-preview serve both; a `TimeEntryQuery`-backed scope feeds the same aggregation core;
-`{% sql_aggregate from: time_entries %}` works with every applicable dimension; a test puts issue data
-and time data **in one template** — which the old two-branch design could not do; `spent_hours`
-measures stop being a special case.
+1. **`source` ∈ `issues | time_entries` on the template model, and the column already
+   exists** (migration 002, T-22). Nothing new in the schema.
+2. **ONE of everything above the query.** One controller, one CRUD, one preview, one
+   permission set, one template model — `[OQ-H]` closed this and it stays closed. A test
+   asserts no second controller and no second template class appears.
+3. **Two queries, and `source` is the switch.** `source: issues` resolves through
+   `IssueQuery#base_scope` (as today); `source: time_entries` resolves through
+   `TimeEntryQuery#base_scope`. Both start from their model's `visible` scope, so INV-1/INV-3
+   are held by construction on both paths, and a multi-actor test covers the time-entry path
+   the way `test/unit/multi_actor_visibility_test.rb` covers the issue one — **that test is
+   the one most likely to be skipped and it is the one that matters**, because `TimeEntry`
+   visibility is a different rule from `Issue` visibility.
+4. **A NEW owned aggregation module for time entries** — a sibling of
+   `aggregation/query_aggregator.rb`, never an edit to it. `KERNEL_FILES` unchanged, `RATCHET`
+   stays 1, G7 untouched. It shares the RESULT VOCABULARY (bucket shape, `filter` payloads for
+   drill-through, caps, the `(none)` bucket) and not the query builder. `SUM(hours)` is its
+   defining measure, and `activity` and `user` are dimensions the issue kernel does not have.
+5. **Its own frozen corpus**, on T-01's pattern, with a pinned reference date. A calculator
+   with no oracle is the untested half, and this is the one real cost of not editing the
+   kernel — pay it in the same PR, not after.
+6. **`{% sql_aggregate from: time_entries %}` routes to the new module**, and a test asserts
+   that a time-entry scope **never** reaches `QueryAggregator` — the regression that would
+   otherwise silently reintroduce S-13's wrong numbers. The reverse guard too: an issue scope
+   never reaches the time-entry module.
+7. **`ReportRun` stops refusing `source: time_entries`.** Its `unsupported_source`
+   diagnostic and the 501-style message naming T-31 both go, and
+   `Drops::TimeEntriesDrop` — built in T-18 and still without a producer — gets one.
+8. **A template body reports on ONE source.** Mixing issue data and time data in one template
+   was **dropped by curator decision, not deferred** (S-13 clause 3), so there is no second
+   scope slot on `RenderContext` and no test for a mixed template. §7b.4's promise of it and
+   FR-60 have both been corrected; do not reintroduce it as a convenience.
 
 **T-32 · Ad-hoc report mail, controlled** *(deps: T-23, T-30)*
 *Accept:* issues resolved through **`Issue.visible(User.current)`** — a test asserts an issue the

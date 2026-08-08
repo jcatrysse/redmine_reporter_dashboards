@@ -1390,7 +1390,7 @@ Three levels, and the user keeps getting information at every one:
 
 1. **Interactive:** a diagnostics panel — what failed, which template, the Liquid line number where
    applicable, engine and version, duration, and a **correlation id** to quote in a bug report.
-2. **Optional failure document** (per template/schedule, default off): a **real, valid PDF** titled
+2. **Optional failure document** (**per template**, default off — *narrowed from "per template/schedule" by curator decision 2026-08-08, closing §Findings S-11*: a schedule renders a template, so the template flag already governs every render, and the schedule half had nowhere to deliver to, since clause 3 below and FR-43 both require the owner's notice to carry no attachment and the document store is T-28's): a **real, valid PDF** titled
    *"Report could not be generated"*, containing the correlation id, timestamp, template name,
    requester, and a **safe** summary — never the raw exception, never SQL. Filename
    `report-FAILED-<correlation-id>.pdf` so it can never be mistaken for the report.
@@ -1410,14 +1410,39 @@ views, disjoint from issue reporting.
 
 **Do not reproduce the branch. Make the data source a field.** `source` ∈
 `issues | time_entries` (extensible), so one controller, one CRUD, one preview and one template model
-serve both. Time entries get a `TimeEntryQuery`-backed scope, and the aggregation core already takes
-a scope — so `{% sql_aggregate from: time_entries %}` works with every dimension that applies, and
-`spent_hours` measures stop being a special case.
+serve both. Time entries get a `TimeEntryQuery`-backed scope.
 
-**Better than the original, materially:** today you cannot put issue data and time data in one
-template or on one dashboard. Once the source is a field, you can — and the whole aggregation
-vocabulary (crosstabs, drill-through, completeness, caps) applies to time entries for free instead of
-being reimplemented.
+**CORRECTED 2026-08-08 — this paragraph used to continue *"and the aggregation core already takes a
+scope, so `{% sql_aggregate from: time_entries %}` works with every dimension that applies, and
+`spent_hours` measures stop being a special case"*. That was measured and is FALSE**, in the way that
+matters most: `QueryAggregator` does not raise on a time-entry scope, it answers ISSUE counts under
+time-entry labels, because its unit of count is `DISTINCT_ISSUES = 'DISTINCT issues.id'` and
+`TimeEntryQuery#base_scope` calls `.left_join_issue`, which makes the wrong answer available instead
+of an error. Four time entries over two issues came back as `2` in every bucket; `spent_hours`
+answered `nil`; `activity`, `user` and `project` degraded to nil. Evidence in
+`implementation-plan.md` §Findings **S-13**.
+
+**Curator decision, 2026-08-08 (S-13 closed):** the kernel stays frozen — **no second G7 hunk** — and
+time entries get their own owned aggregation module, a sibling of `aggregation/query_aggregator.rb`
+rather than an edit to it. The two share the RESULT VOCABULARY (bucket shape, drill-through filters,
+caps) and not the query builder, because a time-entry report wants different SQL — `SUM(hours)`
+grouped by activity, user or an issue attribute — so the reusable part was never the SQL. What stays
+single is everything above the query: one template model, one controller, one CRUD, one preview, one
+set of permissions. **The separation is at the query and the calculator, not at the template**, which
+is what keeps `[OQ-H]`'s closure intact.
+
+**Better than the original — and the claim is narrower than it was.** This paragraph used to promise
+that *"today you cannot put issue data and time data in one template or on one dashboard. Once the
+source is a field, you can"*. **Withdrawn by curator decision, 2026-08-08:** an issue report and a
+time report are two different things to their author, they resolve through two different Redmine query
+classes (`IssueQuery` and `TimeEntryQuery`), and mixing them in one template body was a capability
+nobody asked for. `RenderContext` carries one scope, so supporting it would have meant a second scope
+slot built for a requirement that is now dropped rather than deferred.
+
+What remains, and is still materially better than the base plugin: **one** template model, controller,
+CRUD, preview and permission set instead of a parallel world of each, and one result vocabulary —
+crosstabs, drill-through, completeness, caps — over both sources. The vocabulary is shared; the
+queries and the calculators are not (see the correction above).
 
 ### 7b.5 Ad-hoc report mail — same capability, controlled
 

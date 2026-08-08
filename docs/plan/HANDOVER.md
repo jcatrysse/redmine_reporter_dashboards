@@ -743,15 +743,32 @@ of a CI that runs on fork pull requests.
 
 ## 4b. What the next session should start with
 
-**T-31 IS BLOCKED ON A DECISION, AND THE MEASUREMENT THAT BLOCKS IT IS ALREADY DONE.** Do not
-start by trying to make `{% sql_aggregate from: time_entries %}` work — it was tried, on a
-real Redmine 6.1 / PostgreSQL 16, and the frozen kernel accepts a `TimeEntryQuery` scope
-**without raising** while answering `COUNT(DISTINCT issues.id)` under time-entry labels: four
-time entries over two issues came back as "2" in every bucket, and `spent_hours` came back
-`nil`. The numbers, both routes out of it and their costs are in `implementation-plan.md`
-§Findings **S-13**. The half of T-31 that does not depend on the decision — `source` accepted
-end to end, one controller for both, a `TimeEntryQuery`-backed scope, and
-`Drops::TimeEntriesDrop` finally getting a producer — is startable today.
+**THE THREE OPEN DECISIONS ARE TAKEN (curator, 2026-08-08). T-31 IS UNBLOCKED and its entry in
+`implementation-plan.md` has been rewritten to match.** Read §Findings **S-13** first — not
+because anything is still open, but because it records a measurement you must not repeat and a
+regression you must not reintroduce.
+
+**The one thing to know before writing any code:** pointing the issue kernel at a time-entry
+scope does **not** raise. It answers `COUNT(DISTINCT issues.id)` under time-entry labels — four
+time entries over two issues came back as `2` in every bucket, and `spent_hours` came back
+`nil`. So the new module is not an optimisation, it is the difference between right and
+plausibly wrong, and T-31 carries a test asserting a time-entry scope never reaches
+`QueryAggregator` for exactly that reason.
+
+What was decided:
+
+| | Decision |
+|---|---|
+| **S-11** | The failure-document opt-in is **per template**. No schedule column, now or later, unless T-28 gives it a destination. §7b.3 narrowed |
+| **S-12** | The streamed zip is **T-29's alone**. T-30 is released; `send_document`'s 501 is what T-29 deletes |
+| **S-13** | **The kernel stays frozen — no second G7 hunk.** Time entries get an owned sibling module. The separation is at the QUERY (`IssueQuery` vs `TimeEntryQuery`) and the CALCULATOR, and **nowhere above them**: one template model, one controller, one CRUD, one preview, one permission set. `[OQ-H]` still holds |
+| **S-13 (3)** | **Mixing issue data and time data in one template is DROPPED, not deferred.** No second scope slot on `RenderContext`, no mixed-template test. §7b.4 and FR-60 corrected. Do not reintroduce it as a convenience |
+
+**The cost of route (b), and pay it in the same PR:** the new module needs its OWN frozen
+corpus on T-01's pattern, with a pinned reference date. A calculator with no oracle is the
+untested half, and this project has a name for that.
+
+---
 
 ---
 
@@ -1034,10 +1051,12 @@ end to end, one controller for both, a `TimeEntryQuery`-backed scope, and
    `?????` for a Russian operator is the plausible-looking wrong answer this repository keeps
    deleting.
 
-   **WHAT IS DELIBERATELY NOT BUILT.** The schedule half of §7b.3's *"per template/schedule"*
-   opt-in — §Findings **S-11**, because the owner's notice is required to carry no attachment
-   and the document store is T-28's, so there is no scheduled consumer for the bytes. And
-   E-6's zip is **still owed**, now T-29's alone (§Findings **S-12**); T-30 made the 501
+   **WHAT IS DELIBERATELY NOT BUILT, AND BOTH ARE NOW SETTLED.** The schedule half of
+   §7b.3's opt-in is **dropped** — the curator narrowed §7b.3 to "per template" on
+   2026-08-08 (§Findings ~~S-11~~), because the owner's notice is required to carry no
+   attachment and the document store is T-28's, so there was no scheduled consumer for the
+   bytes. Do not add a `failure_document` column to `reporter_dashboards_schedules`. And
+   E-6's zip is **T-29's alone** as of the same date (§Findings ~~S-12~~); T-30 made the 501
    answer with a failure document, which is not the same as building an archive.
 
 20. **T-25 is PART DONE and nothing delivers yet.** Two increments: `scheduling/occurrences.rb`
