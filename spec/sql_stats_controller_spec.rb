@@ -7,7 +7,14 @@ require_relative 'spec_helper'
 
 Time.zone ||= 'UTC'
 
-unless defined?(ActiveRecord)
+# PER-CONSTANT, NOT `unless defined?(ActiveRecord)`. MEASURED: T-31 added a DB-less spec
+# that defines only `ActiveRecord::StatementInvalid`, and on the seeds where it loaded first
+# the coarse guard here saw `ActiveRecord` already defined and skipped — leaving
+# `RecordNotFound` undefined and this file red for a reason nothing in its own diff showed.
+# A guard over a namespace cannot stand in for a guard over what is inside it.
+module ActiveRecord; end unless defined?(ActiveRecord)
+
+unless defined?(ActiveRecord::RecordNotFound)
   module ActiveRecord
     class RecordNotFound < StandardError; end
   end

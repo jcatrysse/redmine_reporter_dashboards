@@ -121,7 +121,7 @@ hu:
   label_reporter_template_failure_document: "Hibadokumentum készítése"
   label_reporter_preview_pdf: "PDF-előnézet"
   label_reporter_preview_html: "HTML-előnézet"
-  label_reporter_preview_degradations: "A megjelenítő a következő korlátozásokat jelezte"
+  label_reporter_preview_degradations: "A jelentés egyes részei nem a kért módon készültek el"
   label_reporter_report_failed_template: "Ezt a sablont nem sikerült megjeleníteni"
   label_reporter_report_failed_engine: "A megjelenítő motor nem tudta előállítani ezt a dokumentumot"
   label_reporter_report_refused: "Ezt az exportálást a rendszer elutasította"

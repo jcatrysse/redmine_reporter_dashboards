@@ -121,7 +121,7 @@ pt-BR:
   label_reporter_template_failure_document: "Gerar um documento de falha"
   label_reporter_preview_pdf: "Pré-visualização em PDF"
   label_reporter_preview_html: "Pré-visualização em HTML"
-  label_reporter_preview_degradations: "O motor relatou estas limitações"
+  label_reporter_preview_degradations: "Partes deste relatório não puderam ser produzidas como solicitado"
   label_reporter_report_failed_template: "Não foi possível renderizar este modelo"
   label_reporter_report_failed_engine: "O motor de renderização não conseguiu produzir este documento"
   label_reporter_report_refused: "Esta exportação foi recusada"

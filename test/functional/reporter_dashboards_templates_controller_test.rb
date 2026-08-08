@@ -1435,25 +1435,74 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
                    'the refusal must assign the EMPTY result, not merely a different number'
   end
 
-  # THE DANGEROUS SHAPE: a saved TimeEntryQuery, whose `base_scope` joins issues, with a
-  # `group_by` over an issue column. With the guard off this renders plausible issue-derived
-  # buckets at 200; with it on there are none.
-  def test_a_time_entry_query_with_an_issue_dimension_still_reports_nothing
+  # THE DANGEROUS SHAPE, NOW ANSWERED CORRECTLY RATHER THAN REFUSED. A saved TimeEntryQuery
+  # whose `base_scope` joins issues, grouped by an ISSUE column. This is the exact shape that
+  # produced §Findings S-13 — the issue kernel answered `COUNT(DISTINCT issues.id)` here, so
+  # four entries over two issues came back as `2`. The owned aggregator answers HOURS.
+  def test_a_time_entry_query_grouped_by_an_issue_column_reports_hours_not_issue_counts
+    another_users_hours
     query = TimeEntryQuery.create!(name: 'hours here', project: @project,
                                    user: @jsmith, visibility: 2)
     template = create_template(
       source: 'time_entries',
       content: '{% sql_aggregate group_by: tracker, assign_to: stats %}' \
-               'TOTAL=[{{ stats.total }}] N=[{{ stats.buckets.size }}]'
+               'TOTAL=[{{ stats.total }}] MEASURE=[{{ stats.measure }}]'
     )
     grant_time(:view_reporter_dashboards_reports)
+
+    # THE ORACLE IS OVER THE SCOPE THE REPORT IS ACTUALLY OVER, and the first version was not:
+    # it summed `project_id: @project.id` and read 162.75 while the page said 170.4. Both were
+    # right. A saved query is bounded to the project's SUBTREE and not to the single id — see
+    # `ReportScope#resolve`, where that asymmetry is argued — so a one-project sum is simply a
+    # different question. The scope is therefore built by the same production code, whose own
+    # bounds are asserted in `ReporterDashboardsReportScopeTest` and in
+    # `test_a_time_entry_template_does_not_reach_another_projects_hours`; what THIS example is
+    # paid to check is the aggregation over it, and that is still computed twice — once by the
+    # database with `GROUP BY`/`SUM` and once by loading the rows and adding them up in Ruby.
+    #
+    # `uniq(&:id)` deliberately: `SUM(time_entries.hours)` over a row-duplicating join would
+    # over-count, so the Ruby side computes the CORRECT figure rather than the same mistake.
+    # `left_join_issue` is a `belongs_to` and duplicates nothing today; if a future filter
+    # changes that, this goes red instead of agreeing.
+    scope, = RedmineReporterDashboards::Reporting::ReportScope.build(
+      template: template, actor: @jsmith, project: @project, query_id: query.id
+    )
+    hours = scope.to_a.uniq(&:id).sum(&:hours).to_f.round(2)
+    issues = scope.distinct.count(:issue_id)
+    assert hours != issues, "hours #{hours} and issue count #{issues} coincide, so this proves nothing"
 
     get :show, params: { project_id: @project.identifier, id: template.id,
                          query_id: query.id }
 
     assert_response :success
-    assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body
-    assert_include ERB::Util.html_escape('N=[0]'), response.body
+    assert_include ERB::Util.html_escape("TOTAL=[#{hours}]"), response.body
+    assert_include ERB::Util.html_escape('MEASURE=[hours]'), response.body
+    assert_not_include ERB::Util.html_escape("TOTAL=[#{issues}]"), response.body
+  end
+
+  # AND THE BUCKETS ARE HOURS PER ACTIVITY — the dimension the issue kernel does not have at
+  # all, computed here against a second, independent Ruby sum.
+  def test_hours_by_activity_agree_with_a_ruby_sum
+    another_users_hours
+    template = create_template(
+      source: 'time_entries',
+      content: '{% sql_aggregate group_by: activity, assign_to: stats %}' \
+               '{% for b in stats.buckets %}B=[{{ b.label }}:{{ b.count }}]{% endfor %}'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+
+    expected = TimeEntry.visible(@jsmith).where(project_id: @project.id)
+                        .to_a.group_by(&:activity_id)
+                        .transform_values { |rows| rows.sum(&:hours).to_f.round(2) }
+    assert expected.any?, 'no hours to aggregate, so this proves nothing'
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    expected.each do |activity_id, hours|
+      label = TimeEntryActivity.find(activity_id).name
+      assert_include ERB::Util.html_escape("B=[#{label}:#{hours}]"), response.body
+    end
   end
 
   # AND THE REFUSAL IS VISIBLE TO THE AUTHOR — INV-4, which the first version claimed and did
@@ -1461,7 +1510,12 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   # `Diagnostics` object that `ReportRun` threw away, `Outcome#degradations` was filled only
   # from render-ENGINE degradations, and the preview's degradation block sat inside the branch
   # that only runs when the PDF succeeded. The author saw `TOTAL=[0]` and nothing else.
-  def test_the_refused_aggregation_source_is_reported_on_the_page
+  # A TIME-ENTRY AGGREGATION WITH NO `group_by` IS STILL A REFUSAL, and it is still visible.
+  # There is no time-entry equivalent of the issue path's created/closed flow — a time entry
+  # is not opened and closed — so a tag with no dimension has nothing to ask for. Increment 1
+  # recorded `aggregation_source_unsupported` here because the whole source was refused;
+  # increment 2 gives the source an aggregator, and what is left to refuse is the argument.
+  def test_a_time_entry_aggregation_with_no_dimension_says_so_on_the_page
     template = create_template(
       source: 'time_entries',
       content: '{% sql_aggregate assign_to: stats %}TOTAL=[{{ stats.total }}]'
@@ -1472,10 +1526,11 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
 
     assert_response :success
     assert_select 'div.reporter-degradations'
-    assert_include 'aggregation_source_unsupported', response.body
+    assert_include 'aggregation_group_by_required', response.body
+    assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body
   end
 
-  def test_the_refused_aggregation_source_is_reported_in_the_preview_too
+  def test_a_refused_aggregation_argument_is_reported_in_the_preview_too
     grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates,
           :view_time_entries)
 
@@ -1486,7 +1541,7 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     }
 
     assert_response :success
-    assert_include 'aggregation_source_unsupported', response.body
+    assert_include 'aggregation_group_by_required', response.body
   end
 
   # AND A CLEAN ISSUE RENDER SAYS NOTHING, so the block is not simply always drawn.

@@ -44,6 +44,37 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **A report template can now report on spent time, and it reports HOURS.**
+
+  Set a template's data source to *Spent time* and `{% sql_aggregate %}` sums hours instead
+  of counting issues. Same tag, same bucket structure, same drill-through links, same
+  editor, same preview — one template model for both sources rather than a parallel world
+  for each.
+
+  Eleven dimensions: `activity`, `user`, `project` and `issue` on the entry itself, and
+  `tracker`, `status`, `priority`, `author`, `assignee`, `version` and `category` through
+  the entry's issue. The first two do not exist on the issue path at all, and they are the
+  two an hours report is usually about. `measure: count` gives the number of entries
+  instead.
+
+  **You see the hours your role lets you see, and the report says when that is less.**
+  Redmine's permission for spent time has three states per role — all, **only your own**, or
+  none — and the middle one is why this needed saying: an ordinary member opens the team's
+  hours report and sees a smaller, entirely believable total with no way to tell it is their
+  own timesheet. The page now carries a notice when your role narrowed the data. A project
+  with *Time tracking* switched off reports no hours and says so instead of showing zero.
+
+  Two things it deliberately does not do. There is **no time series** — a time entry is not
+  opened and closed, so a tag with no `group_by` is refused and explains itself on the page
+  rather than inventing a trend. And a template reports on **one** source: mixing issue data
+  and hours in one body is not supported and is not planned.
+
+  Correctness here is established by computing every figure twice — once in SQL and once by
+  loading the rows and adding them up in Ruby — on PostgreSQL, MySQL and MariaDB, rather
+  than by recording what the code answered on its first day. The README's *Reporting on
+  spent time* section has the details, including the one join shape whose hours sum would
+  over-count and why no `DISTINCT` can fix it.
+
 - **A report that cannot be generated can now hand you a real PDF that says so.**
 
   Turn on *Produce a failure document* on a report template (it is off, and stays off,
@@ -352,6 +383,15 @@ All notable changes to this plugin are documented in this file.
   - [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md): what each engine
     **did**, generated from an actual run of 20 conformance fixtures. It cannot be
     edited by hand — the build compares it with a fresh run.
+
+### Changed
+
+- **The "what could not be produced" list on a report page no longer blames the render
+  engine for everything in it.** It was headed *"The engine reported these degradations"*,
+  which was true when the engine was the only thing that could put an entry there. It now
+  also carries unresolved assets and refused aggregations, so it reads *"Parts of this
+  report could not be produced as asked"* — in all nine languages. Same list, same place,
+  an accurate attribution.
 
 ### Fixed
 

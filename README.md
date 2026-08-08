@@ -551,9 +551,11 @@ it, whatever the file asks for.
   than one issue.** That needs a zip archive, which this version does not build; the page
   renders all the documents as HTML and the download button is not offered. Combined
   templates — one document for the whole set — download normally.
-* **`source: time_entries` is not renderable yet.** The field exists and survives import
-  and export, but only issue reporting has a data source today. A template carrying it is
-  refused with a message rather than reported against the wrong table.
+* **A `source: time_entries` report has no time series.** Hours by activity, by user, by
+  project, by issue and by seven issue attributes all work (see *Reporting on spent time*
+  below), but `{% sql_aggregate %}` with no `group_by` is refused there and says so on the
+  page: a time entry is not opened and closed, so there is no created/closed flow to plot.
+  Use `group_by:` and, if you want a trend, a `spent_on` filter on the saved query.
 
 ## Scheduled reports
 
@@ -1450,6 +1452,88 @@ stay clickable in the PDF, which is the reason the URLs are absolute.
   lookup per dimension (one more when `sort: position` needs the enumeration
   order). `flags` runs a handful of small aggregates. No issue is ever loaded
   into Ruby, and nothing is done per row.
+
+## Reporting on spent time
+
+A report template has a **data source**. Set it to *Spent time* and the same tag, the same
+bucket structure and the same drill-through links report **hours** instead of issue counts —
+one template model, one editor, one preview, two sources.
+
+```liquid
+{% sql_aggregate group_by: activity, assign_to: by_activity %}
+
+{% for bucket in by_activity.buckets %}
+- {{ bucket.label }}: {{ bucket.count }} h
+{% endfor %}
+Total: {{ by_activity.total }} h
+```
+
+`bucket.count` carries the **measure**, which is hours here — the same key an issue report
+uses for its counts, so a template written against one source reads the other. `measure`
+and `measure_field` on the result say which you are looking at (`hours`/`hours` or
+`count`/`nil`).
+
+### `from:` is not used on a time-entry template
+
+The scope comes from the template's source and the saved query on the page, not from the
+tag. `from: issues` inside a *Spent time* template is ignored; use `query_id:` to point at a
+saved **spent-time** query.
+
+### Dimensions
+
+| On the entry itself | Through the entry's issue |
+|---|---|
+| `activity` · `user` · `project` · `issue` | `tracker` · `status` · `priority` · `author` · `assignee` · `version` · `category` |
+
+`activity` and `user` do not exist on the issue path at all — they are the two an hours
+report is usually about. The seven on the right need the entry to be joined to its issue,
+which a saved spent-time query provides; without one they are refused and the page says so
+rather than reporting a wrong number.
+
+An entry with no activity, or logged against a project rather than an issue, lands in the
+`(none)` bucket, and its drill-through link filters for *none* rather than for an empty
+value.
+
+### Measures
+
+| `measure:` | What it computes |
+|---|---|
+| `hours` (default) | `SUM` of the hours logged, rounded to two places |
+| `count` | how many entries, counted distinctly |
+
+`sort:`, `limit:`, `other_label:` and `empty_label:` behave exactly as they do on the issue
+path, including the folded `(other)` bucket and the `truncated` flag that admits to it.
+
+### What it does not do
+
+- **No time series.** `{% sql_aggregate %}` with no `group_by` is refused: a time entry is
+  not opened and closed, so there is nothing to plot over time. Filter by `spent_on` on the
+  saved query instead.
+- **`{% version_rollup %}` is issue-only** and is refused on a time-entry template, visibly.
+- **Mixing sources in one template is not supported** and is not planned. A report is about
+  issues or about hours.
+
+### You see the hours your role lets you see, and the report says when that is less
+
+Redmine's own permission for spent time has three states per role: all of it, **only your
+own**, or none. The middle one is the dangerous one — an ordinary member opens the team's
+hours report and sees a smaller, entirely believable total with nothing to indicate it is
+their own timesheet. So the page carries a notice when your role narrowed the data, and the
+report is not silently smaller. Turning the project's *Time tracking* module off means no
+hours at all, for administrators too, and that is also said rather than shown as zero.
+
+### Cost, and one limit worth knowing
+
+An hours breakdown costs **three statements** — the grouped read, one batched label lookup
+for every bucket at once, and the total. A count breakdown costs two, because a counted axis
+is totalled from its own buckets. Neither grows with the number of buckets, and no time entry
+is ever loaded into Ruby.
+
+**The one limit:** if a query's own joins multiply rows, the entry *count* is still right
+(it is `DISTINCT`) but the **hours sum is not** — it multiplies with them. No `SELECT
+DISTINCT` fixes a `SUM`: two people logging the same number of hours are two entries, not a
+duplicate. None of Redmine's own spent-time filters produces such a join, so this does not
+arise in normal use; it is written down here because it would be invisible if it ever did.
 
 ### Legacy alias
 

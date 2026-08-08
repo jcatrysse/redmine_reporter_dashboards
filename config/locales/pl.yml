@@ -121,7 +121,7 @@ pl:
   label_reporter_template_failure_document: "Twórz dokument błędu"
   label_reporter_preview_pdf: "Podgląd PDF"
   label_reporter_preview_html: "Podgląd HTML"
-  label_reporter_preview_degradations: "Silnik zgłosił następujące ograniczenia"
+  label_reporter_preview_degradations: "Części tego raportu nie udało się utworzyć zgodnie z żądaniem"
   label_reporter_report_failed_template: "Nie udało się wyrenderować tego szablonu"
   label_reporter_report_failed_engine: "Silnik renderujący nie zdołał utworzyć tego dokumentu"
   label_reporter_report_refused: "Ten eksport został odrzucony"

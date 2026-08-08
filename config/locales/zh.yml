@@ -121,7 +121,7 @@ zh:
   label_reporter_template_failure_document: "生成失败文档"
   label_reporter_preview_pdf: "PDF 预览"
   label_reporter_preview_html: "HTML 预览"
-  label_reporter_preview_degradations: "引擎报告了以下降级"
+  label_reporter_preview_degradations: "本报告的部分内容未能按要求生成"
   label_reporter_report_failed_template: "无法渲染此模板"
   label_reporter_report_failed_engine: "渲染引擎无法生成此文档"
   label_reporter_report_refused: "此导出已被拒绝"

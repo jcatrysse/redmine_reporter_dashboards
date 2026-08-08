@@ -522,6 +522,75 @@ with migration 008 in place.
 three engines for the one reason that step must never fail for — having found nothing to
 check. `working-directory` is per step, not per job.
 
+**NEVER PUT `spec/adapter` AND THE DB-LESS SPECS IN ONE RSPEC PROCESS. It produces a
+CONSTANT SEVEN-FAILURE FLOOR, and a mutation harness built on it reports every mutation as
+"red" whether or not the mutation did anything.** `adapter_helper.rb` says the two must be
+separate processes and gives the reason (`spec/sql_aggregation/*` define a stub
+`ActiveRecord::Base` when none exists; the adapter specs load the real one). T-31 increment 2
+built a mutation harness that ran them together for speed and got a clean sweep of 19
+"kills" — worthless, because the baseline was already 7 failures. Measured after separating
+them: three of those guards were provably DEAD. Always run the unmutated control first and
+require it to be GREEN; a harness whose control is red measures nothing.
+
+    56 examples, 0 failures     # adapter, own process
+    727 examples, 0 failures    # DB-less
+    783 examples, 7 failures    # the two together — the floor
+
+**AND MATCH THE SINGULAR: `grep -qE "[1-9][0-9]* (failures|errors)"` DOES NOT SEE
+`1 failure`.** Same harness, same afternoon. One mutation was reported as surviving because
+the only run that caught it reported exactly one failure. If a script decides green from
+rspec's summary line, match `failure|error`, not the plural.
+
+**A COARSE `unless defined?(ActiveRecord)` GUARD IN ONE DB-LESS SPEC SILENTLY DISABLES
+ANOTHER'S STUB.** Four spec files stub that namespace. Three define `RecordNotFound` under
+`unless defined?(ActiveRecord)`; T-31 added a fourth defining only `StatementInvalid` under
+the same guard. On the seeds where the new file loaded first, `ActiveRecord` was already
+defined, the other guards skipped, and `sql_stats_controller_spec.rb` failed on
+`uninitialized constant ActiveRecord::RecordNotFound` — one spec breaking another through a
+constant neither mentions, on some seeds only. **Guard the CONSTANT, never the namespace:**
+`module ActiveRecord; end unless defined?(ActiveRecord)` then one `unless
+defined?(ActiveRecord::X)` per class. All four files now do. Run the DB-less suite under
+several `--seed` values before believing it.
+
+**A ROUNDING GUARD NEEDS A BUCKET WHOSE FLOAT SUM IS NOT REPRESENTABLE.** T-31's fixture put
+`0.1` and `0.2` in a bucket to justify rounding hours to two places — and also put `4.0`
+there, and `0.1 + 0.2 + 4.0` is exact. Deleting the `.round(2)` left the whole suite green.
+The two rows are now alone in their bucket, and an example asserts
+`raw.sum != 0.3 && raw.sum.round(2) == 0.3` so the fixture cannot silently stop
+discriminating.
+
+**`H.count_queries { … }` COUNTS THE `let` YOU DEREFERENCE INSIDE IT.** An example asserting
+a refusal costs zero statements failed on `User.find` — the first evaluation of the `actor`
+`let`, inside the block. Resolve the scope into a local before opening the counter.
+
+**A GUARD BEHIND A `rescue` CAN BE PROVABLY DEAD IN A GREEN RUN.** T-31's `applicable?`
+refuses an issue-column dimension on a scope with no issues join. Forcing it to `true` — and
+separately forcing `joined_to_issues?` to `true` — left every example green, because
+PostgreSQL raised on `issues.tracker_id` and `measure_rows`' `rescue
+ActiveRecord::StatementInvalid` returned nil either way. **Two guards, both dead, nothing
+red.** The observable that separates a decision from a rescue is that the decision issues NO
+statement: assert the query count, or drive it with a double and assert `group` was never
+called. The general rule — whenever a rescue sits behind a guard, the guard needs an
+assertion the rescue cannot satisfy.
+
+**MariaDB CAN BE INSTALLED IN THIS CONTAINER, AND D-1 REPRODUCES ON IT IN SECONDS.**
+`implementation-plan.md`'s T-31 clause 7 said *"the engine the defect lives on is the one a
+local run in this container cannot install"* — stale, and now corrected there. §4's table has
+carried a local MariaDB 10.11 row since 2026-08-05; this is the recipe, because looking it up
+took longer than running it.
+`sudo apt-get install -y mariadb-server mariadb-client default-libmysqlclient-dev`,
+`sudo service mariadb start`, create `redmine_adapter_test`, then put `gem 'mysql2', '~> 0.5.0'`
+in `redmine/Gemfile.local` — Redmine's Gemfile reads `config/database.yml` to choose database
+gems, and `Gemfile.local` adds one without touching that file, so the Minitest suite stays on
+PostgreSQL. Measured 2026-08-08 on MariaDB 10.11: whole `spec/adapter` green in 4 m, corpus
+green, and D-1 live —
+
+    [D-1] Mysql2 label-keyed grouped .sum over a 394-char expression:
+          DIVERGES (keys [nil], total 3.75 against a real 8.8)
+
+against `agrees (keys [20, 21, nil], total 8.8)` on PostgreSQL. Three buckets collapsed into
+one and the figure was the last group's hours wearing the total's name.
+
 ---
 
 ## 1b. Working agreement — verification, decided by the curator

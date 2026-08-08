@@ -121,7 +121,7 @@ de:
   label_reporter_template_failure_document: "Fehlerdokument erzeugen"
   label_reporter_preview_pdf: "PDF-Vorschau"
   label_reporter_preview_html: "HTML-Vorschau"
-  label_reporter_preview_degradations: "Die Engine meldet folgende Einschränkungen"
+  label_reporter_preview_degradations: "Teile dieses Berichts konnten nicht wie angefordert erstellt werden"
   label_reporter_report_failed_template: "Diese Vorlage konnte nicht gerendert werden"
   label_reporter_report_failed_engine: "Die Render-Engine konnte dieses Dokument nicht erzeugen"
   label_reporter_report_refused: "Dieser Export wurde abgelehnt"

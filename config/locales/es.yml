@@ -121,7 +121,7 @@ es:
   label_reporter_template_failure_document: "Generar un documento de error"
   label_reporter_preview_pdf: "Vista previa en PDF"
   label_reporter_preview_html: "Vista previa en HTML"
-  label_reporter_preview_degradations: "El motor ha comunicado estas limitaciones"
+  label_reporter_preview_degradations: "Algunas partes de este informe no se han podido generar como se pedía"
   label_reporter_report_failed_template: "No se ha podido representar esta plantilla"
   label_reporter_report_failed_engine: "El motor de representación no ha podido producir este documento"
   label_reporter_report_refused: "Esta exportación ha sido rechazada"

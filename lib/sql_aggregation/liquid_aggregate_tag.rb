@@ -163,9 +163,15 @@ module SqlAggregation
       # argument on this path does (HANDOVER §1: "every aggregator entry point LOGS AND
       # DEGRADES"). The owned time-entry aggregator that replaces this branch is T-31's
       # second increment.
-      unless RedmineReporterDashboards::Liquid::ScopeBinding
-             .issue_kernel_permitted?(context, 'sql_aggregate')
-        context.scopes.last[assign_to] = empty_result
+      # T-31 increment 2: A TIME-ENTRY SCOPE GOES TO THE TIME-ENTRY AGGREGATOR. Increment 1
+      # refused here, because answering with the issue kernel is §Findings S-13 — it counts
+      # `DISTINCT issues.id` and would report issue counts under time-entry labels. Now there
+      # is somewhere correct to send it, and the refusal survives only for a source with no
+      # aggregator at all, which is what `time_entry_result` answering nil means.
+      source = RedmineReporterDashboards::Liquid::ScopeBinding.report_source(context)
+      if source != :issues
+        result = time_entry_result(scope, context, source)
+        context.scopes.last[assign_to] = result || empty_result
         return ''
       end
 
@@ -204,6 +210,51 @@ module SqlAggregation
     end
 
     private
+
+    # THE OWNED TIME-ENTRY PATH. One dispatch, and everything about how a time entry is
+    # aggregated lives in `Aggregation::TimeEntryAggregator` — including the positional
+    # grouped read that D-1's still-open `SUM` hazard requires. This method's whole job is to
+    # translate the tag's markup into that module's arguments and to refuse a source it has
+    # no aggregator for.
+    #
+    # `group_by` IS REQUIRED HERE, unlike the issue path's time series. There is no
+    # time-entry equivalent of `aggregate`'s created/closed flow — a time entry is not opened
+    # and closed — so a tag with no dimension has nothing to ask for, and answering the empty
+    # result says that more honestly than inventing a series.
+    def time_entry_result(scope, context, source)
+      diagnostics = RedmineReporterDashboards::Liquid::RenderContext.from(context)&.diagnostics
+
+      unless source == :time_entries
+        diagnostics&.degrade(:aggregation_source_unsupported, source: source.to_s,
+                                                             tag: 'sql_aggregate')
+        Rails.logger.warn("[sql_aggregate] no aggregator for a #{source} scope")
+        return nil
+      end
+
+      group_by = str_param(@raw_params['group_by'], context)
+      if group_by.strip.empty?
+        diagnostics&.degrade(:aggregation_group_by_required, source: source.to_s)
+        Rails.logger.warn('[sql_aggregate] a time-entry aggregation needs group_by')
+        return nil
+      end
+
+      RedmineReporterDashboards::Aggregation::TimeEntryAggregator.breakdown(
+        scope,
+        group_by: group_by,
+        measure: str_param(@raw_params['measure'], context,
+                           default: RedmineReporterDashboards::Aggregation::TimeEntryAggregator::DEFAULT_MEASURE),
+        sort: str_param(@raw_params['sort'], context, default: 'count'),
+        limit: int_param(@raw_params['limit'], context, default: 0),
+        other_label: str_param(@raw_params['other_label'], context,
+                               default: RedmineReporterDashboards::Aggregation::TimeEntryAggregator::DEFAULT_OTHER_LABEL),
+        empty_label: str_param(@raw_params['empty_label'], context, default: nil),
+        logger: Rails.logger,
+        # THE AUTHOR SEES THE REFUSAL TOO. A mistyped `group_by` used to answer the empty
+        # result with the reason only in the server log — the same finding an independent
+        # review raised against increment 1, one layer down (INV-4).
+        diagnostics: diagnostics
+      )
+    end
 
     # Scope resolution (resolve_scope, resolve_query) lives in
     # RedmineReporterDashboards::Liquid::ScopeBinding, shared with {% version_rollup %}.

@@ -99,6 +99,55 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
+**S-17 · The degradation panel is the one user-facing surface with no locale keys at all,
+and every code added since T-19 has quietly widened the gap. NOT a T-31 defect — T-31
+inherited it and added five more codes to it. Owner: a small task of its own, before T-26
+flips the last gate.** `_degradations.html.erb` localises its heading
+(`label_reporter_preview_degradations`) and then prints `degradation.to_s` — a raw symbol and
+an English sentence built in `lib/`:
+
+    aggregation_dimension_unknown: group_by: "activty" is not a time-entry dimension
+
+Nine locale files hold 192 keys each and not one of them is a degradation code. CLAUDE.md §10
+forbids a hardcoded user-facing string in a view; this is the letter of that rule kept
+(`t.o_s` is not a literal in the ERB) and its purpose missed. A Dutch or Russian author reads
+English, and the wording is decided in a layer that has no business owning copy.
+
+**Why it is recorded rather than fixed here.** It is one key per code across nine files plus
+a `detail` that has to become interpolation data rather than prose — a change touching every
+degrade call site in the plugin, which is a second purpose for T-31 (R-02, CLAUDE.md §11.5).
+The shape of the fix is settled by the existing pattern: a
+`reporter_dashboards.degradation.<code>` key with the `data` hash as interpolation, the raw
+code kept as a fallback so an unknown code from a newer install still prints something.
+
+**S-16 · `SUM` over a row-duplicating join over-counts, and no `DISTINCT` can fix it.
+KNOWN LIMIT of T-31's time-entry aggregator, recorded rather than left to be found. Not a
+blocker today; it becomes one the moment a `has_many` reaches a time-entry scope.** Measured
+on PostgreSQL 16 and MariaDB 10.11 (2026-08-08) over the T-31 fixture with a deliberately
+tripling join:
+
+    scope.joins('INNER JOIN roles rrd_dup ON 1=1')   # 3 roles -> every row x3
+    measure: count  ->  correct        (COUNT(DISTINCT time_entries.id))
+    measure: hours  ->  exactly 3x    (SUM(time_entries.hours))
+
+`COUNT(DISTINCT …)` is why the counted measure survives. `SUM` has no equivalent:
+`SUM(DISTINCT hours)` would collapse two genuinely separate entries that logged the same
+number of hours, which is worse than the over-count. The correct fix is a derived table
+(`SUM` over `SELECT DISTINCT id, hours FROM …`), which is a design change and outside T-31's
+`Accept:` list — so it is reported, not absorbed (CLAUDE.md §11.5).
+
+**Why it does not bite today, and what would change that.** Every scope reaching the module
+comes through `Reporting::ReportScope`: either `TimeEntry.visible` or
+`TimeEntryQuery#base_scope`. Redmine's own time-entry filters join `belongs_to`
+associations — one row each — and build custom-field conditions as `IN (SELECT …)`
+subqueries, so none of them duplicates. **This is reasoning from the core source, not a
+measurement of every filter**, which is precisely why the suite now asserts BOTH halves over
+the tripling join: the day a `has_many` join arrives, `spec/adapter/time_entry_aggregator_spec.rb`
+says which measure moved instead of a report quietly tripling somebody's timesheet.
+
+**Owner:** whoever adds a filter or a dimension that needs a `has_many`. The two examples are
+the tripwire, and this entry is the answer they should read.
+
 **S-15 · The scheduler rendered a time-entry report over the ISSUE scope and mailed the
 issue count as a success. FIXED in T-31 increment 1's review round; recorded because the
 shape is general.** Found by a fresh-subagent review of `289fc71`, measured end to end:
@@ -2633,8 +2682,16 @@ overstated it; see §Findings S-13's closing note):*
 7. **IT RUNS ON ALL THREE ENGINES, AND THAT IS A HARD REQUIREMENT.** The oracle comparison
    lives in `spec/adapter/`, which the `adapter` CI job already executes against PostgreSQL,
    MySQL 8 and MariaDB 11. PostgreSQL-only would be finding **S-9**'s shape all over again, and
-   it would specifically miss clause 5 — the engine the defect lives on is the one a local run
-   in this container cannot install.
+   it would specifically miss clause 5.
+
+   **The parenthetical that used to close this clause — *"the engine the defect lives on is the
+   one a local run in this container cannot install"* — was FALSE and is deleted.** MariaDB
+   installs here in one apt command and D-1 reproduces on it in seconds; HANDOVER §1 now
+   carries the recipe and the measurement. Delivered 2026-08-08 against **PostgreSQL 16 and
+   MariaDB 10.11 locally**, both green on the whole of `spec/adapter` and on the pinned corpus.
+   **MySQL 8 remains CI's** — the two Debian packages conflict (HANDOVER §4) — so that third
+   cell is `UNVERIFIED` locally and verified by the `adapter (MySQL 8)` job, which runs this
+   directory unchanged.
 8. **Time-entry VISIBILITY is a different rule from issue visibility, and the narrowing is
    VISIBLE rather than silent** — see §Findings **S-14**, which the curator settled on
    2026-08-08. `TimeEntry.visible_condition` reads `Role#time_entries_visibility`, so an actor

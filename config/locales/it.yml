@@ -121,7 +121,7 @@ it:
   label_reporter_template_failure_document: "Genera un documento di errore"
   label_reporter_preview_pdf: "Anteprima PDF"
   label_reporter_preview_html: "Anteprima HTML"
-  label_reporter_preview_degradations: "Il motore ha segnalato queste limitazioni"
+  label_reporter_preview_degradations: "Alcune parti di questo report non sono state prodotte come richiesto"
   label_reporter_report_failed_template: "Non è stato possibile generare questo modello"
   label_reporter_report_failed_engine: "Il motore di rendering non è riuscito a produrre questo documento"
   label_reporter_report_refused: "Questa esportazione è stata rifiutata"

@@ -121,7 +121,7 @@ en:
   label_reporter_template_failure_document: "Produce a failure document"
   label_reporter_preview_pdf: "PDF preview"
   label_reporter_preview_html: "HTML preview"
-  label_reporter_preview_degradations: "The engine reported these degradations"
+  label_reporter_preview_degradations: "Parts of this report could not be produced as asked"
   label_reporter_report_failed_template: "This template could not be rendered"
   label_reporter_report_failed_engine: "The render engine could not produce this document"
   label_reporter_report_refused: "This export was refused"

@@ -1444,6 +1444,28 @@ CRUD, preview and permission set instead of a parallel world of each, and one re
 crosstabs, drill-through, completeness, caps — over both sources. The vocabulary is shared; the
 queries and the calculators are not (see the correction above).
 
+**AS BUILT (T-31, 2026-08-08).** `Aggregation::TimeEntryAggregator` is the owned calculator. One
+entry point, `breakdown`, answering `QueryAggregator`'s `single_result` keys exactly — verified
+against a real call rather than against a copied list, so the vocabulary claim above is a test and
+not a promise.
+
+| | |
+|---|---|
+| **Unit of count** | `COUNT(DISTINCT time_entries.id)`, named as a constant so the difference from the kernel's `DISTINCT issues.id` is greppable |
+| **Measures** | `hours` → `SUM(time_entries.hours)` (default) · `count` → the distinct entry count |
+| **Dimensions** | four on `time_entries` — `activity`, `user`, `project`, `issue`, of which the first two the issue kernel does not have at all — and seven on `issues`: `tracker`, `status`, `priority`, `author`, `assignee`, `version`, `category` |
+| **The issues join is ASKED ABOUT** | the seven issue dimensions need `TimeEntryQuery#base_scope`'s `left_join_issue`. `applicable?` reads the statement rather than assuming, and refuses **before issuing anything** — the `rescue` behind it is a backstop, not the mechanism (HANDOVER §1: forcing the guard true left every example green) |
+| **Every grouped aggregate is read POSITIONALLY** | `Accept:` clause 5. One `group`, one `pluck`, no `.sum`/`.average`/`.count` on a grouped relation anywhere — `spec/aggregation/time_entry_aggregator_source_spec.rb` asserts it of the module's own source and a double asserts the positions are not swapped |
+| **Refusals are VISIBLE** | a `diagnostics:` port, duck-typed on `#degrade` so the aggregation layer names no Liquid class. `aggregation_dimension_unknown`, `aggregation_measure_unknown`, `aggregation_dimension_unavailable`, plus the tag's `aggregation_group_by_required` and `aggregation_source_unsupported` |
+| **Statement count is fixed** | three per hours breakdown (grouped read, one label lookup for all buckets, the scalar total), two per count breakdown — a counted axis is totalled from its buckets exactly as `QueryAggregator.result_total` does it. Independent of the bucket count (FR-48) |
+| **Known limit** | `SUM` over a row-duplicating join over-counts and no `DISTINCT` fixes it — §Findings **S-16**, asserted in both directions over a deliberately tripling join |
+
+**No `group_by`, no aggregation.** There is no time-entry equivalent of `aggregate`'s
+created/closed flow — a time entry is not opened and closed — so `{% sql_aggregate %}` with no
+dimension over a time-entry scope answers the empty result and degrades
+`aggregation_group_by_required`. That is a refusal of the ARGUMENT, and it is deliberately narrower
+than increment 1's refusal of the whole SOURCE.
+
 ### 7b.5 Ad-hoc report mail — same capability, controlled
 
 Today `find_issues` is `Issue.where(id: params[:issue_ids])` with **no visibility check**, and

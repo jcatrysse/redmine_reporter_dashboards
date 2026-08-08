@@ -2,6 +2,11 @@
 
 require_relative 'aggregation/query_aggregator'
 require_relative 'aggregation/drill_through'
+# T-31's owned time-entry aggregator. NOT a kernel file — it is not in
+# `spec/golden/baseline.rb`'s `KERNEL_FILES`, carries no byte-identity obligation, and
+# declares its own namespace properly (`RedmineReporterDashboards::Aggregation::…`) rather
+# than the legacy `SqlAggregation`, because nothing freezes it.
+require_relative 'aggregation/time_entry_aggregator'
 
 module RedmineReporterDashboards
   # The namespace assignment T-08 asks for, and nothing else.
@@ -36,5 +41,7 @@ module RedmineReporterDashboards
   module Aggregation
     QueryAggregator = ::SqlAggregation::QueryAggregator
     DrillThrough    = ::SqlAggregation::DrillThrough
+    # `TimeEntryAggregator` needs no assignment: it is declared inside this module by its
+    # own file, which is what a file NOT under a byte-identity gate is free to do.
   end
 end

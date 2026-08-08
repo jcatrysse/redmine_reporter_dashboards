@@ -86,6 +86,7 @@ module RrdAdapterHarness
   PROJECT_SWEEP    = 3 # active; holds the one-issue-per-day calendar sweep
   PROJECT_WIDE     = 4 # active; holds the cap-boundary fixture (see seed_wide!)
   PROJECT_BENCH    = 5 # active; empty unless seed_bench! is called (T-03, see below)
+  PROJECT_HOURS    = 6 # active; T-31's time-entry fixture (see seed_hours!)
 
   CF_DEPARTMENT = 10 # list,  visible everywhere
   CF_POINTS     = 11 # int,   visible everywhere
@@ -171,6 +172,57 @@ module RrdAdapterHarness
   # that is the order of magnitude a real list custom field has, and the blank because
   # the completeness workload has to have something to count as unfilled.
   BENCH_DEPARTMENTS = ['Sales', 'Ops', 'Support', 'Finance', 'Legal', 'Field', ''].freeze
+
+  # ------------------------------------------------------------------
+  # T-31's time-entry fixture. ITS OWN PROJECT, for the reason PROJECT_WIDE and
+  # PROJECT_BENCH have their own: every recorded corpus value is read off a scope
+  # filtered to MAIN, ARCHIVED, SWEEP or WIDE (spec/golden/corpus_generator.rb:47-64),
+  # so hours added THERE would move 176 frozen numbers and hours added here move none.
+  # The corpus verification is what proves that rather than this comment.
+  #
+  # Its memberships reuse roles the actors ALREADY hold elsewhere, and that is not a
+  # convenience: `role_ids_for` is the union over ALL of an actor's memberships, so
+  # granting the reporter a manager role here would make CF_SALARY visible to them on
+  # MAIN and change the corpus by a route nothing in this file would show.
+  #
+  #   manager    ROLE_MANAGER   — may see hours here
+  #   developer  ROLE_DEVELOPER — may see hours here
+  #   reporter   no membership  — sees none of them, which is the INV-1 case
+  # ------------------------------------------------------------------
+  ACTIVITY_DESIGN      = 20
+  ACTIVITY_DEVELOPMENT = 21
+  ACTIVITY_UNUSED      = 22 # no entry carries it — so it must never appear as a bucket
+
+  HOURS_ISSUE_BUG     = 6 # tracker 1, STATUS_NEW,    priority 2, version 2, category 1
+  HOURS_ISSUE_FEATURE = 7 # tracker 2, STATUS_CLOSED, priority 3, no version, no category
+
+  # Six entries, and every one of them is carrying a case:
+  #
+  #   0.1 + 0.2   a float sum that is 0.30000000000000004 — the reason `number` rounds,
+  #               and the reason the Ruby oracle must round the same way rather than
+  #               comparing raw floats. THESE TWO ROWS ARE THE ONLY MEMBERS OF THEIR
+  #               ACTIVITY BUCKET, and that is deliberate: MEASURED, the first version put
+  #               the 4.0 row on ACTIVITY_DESIGN too, and 0.1 + 0.2 + 4.0 is exactly
+  #               representable — so deleting `number`'s `.round(2)` left the whole suite
+  #               green. A rounding guard needs a bucket whose sum is NOT representable.
+  #   nil activity   the `(none)` bucket on an own-table dimension
+  #   nil issue_id   the `(none)` bucket on an own-table dimension AND null issue columns
+  #                  under the LEFT OUTER JOIN, which is what separates a left join from
+  #                  a filter
+  #   two users      so `group_by: user` has more than one bucket
+  #   two issues     with different trackers, statuses, priorities, versions, categories
+  #                  and assignees, so every :issue dimension has at least two buckets
+  #
+  # `[issue_id, user_id, activity_id, hours]`, written out rather than generated: which
+  # row carries which case is the whole point of the fixture.
+  HOURS_ENTRIES = [
+    [HOURS_ISSUE_BUG,     ACTORS[:manager],   ACTIVITY_DESIGN,      0.1],
+    [HOURS_ISSUE_BUG,     ACTORS[:manager],   ACTIVITY_DESIGN,      0.2],
+    [HOURS_ISSUE_BUG,     ACTORS[:developer], ACTIVITY_DEVELOPMENT, 1.25],
+    [HOURS_ISSUE_FEATURE, ACTORS[:developer], ACTIVITY_DEVELOPMENT, 2.5],
+    [HOURS_ISSUE_FEATURE, ACTORS[:manager],   nil,                  0.75],
+    [nil,                 ACTORS[:manager],   ACTIVITY_DEVELOPMENT, 4.0]
+  ].freeze
 
   class << self
     def url
@@ -404,6 +456,16 @@ module RrdAdapterHarness
         belongs_to :project, optional: true
         belongs_to :user, optional: true
         belongs_to :activity, class_name: 'TimeEntryActivity', optional: true
+        # T-31. `belongs_to :issue` and `left_join_issue` are BOTH Redmine's own
+        # (`app/models/time_entry.rb`), and `TimeEntryAggregator`'s :issue dimensions exist
+        # only because `TimeEntryQuery#base_scope` calls the scope. Spelled as the raw LEFT
+        # OUTER JOIN core spells it, because `joined_to_issues?` reads the statement's text
+        # and an association join would be a different string — a stand-in that produced
+        # `INNER JOIN` would turn the join into a filter and quietly drop the no-issue entry.
+        belongs_to :issue, optional: true
+        scope :left_join_issue, -> {
+          joins('LEFT OUTER JOIN issues ON issues.id = time_entries.issue_id')
+        }
 
         def self.visible_condition(user)
           return '1=0' if user.nil?
@@ -697,7 +759,8 @@ module RrdAdapterHarness
         { id: PROJECT_ARCHIVED, name: 'Archived', status: 9 },
         { id: PROJECT_SWEEP,    name: 'Sweep',    status: 1 },
         { id: PROJECT_WIDE,     name: 'Wide',     status: 1 },
-        { id: PROJECT_BENCH,    name: 'Bench',    status: 1 }
+        { id: PROJECT_BENCH,    name: 'Bench',    status: 1 },
+        { id: PROJECT_HOURS,    name: 'Hours',    status: 1 }
       ])
 
       ::IssueStatus.insert_all!([
@@ -708,11 +771,21 @@ module RrdAdapterHarness
       ])
 
       ::Tracker.insert_all!([{ id: 1, name: 'Bug' }, { id: 2, name: 'Feature' }])
-      ::IssueCategory.insert_all!([{ id: 1, name: 'Backend', project_id: PROJECT_MAIN }])
+      ::IssueCategory.insert_all!([{ id: 1, name: 'Backend', project_id: PROJECT_MAIN },
+                                   { id: 2, name: 'Frontend', project_id: PROJECT_HOURS }])
       ::IssuePriority.insert_all!([
         { id: 1, name: 'Low',    type: 'IssuePriority' },
         { id: 2, name: 'Normal', type: 'IssuePriority' },
         { id: 3, name: 'High',   type: 'IssuePriority' }
+      ])
+      # T-31. `enumerations` is one table under Redmine's STI, so these share it with the
+      # priorities above — and their ids are deliberately far from 1..3, because the harness's
+      # `TimeEntryActivity` stand-in carries no `type` default scope and a colliding id would
+      # let an hours-by-activity axis borrow a priority's name and still look right.
+      ::TimeEntryActivity.insert_all!([
+        { id: ACTIVITY_DESIGN,      name: 'Design',      type: 'TimeEntryActivity' },
+        { id: ACTIVITY_DEVELOPMENT, name: 'Development', type: 'TimeEntryActivity' },
+        { id: ACTIVITY_UNUSED,      name: 'Unused',      type: 'TimeEntryActivity' }
       ])
       ::User.insert_all!([
         { id: ACTORS[:manager],   login: 'alice', firstname: 'Alice', lastname: 'Adams' },
@@ -723,7 +796,8 @@ module RrdAdapterHarness
       seed_memberships!
       ::Version.insert_all!([
         { id: 1, project_id: PROJECT_MAIN, name: 'v1.0', effective_date: today + 30 },
-        { id: 2, project_id: PROJECT_MAIN, name: 'v2.0', effective_date: today + 90 }
+        { id: 2, project_id: PROJECT_MAIN, name: 'v2.0', effective_date: today + 90 },
+        { id: 3, project_id: PROJECT_HOURS, name: 'sprint 1', effective_date: today + 14 }
       ])
 
       # insert_all! requires every row to carry the same keys, so the columns that
@@ -756,6 +830,43 @@ module RrdAdapterHarness
       seed_archived_project!
       seed_sweep!
       seed_wide!
+      seed_hours!
+    end
+
+    # T-31's fixture. Two issues and HOURS_ENTRIES, in PROJECT_HOURS — see the constants for
+    # which case each row carries and why the project is its own.
+    def seed_hours!
+      ::Issue.insert_all!([
+        { id: HOURS_ISSUE_BUG, project_id: PROJECT_HOURS, tracker_id: 1, status_id: STATUS_NEW,
+          priority_id: 2, category_id: 2, fixed_version_id: 3, author_id: ACTORS[:manager],
+          assigned_to_id: ACTORS[:developer], parent_id: nil, done_ratio: 0,
+          subject: 'billable bug', description: nil, estimated_hours: 1.0,
+          start_date: today - 10, due_date: nil, created_on: at(10), updated_on: at(10),
+          closed_on: nil },
+        { id: HOURS_ISSUE_FEATURE, project_id: PROJECT_HOURS, tracker_id: 2,
+          status_id: STATUS_CLOSED, priority_id: 3, category_id: nil, fixed_version_id: nil,
+          author_id: ACTORS[:developer], assigned_to_id: nil, parent_id: nil, done_ratio: 100,
+          subject: 'billable feature', description: nil, estimated_hours: 3.0,
+          start_date: today - 20, due_date: nil, created_on: at(20), updated_on: at(6),
+          closed_on: at(6) }
+      ])
+
+      ::TimeEntry.insert_all!(HOURS_ENTRIES.each_with_index.map do |(issue_id, user_id, activity_id, hours), i|
+        { project_id: PROJECT_HOURS, issue_id: issue_id, user_id: user_id,
+          activity_id: activity_id, hours: hours, spent_on: today - i,
+          comments: "hours #{i}" }
+      end)
+    end
+
+    # The scope T-31's oracle runs against: Redmine's `TimeEntry.visible` plus the issues
+    # join `TimeEntryQuery#base_scope` supplies, bounded to PROJECT_HOURS and the ARCHIVED
+    # project — the latter so the 40 invisible hours seeded there have to be excluded by the
+    # visibility condition rather than by the project filter. `joined: false` is the other
+    # shape a caller may hold: `TimeEntry.visible` on its own, with no issues join at all.
+    def hours_scope(actor_name, joined: true)
+      scope = ::TimeEntry.visible(actor(actor_name))
+                         .where(project_id: [PROJECT_HOURS, PROJECT_ARCHIVED])
+      joined ? scope.left_join_issue : scope
     end
 
     # Three roles, four actors, six memberships. Written out one row at a time
@@ -787,7 +898,13 @@ module RrdAdapterHarness
         # itself. PROJECT_BENCH holds no issues in any corpus scope, so no recorded
         # number moves; the corpus verification is what proves that rather than this
         # comment.
-        [8, ACTORS[:manager],   PROJECT_BENCH, ROLE_MANAGER]
+        [8, ACTORS[:manager],   PROJECT_BENCH, ROLE_MANAGER],
+        # T-31's hours project. The roles are ones these two actors ALREADY hold elsewhere —
+        # see PROJECT_HOURS's own note for why that is load-bearing rather than tidy: the
+        # entitlement subquery for CF_SALARY is built from `role_ids_for`, the union over ALL
+        # of an actor's memberships, so a NEW role here would move recorded corpus values.
+        [9,  ACTORS[:manager],   PROJECT_HOURS, ROLE_MANAGER],
+        [10, ACTORS[:developer], PROJECT_HOURS, ROLE_DEVELOPER]
       ]
 
       ::Member.insert_all!(memberships.map { |id, uid, pid, _rid| { id: id, user_id: uid, project_id: pid } })
@@ -1172,6 +1289,9 @@ end
 if RrdAdapterHarness.configured?
   require 'active_record'
   require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
+  # T-31's owned aggregator. Loaded directly rather than through `aggregation.rb`, which also
+  # pulls in `drill_through.rb` and assigns namespace constants a booted Redmine owns.
+  require_relative '../../lib/redmine_reporter_dashboards/aggregation/time_entry_aggregator'
 
   RSpec.configure do |config|
     config.before(:suite) do

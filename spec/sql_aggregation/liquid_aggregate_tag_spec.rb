@@ -7,7 +7,14 @@ require_relative '../spec_helper'
 
 Time.zone ||= 'UTC'
 
-unless defined?(ActiveRecord)
+# PER-CONSTANT, NOT `unless defined?(ActiveRecord)`. MEASURED: T-31 added a DB-less spec
+# that defines only `ActiveRecord::StatementInvalid`, and on the seeds where it loaded first
+# the coarse guard here saw `ActiveRecord` already defined and skipped — leaving
+# `RecordNotFound` undefined and this file red for a reason nothing in its own diff showed.
+# A guard over a namespace cannot stand in for a guard over what is inside it.
+module ActiveRecord; end unless defined?(ActiveRecord)
+
+unless defined?(ActiveRecord::RecordNotFound)
   module ActiveRecord
     class RecordNotFound < StandardError; end
   end
@@ -62,6 +69,10 @@ unless defined?(Rails)
 end
 
 require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
+# T-31 increment 2: the tag DISPATCHES a time-entry scope to this module, so it has to be
+# loadable here. Required directly and not through `aggregation.rb`, which also assigns
+# namespace constants a booted Redmine owns — the same reason spec/adapter does it this way.
+require_relative '../../lib/redmine_reporter_dashboards/aggregation/time_entry_aggregator'
 require_relative '../../lib/sql_aggregation/liquid_aggregate_tag'
 # T-07: these examples exercise the LEGACY resolution path — a tag renders with no
 # RenderContext in its registers, so Liquid::ScopeBinding falls back to
@@ -386,8 +397,14 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   end
 
   # ------------------------------------------------------------------
-  # T-31 / §Findings S-13 — this kernel counts issues, so it refuses anything else
+  # T-31 / §Findings S-13 — this kernel counts issues, so a time-entry scope is DISPATCHED
   # ------------------------------------------------------------------
+  #
+  # INCREMENT 1 REFUSED HERE; INCREMENT 2 DISPATCHES. The refusal was never the goal — it was
+  # the safe half of the fix, shipped first because answering with the issue kernel is the
+  # defect. What has not changed, and is what every example below is really about, is that
+  # `QueryAggregator` NEVER SEES A TIME-ENTRY SCOPE. What has changed is where it goes
+  # instead: `Aggregation::TimeEntryAggregator`, which counts time entries and sums hours.
   #
   # The measurement that forced this: handed a `TimeEntryQuery#base_scope`, the aggregator
   # does NOT raise. That query calls `.left_join_issue`, so every issue column resolves and
@@ -403,14 +420,47 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
                           render_context })
     end
 
-    it 'does not aggregate at all when the scope is over time entries' do
+    def codes(ctx)
+      render_context = ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
+      # `to_a` answers Hashes — that is the serialised form the diagnostics panel reads, so
+      # asserting on it is asserting on what a reader actually sees.
+      render_context.diagnostics.to_a.map { |d| (d['code'] || d[:code]).to_s }
+    end
+
+    # THE INVARIANT THAT SURVIVED BOTH INCREMENTS. `QueryAggregator` counts
+    # `DISTINCT issues.id`; it must not be handed a relation over another table under any
+    # markup, with or without a dimension.
+    it 'never reaches the issue kernel when the scope is over time entries' do
       expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
       expect(SqlAggregation::QueryAggregator).not_to receive(:breakdown)
       expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+      allow(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown).and_return(dimension_result)
 
       build_tag('assign_to: stats').render(owned_context(:time_entries))
+      build_tag('group_by: activity, assign_to: stats').render(owned_context(:time_entries))
     end
 
+    # AND IT GOES TO THE OWNED AGGREGATOR, with the tag's arguments translated. Asserted on
+    # the CALL and not only on the assignment: a dispatch that dropped `measure` would still
+    # assign a plausible result.
+    it 'dispatches a dimensioned aggregation to the time-entry aggregator' do
+      ctx = owned_context(:time_entries)
+      expect(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown)
+        .with(scope, hash_including(group_by: 'activity', measure: 'count', limit: 5,
+                                    sort: 'label'))
+        .and_return(dimension_result)
+
+      build_tag('group_by: activity, measure: count, sort: label, limit: 5, assign_to: stats')
+        .render(ctx)
+
+      expect(ctx.scopes.last['stats']).to eq(dimension_result)
+    end
+
+    # A TIME-ENTRY AGGREGATION WITH NO DIMENSION IS STILL A REFUSAL. There is no time-entry
+    # equivalent of `aggregate`'s created/closed flow — a time entry is not opened and closed
+    # — so a tag with no dimension has nothing to ask for.
     it 'assigns the empty result rather than leaving the variable undefined' do
       ctx = owned_context(:time_entries)
       build_tag('assign_to: stats').render(ctx)
@@ -421,18 +471,55 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
 
     # VISIBLE, NOT SILENT (INV-4). A template that renders nothing and says nothing is the
     # same defect one layer up: the author has no way to learn why their figures are blank.
-    it 'records a degradation naming the source it refused' do
+    # The code is NARROWER than increment 1's `aggregation_source_unsupported`, and that is
+    # the improvement — the source is supported now; the ARGUMENT is what is missing.
+    it 'records a degradation naming the argument it needs' do
       ctx = owned_context(:time_entries)
-      render_context = ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
-
       build_tag('assign_to: stats').render(ctx)
 
-      # `to_a` answers Hashes — that is the serialised form the diagnostics panel reads,
-      # so asserting on it is asserting on what a reader actually sees.
-      recorded = render_context.diagnostics.to_a
-      expect(recorded.map { |d| d['code'] || d[:code] }.map(&:to_s))
-        .to include('aggregation_source_unsupported')
-      expect(recorded.to_s).to include('time_entries')
+      expect(codes(ctx)).to include('aggregation_group_by_required')
+      expect(ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
+               .diagnostics.to_a.to_s).to include('time_entries')
+    end
+
+    # AND THE AGGREGATOR'S OWN REFUSALS REACH THE AUTHOR TOO. MUTATION-TESTED and this is
+    # why it exists: replacing the `diagnostics:` argument with `nil` left every other
+    # example green, so the wiring that carries a mistyped `group_by` back to the page was
+    # provably dead. `activty` is refused by the module, not by the tag — a different layer,
+    # the same author, one panel (INV-4).
+    it 'carries the aggregator\'s own refusal back to the author' do
+      ctx = owned_context(:time_entries)
+
+      build_tag('group_by: activty, assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).to include('aggregation_dimension_unknown')
+      expect(ctx.scopes.last['stats']).to eq(described_class.new('sql_aggregate', '', nil)
+                                                            .send(:empty_result))
+    end
+
+    it 'carries a refused MEASURE back too, which is a different code' do
+      ctx = owned_context(:time_entries)
+
+      build_tag('group_by: activity, measure: median, assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).to include('aggregation_measure_unknown')
+    end
+
+    # AND A SOURCE WITH NO AGGREGATOR AT ALL STILL FAILS CLOSED. Unreachable through
+    # `RenderContext` today, whose `SOURCES` is a closed set of two — which is exactly why it
+    # is driven here through `report_source`: §7 rule 5 makes "an install one minor behind
+    # reading a newer row" routine, and the third source must land on the empty result and a
+    # degradation rather than on whichever aggregator happens to be last in the method.
+    it 'refuses a source it has no aggregator for, visibly' do
+      ctx = owned_context(:time_entries)
+      allow(RedmineReporterDashboards::Liquid::ScopeBinding)
+        .to receive(:report_source).and_return(:invoices)
+
+      build_tag('group_by: activity, assign_to: stats').render(ctx)
+
+      expect(ctx.scopes.last['stats']).to eq(described_class.new('sql_aggregate', '', nil)
+                                                            .send(:empty_result))
+      expect(codes(ctx)).to include('aggregation_source_unsupported')
     end
 
     # AND THE ISSUE PATH IS UNTOUCHED. Without this the guard could be refusing
