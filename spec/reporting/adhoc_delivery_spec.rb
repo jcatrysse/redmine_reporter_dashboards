@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
 require 'yaml'
-require 'spec_helper'
+
+# `require_relative`, for the reason spelled out in `mail_policy_spec.rb`: a bare require
+# of anything under this plugin resolves locally and raises `LoadError` in CI.
+require_relative '../spec_helper'
 
 # T-32 — the structural claims `AdhocDelivery` and migration 009 make about themselves.
 #
@@ -128,6 +131,29 @@ RSpec.describe 'the ad-hoc mail layer, structurally' do
 
         expect(missing).to eq([])
       end
+    end
+  end
+
+  # THE "passes locally, fails in CI" CLASS, made mechanical.
+  #
+  # `mail_policy_spec.rb` shipped with `require 'redmine_reporter_dashboards/…'`. It
+  # resolved on this machine — the checkout puts the plugin's `lib` on `$LOAD_PATH` — and
+  # raised `LoadError` on all four CI `rspec` jobs, aborting the file before a single
+  # example ran. Nothing local could have caught it, which is exactly why the check has to
+  # be on the SHAPE of the require rather than on the run.
+  #
+  # CLAUDE.md §3 names this class in as many words for the reviewer role; this is the
+  # cheapest possible version of it.
+  describe 'no spec depends on the load path to find this plugin' do
+    it 'requires plugin files relatively, everywhere under spec/' do
+      offenders = Dir[File.join(plugin_root, 'spec/**/*.rb')].sort.filter_map do |path|
+        line = File.read(path, encoding: 'UTF-8').lines.find do |l|
+          l.match?(/^\s*require\s+['"]redmine_reporter_dashboards/)
+        end
+        "#{path.sub("#{plugin_root}/", '')}: #{line.strip}" if line
+      end
+
+      expect(offenders).to eq([])
     end
   end
 

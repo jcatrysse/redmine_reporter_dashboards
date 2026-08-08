@@ -1,7 +1,15 @@
 # frozen_string_literal: true
 
-require 'spec_helper'
-require 'redmine_reporter_dashboards/reporting/mail_policy'
+# `require_relative`, LIKE EVERY SIBLING IN THIS DIRECTORY, and a bare `require` here
+# turned all four CI `rspec` jobs red while passing locally on every Redmine branch.
+#
+# The local checkout happens to put `<plugin>/lib` on `$LOAD_PATH`, so
+# `require 'redmine_reporter_dashboards/reporting/mail_policy'` resolved here and nowhere
+# else; CI checks the plugin out into `plugin/` and the same line is a `LoadError` that
+# aborts the whole file before one example runs. `require_relative` resolves against THIS
+# FILE and cannot depend on the load path at all.
+require_relative '../spec_helper'
+require_relative '../../lib/redmine_reporter_dashboards/reporting/mail_policy'
 
 # T-32 / FR-61 — who this installation will put a report in front of.
 #
