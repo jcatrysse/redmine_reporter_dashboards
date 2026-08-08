@@ -54,6 +54,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/occurr
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/runner'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/diagnostic'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/exchange'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/time_entry_visibility'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/failure_document'
 # T-25's delivery. It is required AFTER report_run and the scheduler because it names both,

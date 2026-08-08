@@ -41,6 +41,32 @@ module ReporterDashboards
       end
     end
 
+    # T-31. One picker for both sources, from the model's own closed list.
+    def reporter_template_source_options
+      RedmineReporterDashboards::Template::SOURCES.map do |source|
+        [l(:"label_reporter_template_source_#{source}"), source]
+      end
+    end
+
+    # §Findings **S-14** — the narrowing is VISIBLE, never silent.
+    #
+    # `TimeEntry.visible` branches on `Role#time_entries_visibility`, so an actor whose role
+    # says `own` gets their own hours and nothing else. The report is correct; what would be
+    # wrong is letting them read a smaller, entirely believable project total without
+    # knowing it is their own timesheet. Same shape as §9b.2's "Preview of 50 of 1 284
+    # issues": the bound is stated rather than applied quietly.
+    #
+    # Answers nil for an issue template and for an actor who sees everything, so a view can
+    # render it unconditionally.
+    def reporter_time_entry_visibility_notice(template, user, project)
+      return nil unless template.respond_to?(:source) && template.source.to_s == 'time_entries'
+
+      case RedmineReporterDashboards::Reporting::TimeEntryVisibility.state(user, project)
+      when :own then l(:text_reporter_time_entries_own_only)
+      when :none then l(:text_reporter_time_entries_not_visible)
+      end
+    end
+
     def reporter_template_orientation_options
       RedmineReporterDashboards::Template::ORIENTATIONS.map do |orientation|
         [l(:"label_reporter_template_orientation_#{orientation}"), orientation]

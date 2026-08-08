@@ -50,8 +50,25 @@ module RedmineReporterDashboards
       # and the two never meet.
       OUTPUTS = %i[html pdf].freeze
 
+      # WHAT TABLE `scope` IS OVER, said rather than sniffed — T-31, and the reason it is
+      # here rather than derived is §Findings **S-13**.
+      #
+      # A `{% sql_aggregate %}` handed a TIME-ENTRY relation does not raise: the frozen
+      # kernel counts `DISTINCT issues.id`, and `TimeEntryQuery#base_scope` calls
+      # `.left_join_issue`, so the issue columns resolve and the tag reports issue counts
+      # under time-entry labels. Four entries over two issues came back as `2`.
+      #
+      # The obvious guard — ask the relation what model it is over — is worse than useless
+      # here. Every legacy-path scope is an issue scope and correctly needs no annotation,
+      # and the specs' scope doubles answer no `model`/`klass`/`table_name` at all, so a
+      # sniffing check would either raise on them or fail open on exactly the object it
+      # cannot identify. The producer KNOWS (`template.source` is a column), so it says so,
+      # and a consumer that cannot find a render context gets `:issues` — which is what the
+      # legacy path is, always.
+      SOURCES = %i[issues time_entries].freeze
+
       attr_reader :actor, :scope, :query, :correlation_id, :diagnostics, :budget, :batch,
-                  :charts, :output
+                  :charts, :output, :source
 
       # actor          the user the render is FOR. Required (INV-1).
       # scope          an ActiveRecord issue relation, already visibility-scoped by
@@ -81,15 +98,28 @@ module RedmineReporterDashboards
       #                a `<canvas>` or an `<svg>` (§6, and FR-34's "no engine-specific
       #                workaround in a template"). Defaults to `:html` because that is
       #                the preview an author sees while writing.
+      # source         `:issues` or `:time_entries` — which TABLE `scope` is over. Defaults
+      #                to `:issues` because that is what every caller predating T-31 holds
+      #                and what the legacy glue always produces. An unknown value is
+      #                REFUSED rather than coerced: a stored string selecting behaviour is
+      #                the shape T-25's review found reporting success while mailing the
+      #                wrong person's numbers, and the same argument applies to a scope
+      #                whose table nobody can name.
       def initialize(actor:, scope: nil, query: nil, correlation_id: nil,
                      diagnostics: nil, budget: nil, batch: nil, charts: nil,
-                     output: :html)
+                     output: :html, source: :issues)
         if actor.nil?
           raise ArgumentError,
                 'a RenderContext needs an actor (INV-1: never ambient User.current)'
         end
 
+        unless SOURCES.include?(source.to_sym)
+          raise ArgumentError,
+                "#{source.inspect} is not a report source. Known: #{SOURCES.inspect}"
+        end
+
         @actor = actor
+        @source = source.to_sym
         @scope = scope
         @query = query
         @correlation_id = correlation_id
@@ -154,7 +184,7 @@ module RedmineReporterDashboards
         self.class.new(actor: @actor, scope: @scope, query: @query,
                        correlation_id: @correlation_id, diagnostics: @diagnostics,
                        budget: @budget, batch: other_batch, charts: @charts,
-                       output: @output)
+                       output: @output, source: @source)
       end
 
       # The output binding is chosen by whoever is producing the document, and it is a
@@ -169,7 +199,7 @@ module RedmineReporterDashboards
         self.class.new(actor: @actor, scope: @scope, query: @query,
                        correlation_id: @correlation_id, diagnostics: @diagnostics,
                        budget: @budget, batch: @batch, charts: @charts,
-                       output: other_output)
+                       output: other_output, source: @source)
       end
 
       def with_budget(other_budget)
@@ -178,7 +208,7 @@ module RedmineReporterDashboards
                        budget: other_budget,
                        batch: Batch.new(actor: @actor, scope: @scope,
                                         diagnostics: @diagnostics, budget: other_budget),
-                       charts: @charts, output: @output)
+                       charts: @charts, output: @output, source: @source)
       end
 
       # The one register lookup the owned path performs. Returns nil when there is no
@@ -205,7 +235,8 @@ module RedmineReporterDashboards
 
       def to_s
         "#<RenderContext actor=#{actor_label} output=#{@output} " \
-          "scope=#{@scope ? 'yes' : 'nil'} query=#{@query ? "##{@query.id}" : 'nil'}>"
+          "scope=#{@scope ? 'yes' : 'nil'} source=#{@source} " \
+          "query=#{@query ? "##{@query.id}" : 'nil'}>"
       end
 
       # A login, never a name: this appears in log lines, and a display name is

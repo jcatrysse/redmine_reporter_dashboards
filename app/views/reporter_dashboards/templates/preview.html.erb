@@ -43,6 +43,12 @@
 <% end %>
 
 <div class="box">
+<%# §Findings S-14 — the narrowing is stated, never silent. Answers nil for an issue
+    template and for an actor who sees every hour in the project, so this is rendered
+    unconditionally rather than behind a branch a later edit can get wrong. %>
+<% if (rrd_notice = reporter_time_entry_visibility_notice(@template, User.current, @project)) %>
+  <p class="warning" id="reporter-time-entry-visibility"><%= rrd_notice %></p>
+<% end %>
   <h3><%= l(:label_reporter_preview_pdf) %></h3>
   <% if @diagnostic %>
     <%= render partial: 'diagnostics', locals: { diagnostic: @diagnostic } %>

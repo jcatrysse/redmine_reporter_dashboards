@@ -380,19 +380,48 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
     end
   end
 
-  describe 'a source this version cannot render' do
-    it 'refuses a time-entry template rather than reporting on issues' do
-      # T-22 built the column and T-31 gives it a scope. Between them the value can
-      # exist — an import can create one — and rendering it against the ISSUE scope
-      # would be a report about the wrong table that looks entirely correct.
+  describe 'a source outside the closed set' do
+    # T-31 REPLACED THIS EXAMPLE'S SUBJECT. It used to assert that a `time_entries`
+    # template was refused, because `source` was a column before it was a feature. Both
+    # sources render now — so what has to be refused is a value neither branch knows.
+    #
+    # `Template` validates `source` on save and that is NOT enough on its own:
+    # `update_columns` and `update_all` bypass validation and this plugin uses both, and §7
+    # rule 5 makes "an install one minor behind reading a newer row" routine. So the set is
+    # closed where the behaviour is chosen, and the `else` that would quietly report on
+    # issues does not exist.
+    it 'refuses a source it does not know rather than reporting on issues' do
       renderer = ReportRunSpecSupport::CountingRenderer.new
       outcome = run(scope: ReportRunSpecSupport::FakeScope.new(3), renderer: renderer,
-                    template: template(source: 'time_entries')).call
+                    template: template(source: 'invoices')).call
 
       expect(outcome).not_to be_ok
       expect(outcome.diagnostic.code).to eq(:unsupported_source)
-      expect(outcome.diagnostic.message).to include('T-31')
+      expect(outcome.diagnostic.message).to include('invoices')
+    end
+
+    it 'renders nothing at all for it, rather than a report about the wrong table' do
+      renderer = ReportRunSpecSupport::CountingRenderer.new
+      run(scope: ReportRunSpecSupport::FakeScope.new(3), renderer: renderer,
+          template: template(source: 'invoices')).call
+
       expect(renderer.calls).to eq(0)
+    end
+
+    # AND BOTH KNOWN SOURCES GET THROUGH. Without this the closed check could be refusing
+    # everything and the two examples above would still pass.
+    it 'renders a time-entry template, which T-31 made a supported source' do
+      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(3),
+                    template: template(source: 'time_entries')).call
+
+      expect(outcome).to be_ok
+    end
+
+    it 'renders an issue template, unchanged' do
+      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(3),
+                    template: template(source: 'issues')).call
+
+      expect(outcome).to be_ok
     end
   end
 
@@ -414,7 +443,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       # wrong answer that looks like a right one.
       expect do
         run(scope: nil, template: template(output: 'per_record')).call
-      end.to raise_error(ArgumentError, /per-record report needs an issue scope/)
+      end.to raise_error(ArgumentError, /per-record report needs a record scope/)
     end
   end
 end

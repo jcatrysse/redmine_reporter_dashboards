@@ -386,6 +386,74 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   end
 
   # ------------------------------------------------------------------
+  # T-31 / §Findings S-13 — this kernel counts issues, so it refuses anything else
+  # ------------------------------------------------------------------
+  #
+  # The measurement that forced this: handed a `TimeEntryQuery#base_scope`, the aggregator
+  # does NOT raise. That query calls `.left_join_issue`, so every issue column resolves and
+  # the tag answers `COUNT(DISTINCT issues.id)` under time-entry labels — four time entries
+  # over two issues came back as `2` in every bucket, and `spent_hours` answered nil. A
+  # wrong number under a right heading is the outcome this whole guard exists to prevent.
+  describe 'a scope over a table this kernel does not count' do
+    def owned_context(source)
+      render_context = RedmineReporterDashboards::Liquid::RenderContext.new(
+        actor: Object.new, scope: scope, source: source
+      )
+      build_context({}, { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY =>
+                          render_context })
+    end
+
+    it 'does not aggregate at all when the scope is over time entries' do
+      expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
+      expect(SqlAggregation::QueryAggregator).not_to receive(:breakdown)
+      expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
+
+      build_tag('assign_to: stats').render(owned_context(:time_entries))
+    end
+
+    it 'assigns the empty result rather than leaving the variable undefined' do
+      ctx = owned_context(:time_entries)
+      build_tag('assign_to: stats').render(ctx)
+
+      expect(ctx.scopes.last['stats']).to eq(described_class.new('sql_aggregate', '', nil)
+                                                            .send(:empty_result))
+    end
+
+    # VISIBLE, NOT SILENT (INV-4). A template that renders nothing and says nothing is the
+    # same defect one layer up: the author has no way to learn why their figures are blank.
+    it 'records a degradation naming the source it refused' do
+      ctx = owned_context(:time_entries)
+      render_context = ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
+
+      build_tag('assign_to: stats').render(ctx)
+
+      # `to_a` answers Hashes — that is the serialised form the diagnostics panel reads,
+      # so asserting on it is asserting on what a reader actually sees.
+      recorded = render_context.diagnostics.to_a
+      expect(recorded.map { |d| d['code'] || d[:code] }.map(&:to_s))
+        .to include('aggregation_source_unsupported')
+      expect(recorded.to_s).to include('time_entries')
+    end
+
+    # AND THE ISSUE PATH IS UNTOUCHED. Without this the guard could be refusing
+    # everything and all three examples above would still pass.
+    it 'aggregates normally when the very same scope is declared as issues' do
+      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
+
+      build_tag('assign_to: stats').render(owned_context(:issues))
+    end
+
+    # The legacy path has no render context at all, and it resolves issue scopes only —
+    # so it must keep working with no annotation anywhere.
+    it 'aggregates on the legacy path, which carries no source at all' do
+      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
+
+      build_tag('from: issues, assign_to: stats')
+        .render(build_context({}, { sql_issue_query: LiquidTagIssueQueryStub.new(scope) }))
+    end
+  end
+
+  # ------------------------------------------------------------------
   # Scope resolution via context.registers (fast path in production)
   # ------------------------------------------------------------------
 

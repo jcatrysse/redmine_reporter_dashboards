@@ -39,7 +39,7 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
 
   fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules,
            :issues, :issue_statuses, :trackers, :enumerations, :projects_trackers,
-           :queries
+           :queries, :time_entries
 
   Template = RedmineReporterDashboards::Template
 
@@ -1301,5 +1301,241 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_response :internal_server_error
     assert_select 'table.list th', text: l(:label_reporter_template)
     assert_include 'Named in the panel', response.body
+  end
+  # ------------------------------------------------------------------ T-31 / source
+  #
+  # One controller, one CRUD, one preview — `[OQ-H]` closed that — and the separation is at
+  # the QUERY: `source: issues` resolves through `IssueQuery`, `source: time_entries`
+  # through `TimeEntryQuery`. These drive both through the same actions.
+
+  def grant_time(*permissions)
+    grant(:view_time_entries, *permissions)
+    Role.find(1).update_columns(time_entries_visibility: 'all')
+  end
+
+  # SOMEBODY ELSE'S HOURS, IN THIS PROJECT — and the fixture needs them, because MEASURED:
+  # project 1 has three time entries and jsmith authored all three, so `TimeEntry` and
+  # `TimeEntry.visible(jsmith)` return the same 3 rows and `time_entries_visibility: 'own'`
+  # narrows nothing. Without this row, a test asserting "the report sees exactly the visible
+  # entries" passes with `.visible` deleted, and the S-14 narrowing cannot be demonstrated
+  # at all. It is the difference between `all` (4) and `own` (3).
+  def another_users_hours
+    TimeEntry.create!(project: @project, user: @dlopper, author: @dlopper,
+                      issue: Issue.where(project_id: @project.id).first,
+                      hours: 7.5, spent_on: Date.new(2026, 3, 10),
+                      activity: TimeEntryActivity.where(active: true).first)
+  end
+
+  def test_a_time_entry_template_renders_through_the_same_show_action
+    template = create_template(source: 'time_entries',
+                               content: 'HOURS=[{{ time_entries.total_hours }}]')
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+  end
+
+  # THE SCOPE IS THE VIEWER'S, AND IT IS `TimeEntry.visible` RATHER THAN `Issue.visible`.
+  # Asserted by counting, with a row somebody else booked so that the two answers DIFFER —
+  # see `another_users_hours` for the measurement that made this necessary.
+  def test_a_time_entry_template_sees_every_visible_entry_including_other_peoples
+    another_users_hours
+    template = create_template(source: 'time_entries',
+                               content: 'COUNT=[{{ time_entries.size }}]')
+    grant_time(:view_reporter_dashboards_reports)
+    expected = TimeEntry.visible(@jsmith).where(project_id: @project.id).count
+    assert_equal 4, expected, 'the fixture is not what this test assumes'
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include ERB::Util.html_escape('COUNT=[4]'), response.body
+  end
+
+  # THE ONE THAT CATCHES A DELETED `.visible`. With `time_entries_visibility: 'own'` the
+  # actor may read three of the four rows in the project, so an unfiltered scope answers 4
+  # and the correct one answers 3. Both numbers are real and both are plausible, which is
+  # exactly why the count has to be asserted rather than eyeballed.
+  def test_an_own_only_actor_sees_fewer_entries_than_the_project_has
+    another_users_hours
+    template = create_template(source: 'time_entries',
+                               content: 'COUNT=[{{ time_entries.size }}]')
+    grant(:view_time_entries, :view_reporter_dashboards_reports)
+    Role.find(1).update_columns(time_entries_visibility: 'own')
+
+    # COMPUTED AND SELF-GUARDING rather than hard-coded. The first version asserted 3 and
+    # measured 1: `visible_condition`'s `own` branch filters on `time_entries.user_id`, and
+    # only one of the fixture's three rows in this project has jsmith as its USER — the
+    # others merely have him as author. The exact figures are the fixture's business; what
+    # this test needs is that the two answers DIFFER, and it says so if they stop.
+    unscoped = TimeEntry.where(project_id: @project.id).count
+    visible = TimeEntry.visible(@jsmith).where(project_id: @project.id).count
+    assert unscoped > visible,
+           "the fixture does not discriminate (#{unscoped} vs #{visible}), so this proves nothing"
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_include ERB::Util.html_escape("COUNT=[#{visible}]"), response.body
+    assert_not_include ERB::Util.html_escape("COUNT=[#{unscoped}]"), response.body
+  end
+
+  # AND WITH NO `:view_time_entries` AT ALL, nothing — `TimeEntry.visible` answers `1=0`.
+  def test_an_actor_without_the_permission_sees_no_entries
+    another_users_hours
+    template = create_template(source: 'time_entries',
+                               content: 'COUNT=[{{ time_entries.size }}]')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_include ERB::Util.html_escape('COUNT=[0]'), response.body
+  end
+
+  # AND IT DOES NOT SEE ANOTHER PROJECT'S HOURS. Without this, a scope that forgot its
+  # project filter would pass the examples above whenever the fixture's other projects
+  # happened to be invisible.
+  def test_a_time_entry_template_does_not_reach_another_projects_hours
+    template = create_template(source: 'time_entries',
+                               content: 'COUNT=[{{ time_entries.size }}]')
+    grant_time(:view_reporter_dashboards_reports)
+    everywhere = TimeEntry.visible(@jsmith).count
+    here = TimeEntry.visible(@jsmith).where(project_id: @project.id).count
+    assert everywhere > here, 'the fixture has no out-of-project entries, so this proves nothing'
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_include ERB::Util.html_escape("COUNT=[#{here}]"), response.body
+    assert_not_include ERB::Util.html_escape("COUNT=[#{everywhere}]"), response.body
+  end
+
+  # §Findings S-13 — the guard, at the entry point rather than only in the unit spec.
+  # `{% sql_aggregate %}` inside a time-entry template must report NOTHING rather than
+  # issue counts under time-entry labels.
+  def test_sql_aggregate_in_a_time_entry_template_reports_nothing_rather_than_issue_counts
+    template = create_template(
+      source: 'time_entries',
+      content: '{% sql_aggregate assign_to: stats %}TOTAL=[{{ stats.total }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+    issue_count = Issue.visible(@jsmith).where(project_id: @project.id).count
+    assert issue_count.positive?
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_not_include ERB::Util.html_escape("TOTAL=[#{issue_count}]"), response.body,
+                       'S-13: the issue count reached a time-entry report'
+  end
+
+  # ...AND THE SAME TAG STILL WORKS ON AN ISSUE TEMPLATE. Without this the guard could be
+  # refusing everything and the example above would still pass.
+  def test_sql_aggregate_still_aggregates_in_an_issue_template
+    template = create_template(
+      content: '{% sql_aggregate assign_to: stats %}TOTAL=[{{ stats.total }}]'
+    )
+    grant(:view_reporter_dashboards_reports)
+    total = Issue.visible(@jsmith).where(project_id: @project.id).count
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_include ERB::Util.html_escape("TOTAL=[#{total}]"), response.body
+  end
+
+  # ------------------------------------------------------------------ T-31 / S-14
+  #
+  # `TimeEntry.visible` branches on `Role#time_entries_visibility`. All three states, and
+  # the middle one is the whole reason the finding exists.
+
+  def test_an_actor_who_sees_every_hour_is_told_nothing
+    template = create_template(source: 'time_entries', content: 'x')
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_select '#reporter-time-entry-visibility', count: 0
+  end
+
+  def test_an_actor_who_sees_only_their_own_hours_is_told_so
+    template = create_template(source: 'time_entries', content: 'x')
+    grant(:view_time_entries, :view_reporter_dashboards_reports)
+    Role.find(1).update_columns(time_entries_visibility: 'own')
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_select '#reporter-time-entry-visibility'
+    assert_include l(:text_reporter_time_entries_own_only), response.body
+  end
+
+  def test_an_actor_who_may_see_no_hours_at_all_is_told_so
+    template = create_template(source: 'time_entries', content: 'x')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include l(:text_reporter_time_entries_not_visible), response.body
+  end
+
+  # AN ISSUE TEMPLATE NEVER CARRIES THE NOTICE, whatever the actor's time-entry role is.
+  # Without this, a notice rendered unconditionally would pass all three examples above.
+  def test_an_issue_template_never_carries_the_time_entry_notice
+    template = create_template(content: 'x')
+    grant(:view_reporter_dashboards_reports)
+    Role.find(1).update_columns(time_entries_visibility: 'own')
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_select '#reporter-time-entry-visibility', count: 0
+  end
+
+  # ------------------------------------------------------------------ T-31 / authoring
+
+  def test_the_form_offers_both_sources
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates)
+
+    get :new, params: { project_id: @project.identifier }
+
+    assert_response :success
+    assert_select 'select[name=?] option[value=?]', 'template[source]', 'issues'
+    assert_select 'select[name=?] option[value=?]', 'template[source]', 'time_entries'
+  end
+
+  def test_source_is_settable_on_create
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates)
+
+    post :create, params: { project_id: @project.identifier,
+                            template: { name: 'Hours', content: 'x',
+                                        source: 'time_entries', output: 'combined' } }
+
+    assert_equal 'time_entries', Template.order(:id).last.source
+  end
+
+  # A THIRD VALUE IS REFUSED BY THE MODEL, not silently stored and rendered against the
+  # wrong table.
+  def test_a_source_outside_the_closed_set_is_refused
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates)
+
+    assert_no_difference 'Template.count' do
+      post :create, params: { project_id: @project.identifier,
+                              template: { name: 'Bad', content: 'x',
+                                          source: 'invoices', output: 'combined' } }
+    end
+
+    assert_response :unprocessable_entity
+  end
+
+  # ...AND IF ONE IS ALREADY STORED — an import, an `update_columns`, a rollback across a
+  # minor — the render REFUSES rather than falling through to the issue scope.
+  def test_a_stored_unknown_source_is_refused_at_render_time
+    template = create_template
+    template.update_columns(source: 'invoices')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :internal_server_error
+    assert_include 'invoices', response.body
   end
 end

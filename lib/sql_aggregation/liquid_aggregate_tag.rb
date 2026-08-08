@@ -156,6 +156,31 @@ module SqlAggregation
         return ''
       end
 
+      # THIS KERNEL COUNTS ISSUES, SO IT IS ONLY EVER GIVEN AN ISSUE SCOPE — T-31, and
+      # §Findings **S-13** is why the refusal is here rather than a comment somewhere.
+      #
+      # `QueryAggregator`'s unit of count is `DISTINCT issues.id`. Handed a time-entry
+      # relation it does NOT raise: `TimeEntryQuery#base_scope` calls `.left_join_issue`,
+      # so every issue column resolves and the tag answers issue counts under time-entry
+      # labels — four entries over two issues came back as `2` in every bucket, and
+      # `spent_hours` answered nothing at all. A wrong number under a right heading is the
+      # one outcome this repository keeps deleting.
+      #
+      # It refuses LOUDLY and degrades to the empty result rather than raising, which is
+      # what every other unusable argument on this path does (HANDOVER §1: "every
+      # aggregator entry point LOGS AND DEGRADES"). The owned time-entry aggregator that
+      # replaces this branch is T-31's second increment; until it lands, a template asking
+      # for it gets nothing and a recorded degradation, never a plausible lie.
+      unowned_source = report_source(context)
+      if unowned_source != :issues
+        Rails.logger.warn("[sql_aggregate] refusing a #{unowned_source} scope: this " \
+                          'aggregation kernel counts issues, and answering would report ' \
+                          'issue counts under other labels (finding S-13)')
+        record_degradation(context, unowned_source)
+        context.scopes.last[assign_to] = empty_result
+        return ''
+      end
+
       Rails.logger.info("[sql_aggregate] scope resolved via #{scope_class_label(scope)} in #{elapsed_ms(t0)}ms")
       t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
@@ -191,6 +216,31 @@ module SqlAggregation
     end
 
     private
+
+    # WHICH TABLE the resolved scope is over, taken from the render context rather than
+    # sniffed off the relation.
+    #
+    # `RenderContext.from` and NOT `TagContext.for`, deliberately. `TagContext.for` never
+    # answers nil — it builds an actor-only fallback — and building one reads
+    # `User.current`, so using it here would add an ambient actor read to a code path that
+    # does not need an actor at all. INV-1 is about not doing that. Nil is the answer this
+    # method wants: no owned render context IS the legacy path, and the legacy path resolves
+    # issue scopes and nothing else.
+    #
+    # Asking the relation instead would raise on every scope double in the specs and fail
+    # OPEN on exactly the object it could not identify.
+    def report_source(context)
+      RedmineReporterDashboards::Liquid::RenderContext.from(context)&.source || :issues
+    end
+
+    # Visible rather than silent (INV-4). The degradation reaches the diagnostics panel the
+    # same way an unresolved asset or a readiness timeout does. Nothing to record on the
+    # legacy path, where there is no diagnostics collector and no owned panel to show one.
+    def record_degradation(context, source)
+      RedmineReporterDashboards::Liquid::RenderContext.from(context)
+        &.diagnostics
+        &.degrade(:aggregation_source_unsupported, source: source.to_s)
+    end
 
     # Scope resolution (resolve_scope, resolve_query) lives in
     # RedmineReporterDashboards::Liquid::ScopeBinding, shared with {% version_rollup %}.

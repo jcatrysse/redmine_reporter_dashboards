@@ -24,6 +24,15 @@
     <%= f.text_field :description, size: 60, maxlength: 255 %>
   </p>
   <p>
+    <%# T-31 — WHICH TABLE this template reports on. `source` and `output` are two
+        ORTHOGONAL axes and §7's table says so in as many words: the base plugin's three
+        template types conflated them, so it could not express "one document per time
+        entry". Two selects, and every combination is valid. %>
+    <%= f.select :source, reporter_template_source_options,
+                 {}, label: :label_reporter_template_source %>
+    <em class="info"><%= l(:text_reporter_template_source_info) %></em>
+  </p>
+  <p>
     <%= f.select :output, reporter_template_output_options %>
     <em class="info"><%= l(:text_reporter_template_output_info) %></em>
   </p>

@@ -47,6 +47,17 @@ module RedmineReporterDashboards
       # an author should feel the limit at the keyboard, not at 06:00 in a scheduled run.
       OUTPUT_CLASSES = %i[report preview].freeze
 
+      # T-31. What each source is called in a template, and what one record of it is
+      # called — the two assign names, so the branch below is a lookup rather than an `if`.
+      # A Hash and not two constants because adding a third source should be one line here
+      # plus a scope in the controller, which is §7b.4's whole argument for a field.
+      SOURCES = {
+        'issues' => { collection: 'issues', record: 'issue', drop: :IssuesDrop,
+                      record_drop: :IssueDrop },
+        'time_entries' => { collection: 'time_entries', record: 'time_entry',
+                            drop: :TimeEntriesDrop, record_drop: :TimeEntryDrop }
+      }.freeze
+
       # §9b.2's `preview_max_issues`. A CONSTANT and not a plugin setting: FR-21b makes
       # every capability of the reporting surface a role permission, and the only two
       # settings this plugin has are installation policy about egress and delivery. A cap
@@ -70,10 +81,13 @@ module RedmineReporterDashboards
       # THE TEMPLATE works, and the second document tells them nothing the first did not.
       PREVIEW_MAX_DOCUMENTS = 1
 
-      # One document to produce. `issue` is nil for a combined report and the issue for a
-      # per-record one; the correlation id is minted HERE, per document, because FR-58's
-      # whole point is that the id in the diagnostics panel is the id in the log line.
-      Job = Struct.new(:issue, :correlation_id, :label, keyword_init: true)
+      # One document to produce. `record` is nil for a combined report and the one row for
+      # a per-record one — an Issue or a TimeEntry, which is why T-31 renamed it from
+      # `issue`: a field whose name says issue while holding a time entry is how the next
+      # reader concludes the wrong thing about a branch. The correlation id is minted HERE,
+      # per document, because FR-58's whole point is that the id in the diagnostics panel
+      # is the id in the log line.
+      Job = Struct.new(:record, :correlation_id, :label, keyword_init: true)
 
       # A rendered HTML body, before any engine has seen it.
       Section = Struct.new(:job, :body, :duration_ms, keyword_init: true)
@@ -155,13 +169,13 @@ module RedmineReporterDashboards
       def call(pdf: false)
         started = monotonic_ms
 
-        # `source` IS A COLUMN BEFORE IT IS A FEATURE. T-22 built `source ∈ issues |
-        # time_entries` because §7 rule 6 requires a column in the same migration as its
-        # table, and T-31 is the task that gives `time_entries` a scope. Between the two,
-        # a template carrying that value can exist — an import can create one — and the
-        # one thing this must not do is render it against the ISSUE scope, which would be
-        # a report about the wrong table that looks entirely correct.
-        return failed(unsupported_source_diagnostic, 0, started) unless template.source == 'issues'
+        # T-31: BOTH sources render now. What used to be here was a refusal, because
+        # `source` was a column before it was a feature — see the deleted
+        # `unsupported_source_diagnostic`. A value outside the closed set is still refused,
+        # below, because a stored string that selects behaviour must never fall through to a
+        # default branch (the shape T-25's review found reporting success while mailing one
+        # person's view of the data to a list chosen for somebody else's).
+        return failed(unknown_source_diagnostic, 0, started) unless known_source?
 
         total = count_scope
 
@@ -228,11 +242,13 @@ module RedmineReporterDashboards
       # not to a loaded Array. A preview that loads 40 000 issues and then keeps 50 has
       # already spent the memory the bound exists to save.
       def build_jobs
-        return [Job.new(issue: nil, correlation_id: mint_id, label: template.name)] unless per_record?
+        unless per_record?
+          return [Job.new(record: nil, correlation_id: mint_id, label: template.name)]
+        end
 
         bounded = limit ? scope.limit(limit) : scope
-        bounded.to_a.map do |issue|
-          Job.new(issue: issue, correlation_id: mint_id, label: "##{issue.id}")
+        bounded.to_a.map do |record|
+          Job.new(record: record, correlation_id: mint_id, label: "##{record.id}")
         end
       end
 
@@ -245,7 +261,7 @@ module RedmineReporterDashboards
 
         if scope.nil?
           raise ArgumentError,
-                'a per-record report needs an issue scope; the caller passed none'
+                'a per-record report needs a record scope; the caller passed none'
         end
 
         true
@@ -282,10 +298,14 @@ module RedmineReporterDashboards
       def render_context(job, output: :html)
         ::RedmineReporterDashboards::Liquid::RenderContext.new(
           actor: actor,
-          scope: job.issue ? nil : scope_for_render,
+          scope: job.record ? nil : scope_for_render,
           query: query,
           correlation_id: job.correlation_id,
-          output: output
+          output: output,
+          # SAID, NOT SNIFFED — §Findings S-13. This is what stops `{% sql_aggregate %}`
+          # handing a time-entry relation to the issue kernel and getting plausible,
+          # wrong numbers back.
+          source: template.source.to_sym
         )
       end
 
@@ -306,10 +326,17 @@ module RedmineReporterDashboards
           'user' => drops::UserDrop.new(actor, context: context)
         }
 
-        if job.issue
-          assigns['issue'] = drops::IssueDrop.new(job.issue, context: context)
+        names = SOURCES.fetch(template.source.to_s)
+
+        # `issue` / `issues` for an issue template, `time_entry` / `time_entries` for a
+        # time one. The per-record variable is the RECORD and the combined one is the
+        # COLLECTION, exactly as before — only the names and the drop classes move.
+        if job.record
+          assigns[names[:record]] = drops.const_get(names[:record_drop])
+                                         .new(job.record, context: context)
         elsif scope
-          assigns['issues'] = drops::IssuesDrop.new(scope_for_render, context: context)
+          assigns[names[:collection]] = drops.const_get(names[:drop])
+                                             .new(scope_for_render, context: context)
         end
 
         assigns
@@ -410,14 +437,21 @@ module RedmineReporterDashboards
         id && registry.fetch(id)
       end
 
-      def unsupported_source_diagnostic
+      # A CLOSED SET, AND `else` IS NOT A BRANCH. `Template` validates `source` on save, and
+      # that is not enough on its own: `update_columns` and `update_all` bypass validation
+      # and this plugin uses both, and §7 rule 5 makes "an install one minor behind reading
+      # a newer row" routine. So the set is closed HERE too, where the behaviour is chosen.
+      def known_source?
+        SOURCES.key?(template.source.to_s)
+      end
+
+      def unknown_source_diagnostic
         Diagnostic.new(
           origin: :template,
           code: :unsupported_source,
           template_name: template.name,
-          message: "this template reports on #{template.source.inspect}, which this " \
-                   'version of the plugin cannot render; time-entry reporting arrives ' \
-                   'with T-31',
+          message: "this template reports on #{template.source.inspect}, which is not a " \
+                   'data source this version of the plugin knows',
           correlation_id: mint_id,
           detail: "template=#{template.id} source=#{template.source}"
         )

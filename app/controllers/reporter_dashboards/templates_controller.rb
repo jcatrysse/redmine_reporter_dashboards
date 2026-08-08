@@ -149,7 +149,7 @@ module ReporterDashboards
 
       @outcome = Reporting::ReportRun.preview(template: @template,
                                               actor: User.current,
-                                              scope: issue_scope,
+                                              scope: report_scope,
                                               query: @query,
                                               guard: batch_guard,
                                               logger: Rails.logger).call(pdf: true)
@@ -299,7 +299,13 @@ module ReporterDashboards
       # selects no engine — it decides whether a refusal answers with a page or with a PDF
       # saying the same three facts. The action already requires an authoring permission on
       # this template.
-      permitted = %i[name description content output orientation page_size margins enabled]
+      # `source` IS PERMITTED FROM T-31 ON, and it was not before because there was only
+      # one. It names a TABLE, not an identity: both sources resolve through their model's
+      # own `visible` scope, so an author choosing `time_entries` gets exactly the hours
+      # they may already read in the time-entry list. The model's `inclusion:` validation
+      # and `ReportRun`'s closed-set check are what stop a third value.
+      permitted = %i[name description content source output orientation page_size margins
+                     enabled]
       permitted << :failure_document if Template.failure_document_supported?
       params.require(:template).permit(*permitted)
     end
@@ -346,7 +352,7 @@ module ReporterDashboards
       # reading both in one argument list made the binding depend on keyword evaluation
       # order — reorder the two keywords and the report silently loses its query, with
       # nothing raising anywhere.
-      scope = issue_scope
+      scope = report_scope
 
       @outcome = Reporting::ReportRun.new(template: @template,
                                           actor: User.current,
@@ -367,6 +373,50 @@ module ReporterDashboards
       return :unprocessable_entity if @diagnostic.origin == :batch
 
       :internal_server_error
+    end
+
+    # T-31: WHICH TABLE, DECIDED BY THE TEMPLATE'S OWN `source` COLUMN.
+    #
+    # One controller serves both sources — that is `[OQ-H]`'s closure and §7b.4's whole
+    # argument — and the separation is here, at the query, because an issue report and a
+    # time report genuinely resolve through two different Redmine core classes with two
+    # different `base_scope` methods. Everything above this line is shared.
+    #
+    # NO `else` BRANCH, AND ITS ABSENCE IS THE POINT. The first version had one — it set
+    # `@query = nil` and answered `nil`, so an unknown `source` could not fall through to
+    # the issue scope. Mutation testing then showed it was a SECOND MECHANISM for a property
+    # something else already holds: replacing it with `issue_scope` left the whole suite
+    # green, because both callers refuse an unknown source before the scope is ever read —
+    # `ReportRun#call` with a typed diagnostic (`known_source?`), and `#preview` with a 422,
+    # since `source` is in `PREVIEW_BLOCKING_ATTRIBUTES`. Deleted rather than kept as an
+    # untestable guard, which is what T-25 did with the one mutation that survived there.
+    #
+    # A `case` with no matching `when` answers nil, so the behaviour is unchanged; `@query`
+    # is cleared first so that answer carries no stale drill-through either.
+    def report_scope
+      @query = nil
+
+      case @template.source.to_s
+      when 'issues' then issue_scope
+      when 'time_entries' then time_entry_scope
+      end
+    end
+
+    # `TimeEntry.visible(User.current)` is the whole visibility decision, in SQL, where it
+    # belongs — and it is a DIFFERENT rule from `Issue.visible`: it branches on
+    # `Role#time_entries_visibility`, so an actor whose role says `own` gets their own hours
+    # only. That narrowing is real and correct; what would be wrong is not saying so, which
+    # is §Findings **S-14** and why `@time_entry_visibility` is assigned for the views.
+    def time_entry_scope
+      @query = nil
+      if params[:query_id].present?
+        @query = TimeEntryQuery.visible(User.current).find_by(id: params[:query_id])
+        # Same reasoning as the issue path: an id that does not resolve is IGNORED rather
+        # than answered differently, because "deleted" and "not yours" must look alike.
+        return @query.base_scope if @query
+      end
+
+      TimeEntry.visible(User.current).where(project_id: @project.id)
     end
 
     # THE SCOPE THE PICKER OFFERS IS THE SCOPE THE TEMPLATE RESOLVES THROUGH — T-23's
