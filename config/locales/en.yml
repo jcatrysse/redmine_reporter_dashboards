@@ -277,3 +277,4 @@ en:
   error_reporter_adhoc_attachments_too_large: "The report is too large to send by e-mail. Narrow the selection, or use a template that produces one document."
   error_reporter_adhoc_partial_delivery: "Some recipients received the report before delivery failed. Check the mail log before sending it again."
   error_reporter_adhoc_render_failed: "The report could not be produced, so nothing was sent. The details are below."
+  error_reporter_adhoc_recipients_not_permitted: "One or more recipients are not allowed to see reports in this project, so nothing was sent."

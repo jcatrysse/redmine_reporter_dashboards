@@ -277,3 +277,4 @@ zh:
   error_reporter_adhoc_attachments_too_large: "报表过大，无法通过电子邮件发送。请缩小选择范围，或使用生成单个文档的模板。"
   error_reporter_adhoc_partial_delivery: "部分收件人在发送失败前已收到报表。再次发送前请检查邮件日志。"
   error_reporter_adhoc_render_failed: "无法生成此报表，因此未发送任何内容。详细信息见下方。"
+  error_reporter_adhoc_recipients_not_permitted: "有一位或多位收件人无权查看本项目的报表，因此未发送任何内容。"

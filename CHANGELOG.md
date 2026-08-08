@@ -19,6 +19,11 @@ All notable changes to this plugin are documented in this file.
     send** rather than quietly reporting on the rest.
   - **The sender is this installation**, with you in `Reply-To`. There is no field, no
     parameter and no column anywhere on this path that could carry a different one.
+  - **Recipients must be entitled to reports in that project** — somebody who could open
+    the report themselves, or you. A member whose role lacks *View report templates* is
+    refused, and so is anyone outside the project; one ineligible name refuses the whole
+    send rather than quietly delivering to the rest. The report is still produced with the
+    *sender's* access and says so, which is what sharing one means.
   - **Recipients are Redmine users** by default. External addresses need an administrator
     to enable them *and* to list the permitted domains; an empty list accepts nothing,
     whatever the checkbox says, and the settings page warns when that is the state.

@@ -48,14 +48,16 @@
     <p>
       <label for="recipient_user_ids"><%= l(:label_reporter_adhoc_mail_recipients) %></label>
       <%#
-        THE PICKER IS NOT THE CHECK, and this one is deliberately narrow anyway. It offers
-        the project's members, which is the list that is useful; the controller resolves
-        whatever ids arrive through `User.active` regardless, so a posted id outside this
-        list is not an escalation — the bytes were rendered as the REQUESTER, so a
-        recipient with wider access gains the requester nothing.
+        THE PICKER IS NOT THE CHECK — HANDOVER §1, from T-25's escalation: "a `select`
+        narrowed to project members proves nothing about what the controller accepts."
+        `#resolve_recipients` asks `allowed_to?` of every posted id regardless, and refuses
+        the whole send if any of them is not entitled to reports here (§Findings S-20).
+
+        Both call `may_receive_reports?`, so the list and the rule cannot drift — a picker
+        that offers what the check refuses is a form answering 422 for no visible reason.
       %>
       <%= select_tag 'recipient_user_ids',
-                     options_from_collection_for_select(@project.users.active.sorted, :id, :name),
+                     options_from_collection_for_select(recipient_choices, :id, :name),
                      multiple: true, size: 8, id: 'recipient_user_ids' %>
       <em class="info"><%= l(:text_reporter_adhoc_mail_recipients_info) %></em>
     </p>

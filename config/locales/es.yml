@@ -277,3 +277,4 @@ es:
   error_reporter_adhoc_attachments_too_large: "El informe es demasiado grande para enviarlo por correo. Reduzca la selección o use una plantilla que produzca un solo documento."
   error_reporter_adhoc_partial_delivery: "Algunos destinatarios recibieron el informe antes de que fallara el envío. Revise el registro de correo antes de volver a enviarlo."
   error_reporter_adhoc_render_failed: "No se pudo generar el informe, por lo que no se envió nada. Los detalles están más abajo."
+  error_reporter_adhoc_recipients_not_permitted: "Uno o más destinatarios no tienen permiso para ver informes en este proyecto, por lo que no se envió nada."

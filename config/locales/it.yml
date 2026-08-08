@@ -277,3 +277,4 @@ it:
   error_reporter_adhoc_attachments_too_large: "Il report è troppo grande per essere inviato per e-mail. Restringi la selezione o usa un modello che produca un solo documento."
   error_reporter_adhoc_partial_delivery: "Alcuni destinatari hanno ricevuto il report prima che l’invio fallisse. Controlla il log della posta prima di inviarlo di nuovo."
   error_reporter_adhoc_render_failed: "Non è stato possibile produrre il report, quindi non è stato inviato nulla. I dettagli sono qui sotto."
+  error_reporter_adhoc_recipients_not_permitted: "Uno o più destinatari non possono vedere i report in questo progetto, quindi non è stato inviato nulla."

@@ -277,3 +277,4 @@ de:
   error_reporter_adhoc_attachments_too_large: "Der Bericht ist zu groß für den E-Mail-Versand. Schränken Sie die Auswahl ein oder verwenden Sie eine Vorlage, die ein einzelnes Dokument erzeugt."
   error_reporter_adhoc_partial_delivery: "Einige Empfänger haben den Bericht erhalten, bevor der Versand fehlschlug. Prüfen Sie das Mail-Protokoll, bevor Sie erneut senden."
   error_reporter_adhoc_render_failed: "Der Bericht konnte nicht erstellt werden, daher wurde nichts gesendet. Die Einzelheiten stehen unten."
+  error_reporter_adhoc_recipients_not_permitted: "Ein oder mehrere Empfänger dürfen in diesem Projekt keine Berichte sehen, daher wurde nichts gesendet."

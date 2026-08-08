@@ -277,3 +277,4 @@ pl:
   error_reporter_adhoc_attachments_too_large: "Raport jest zbyt duży, aby wysłać go e-mailem. Zawęź wybór lub użyj szablonu tworzącego jeden dokument."
   error_reporter_adhoc_partial_delivery: "Część odbiorców otrzymała raport, zanim wysyłka się nie powiodła. Sprawdź dziennik poczty przed ponownym wysłaniem."
   error_reporter_adhoc_render_failed: "Nie udało się utworzyć raportu, więc nic nie zostało wysłane. Szczegóły znajdują się poniżej."
+  error_reporter_adhoc_recipients_not_permitted: "Co najmniej jeden odbiorca nie ma prawa oglądać raportów w tym projekcie, więc nic nie zostało wysłane."

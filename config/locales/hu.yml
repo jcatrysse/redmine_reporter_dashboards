@@ -277,3 +277,4 @@ hu:
   error_reporter_adhoc_attachments_too_large: "A jelentés túl nagy e-mailben küldeni. Szűkítse a kiválasztást, vagy használjon egyetlen dokumentumot előállító sablont."
   error_reporter_adhoc_partial_delivery: "Néhány címzett megkapta a jelentést, mielőtt a küldés meghiúsult. Ellenőrizze a levelezési naplót, mielőtt újra küldi."
   error_reporter_adhoc_render_failed: "A jelentést nem sikerült előállítani, ezért semmi sem került elküldésre. A részletek alább olvashatók."
+  error_reporter_adhoc_recipients_not_permitted: "Legalább egy címzett nem láthat jelentéseket ebben a projektben, ezért semmi sem került elküldésre."

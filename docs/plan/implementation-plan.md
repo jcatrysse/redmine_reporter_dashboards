@@ -100,33 +100,42 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
-**S-20 · An ad-hoc report may be mailed to ANY active account in the instance, including a
-non-member and an administrator, with a requester-controlled `Subject`. REPORTED, PINNED
-BY A TEST, AND NOT DECIDED. Owner: the curator.** Found by the independent review of T-32,
-reproduced end to end (`to=["admin@somenet.foo"]`, status 302, one delivery).
+**S-20 · An ad-hoc report could be mailed to ANY active account in the instance, with a
+requester-controlled `Subject`. FOUND by the independent review of T-32; DECIDED by the
+curator on 2026-08-08 and CLOSED.** Reproduced end to end before the fix
+(`to=["admin@somenet.foo"]`, status 302, one delivery).
 
-**What is and is not at stake.** The document itself is not: the bytes are rendered as the
-requester, so naming a recipient with wider access gains the requester nothing and discloses
-nothing. What the review is pointing at is the **envelope** — this installation's `From`, an
-arbitrary `Subject`, a PDF attachment, and a recipient the requester need not share a project
-with, at the default rate of twelve an hour.
+**What was and was not at stake.** The document never was: it is rendered as the requester,
+so naming a recipient with wider access disclosed nothing. The **envelope** was — this
+installation's `From`, an arbitrary `Subject`, a PDF attachment, and a recipient who need
+not share a project with the sender, at twelve an hour.
 
-**Why it was not narrowed on the spot.** FR-61 says only *"recipients are Redmine users"*,
-and §4.1's `require: :loggedin` on `mail_reporter_dashboards_reports` exists precisely so
-that *"a logged-in non-member legitimately mails themselves a report they can already
-read"* — which a members-only bound would break. So the two obvious narrowings each
-contradict something written down:
+**The decision: a recipient must be permitted to open a report in THIS project**, asked as
+`User#allowed_to?(:view_reporter_dashboards_reports, project)`.
 
-| Bound | What it costs |
-|---|---|
-| project members only | breaks §4.1's stated non-member case |
-| members **or** the requester | probably right, and it is still a rule no spec states |
+**It is a permission check and deliberately not a membership check**, which is the part
+worth keeping. §4.1 answers every *who may do what, in which project* question with a role
+grant, so `Member.where(...)` would be a second and weaker vocabulary for a question the
+permission model already answers. Asking `allowed_to?` also lands the edge cases correctly
+by construction: a MEMBER whose roles lack the permission is refused, a non-member is
+refused unless an administrator deliberately granted it to the Non-member role in a public
+project, and an administrator is permitted because they can already read everything. The
+REQUESTER needs no special case — `require_view_permission` has already demanded the same
+permission of them — so §4.1's *"a logged-in non-member legitimately mails themselves a
+report they can already read"* survives with no second rule to keep in step.
 
-That is CLAUDE.md §11.5 — a task that has grown a second purpose should be split, not
-absorbed — so the current bound is **pinned by
-`test_the_recipient_bound_is_every_active_user_which_is_a_recorded_open_question`** rather
-than changed. It is now a decision somebody has to edit a test to reverse, instead of an
-accident nobody wrote down.
+**What it does not claim.** Not that the recipient could have produced the report. The
+document carries the requester's visibility and the mail says so (FR-47); that is what
+sharing a report IS, and a recipient with narrower issue visibility legitimately sees more
+than they could query.
+
+**Refused wholesale, not filtered** — the same rule as the issue ids and the external
+addresses. Mutation testing is what established that: dropping the ineligible recipients
+survived deletion, because a single ineligible recipient leaves the list empty and falls
+into `:no_recipients` anyway. The MIXED request is the discriminator, and it now has a test.
+So does the picker, which survived deletion for the same reason — every member of the
+fixture was entitled, so `select` was a no-op. Six mutations, six red, after two of them
+first showed the examples could not tell the two behaviours apart.
 
 **S-19 · `technical-spec.md` §7's table list stops before T-32, and FR-61 cannot be built
 without two tables it does not name. DERIVED from stated requirements and RECORDED for the

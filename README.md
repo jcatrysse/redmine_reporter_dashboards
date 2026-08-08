@@ -573,6 +573,12 @@ Four things about it are deliberate, and each one is a thing the report you send
 * **The sender is this Redmine, and you are in `Reply-To`.** There is no field for a
   sender, so a report cannot be mailed from an address that is not this installation's.
   Somebody who replies reaches you.
+* **Recipients must be allowed to open reports in that project.** You can send to a
+  colleague who could open the report themselves, and to yourself; you cannot use it to
+  put a PDF in front of somebody with no business in the project. A project member whose
+  role does not include *View report templates* is refused, and so is anybody outside the
+  project. If one recipient in the list is not permitted, **nothing is sent** rather than
+  the rest of the list receiving it quietly.
 * **Recipients are Redmine users** unless an administrator has enabled external addresses
   in *Administration → Plugins → Reporter dashboards* **and** listed the permitted domains
   there. An empty domain list means no external address is accepted, whatever the checkbox

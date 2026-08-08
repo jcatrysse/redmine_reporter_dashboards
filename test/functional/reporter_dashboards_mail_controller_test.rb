@@ -30,13 +30,37 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
 
   def setup
     @project = Project.find(1)
-    EnabledModule.create!(project: @project, name: 'reporter_dashboards_reports') unless
-      @project.module_enabled?(:reporter_dashboards_reports)
+    unless @project.module_enabled?(:reporter_dashboards_reports)
+      EnabledModule.create!(project: @project, name: 'reporter_dashboards_reports')
+      # RELOAD, AND ITS ABSENCE MADE AN ASSERTION LIE.
+      #
+      # `module_enabled?` loads and MEMOISES `enabled_modules` — without the row that is
+      # about to be created. `User#allowed_to?(perm, project)` then asks that stale object
+      # `allows_to?`, gets false, and answers false for everybody. The controller's own
+      # `@project` is loaded fresh inside the request and answers TRUE, so the two disagree:
+      # the picker (controller side) offered a user the test (stale side) then declared
+      # ineligible. The code was right and the test was wrong, which is the harder way round
+      # to notice.
+      @project.reload
+    end
     @requester = User.find(2)
     @colleague = User.find(3)
     @role = Role.find(1)
     @template = Template.create!(project: @project, author_id: @requester.id,
                                  name: 'Weekly', content: '<p>hi</p>')
+
+    # THE COLLEAGUE IS GIVEN THE SAME ROLE AS THE REQUESTER, deliberately and explicitly.
+    #
+    # S-20's bound is "may this person open a report in THIS project", so the default
+    # recipient has to actually hold that permission or every send in this file is refused
+    # for a reason none of the tests are about. Redmine's fixtures put user 3 in project 1
+    # under a DIFFERENT role, so `grant` — which edits role 1 — did not reach them, and
+    # eighteen tests went red the moment the bound landed.
+    #
+    # Stated as an explicit membership rather than left to the fixture: HANDOVER §1's rule
+    # is not to build on what some other test class happened to declare.
+    Member.where(project_id: @project.id, user_id: @colleague.id).destroy_all
+    Member.create!(project: @project, user: @colleague, roles: [@role])
 
     # `:view_issues` IS PART OF THE BASELINE, and finding out why cost two red tests.
     # `Reporting::ReportScope` starts from `Issue.visible(actor)`, which is empty for a
@@ -439,6 +463,35 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
     assert_not_includes @response.body, 'Translation missing'
   end
 
+  # G6 — THE AUDIT PAGE'S COST MUST NOT SCALE WITH THE NUMBER OF ROWS.
+  #
+  # `includes(:recipients)` preloaded the recipient ROWS and not the PEOPLE, so the view ran
+  # `User.find_by` per row and `recipient.user` per recipient — about 1.5 extra statements
+  # per row, measured by an independent review. Bounded by `INDEX_LIMIT`, so never fatal,
+  # which is exactly why only a counting assertion catches it: the page always looked fine.
+  #
+  # Asserted as "the same count for 2 rows and for 12", not as an absolute number, because
+  # the absolute number is a property of Redmine's own before_actions and would make this
+  # test a tripwire for unrelated core changes.
+  def test_the_audit_page_costs_the_same_for_two_rows_and_for_twelve
+    # WARM UP FIRST. The first request in a process pays for schema loads and setting
+    # lookups the second does not — unwarmed, this measured 29 queries for two rows and 20
+    # for twelve, i.e. the warmup rather than the page.
+    seed_audit_row
+    get :index, params: { project_id: @project.id }
+
+    small = count_queries { get :index, params: { project_id: @project.id } }
+    assert_response :success
+
+    10.times { seed_audit_row }
+    large = count_queries { get :index, params: { project_id: @project.id } }
+    assert_response :success
+
+    assert_equal 11, assigns(:mail_sends).length, 'the fixture must actually have grown'
+    assert_equal small, large,
+                 "the audit page cost #{small} queries for 2 rows and #{large} for 12"
+  end
+
   # ------------------------------------------------------------------ external addresses
 
   def test_an_external_address_is_refused_when_the_setting_is_off
@@ -641,27 +694,115 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
     assert_equal 'Report: Weekly', ActionMailer::Base.deliveries.last.subject
   end
 
-  # THE RECIPIENT BOUND, PINNED RATHER THAN NARROWED — recorded as §Findings S-20.
+  # THE RECIPIENT BOUND — CURATOR DECISION, §Findings S-20, taken 2026-08-08.
   #
-  # An independent review observed that `User.active.where(id: ids)` accepts ANY active
-  # account, including a non-member and an administrator, with an attacker-controlled
-  # Subject. FR-61 says only "recipients are Redmine users", and §4.1's `require: :loggedin`
-  # exists so a non-member can mail themselves — so narrowing this to project members is a
-  # decision the specs do not make, and I have not made it silently (CLAUDE.md §11.5). The
-  # bytes are the requester's own visibility either way; the question is about the envelope.
+  # It used to be every active account in the instance. It is now "may this person open a
+  # report in THIS project", asked as `allowed_to?` rather than as a membership lookup:
+  # §4.1 answers every who-may-do-what-here question with a role grant, and a
+  # `Member.where(...)` would be a second, weaker vocabulary for the same question.
   #
-  # This test does not endorse the bound. It makes it a DECISION: changing it now has to
-  # change a test that says what it is.
-  def test_the_recipient_bound_is_every_active_user_which_is_a_recorded_open_question
-    member_ids = @project.users.map(&:id)
-    outsider = User.active.where.not(id: member_ids).where.not(id: User.anonymous.id).first
-    assert outsider, 'the fixture set must contain an active non-member'
+  # Three cases, and the middle one is the whole point — a project MEMBER whose roles do
+  # not carry the reports permission is refused, so this is genuinely a permission bound
+  # and not a membership bound wearing a permission's name.
+  def test_a_recipient_entitled_to_reports_here_is_accepted
+    with_engine { post :create, params: send_params }
+
+    assert_response :redirect
+    assert_equal [@colleague.mail], ActionMailer::Base.deliveries.last.to
+  end
+
+  def test_a_recipient_outside_the_project_is_refused
+    outsider = non_member_outsider
 
     with_engine { post :create, params: send_params(recipient_user_ids: [outsider.id.to_s]) }
 
-    assert_response :redirect
-    assert_equal [outsider.mail], ActionMailer::Base.deliveries.last.to
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length
+    assert_equal 0, MailSend.count, 'a refusal before any work must not consume the quota'
   end
+
+  # THE CASE THAT SEPARATES A PERMISSION BOUND FROM A MEMBERSHIP BOUND. `@colleague` stays
+  # a member throughout; only what their role may do changes.
+  def test_a_member_without_the_reports_permission_is_refused
+    reader_less = Role.create!(name: 'Reader-less', permissions: [:view_issues])
+    Member.where(project_id: @project.id, user_id: @colleague.id).destroy_all
+    Member.create!(project: @project, user: @colleague, roles: [reader_less])
+    @colleague = User.find(@colleague.id)
+    assert_not @colleague.allowed_to?(:view_reporter_dashboards_reports, @project),
+               'the colleague must not be entitled, or this test proves nothing'
+
+    with_engine { post :create, params: send_params }
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length
+  end
+
+  # MUTATION TESTING FOUND BOTH OF THE NEXT TWO GAPS, and both are the same shape: with
+  # every member of the fixture entitled, "filter the ineligible out" and "refuse when any
+  # is ineligible" are indistinguishable, and so are "offer the entitled" and "offer
+  # everyone". A member who is deliberately NOT entitled is what separates them.
+
+  # P3: refusing ineligible recipients WHOLESALE, not dropping them from the list.
+  #
+  # Dropping survived deletion because a single ineligible recipient leaves the list empty
+  # and falls into `:no_recipients` anyway. The MIXED request is the discriminator — one
+  # colleague who may receive and one who may not — and dropping would mail the first while
+  # telling the requester the send succeeded.
+  def test_one_ineligible_recipient_refuses_the_whole_send
+    stranger = member_without_reports_permission
+
+    with_engine do
+      post :create, params: send_params(recipient_user_ids: [@colleague.id.to_s,
+                                                             stranger.id.to_s])
+    end
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length,
+                 'the eligible recipient was mailed while the ineligible one was dropped'
+  end
+
+  # P4: the picker really filters. It survived deletion because every member of the fixture
+  # happened to be entitled, so `select` was a no-op and the example could not tell a
+  # filtered list from an unfiltered one.
+  def test_the_picker_omits_a_member_who_may_not_see_reports
+    stranger = member_without_reports_permission
+
+    get :new, params: { project_id: @project.id, template_id: @template.id }
+
+    assert_response :success
+    offered = @controller.send(:recipient_choices).map(&:id)
+    assert_includes offered, @colleague.id, 'the entitled member must still be offered'
+    assert_not_includes offered, stranger.id,
+                        'the picker offers a member #create would refuse'
+  end
+
+  # AND THE REFUSAL SAYS WHY, as a sentence rather than as a symbol.
+  def test_the_recipient_refusal_is_a_sentence
+    with_engine do
+      post :create, params: send_params(recipient_user_ids: [non_member_outsider.id.to_s])
+    end
+
+    message = flash.now[:error].to_s
+    assert_not message.strip.empty?
+    assert_not_includes message.downcase, 'translation missing'
+    assert_not_includes message, 'recipients_not_permitted'
+  end
+
+  # THE PICKER AND THE CHECK CANNOT DRIFT, because both go through `may_receive_reports?`.
+  # The picker is not the check (HANDOVER §1) — but one that offers what the check refuses
+  # is a form answering 422 for no visible reason.
+  def test_the_picker_offers_only_recipients_the_check_will_accept
+    get :new, params: { project_id: @project.id, template_id: @template.id }
+
+    assert_response :success
+    offered = @controller.send(:recipient_choices)
+    assert offered.any?, 'the picker must not be empty for this fixture'
+    offered.each do |user|
+      assert user.allowed_to?(:view_reporter_dashboards_reports, @project),
+             "the picker offers #{user.login}, whom #create would refuse"
+    end
+  end
+
 
   # THE COLLAPSE, END TO END. Ticked box, empty allowlist: no external address is accepted.
   def test_an_empty_allowlist_refuses_every_external_address_even_when_enabled
@@ -809,6 +950,60 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
     RedmineReporterDashboards::Reporting::MailPolicy
       .from_settings({ 'mail_external_addresses' => '0',
                        'mail_external_domains' => '' }.merge(overrides))
+  end
+
+  # One audited send with one recipient, without going through the controller — the page is
+  # what is being measured, not the send.
+  def seed_audit_row
+    row = MailSend.claim(author_id: @requester.id, project_id: @project.id,
+                         template_id: @template.id, template_name: 'Weekly',
+                         created_at: Time.now)
+    MailSendRecipient.create!(mail_send_id: row.id, user_id: @colleague.id,
+                              created_at: Time.now)
+    row
+  end
+
+  # Counts SELECTs, ignoring the noise every Rails version emits differently.
+  #
+  # HANDOVER §1: resolve anything you need into a local BEFORE opening the counter — a `let`
+  # or a lazy association dereferenced inside the block is counted as part of the subject.
+  def count_queries(&block)
+    count = 0
+    counter = lambda do |_name, _start, _finish, _id, payload|
+      next if %w[CACHE SCHEMA TRANSACTION].include?(payload[:name])
+
+      count += 1
+    end
+    ActiveSupport::Notifications.subscribed(counter, 'sql.active_record', &block)
+    count
+  end
+
+  # A MEMBER of this project whose role does not carry the reports permission. The
+  # discriminator between a permission bound and a membership bound, and between refusing
+  # and filtering — see the two tests above, both of which exist because a mutation
+  # survived without it.
+  def member_without_reports_permission
+    stranger = non_member_outsider
+    reader_less = Role.create!(name: 'Reader-less', permissions: [:view_issues])
+    Member.create!(project: @project, user: stranger, roles: [reader_less])
+    stranger = User.find(stranger.id)
+    @project.reload
+    assert_not stranger.allowed_to?(:view_reporter_dashboards_reports, @project),
+               'the stranger must be a member and still not entitled'
+    stranger
+  end
+
+  # An active, non-admin account that is NOT entitled to reports here. Asserted rather than
+  # assumed: an "outsider" who turns out to be entitled would make every refusal test below
+  # pass for the wrong reason — the same trap the invisible-issue helper exists for.
+  def non_member_outsider
+    outsider = User.active.where(admin: false)
+                   .where.not(id: @project.users.map(&:id))
+                   .where.not(id: User.anonymous.id).order(:id).first
+    assert outsider, 'the fixture set must contain an active non-admin non-member'
+    assert_not outsider.allowed_to?(:view_reporter_dashboards_reports, @project),
+               "#{outsider.login} is already entitled, so this test proves nothing"
+    outsider
   end
 
   # A PRIVATE issue in THIS project, authored by somebody else.

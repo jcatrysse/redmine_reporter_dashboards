@@ -123,7 +123,19 @@ module ReporterDashboards
       scope = scope.where(author_id: User.current.id) unless User.current.admin?
 
       @mail_sends = scope.includes(:recipients).order(created_at: :desc, id: :desc)
-                         .limit(INDEX_LIMIT)
+                         .limit(INDEX_LIMIT).to_a
+      # THE PAGE'S USERS, RESOLVED IN ONE QUERY (G6). `includes(:recipients)` preloaded the
+      # rows and not the PEOPLE, so the view did `User.find_by` per row and `recipient.user`
+      # per recipient — about 1.5 extra statements per row, measured by an independent
+      # review. Bounded by `INDEX_LIMIT`, so never fatal; but G6 asks for `includes`/
+      # `preload` deliberately rather than for a bound that happens to be small.
+      #
+      # `MailSendRecipient` and the author cannot be a Rails association: `author_id` and
+      # `user_id` point at Redmine's `User`, which this plugin does not own and must not
+      # grow a `has_many` on. One `where(id: …)` over both sets is the honest equivalent.
+      ids = @mail_sends.map(&:author_id) +
+            @mail_sends.flat_map { |send| send.recipients.map(&:user_id) }
+      @page_users = ::User.where(id: ids.compact.uniq).index_by(&:id)
       # BOUNDED, AND THE PAGE SAYS SO. An unbounded audit list is the "unbounded axis" the
       # T-31 review found one layer over: it works for a month and then times out, at the
       # moment somebody actually needs it. `#total` is what lets the view print
@@ -184,6 +196,38 @@ module ReporterDashboards
       ids = Array(params[:recipient_user_ids]).reject(&:blank?)
       users = ids.empty? ? [] : ::User.active.where(id: ids).to_a
 
+      # THE RECIPIENT MUST BE ENTITLED TO REPORTS IN THIS PROJECT — curator decision,
+      # §Findings S-20, replacing "any active account in the instance".
+      #
+      # --- WHY IT IS A PERMISSION CHECK AND NOT A MEMBERSHIP CHECK ---
+      #
+      # §4.1 answers every "who may do what, in which project" question with a role grant,
+      # and `Member.where(...)` would be a second, weaker vocabulary for the same question.
+      # Asking `allowed_to?` lands in the right place by construction: a member whose roles
+      # do not include the reports permission is refused, a non-member is refused UNLESS an
+      # administrator deliberately granted it to the Non-member role in a public project,
+      # and an administrator is permitted because they can already read everything.
+      #
+      # The REQUESTER is always eligible without a special case, because
+      # `require_view_permission` has already demanded the same permission of them — so
+      # §4.1's "a logged-in non-member legitimately mails themselves a report they can
+      # already read" survives with no second rule to keep in step.
+      #
+      # --- WHAT THIS DOES NOT CLAIM ---
+      #
+      # It does NOT mean the recipient could have produced the report themselves. The
+      # document is rendered as the REQUESTER (FR-61) and the mail says whose access
+      # produced it (FR-47) — that is the point of sharing one, and a recipient with
+      # narrower issue visibility legitimately sees more than they could query. What this
+      # closes is the envelope: before it, any active account in the instance could be
+      # mailed a PDF from this server with a requester-controlled subject.
+      #
+      # REFUSED WHOLESALE, not filtered. Same rule as the addresses below and the issue ids
+      # in the delivery: dropping the ineligible recipients would mail the rest and leave
+      # the requester believing everybody got it.
+      ineligible = users.reject { |user| may_receive_reports?(user) }
+      return [users, [], :recipients_not_permitted] if ineligible.any?
+
       addresses = split_addresses(params[:recipient_addresses])
 
       # EXTERNAL ADDRESSES ARE REFUSED WHOLESALE WHEN THE POLICY IS OFF, and the refusal
@@ -199,6 +243,24 @@ module ReporterDashboards
 
       [users, addresses, nil]
     end
+
+    # ONE PLACE, because the picker below and the check above must not be able to disagree.
+    # The picker is not the check — HANDOVER §1, from T-25's escalation — but a picker that
+    # offers what the check will refuse is a form that answers 422 for no visible reason.
+    def may_receive_reports?(user)
+      user.allowed_to?(:view_reporter_dashboards_reports, @project)
+    end
+
+    # The accounts the compose form offers. Active project members who may actually open a
+    # report here, ordered so two renders of the page agree (CLAUDE.md §6).
+    #
+    # Deliberately NARROWER than what `#create` accepts: an administrator is eligible and is
+    # not listed, because listing every administrator in the picker is noise for the common
+    # case and they are reachable by anybody who really means to name them.
+    def recipient_choices
+      @project.users.active.sorted.select { |user| may_receive_reports?(user) }
+    end
+    helper_method :recipient_choices
 
     def split_addresses(raw)
       raw.to_s.split(/[\s,;]+/).map(&:strip).reject(&:empty?).uniq

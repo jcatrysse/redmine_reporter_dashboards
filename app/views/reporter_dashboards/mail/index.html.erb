@@ -45,7 +45,7 @@
       <% @mail_sends.each do |send| %>
         <tr>
           <td><%= format_time(send.created_at) %></td>
-          <td><%= link_to_user(User.find_by(id: send.author_id)) %></td>
+          <td><%= link_to_user(@page_users[send.author_id]) %></td>
           <td>
             <%# THE STORED NAME, not the association. A deleted or renamed template would
                 otherwise make the audit describe something other than what was sent. %>
@@ -77,7 +77,7 @@
                   guard worked — while `label_reporter_adhoc_mail_user_gone`, which IS
                   translated into all nine locales, was referenced nowhere in the tree.
                 %>
-                <div><%= link_to_user(recipient.user).presence ||
+                <div><%= link_to_user(@page_users[recipient.user_id]).presence ||
                          l(:label_reporter_adhoc_mail_user_gone) %></div>
               <% end %>
             <% end %>
