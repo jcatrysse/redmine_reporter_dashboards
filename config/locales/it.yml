@@ -192,3 +192,4 @@ it:
   text_reporter_schedule_test_confirm: "Inviare un report di prova a %{mail}? Viene generato esattamente come l'esecuzione reale e arriva solo a Lei."
   field_redmine_reporter_dashboards_schedule_enabled: "Attiva"
   text_reporter_schedule_template_hidden: "Un modello di report che non può vedere"
+  permission_render_reporter_dashboards_reports_as_others: "Generare report come un altro utente — concede l'accesso a tutto ciò che quell'utente può vedere"

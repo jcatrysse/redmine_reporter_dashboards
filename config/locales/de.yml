@@ -192,3 +192,4 @@ de:
   text_reporter_schedule_test_confirm: "Einen Testbericht an %{mail} senden? Er wird genau wie der echte Lauf erzeugt und geht nur an Sie."
   field_redmine_reporter_dashboards_schedule_enabled: "Aktiviert"
   text_reporter_schedule_template_hidden: "Eine Berichtsvorlage, die Sie nicht sehen können"
+  permission_render_reporter_dashboards_reports_as_others: "Berichte als anderer Benutzer erzeugen — gewährt Zugriff auf alles, was dieser Benutzer sehen kann"

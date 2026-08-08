@@ -217,8 +217,8 @@ the obligation**: write run state with `update_columns` (or an equivalent that d
 whole row), so the runner and the form cannot overwrite each other's columns. §7's Reversibility
 section records the decision next to rule 6, because rule 6 is what makes it irreversible.
 
-**S-10 · Who may bind a schedule to somebody else's render identity? REPORTED, NOT
-DECIDED (2026-08-08).** T-25's UI shipped `render_as_user_id` permitted and unfiltered, and
+**~~S-10~~ CLOSED by the curator, 2026-08-08: A PERMISSION,
+`render_reporter_dashboards_reports_as_others`.** T-25's UI shipped `render_as_user_id` permitted and unfiltered, and
 an independent review turned that into a working privilege escalation: a member holding
 `manage_reporter_dashboards_schedules` posted an administrator's id, pressed "Send a test",
 and received an admin-visibility report containing a private issue they could not see.
@@ -243,8 +243,37 @@ curator:
    presser's — preserves the button for more people and turns it into a way to send mail to
    somebody else, which is why it was not chosen unilaterally.
 
-Until this is answered the plugin is *narrower* than the spec, which is the safe direction;
-the code says so in `schedules_controller.rb#apply_render_identity`.
+**THE ANSWER, and what it does and does not change.** A role permission, granted per role
+per project, registered in §4.1 and live. Without it you may render as yourself; with it, as
+any active member of that project. The project bound survives the grant — the permission
+authorises borrowing a colleague's visibility, not naming an arbitrary account — and an
+administrator needs no grant, because `User#allowed_to?` answers `return true if admin?`
+(`user.rb:378`), so that exemption now falls out of Redmine's own model instead of a
+hand-written `|| User.current.admin?` that could drift from it.
+
+**Question 2 is answered by the same permission**, at the curator's request, and that is the
+stronger shape rather than merely the tidier one: binding a schedule to another identity and
+reading that identity's report on demand are ONE capability exercised twice, so they are one
+grant. Two would let an administrator hand out half of it and believe they had withheld the
+other half.
+
+**It maps NO action, and that is load-bearing.** Every other entry in `permissions.rb` opens
+a door; this one widens a FIELD behind `manage_…_schedules`. Mapping it would make it
+*sufficient* for `authorize` on actions it is not sufficient for, so a role holding only it
+could reach `#create` and be stopped by nothing but the second guard. `{}` says the truth:
+holding it alone lets you do nothing at all, and an example asserts that.
+
+**The label was the condition attached to choosing this model.** The permission does not
+relocate the escalation, it AUTHORISES it — anyone holding it can bind a schedule to a
+colleague with wider visibility and read the result. That is only acceptable if the checkbox
+tells the truth, because the roles screen is the one place an administrator reads about it.
+So it is *"Render reports as another user — grants access to everything that user can see"*
+in all nine locales, not the milder "choose a render identity" that would describe the
+mechanism while hiding the consequence.
+
+Six negative tests: the permission ignored, the permission not required, the project bound
+removed, the test-send guard opened, the test-send guard ignoring the grant, and the
+permission given actions. All six red.
 
 **S-8 · Deleting a `Role`, a `Project` or a `User` orphans plugin rows, and the roles join table is
 NOT the same shape as Redmine's.** Core's `Role` declares the reciprocal

@@ -192,3 +192,4 @@ en:
   text_reporter_schedule_test_confirm: "Send a test report to %{mail}? It is rendered exactly as the real run and goes only to you."
   field_redmine_reporter_dashboards_schedule_enabled: "Enabled"
   text_reporter_schedule_template_hidden: "A report template you cannot see"
+  permission_render_reporter_dashboards_reports_as_others: "Render reports as another user — grants access to everything that user can see"

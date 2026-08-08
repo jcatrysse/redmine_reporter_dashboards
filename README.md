@@ -581,6 +581,15 @@ If that identity is locked, deleted, or set to a policy this version does not un
 the schedule **fails** rather than falling back to somebody else. A report mailed as the
 wrong person is worse than a report that did not arrive.
 
+**Choosing somebody else's identity is a permission of its own.** By default you may only
+schedule a report as yourself — otherwise anyone who can manage schedules could borrow a
+colleague's wider visibility and have the result mailed to them. The role permission
+*"Render reports as another user"* lifts that, within one project, and its description says
+plainly what it grants: **access to everything that user can see**. Grant it deliberately.
+
+The same permission governs the *Send a test* button: without it you can only test-send a
+schedule that renders as you.
+
 ### When a report cannot be produced
 
 The schedule's **owner** gets a notice naming what went wrong and a correlation id to quote.

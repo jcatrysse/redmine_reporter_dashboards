@@ -153,10 +153,16 @@ module ReporterDashboards
       #
       # FR-45 is not negotiable — a test send that renders as somebody else would prove
       # nothing about the real run — so the OTHER half gives way: you may test-send only a
-      # schedule that renders as you. An administrator is exempt for the same reason as in
-      # `assignable_identity_ids`. With that rule and the one above, a non-administrator can
-      # only ever create schedules rendered as themselves, so they can always test their own.
-      unless actor == User.current || User.current.admin?
+      # schedule that renders as you, OR hold the permission that says you may hold somebody
+      # else's visibility.
+      #
+      # THE SAME PERMISSION AS THE FIELD, deliberately. Binding a schedule to another
+      # identity and reading that identity's report on demand are one capability exercised
+      # twice, so they are one grant; two would let an administrator hand out half of it and
+      # believe they had withheld the other half. The curator chose the permission model for
+      # S-10 and asked for this to follow it.
+      unless actor == User.current ||
+             User.current.allowed_to?(:render_reporter_dashboards_reports_as_others, @project)
         return deny_access
       end
       result = Reporting::ScheduledDelivery.new(logger: Rails.logger)
@@ -300,20 +306,23 @@ module ReporterDashboards
     # `apply_template` and `apply_query` exist for exactly this reason and this field is
     # strictly stronger than either. It is resolved the same way now.
     #
-    # --- WHY THE BOUND IS "YOURSELF, OR ANYBODY IF YOU ARE AN ADMINISTRATOR" ---
+    # --- WHO MAY NAME SOMEBODY ELSE: THE CURATOR'S ANSWER TO S-10, 2026-08-08 ---
     #
-    # "A project member" is NOT a safe bound: every member with wider visibility than yours
-    # is an escalation target, which is the whole of the finding above. §7b.5 states the
-    # rule this plugin already applies to on-demand mail — *"you can only mail what you can
-    # see"* — and the identity that satisfies it is your own. An administrator is exempt
-    # because they already hold every visibility there is, and because a service-account
-    # schedule is a legitimate thing for an administrator to set up.
+    # "A project member" is not a bound at all — every member with wider visibility than
+    # yours is an escalation target, which is the whole of the finding above. The question of
+    # who *should* be able to name another identity was reported rather than answered, and
+    # the answer is `render_reporter_dashboards_reports_as_others`: a permission, granted per
+    # role per project, which an administrator ticks deliberately and whose label says what
+    # it really grants.
     #
-    # **REPORTED, NOT DECIDED (CLAUDE.md §11.3).** §4.1 gives `manage_…_schedules` no
-    # impersonation power and FR-45 speaks only about the identity being *auditable*, never
-    # about who may choose it. This is the narrowest rule that closes the hole; a wider one
-    # — a delegation model, say — is a curator decision and a spec line, not something to
-    # widen quietly here.
+    # Without it you may name YOURSELF, which is §7b.5's rule for on-demand mail — *"you can
+    # only mail what you can see"* — applied to this field.
+    #
+    # THE ADMINISTRATOR CASE IS NOT WRITTEN HERE ANY MORE. It used to be `|| User.current
+    # .admin?`, and it did not need to be: Redmine's `User#allowed_to?` answers `return true
+    # if admin?` for every permission once the project allows the action (`user.rb:378`). One
+    # rule, and the administrator exemption falls out of Redmine's own model instead of a
+    # hand-written disjunction that could drift from it.
     def apply_render_identity(schedule)
       attributes = params[:schedule] || {}
       # Not the chosen policy — the STORED one is irrelevant, because the id is cleared
@@ -332,7 +341,7 @@ module ReporterDashboards
 
     def assignable_identity_ids
       @assignable_identity_ids ||=
-        if User.current.admin?
+        if User.current.allowed_to?(:render_reporter_dashboards_reports_as_others, @project)
           @project.users.active.pluck(:id)
         else
           [User.current.id]

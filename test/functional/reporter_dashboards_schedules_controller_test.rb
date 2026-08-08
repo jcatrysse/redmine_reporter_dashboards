@@ -277,9 +277,58 @@ class ReporterDashboardsSchedulesControllerTest < Redmine::ControllerTest
     assert_equal @author.id, Schedule.order(:id).last.render_as_user_id
   end
 
-  def test_an_administrator_may_render_as_another_member
-    # A service-account schedule is a legitimate thing for an administrator to set up, and
-    # an administrator already holds every visibility there is.
+  def test_the_render_as_others_permission_is_what_widens_the_bound
+    # THE CURATOR'S ANSWER TO S-10: a permission, granted per role per project, whose label
+    # says what it really grants. Same role, same request, one extra checkbox.
+    grant(:view_reporter_dashboards_reports, :view_reporter_dashboards_schedules,
+          :manage_reporter_dashboards_schedules,
+          :render_reporter_dashboards_reports_as_others)
+
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01', render_as: 'user',
+                                        render_as_user_id: @other.id.to_s } }
+
+    assert_response :redirect
+    assert_equal @other.id, Schedule.order(:id).last.render_as_user_id
+  end
+
+  def test_the_permission_alone_lets_you_do_nothing
+    # It maps no action, deliberately: it widens a field behind `manage_…_schedules` rather
+    # than opening a door. Mapping it would make it sufficient for `authorize` on actions it
+    # is not sufficient for.
+    grant(:render_reporter_dashboards_reports_as_others)
+
+    get :index, params: { project_id: @project.id }
+    assert_response :forbidden
+
+    get :new, params: { project_id: @project.id }
+    assert_response :forbidden
+  end
+
+  def test_the_bound_is_still_the_project_even_with_the_permission
+    # The permission authorises borrowing a colleague's visibility, not naming an arbitrary
+    # account: an administrator who is not a member of this project is still not offered,
+    # because the schedule's blast radius is the project it lives in.
+    grant(:view_reporter_dashboards_reports, :view_reporter_dashboards_schedules,
+          :manage_reporter_dashboards_schedules,
+          :render_reporter_dashboards_reports_as_others)
+    outsider = User.find(4)
+    assert_not_includes @project.users.map(&:id), outsider.id, 'fixture precondition'
+
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01', render_as: 'user',
+                                        render_as_user_id: outsider.id.to_s } }
+
+    assert_response :unprocessable_entity
+    assert_nil Schedule.order(:id).last.render_as_user_id
+  end
+
+  def test_an_administrator_may_render_as_another_member_without_the_permission
+    # Not a second rule — `User#allowed_to?` answers `return true if admin?` for every
+    # permission (user.rb:378), so the administrator exemption falls out of Redmine's own
+    # model rather than from a hand-written `|| User.current.admin?` that could drift from it.
     @request.session[:user_id] = 1
 
     post :create, params: { project_id: @project.id,
@@ -304,6 +353,26 @@ class ReporterDashboardsSchedulesControllerTest < Redmine::ControllerTest
     end
 
     assert_response :forbidden
+  end
+
+  def test_the_same_permission_is_what_allows_test_sending_somebody_elses_identity
+    # ONE CAPABILITY, ONE GRANT. Binding a schedule to another identity and reading that
+    # identity's report on demand are the same thing exercised twice — two permissions would
+    # let an administrator hand out half of it and believe they had withheld the other half.
+    @schedule.update_columns(render_as: Schedule::RENDER_AS_USER,
+                             render_as_user_id: @other.id)
+    grant(:view_reporter_dashboards_reports, :view_reporter_dashboards_schedules,
+          :manage_reporter_dashboards_schedules,
+          :render_reporter_dashboards_reports_as_others)
+    RedmineReporterDashboards::Reporting::ScheduledDelivery.any_instance
+      .stubs(:call)
+      .returns(RedmineReporterDashboards::Scheduling::Runner::Delivered.new(
+                 recipients_count: 1, document_count: 1, bytes_total: 10
+               ))
+
+    post :test_send, params: { project_id: @project.id, id: @schedule.id }
+
+    assert_redirected_to project_reporter_schedule_path(@project, @schedule)
   end
 
   def test_an_administrator_may_test_send_any_schedule
@@ -686,14 +755,16 @@ class ReporterDashboardsSchedulesControllerTest < Redmine::ControllerTest
     # FR-45, verbatim: "a test send uses the SAME identity as the real run." `@other` is the
     # stored identity and somebody else is pressing the button.
     #
-    # THE PRESSER IS AN ADMINISTRATOR, and that is the only way this example can exist now.
-    # A non-administrator pressing a button on a schedule that renders as somebody else is
-    # the second blocker an independent review found — the output landed in the presser's
-    # mailbox with somebody else's visibility in it. FR-45 still holds for the case that
-    # remains legitimate, and this asserts it.
+    # THE PRESSER HOLDS `render_…_as_others`, which is the grant that makes pressing this
+    # button on somebody else's identity legitimate at all. Without it this is the second
+    # blocker an independent review found — the output landed in the presser's mailbox with
+    # somebody else's visibility in it. FR-45 still holds for the authorised case, and this
+    # is what asserts it.
     @schedule.update_columns(render_as: Schedule::RENDER_AS_USER,
                              render_as_user_id: @other.id)
-    @request.session[:user_id] = 1
+    grant(:view_reporter_dashboards_reports, :view_reporter_dashboards_schedules,
+          :manage_reporter_dashboards_schedules,
+          :render_reporter_dashboards_reports_as_others)
     seen = []
     RedmineReporterDashboards::Reporting::ScheduledDelivery.any_instance
       .stubs(:call).with { |kwargs| seen << kwargs[:actor]; true }

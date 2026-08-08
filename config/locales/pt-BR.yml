@@ -192,3 +192,4 @@ pt-BR:
   text_reporter_schedule_test_confirm: "Enviar um relatório de teste para %{mail}? Ele é gerado exatamente como a execução real e vai apenas para você."
   field_redmine_reporter_dashboards_schedule_enabled: "Ativado"
   text_reporter_schedule_template_hidden: "Um modelo de relatório que você não pode ver"
+  permission_render_reporter_dashboards_reports_as_others: "Gerar relatórios como outro usuário — concede acesso a tudo o que esse usuário pode ver"

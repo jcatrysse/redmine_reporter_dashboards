@@ -883,7 +883,12 @@ module RedmineReporterDashboards
             [:manage_reporter_dashboards_schedules,
              { :'reporter_dashboards/schedules' => [:index, :show, :new, :create, :edit,
                                                     :update, :destroy, :test_send] },
-             { require: :member }]
+             { require: :member }],
+            # The curator's answer to S-10. It maps NO action on purpose: it widens a field
+            # behind `manage_…_schedules` rather than opening a door, so holding it alone
+            # lets you do nothing — and mapping it would make it sufficient for `authorize`
+            # on actions it is not sufficient for.
+            [:render_reporter_dashboards_reports_as_others, {}, { require: :member }]
           ]
         )
       end

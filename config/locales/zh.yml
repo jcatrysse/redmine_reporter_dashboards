@@ -192,3 +192,4 @@ zh:
   text_reporter_schedule_test_confirm: "向 %{mail} 发送测试报表？它的生成方式与真实运行完全相同，且只会发送给您。"
   field_redmine_reporter_dashboards_schedule_enabled: "已启用"
   text_reporter_schedule_template_hidden: "您无权查看的报表模板"
+  permission_render_reporter_dashboards_reports_as_others: "以其他用户身份生成报表 — 授予访问该用户可见的全部内容的权限"

@@ -380,6 +380,55 @@ module RedmineReporterDashboards
         covers: 'See, create, edit, disable and delete schedules, choose their ' \
                 'recipients, and send a test run'
       ),
+      # --- THE CURATOR'S ANSWER TO S-10, 2026-08-08 -------------------------------------
+      #
+      # `render_as_user_id` decides WHOSE VISIBILITY THE SQL RUNS UNDER, and T-25's first UI
+      # let any schedule manager set it to anybody: an independent review posted an
+      # administrator's id, pressed "Send a test", and received an admin-visibility report
+      # containing a private issue they could not see. The hole was closed narrowly — you may
+      # render as yourself — and the question of who *should* be able to do more was put to
+      # the curator rather than answered here (§Findings S-10).
+      #
+      # **The answer is a permission**, which is how Redmine states every other "who may do
+      # what, in which project" question. It is granted per role per project, so holding it
+      # in one project says nothing about another.
+      #
+      # --- WHAT THIS PERMISSION HONESTLY IS, AND WHY THE LABEL SAYS SO ---
+      #
+      # It does not relocate the escalation, it AUTHORISES it. Anyone holding this can bind
+      # a schedule to a colleague with wider visibility and read the result, which is the
+      # same capability the reviewer demonstrated — the difference is that an administrator
+      # now decides who has it, deliberately, on the roles screen.
+      #
+      # That only works if the checkbox tells the truth, because the roles screen is the one
+      # place an administrator reads about it. So the label is *"Render reports as another
+      # user — grants access to everything that user can see"* in all nine locales, and not
+      # the milder "choose a render identity" that would describe the mechanism while hiding
+      # the consequence.
+      #
+      # --- IT MAPS NO ACTION, AND THAT IS CORRECT ---
+      #
+      # Every other entry in this file opens a door. This one widens a FIELD: it is asked by
+      # `SchedulesController#apply_render_identity` and by `#test_send`, both of which are
+      # already behind `manage_…_schedules`. Mapping it to those actions would make it
+      # *sufficient* for `authorize` on them, so a role holding only this could reach
+      # `#create` and be stopped by nothing but the second guard. `{}` says what is true:
+      # holding this alone lets you do nothing at all.
+      Entry.new(
+        name: :render_reporter_dashboards_reports_as_others,
+        project_module: REPORTS_MODULE,
+        actions: {},
+        read: false,
+        requires: :member,
+        group: :reports_schedule,
+        # NOT `authoring: true`. That flag means code execution (INV-9) and derives
+        # `require: :member` from it; this is a visibility privilege, so the requirement is
+        # written by hand and the flag stays false rather than being borrowed for its
+        # side effect.
+        authoring: false,
+        covers: 'Bind a schedule to another user\'s render identity, and test-send one. ' \
+                'Grants access to everything that user can see'
+      ),
       # --- distribution: the two paths that reach outside Redmine's permission model ----
       Entry.new(
         name: :mail_reporter_dashboards_reports,

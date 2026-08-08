@@ -29,7 +29,9 @@ module ReporterDashboards
     # The identities this actor may bind a schedule to — the same bound the controller
     # enforces, so the picker cannot offer what the controller would refuse.
     def reporter_schedule_assignable_identities(project)
-      return project.users.active.sorted if User.current.admin?
+      if User.current.allowed_to?(:render_reporter_dashboards_reports_as_others, project)
+        return project.users.active.sorted
+      end
 
       [User.current]
     end
