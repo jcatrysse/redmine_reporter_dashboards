@@ -363,14 +363,22 @@ module RedmineReporterDashboards
         # NOT `authoring: true` even so. A schedule chooses a template, it does not write
         # one, so this is not the code-execution class INV-9 governs — which is exactly why
         # `manage_…_schedules` alone cannot create a template to point at.
-        actions: { SCHEDULES_CONTROLLER => [:new, :create, :edit, :update, :destroy,
-                                            :test_send] },
+        # `#index` AND `#show` ARE HERE TOO, and leaving them out made this permission
+        # unusable alone: a role holding it created a schedule and was answered 403 on the
+        # redirect to it, with no menu entry either. Redmine's own `manage_public_queries`
+        # does not stand alone in that sense; a permission that can change a thing it cannot
+        # look at is not a milder permission, it is a broken one.
+        #
+        # The SPLIT is unaffected, which is what §4.1 is about: `view_…` still grants
+        # read-only, and nothing about holding it lets you change who receives a report.
+        actions: { SCHEDULES_CONTROLLER => [:index, :show, :new, :create, :edit, :update,
+                                            :destroy, :test_send] },
         read: false,
         requires: :member,
         group: :reports_schedule,
         authoring: false,
-        covers: 'Create, edit, disable and delete schedules, choose their recipients, ' \
-                'and send a test run'
+        covers: 'See, create, edit, disable and delete schedules, choose their ' \
+                'recipients, and send a test run'
       ),
       # --- distribution: the two paths that reach outside Redmine's permission model ----
       Entry.new(

@@ -190,3 +190,5 @@ zh:
   text_reporter_schedule_render_as_info: "所有收件人看到的都是此人视角下的数据，可能与他们自己的可见范围不同。"
   text_reporter_schedule_enabled_info: "计划仅在启用时运行。"
   text_reporter_schedule_test_confirm: "向 %{mail} 发送测试报表？它的生成方式与真实运行完全相同，且只会发送给您。"
+  field_redmine_reporter_dashboards_schedule_enabled: "已启用"
+  text_reporter_schedule_template_hidden: "您无权查看的报表模板"

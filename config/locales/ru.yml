@@ -190,3 +190,5 @@ ru:
   text_reporter_schedule_render_as_info: "Все получатели видят данные глазами этого пользователя, что может отличаться от их собственной видимости."
   text_reporter_schedule_enabled_info: "Расписание выполняется только пока оно включено."
   text_reporter_schedule_test_confirm: "Отправить тестовый отчёт на %{mail}? Он формируется точно так же, как настоящий запуск, и придёт только вам."
+  field_redmine_reporter_dashboards_schedule_enabled: "Включено"
+  text_reporter_schedule_template_hidden: "Шаблон отчёта, который вам недоступен"

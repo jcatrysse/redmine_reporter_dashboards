@@ -596,7 +596,7 @@ asks that question). `Req` is Redmine's `require:`; `read` is Redmine's `read: t
 | **`edit_own_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete the templates you authored** | **live** |
 | **`edit_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete any template in the project** | **live** |
 | **`manage_public_reporter_dashboards_templates`** | R | — | `member` | **Give a template a visibility wider than its author** — Redmine's `manage_public_queries` decision, for templates | **live** |
-| `manage_reporter_dashboards_schedules` | R | — | `member` | Create, edit, disable and delete schedules, choose recipients, send a test run | **live** |
+| `manage_reporter_dashboards_schedules` | R | — | `member` | **See**, create, edit, disable and delete schedules, choose recipients, send a test run. It maps `#index`/`#show` as well as the writing actions — a permission that can change a thing it cannot look at is broken rather than milder, and leaving them out made a role holding this one alone get a 403 on the redirect after its own successful create | **live** |
 | `mail_reporter_dashboards_reports` | R | — | `loggedin` | Send a report by e-mail on demand, to Redmine users | T-32 |
 | `share_reporter_dashboards_reports` | R | — | `member` | Create a share link: an expiring, revocable URL serving a snapshot to whoever holds it | T-28 |
 | `publish_reporter_dashboards_reports` | R | — | `member` | Turn a share link into a **public** link, reachable without a Redmine account (FR-62) | T-28 |

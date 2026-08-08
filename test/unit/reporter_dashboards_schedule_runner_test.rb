@@ -494,9 +494,9 @@ class ReporterDashboardsScheduleRunnerTest < ActiveSupport::TestCase
     assert_equal 1, summary.failed
     # NO CLASS NAME PREFIX on the runner's own errors — a UX finding, not a review one.
     # `last_error` is a column an administrator reads on a schedule row, and sixty
-    # characters of `RedmineReporterDashboards::Scheduling::Runner::IdentityUnavailable:`
-    # say less than the sentence after it. A FOREIGN exception keeps its class (see the
-    # `IOError` example above), because there the class is the only clue about what broke.
+    # characters of a fully-qualified `…::IdentityUnavailable:` say less than the sentence
+    # after it. A FOREIGN exception keeps its class (see the `IOError` example above),
+    # because there the class is the only clue about what broke.
     assert_includes schedule.reload.last_error, 'not an active account'
     assert_not_includes schedule.last_error, 'IdentityUnavailable'
   end

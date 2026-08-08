@@ -190,3 +190,5 @@ pt-BR:
   text_reporter_schedule_render_as_info: "Todos os destinatários recebem a visão dos dados desta pessoa, que pode ser diferente da deles."
   text_reporter_schedule_enabled_info: "Um agendamento só é executado enquanto estiver ativado."
   text_reporter_schedule_test_confirm: "Enviar um relatório de teste para %{mail}? Ele é gerado exatamente como a execução real e vai apenas para você."
+  field_redmine_reporter_dashboards_schedule_enabled: "Ativado"
+  text_reporter_schedule_template_hidden: "Um modelo de relatório que você não pode ver"

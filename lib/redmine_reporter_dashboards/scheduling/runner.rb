@@ -629,13 +629,13 @@ module RedmineReporterDashboards
       # The class name is half the diagnostic. `undefined method 'each' for nil` with no
       # class in front of it has sent more than one person looking in the wrong file.
       #
-      # EXCEPT FOR THIS CLASS'S OWN, which are a UX pass's finding rather than a reviewer's.
-      # `last_error` is a column an administrator reads on a schedule row, and
-      # `RedmineReporterDashboards::Scheduling::Runner::IdentityUnavailable: schedule 5
-      # names no user to render as` spends sixty characters saying what the next twelve
-      # words say better. The prefix earns its place for a FOREIGN exception, where the
-      # class is the only clue about which layer broke, and earns nothing for one this file
-      # raised with a sentence already in it.
+      # EXCEPT FOR `Schedule::IdentityUnavailable`, which is a UX pass's finding rather than
+      # a reviewer's. `last_error` is a column an administrator reads on a schedule row, and
+      # a sixty-character fully-qualified class name in front of it says less than the
+      # sentence after it. The prefix earns its place for a FOREIGN exception, where the
+      # class is the only clue about which layer broke, and earns nothing for one the model
+      # raised with a sentence already in it. (The class used to live on this file; T-25's
+      # UI moved it to `Schedule`, so a test send and a 06:00 run cannot disagree.)
       def describe(error)
         return error.to_s unless error.is_a?(::StandardError)
         return error.message if

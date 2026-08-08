@@ -190,3 +190,5 @@ hu:
   text_reporter_schedule_render_as_info: "A címzettlistán mindenki ennek a személynek az adatnézetét kapja meg, amely eltérhet a sajátjától."
   text_reporter_schedule_enabled_info: "Az ütemezés csak akkor fut, amíg engedélyezve van."
   text_reporter_schedule_test_confirm: "Küldjünk teszt jelentést ide: %{mail}? Pontosan úgy készül, mint a valódi futás, és csak Önhöz jut el."
+  field_redmine_reporter_dashboards_schedule_enabled: "Engedélyezve"
+  text_reporter_schedule_template_hidden: "Egy jelentéssablon, amelyet nem láthat"

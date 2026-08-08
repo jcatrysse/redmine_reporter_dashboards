@@ -881,8 +881,8 @@ module RedmineReporterDashboards
             # in the plugin that puts mail on the wire without a schedule firing, and a
             # read permission that could send e-mail would not be a read permission.
             [:manage_reporter_dashboards_schedules,
-             { :'reporter_dashboards/schedules' => [:new, :create, :edit, :update,
-                                                    :destroy, :test_send] },
+             { :'reporter_dashboards/schedules' => [:index, :show, :new, :create, :edit,
+                                                    :update, :destroy, :test_send] },
              { require: :member }]
           ]
         )

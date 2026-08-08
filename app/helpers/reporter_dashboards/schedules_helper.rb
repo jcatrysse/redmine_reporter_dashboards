@@ -12,9 +12,26 @@ module ReporterDashboards
     # WHAT TO CALL A SCHEDULE, which has no name column of its own on purpose: a schedule
     # is "this template, on this rhythm", and a second name to keep in step with the
     # template's is a second thing to go stale.
+    # A NAME THIS ACTOR MAY SEE. `TemplatesController#find_template` renders 404 for a
+    # template that is not visible, so the plugin has already decided such a template's
+    # existence is protected — and this helper printed its NAME as the page heading and as
+    # every row link, to any `view_…_schedules` holder. That permission is `read: true`, so
+    # it leaked out of closed projects too. Measured: a private template called
+    # "Q3 LAYOFFS" appeared in both `#index` and `#show`.
     def reporter_schedule_name(schedule)
-      name = schedule.template&.name.to_s.strip
+      template = schedule.template
+      return l(:label_reporter_schedule) if template.nil? || !template.visible?(User.current)
+
+      name = template.name.to_s.strip
       name.empty? ? l(:label_reporter_schedule) : name
+    end
+
+    # The identities this actor may bind a schedule to — the same bound the controller
+    # enforces, so the picker cannot offer what the controller would refuse.
+    def reporter_schedule_assignable_identities(project)
+      return project.users.active.sorted if User.current.admin?
+
+      [User.current]
     end
 
     def reporter_schedule_template_link(schedule)
@@ -23,7 +40,11 @@ module ReporterDashboards
       # — `delete_all` and a DB-level delete bypass `dependent: :destroy` — and it is
       # exactly the state an operator is on this page to diagnose.
       return content_tag(:em, l(:text_reporter_schedule_template_missing)) if template.nil?
-      return template.name unless template.visible?(User.current)
+      # The `visible?` check gates the NAME and not only the link — see
+      # `reporter_schedule_name`.
+      unless template.visible?(User.current)
+        return content_tag(:em, l(:text_reporter_schedule_template_hidden))
+      end
 
       link_to template.name, project_reporter_template_path(schedule.project, template)
     end
@@ -47,7 +68,13 @@ module ReporterDashboards
         return content_tag(:em, l(:text_reporter_schedule_identity_missing))
       end
 
-      link_to_user(schedule.author) || content_tag(:em, l(:text_reporter_schedule_identity_missing))
+      # NOT `link_to_user(schedule.author) || …`: `link_to_user(nil)` returns `""`, which is
+      # truthy, so the fallback could never fire and a schedule whose author account was
+      # removed showed a blank cell — the exact state an operator opens this page to
+      # diagnose, with nine translations for a branch that was unreachable.
+      return content_tag(:em, l(:text_reporter_schedule_identity_missing)) if schedule.author.nil?
+
+      link_to_user(schedule.author)
     end
 
     # The one line `view_reporter_dashboards_schedules` exists for: did it run, and what

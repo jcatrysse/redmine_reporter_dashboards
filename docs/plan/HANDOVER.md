@@ -422,6 +422,30 @@ bit: **anything a rescue body calls is part of the rescue's correctness**, inclu
 logging, including a second rescue's own logging. The fix is one non-throwing choke point,
 not six `begin`s.
 
+**A FIELD THAT NAMES A USER IS A PRIVILEGE FIELD, AND `permit` IS NOT A FILTER.** T-25's
+schedule form put `render_as_user_id` — the column that decides **whose visibility the SQL
+runs under** — straight into `params.permit`, next to `apply_template` and `apply_query`,
+which exist precisely because permitting an id lets a request name something the actor may
+not have. An independent review posted `render_as_user_id=1`, pressed "Send a test", and
+received an ADMINISTRATOR-visibility report containing a private issue the attacker could
+not see. It was also plantable in two steps, because the id was stored even while the policy
+said `author`.
+
+Two things generalise. **The picker is not the check** — a `select` narrowed to project
+members proves nothing about what the controller accepts. And **"a project member" is not a
+safe bound for an identity field**: every member with wider visibility than yours is an
+escalation target, so the first test written for this passed with the bound widened to the
+whole project, because it happened to target an administrator (who is not a member). Pick a
+target inside the wrong bound when testing one.
+
+**TWO SAFE HALVES CAN BE AN EXFILTRATION PRIMITIVE TOGETHER.** The same review found a
+second escalation needing NO parameter tampering: `#test_send` rendered as the schedule's
+stored identity (FR-45, correct) and delivered to whoever pressed the button (convenient,
+correct in isolation). Any schedule authored by an administrator could therefore be
+test-sent by any schedule manager, and the output landed in their mailbox. When an action
+couples "act as X" with "deliver to Y", the requirement that fixes it is whichever of the
+two is written down — here FR-45 — and the other half gives way.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
@@ -580,6 +604,8 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-25 (parts 1 and 2): the scheduler's arithmetic and its runner — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07), and these are the POST-REVIEW figures** | `rake redmine:plugins:test` — **390 runs, 2042 assertions, 0 failures, 0 errors, 4 skips** (was 340/0/0/4 — **skip count unchanged**). 36 new Minitest examples driving the tick against a real database, because every claim the runner makes is about a WRITE: that the unique index refuses a second claim, that `update_columns` leaves an untouched column alone, that a run row stops saying `running`. A double cannot fail an index. DB-less: **2123 rspec examples, 0 failures, 126 pending** (was 2042). Nine gates green including `layer_purity` strict, G11 both arms, `zero_reporter` still 16/16, and the 2.7 floor |
 | **T-25: every guard in the runner, negative-tested one at a time — TWICE, before and after an independent review** | **yes, locally (2026-08-07)** | Each guard removed in the mirrored copy, the one test that names it re-run, and confirmed RED: the at-most-once claim, the delivery contract (a port answering `nil` must not read as a success), `last_run_on` not advancing on a failure, the guarded recording of a failure (an exception in a rescue clause is not caught by that clause — FR-41 violated by the code written for it), the bounded error text, the schedule's own timezone, draft-versus-failure, S-7's `update_columns` in three mutations, and rule 5's column filtering in two. **Three of the first ten were GREEN under mutation and the examples were rewritten** — see the §1 traps. A fresh-subagent review then REJECTED the result with one blocker and five majors, every one backed by a probe it ran; the eight fixes were negative-tested the same way (14 mutations, 13 red) and the one that stayed green — a `[date, last_run_on].max` that `#regressed?` makes provably unreachable — was DELETED rather than kept as a second mechanism for one property. Two clauses survive as documented redundancy rather than load-bearing guards: `logged?` in the render identity (`AnonymousUser`'s status already fails `active?`) and nothing else |
 | **T-25: the layer_purity `scheduling` arm** | **yes, locally (2026-08-07)** | Same pattern as the `reporting` arm and the same forbidden set. The scheduler runs from a rake task with no request behind it, so a cookie or a session there is not a leak across a boundary but a value that cannot exist |
+| **T-25 (part 4): the schedule UI and its two permission promotions — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-08), POST-REVIEW figures** | `rake redmine:plugins:test` — **494 runs, 2392 assertions, 0 failures, 0 errors, 4 skips** (was 451 before the UI — **skip count unchanged throughout T-25**). DB-less **2123 examples, 0 failures, 126 pending**, including all 92 permission-map examples against the two now-live §4.1 rows. Nine gates green, `layer_purity` strict, locale parity **176 keys x 9 files** with identical interpolation placeholders |
+| **T-25 part 4's independent review: a third REJECT, and the only one to find a privilege escalation** | **yes, locally (2026-08-08)** | **Two blockers, both escalations, both reproduced end to end**: `render_as_user_id` permitted and unfiltered (admin-visibility report into an ordinary member's inbox, with a private issue in it), and `#test_send` coupling FR-45's stored identity to delivery-to-the-presser with no tampering at all. Eight majors, four of them visible on the first page an operator opens — a `Translation missing` header, a private template's NAME disclosed as the page heading, an identity picker that never pre-selected (so no `render_as: user` schedule could be saved from its own form), and a partial PATCH silently deleting every recipient. All 16 fixed; **19 mutations run, 19 red**, two of which needed sharper examples after mutation showed the first attempt vacuous |
 | **T-25 (part 3): the delivery, the mailer, the rake task and FR-44 — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07), POST-REVIEW figures** | `rake redmine:plugins:test` — **451 runs, 2256 assertions, 0 failures, 0 errors, 4 skips** (was 390/0/0/4 before T-25 part 2 — **skip count unchanged throughout**). DB-less unchanged at **2123 examples, 0 failures, 126 pending** — the delivery is application layer and has no DB-less half. Nine gates green, `layer_purity` strict, locale parity **129 keys x 9 files** with identical interpolation placeholders in every language |
 | **T-25 part 3's independent review: a second REJECT, 1 blocker + 5 majors + 6 minors + 3 nits, every one probe-backed** | **yes, locally (2026-08-07)** | The blocker was the heartbeat crying wolf on a healthy install (see §1). The majors: the owner's failure notice quoted a correlation id that existed nowhere else (`ReportRun` mints its own per document — run row `3a8cd94c…`, owner mail `23688ef7…`); **no owner notice at all** for the three failures that happen BEFORE `delivery.call`, of which a locked render identity is the likeliest in production, while the README said otherwise; an empty per-record report mailed as a success **with no attachment**; `#as`'s `ensure` unenforced (deleting it left the suite green); and the query-count bound set to the pre-change value, so it could not detect the regression it was written for. All 15 fixed and **16 mutations run, 16 red** — two examples were rewritten after mutation showed them vacuous. A test written for a MINOR then found an unlisted defect: a dangling `template_id` was a `NoMethodError` on nil rather than a failure |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
@@ -922,6 +948,18 @@ of a CI that runs on fork pull requests.
    sends nothing and is not a failure**: zero is the good outcome for "my overdue issues"
    and a breakage for a weekly status report, the plugin cannot tell which, so the run row
    records `document_count: 0` and nobody is paged.
+
+   **T-25 IS COMPLETE, AND ITS UI IS WHERE BOTH ESCALATIONS WERE.** `SchedulesController`
+   (8 actions), 5 views, a helper, and the two §4.1 rows promoted to live. Four things to
+   know. **`render_as_user_id` is resolved in `apply_render_identity`, never permitted** —
+   the bound is "yourself, or anybody if you are an administrator", which is §7b.5's *you
+   can only mail what you can see* applied to the field; anything wider is a curator
+   decision (see the ASK below). **You may test-send only a schedule that renders as you**
+   (or be an administrator): FR-45 fixes the identity, so the delivery target is what gives
+   way. **`manage_…_schedules` maps `#index`/`#show` too** — without them a role holding it
+   alone created a schedule and got a 403 on the redirect. **Absent and empty are different
+   requests** for both `recipient_user_ids` and `template_id`; the form carries a hidden
+   blank so an emptied multi-select is expressible at all.
 
    **S-7's OBLIGATION IS PAID, AND READING THE ROW BACK CANNOT PROVE IT.** See the three new §1
    traps. The run state goes through `update_columns`; the example that establishes it subscribes to

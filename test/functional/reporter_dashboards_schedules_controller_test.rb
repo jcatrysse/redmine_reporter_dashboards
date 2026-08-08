@@ -154,18 +154,198 @@ class ReporterDashboardsSchedulesControllerTest < Redmine::ControllerTest
     assert_response :forbidden
   end
 
-  def test_manage_alone_can_write_and_read
-    # The other direction. `manage_` maps neither `#index` nor `#show`, so somebody who can
-    # edit a schedule but not view one would be an absurdity — Redmine's `authorize` refuses
-    # an unmapped action outright, which is why `view_` is what the menu link is gated on.
-    grant(:manage_reporter_dashboards_schedules)
+  def test_manage_alone_can_both_write_and_read
+    # `#index`/`#show` are mapped into `manage_` as well, and leaving them out made the
+    # permission unusable alone: a role holding it created a schedule and was answered 403
+    # on the redirect to it, with no menu entry either. Redmine's `manage_public_queries`
+    # does not stand alone in that sense. The SPLIT is unaffected — `view_` still grants
+    # read-only, and holding it still changes nothing about who receives a report.
+    grant(:view_reporter_dashboards_reports, :manage_reporter_dashboards_schedules)
 
     get :new, params: { project_id: @project.id }
     assert_response :success
 
     get :index, params: { project_id: @project.id }
-    # `manage_` does not map #index, and nothing pretends it does.
+    assert_response :success
+
+    get :show, params: { project_id: @project.id, id: @schedule.id }
+    assert_response :success
+  end
+
+  def test_creating_a_schedule_lands_somewhere_the_creator_can_actually_read
+    # The bug the mapping above fixes, asserted end to end rather than by inspecting a list.
+    grant(:view_reporter_dashboards_reports, :manage_reporter_dashboards_schedules)
+
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01' } }
+    assert_response :redirect
+    schedule = Schedule.order(:id).last
+
+    get :show, params: { project_id: @project.id, id: schedule.id }
+    assert_response :success
+  end
+
+  def test_the_explicit_manage_guard_holds_when_the_action_map_does_not
+    # THE GUARD THE CLASS COMMENT IS ABOUT, and it had ZERO coverage: every 403 example
+    # above is satisfied by the action map alone, so `require_manage_permission` could be
+    # DELETED OUTRIGHT and all 23 examples passed. An independent review measured that. The
+    # comment argues the guard is what holds the line when somebody widens the map — so this
+    # widens the map and asserts the guard still refuses.
+    grant(:view_reporter_dashboards_schedules)
+    permission = Redmine::AccessControl.permission(:view_reporter_dashboards_schedules)
+    widened = permission.actions + ['reporter_dashboards/schedules/destroy',
+                                    'reporter_dashboards/schedules/test_send']
+    permission.stubs(:actions).returns(widened)
+
+    delete :destroy, params: { project_id: @project.id, id: @schedule.id }
     assert_response :forbidden
+
+    post :test_send, params: { project_id: @project.id, id: @schedule.id }
+    assert_response :forbidden
+  end
+
+  # --- the render identity, which decides whose visibility the SQL runs under -----------
+
+  def test_a_member_cannot_bind_a_schedule_to_somebody_elses_identity
+    # THE BLOCKER. `render_as_user_id` was in `permit` and filtered against nothing: a
+    # member holding `manage_…_schedules` posted `render_as_user_id=1`, pressed Send a test,
+    # and received an ADMINISTRATOR-visibility report in their own inbox. An independent
+    # review reproduced it against a private issue the attacker could not see.
+    admin = User.find(1)
+    assert admin.admin?, 'fixture precondition'
+
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01',
+                                        render_as: 'user',
+                                        render_as_user_id: admin.id.to_s } }
+
+    assert_response :unprocessable_entity
+    assert_nil Schedule.order(:id).last.render_as_user_id
+  end
+
+  def test_the_identity_cannot_be_planted_under_a_benign_policy_and_activated_later
+    # The two-step variant the review also found: the id was stored even while the policy
+    # said `author`, so it could be planted first and the policy flipped by a later request
+    # that never mentions the id.
+    admin = User.find(1)
+
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01',
+                                        render_as: 'author',
+                                        render_as_user_id: admin.id.to_s } }
+    assert_response :redirect
+    schedule = Schedule.order(:id).last
+    assert_nil schedule.render_as_user_id, 'nothing is stored under a benign policy'
+
+    patch :update, params: { project_id: @project.id, id: schedule.id,
+                             schedule: { template_id: @template.id, repeat: 'daily',
+                                         start_date: '2026-03-01', render_as: 'user' } }
+
+    assert_response :unprocessable_entity
+    assert_nil schedule.reload.render_as_user_id
+  end
+
+  def test_a_member_cannot_bind_a_schedule_to_another_MEMBERS_identity
+    # "A PROJECT MEMBER" IS NOT A SAFE BOUND, and the example above does not prove that: it
+    # targets an administrator, who is not a member of this project, so widening the bound to
+    # `@project.users` leaves it green. Measured. Every member with wider visibility than
+    # yours — a lead who can see private issues you cannot — is an escalation target, which
+    # is the whole of the finding. `@other` IS a member of project 1.
+    assert_includes @project.users.map(&:id), @other.id, 'fixture precondition'
+
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01', render_as: 'user',
+                                        render_as_user_id: @other.id.to_s } }
+
+    assert_response :unprocessable_entity
+    assert_nil Schedule.order(:id).last.render_as_user_id
+  end
+
+  def test_a_member_may_render_as_themselves
+    # The bound is "yourself, or anybody if you are an administrator" — §7b.5's rule applied
+    # to this field: you can only mail what you can see.
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01', render_as: 'user',
+                                        render_as_user_id: @author.id.to_s } }
+
+    assert_response :redirect
+    assert_equal @author.id, Schedule.order(:id).last.render_as_user_id
+  end
+
+  def test_an_administrator_may_render_as_another_member
+    # A service-account schedule is a legitimate thing for an administrator to set up, and
+    # an administrator already holds every visibility there is.
+    @request.session[:user_id] = 1
+
+    post :create, params: { project_id: @project.id,
+                            schedule: { template_id: @template.id, repeat: 'daily',
+                                        start_date: '2026-03-01', render_as: 'user',
+                                        render_as_user_id: @other.id.to_s } }
+
+    assert_response :redirect
+    assert_equal @other.id, Schedule.order(:id).last.render_as_user_id
+  end
+
+  def test_a_test_send_of_somebody_elses_identity_is_refused
+    # THE SECOND BLOCKER, and it needed no tampering at all: any schedule authored by an
+    # administrator could be test-sent by any `manage_…_schedules` holder, and the output
+    # landed in the presser's mailbox. FR-45 says a test renders as the stored identity, so
+    # the OTHER half gives way — you may test-send only a schedule that renders as you.
+    @schedule.update_columns(render_as: Schedule::RENDER_AS_USER,
+                             render_as_user_id: @other.id)
+
+    assert_no_difference 'ActionMailer::Base.deliveries.size' do
+      post :test_send, params: { project_id: @project.id, id: @schedule.id }
+    end
+
+    assert_response :forbidden
+  end
+
+  def test_an_administrator_may_test_send_any_schedule
+    @schedule.update_columns(render_as: Schedule::RENDER_AS_USER,
+                             render_as_user_id: @other.id)
+    @request.session[:user_id] = 1
+    RedmineReporterDashboards::Reporting::ScheduledDelivery.any_instance
+      .stubs(:call)
+      .returns(RedmineReporterDashboards::Scheduling::Runner::Delivered.new(
+                 recipients_count: 1, document_count: 1, bytes_total: 10
+               ))
+
+    post :test_send, params: { project_id: @project.id, id: @schedule.id }
+
+    assert_redirected_to project_reporter_schedule_path(@project, @schedule)
+  end
+
+  def test_a_failed_test_send_does_not_mail_the_schedules_owner
+    # The class comment and the confirmation dialog both promise a test "goes only to you",
+    # in nine languages. On the failure path it mailed the OWNER — telling them their
+    # SCHEDULED run had failed when no run happened, once per click.
+    @template.update_columns(content: '{% this is not a tag %}')
+    ScheduleRecipient.create!(schedule_id: @schedule.id, user_id: @other.id)
+
+    assert_no_difference 'ActionMailer::Base.deliveries.size' do
+      post :test_send, params: { project_id: @project.id, id: @schedule.id }
+    end
+
+    assert_match(/could not be sent/, flash[:error])
+  end
+
+  def test_a_delivery_that_raises_is_a_flash_and_not_a_500
+    # `ScheduledDelivery` states its own contract — "it may also raise" — and `Runner`
+    # honours it. This did not: an MTA outage gave the operator a Redmine 500 page instead
+    # of the flash this action exists to produce.
+    RedmineReporterDashboards::Reporting::ScheduledDelivery.any_instance
+      .stubs(:call).raises(RuntimeError, 'smtp exploded')
+
+    post :test_send, params: { project_id: @project.id, id: @schedule.id }
+
+    assert_redirected_to project_reporter_schedule_path(@project, @schedule)
+    assert_match(/smtp exploded/, flash[:error])
   end
 
   def test_holding_neither_permission_reaches_nothing
@@ -315,6 +495,157 @@ class ReporterDashboardsSchedulesControllerTest < Redmine::ControllerTest
 
   # --- destroying --------------------------------------------------------------------------
 
+  def test_a_patch_that_does_not_mention_recipients_keeps_them
+    # "Absent" and "empty" are not the same request. `requested_recipient_ids` returned `[]`
+    # for both, so any partial update — a future inline toggle, a REST client, a renamed
+    # field — silently deleted the distribution list and answered "Successful update".
+    ScheduleRecipient.create!(schedule_id: @schedule.id, user_id: @other.id)
+
+    patch :update, params: { project_id: @project.id, id: @schedule.id,
+                             schedule: { enabled: '0' } }
+
+    assert_response :redirect
+    assert_equal [@other.id], @schedule.reload.recipients.map(&:user_id)
+  end
+
+  def test_an_empty_recipient_list_still_clears_it
+    # The other half: an emptied list must still clear it, or the form could never remove
+    # the last recipient.
+    #
+    # `['']` AND NOT `[]`, and the difference is the whole reason the partial carries a
+    # hidden blank: Rails drops an empty array from the parameters entirely, so `[]` over
+    # HTTP is indistinguishable from "not requested" — a browser with nothing selected sends
+    # no key at all. The hidden element is what makes an emptied list expressible, and this
+    # is the request it produces. (An assertion on the literal `[]` was written here first
+    # and failed, which is how the distinction got pinned down.)
+    ScheduleRecipient.create!(schedule_id: @schedule.id, user_id: @other.id)
+
+    patch :update, params: { project_id: @project.id, id: @schedule.id,
+                             schedule: { template_id: @template.id, repeat: 'weekly',
+                                         start_date: '2026-01-01',
+                                         recipient_user_ids: [''] } }
+
+    assert_response :redirect
+    assert_empty @schedule.reload.recipients
+  end
+
+  def test_clearing_the_template_fails_rather_than_keeping_the_old_one
+    # `return if id.blank?` did the exact thing its own comment refused — clearing the
+    # picker and saving returned "Successful update" and changed nothing, which also kept an
+    # invisible template attached to a schedule its editor cannot see.
+    patch :update, params: { project_id: @project.id, id: @schedule.id,
+                             schedule: { template_id: '', repeat: 'weekly',
+                                         start_date: '2026-01-01' } }
+
+    assert_response :unprocessable_entity
+    assert_equal @template.id, @schedule.reload.template_id, 'and nothing was written'
+  end
+
+  def test_a_query_from_another_project_is_refused
+    # The picker offers this project's and global queries; the controller used only
+    # `IssueQuery.visible`, so a schedule in project A could be bound to a query scoped to
+    # project B — a report silently covering a different project than the one whose
+    # permissions were checked to create it.
+    other_project = Project.find(2)
+    foreign = IssueQuery.create!(name: 'Elsewhere', project: other_project, user: @author,
+                                 visibility: Query::VISIBILITY_PUBLIC)
+
+    patch :update, params: { project_id: @project.id, id: @schedule.id,
+                             schedule: { template_id: @template.id, repeat: 'weekly',
+                                         start_date: '2026-01-01',
+                                         query_id: foreign.id.to_s } }
+
+    assert_nil @schedule.reload.query_id
+    assert_nil @schedule.query_type
+  end
+
+  # --- what the pages show, and what they must not ---------------------------------------
+
+  def test_the_edit_form_round_trips_without_the_operator_touching_anything
+    # THE EXAMPLE THAT WOULD HAVE CAUGHT THE PICKER BUG. `principals_options_for_select`
+    # compares an Integer id to a String, so the identity option was never marked selected:
+    # the browser showed blank, and pressing Save posted an empty id — every schedule using
+    # the policy FR-45 exists for was uneditable until somebody re-picked the identity by
+    # hand, on the one field where a mis-click changes whose data is mailed.
+    @schedule.update_columns(render_as: Schedule::RENDER_AS_USER,
+                             render_as_user_id: @author.id)
+
+    get :edit, params: { project_id: @project.id, id: @schedule.id }
+    assert_response :success
+    assert_select "select#schedule_render_as_user_id option[selected][value=?]",
+                  @author.id.to_s
+
+    # And what that form posts back is accepted unchanged.
+    patch :update, params: { project_id: @project.id, id: @schedule.id,
+                             schedule: { template_id: @template.id, repeat: 'weekly',
+                                         start_date: '2026-01-01', render_as: 'user',
+                                         render_as_user_id: @author.id.to_s } }
+    assert_response :redirect
+    assert_equal @author.id, @schedule.reload.render_as_user_id
+  end
+
+  def test_the_recipient_selection_survives_a_failed_save
+    # Every other field survived a 422 and the one that takes eight clicks did not, because
+    # the partial read the unsaved record's association.
+    post :create, params: { project_id: @project.id,
+                            schedule: { repeat: 'daily', start_date: '2026-03-01',
+                                        email_subject: 'Keep me',
+                                        recipient_user_ids: [@other.id.to_s] } }
+
+    assert_response :unprocessable_entity
+    assert_select "select#schedule_recipient_user_ids option[selected][value=?]",
+                  @other.id.to_s
+  end
+
+  def test_a_private_templates_name_is_not_disclosed_to_a_viewer
+    # `TemplatesController#find_template` renders 404 for a template that is not visible, so
+    # the plugin has already decided its existence is protected — and these pages printed
+    # its NAME as the heading and as every row link, to any `view_…_schedules` holder.
+    secret = Template.create!(project: @project, author_id: @other.id, name: 'Q3 LAYOFFS',
+                              visibility: Template::VISIBILITY_PRIVATE)
+    @schedule.update_columns(template_id: secret.id)
+    grant(:view_reporter_dashboards_schedules)
+    assert_not secret.visible?(@author), 'fixture precondition'
+
+    get :index, params: { project_id: @project.id }
+    assert_response :success
+    assert_not_includes response.body, 'Q3 LAYOFFS'
+
+    get :show, params: { project_id: @project.id, id: @schedule.id }
+    assert_response :success
+    assert_not_includes response.body, 'Q3 LAYOFFS'
+  end
+
+  def test_no_page_renders_a_missing_translation
+    # `field_enabled` existed neither in Redmine core nor in any of the nine locale files,
+    # so `#show` printed the raw I18n miss as a table header. The suite rendered that page
+    # three times and never looked.
+    get :index, params: { project_id: @project.id }
+    assert_not_includes response.body, 'ranslation missing'
+
+    get :show, params: { project_id: @project.id, id: @schedule.id }
+    assert_not_includes response.body, 'ranslation missing'
+
+    get :new, params: { project_id: @project.id }
+    assert_not_includes response.body, 'ranslation missing'
+
+    get :edit, params: { project_id: @project.id, id: @schedule.id }
+    assert_not_includes response.body, 'ranslation missing'
+  end
+
+  def test_a_schedule_whose_author_is_gone_says_so_rather_than_showing_a_blank
+    # `link_to_user(nil)` returns `""`, which is truthy, so the `||` fallback could never
+    # fire — nine translations for a branch that was unreachable on the path that needs it
+    # most: a schedule whose author account was removed is what an operator opens this page
+    # to diagnose.
+    @schedule.update_columns(author_id: 999_999)
+
+    get :show, params: { project_id: @project.id, id: @schedule.id }
+
+    assert_response :success
+    assert_includes response.body, I18n.t(:text_reporter_schedule_identity_missing)
+  end
+
   def test_destroy_removes_the_schedule_and_its_children
     ScheduleRecipient.create!(schedule_id: @schedule.id, user_id: @other.id)
     ScheduleRun.claim(@schedule, Date.new(2026, 3, 10))
@@ -353,9 +684,16 @@ class ReporterDashboardsSchedulesControllerTest < Redmine::ControllerTest
 
   def test_a_test_send_uses_the_schedules_stored_identity_and_not_the_requester
     # FR-45, verbatim: "a test send uses the SAME identity as the real run." `@other` is the
-    # stored identity and `@author` is pressing the button.
+    # stored identity and somebody else is pressing the button.
+    #
+    # THE PRESSER IS AN ADMINISTRATOR, and that is the only way this example can exist now.
+    # A non-administrator pressing a button on a schedule that renders as somebody else is
+    # the second blocker an independent review found — the output landed in the presser's
+    # mailbox with somebody else's visibility in it. FR-45 still holds for the case that
+    # remains legitimate, and this asserts it.
     @schedule.update_columns(render_as: Schedule::RENDER_AS_USER,
                              render_as_user_id: @other.id)
+    @request.session[:user_id] = 1
     seen = []
     RedmineReporterDashboards::Reporting::ScheduledDelivery.any_instance
       .stubs(:call).with { |kwargs| seen << kwargs[:actor]; true }

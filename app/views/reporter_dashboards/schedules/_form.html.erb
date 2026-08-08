@@ -69,10 +69,20 @@
                    [l(:"label_reporter_schedule_render_as_#{value}"), value]
                  } %>
   </p>
+  <%#
+    THE OBJECT, NOT THE ID. `principals_options_for_select` matches with
+    `option_value_selected?(element, selected) || element.id.to_s == selected`
+    (application_helper.rb:694) — and `render_as_user_id` is an INTEGER, so `"3" == 3` is
+    false and nothing was ever marked selected. The browser showed the blank option, and
+    pressing Save without touching anything posted an empty id: every schedule using the
+    policy FR-45 exists for was uneditable until somebody re-picked the identity by hand, on
+    the one field where a mis-click changes whose data is mailed. The template and recipient
+    selects use different helpers and did pre-select, so the page looked right.
+  %>
   <p>
     <%= f.select :render_as_user_id,
-                 principals_options_for_select(@project.users.active.sorted,
-                                               @schedule.render_as_user_id),
+                 principals_options_for_select(reporter_schedule_assignable_identities(@project),
+                                               @schedule.render_as_user),
                  include_blank: true %>
     <em class="info"><%= l(:text_reporter_schedule_render_as_info) %></em>
   </p>
@@ -86,9 +96,16 @@
   %>
   <p>
     <label><%= l(:label_reporter_schedule_recipients) %></label>
+    <%#
+      THE HIDDEN FIELD IS LOAD-BEARING. A multi-select with nothing chosen sends no key at
+      all, and the controller now distinguishes "not requested" from "cleared" — without
+      this, emptying the list would be indistinguishable from a partial update and would
+      silently keep the old recipients.
+    %>
+    <%= hidden_field_tag 'schedule[recipient_user_ids][]', '', id: nil %>
     <%= select_tag 'schedule[recipient_user_ids][]',
                    options_from_collection_for_select(@project.users.active.sorted, :id,
-                                                      :name, @schedule.recipients.map(&:user_id)),
+                                                      :name, reporter_selected_recipient_ids),
                    multiple: true, size: 8, id: 'schedule_recipient_user_ids' %>
   </p>
 

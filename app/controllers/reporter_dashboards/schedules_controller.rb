@@ -95,6 +95,7 @@ module ReporterDashboards
       @schedule.author_id = User.current.id
       apply_template(@schedule)
       apply_query(@schedule)
+      apply_render_identity(@schedule)
 
       if save_with_recipients(@schedule)
         flash[:notice] = l(:notice_successful_create)
@@ -110,6 +111,7 @@ module ReporterDashboards
       @schedule.attributes = schedule_params
       apply_template(@schedule)
       apply_query(@schedule)
+      apply_render_identity(@schedule)
 
       if save_with_recipients(@schedule)
         flash[:notice] = l(:notice_successful_update)
@@ -139,12 +141,31 @@ module ReporterDashboards
     # obvious way to build this and would silently cost somebody a report.
     def test_send
       actor = @schedule.render_identity
+
+      # THE SECOND ESCALATION, AND IT NEEDED NO TAMPERING AT ALL.
+      #
+      # This action deliberately couples "render as the schedule's stored identity" (FR-45)
+      # with "deliver to whoever pressed the button". Each half is safe; together they are
+      # an exfiltration primitive — any schedule authored by an administrator could be
+      # test-sent by any `manage_…_schedules` holder and the output landed in the presser's
+      # mailbox. Measured by an independent review on an untouched schedule:
+      # `actor=admin recipients=["jsmith"]`.
+      #
+      # FR-45 is not negotiable — a test send that renders as somebody else would prove
+      # nothing about the real run — so the OTHER half gives way: you may test-send only a
+      # schedule that renders as you. An administrator is exempt for the same reason as in
+      # `assignable_identity_ids`. With that rule and the one above, a non-administrator can
+      # only ever create schedules rendered as themselves, so they can always test their own.
+      unless actor == User.current || User.current.admin?
+        return deny_access
+      end
       result = Reporting::ScheduledDelivery.new(logger: Rails.logger)
                                            .call(schedule: @schedule,
                                                  occurrence_date: User.current.today,
                                                  actor: actor,
                                                  run: TestRun.new(SecureRandom.uuid),
-                                                 recipients: [User.current])
+                                                 recipients: [User.current],
+                                                 notify_owner: false)
 
       if result.ok?
         flash[:notice] = l(:notice_reporter_schedule_test_sent, mail: User.current.mail)
@@ -157,6 +178,16 @@ module ReporterDashboards
       # is no row here, so it goes to the screen — and it is the message the operator needs,
       # because a schedule whose identity is locked will fail at 06:00 for the same reason.
       flash[:error] = l(:error_reporter_schedule_test_failed, message: e.message)
+      redirect_to project_reporter_schedule_path(@project, @schedule)
+    rescue StandardError => e
+      # `ScheduledDelivery` states its own contract — "it may also raise; `Runner` handles
+      # both identically" — and `Runner` does. This did not: an MTA outage gave the operator
+      # a Redmine 500 page instead of the flash this action exists to produce. Bounded,
+      # because the message can carry a whole backtrace.
+      Rails.logger.error("[scheduler] test send for schedule #{@schedule.id} raised: " \
+                         "#{e.class}: #{e.message}")
+      flash[:error] = l(:error_reporter_schedule_test_failed,
+                        message: "#{e.class}: #{e.message}".slice(0, 500))
       redirect_to project_reporter_schedule_path(@project, @schedule)
     end
 
@@ -203,7 +234,7 @@ module ReporterDashboards
     # the runner's, and a form that could write `last_status` could hide a failure.
     def schedule_params
       params.require(:schedule).permit(:repeat, :start_date, :end_date, :email_subject,
-                                       :render_as, :render_as_user_id, :timezone, :enabled)
+                                       :render_as, :timezone, :enabled)
     end
 
     # THE TEMPLATE HAS TO BE ONE THIS ACTOR CAN SEE, and `Template.visible` is the same
@@ -211,8 +242,19 @@ module ReporterDashboards
     # somebody else's PRIVATE template and have it mailed to a list of their choosing —
     # which is a disclosure hole reached entirely through a form field.
     def apply_template(schedule)
-      id = params[:schedule] && params[:schedule][:template_id]
-      return if id.blank?
+      attributes = params[:schedule] || {}
+      # ABSENT AND BLANK ARE DIFFERENT REQUESTS, and the first version conflated them: the
+      # comment below said "left unset rather than silently kept" while `return if
+      # id.blank?` did exactly the thing it refused. Clearing the picker and saving returned
+      # "Successful update" and changed nothing — which also kept an invisible template
+      # attached to a schedule its editor cannot see.
+      return unless attributes.key?(:template_id)
+
+      id = attributes[:template_id]
+      if id.blank?
+        schedule.template_id = nil
+        return
+      end
 
       template = Template.visible(User.current).where(project_id: @project.id).find_by(id: id)
       # Left unset rather than silently kept: `template_id` is `presence: true`, so an
@@ -233,9 +275,68 @@ module ReporterDashboards
         return
       end
 
-      query = IssueQuery.visible(User.current).find_by(id: attributes[:query_id])
+      # `.where(project_id: …)` MATCHING THE PICKER EXACTLY. The comment above used to say
+      # "IssueQuery.visible is what the picker lists", and the picker was narrower: a
+      # schedule in project A could be bound to a query scoped to project B, so the report
+      # silently covered a different project than the one whose permissions were checked to
+      # create it. The same asymmetry `apply_template` was written to avoid, in its sibling.
+      query = IssueQuery.visible(User.current)
+                        .where(project_id: [nil, @project.id])
+                        .find_by(id: attributes[:query_id])
       schedule.query_id = query&.id
       schedule.query_type = query ? 'IssueQuery' : nil
+    end
+
+    # THE FIELD THAT DECIDES WHOSE VISIBILITY THE SQL RUNS UNDER, and it was in `permit`.
+    #
+    # `render_as_user_id` went straight from the form into the column. The picker offered
+    # only project members, and nothing behind the picker checked anything — so a member
+    # holding `manage_…_schedules` could POST `render_as_user_id=1`, press "Send a test",
+    # and receive an ADMINISTRATOR-visibility report in their own inbox. An independent
+    # review reproduced it end to end, against a private issue the attacker could not see:
+    # "attacker sees 7, admin sees 8 … SCOPE SIZE=8; contains PAYROLL? true". It was also
+    # plantable in two steps, because the id is stored even while the policy says `author`.
+    #
+    # `apply_template` and `apply_query` exist for exactly this reason and this field is
+    # strictly stronger than either. It is resolved the same way now.
+    #
+    # --- WHY THE BOUND IS "YOURSELF, OR ANYBODY IF YOU ARE AN ADMINISTRATOR" ---
+    #
+    # "A project member" is NOT a safe bound: every member with wider visibility than yours
+    # is an escalation target, which is the whole of the finding above. §7b.5 states the
+    # rule this plugin already applies to on-demand mail — *"you can only mail what you can
+    # see"* — and the identity that satisfies it is your own. An administrator is exempt
+    # because they already hold every visibility there is, and because a service-account
+    # schedule is a legitimate thing for an administrator to set up.
+    #
+    # **REPORTED, NOT DECIDED (CLAUDE.md §11.3).** §4.1 gives `manage_…_schedules` no
+    # impersonation power and FR-45 speaks only about the identity being *auditable*, never
+    # about who may choose it. This is the narrowest rule that closes the hole; a wider one
+    # — a delegation model, say — is a curator decision and a spec line, not something to
+    # widen quietly here.
+    def apply_render_identity(schedule)
+      attributes = params[:schedule] || {}
+      # Not the chosen policy — the STORED one is irrelevant, because the id is cleared
+      # whenever the policy is not RENDER_AS_USER. That is what stops it being planted under
+      # a benign policy and activated later by a request that never mentions it.
+      unless schedule.render_as == Schedule::RENDER_AS_USER
+        schedule.render_as_user_id = nil
+        return
+      end
+      return unless attributes.key?(:render_as_user_id)
+
+      wanted = attributes[:render_as_user_id].to_s
+      schedule.render_as_user_id =
+        assignable_identity_ids.include?(wanted.to_i) && wanted.present? ? wanted.to_i : nil
+    end
+
+    def assignable_identity_ids
+      @assignable_identity_ids ||=
+        if User.current.admin?
+          @project.users.active.pluck(:id)
+        else
+          [User.current.id]
+        end
     end
 
     # RECIPIENTS ARE REDMINE USERS AND THE LIST IS BOUNDED BY THE PROJECT.
@@ -252,22 +353,38 @@ module ReporterDashboards
       Schedule.transaction do
         raise ActiveRecord::Rollback unless schedule.save
 
-        schedule.recipients.delete_all
-        ids.each { |id| schedule.recipients.create!(user_id: id) }
+        # `nil` MEANS "NOT REQUESTED" AND `[]` MEANS "CLEAR IT". The first version returned
+        # `[]` for both, so any partial update — a future inline toggle, a REST client, a
+        # renamed field — silently deleted every recipient and answered "Successful update".
+        # Nothing said the list was gone; the operator found out when nobody got the report.
+        # The form always sends the key, because of the hidden element in the partial.
+        unless ids.nil?
+          schedule.recipients.delete_all
+          ids.each { |id| schedule.recipients.create!(user_id: id) }
+        end
         true
       end || false
     end
 
     def requested_recipient_ids
-      requested = Array(params[:schedule] && params[:schedule][:recipient_user_ids])
-                  .reject(&:blank?).map(&:to_i)
-      return [] if requested.empty?
+      attributes = params[:schedule] || {}
+      return nil unless attributes.key?(:recipient_user_ids)
 
+      requested = Array(attributes[:recipient_user_ids]).reject(&:blank?).map(&:to_i)
       requested & assignable_recipient_ids
     end
 
     def assignable_recipient_ids
       @assignable_recipient_ids ||= @project.users.active.pluck(:id)
+    end
+
+    # WHAT THE FORM SHOULD SHOW AS SELECTED, which is not the same as what is stored once a
+    # save has failed. Every other field survived a 422 and the one that takes eight clicks
+    # did not, because the partial read the unsaved record's association.
+    helper_method :reporter_selected_recipient_ids
+
+    def reporter_selected_recipient_ids
+      requested_recipient_ids || @schedule.recipients.map(&:user_id)
     end
   end
 end

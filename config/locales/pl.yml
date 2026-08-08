@@ -190,3 +190,5 @@ pl:
   text_reporter_schedule_render_as_info: "Wszyscy odbiorcy otrzymują widok danych tej osoby, który może różnić się od ich własnego."
   text_reporter_schedule_enabled_info: "Harmonogram działa tylko wtedy, gdy jest włączony."
   text_reporter_schedule_test_confirm: "Wysłać raport testowy na %{mail}? Powstaje dokładnie tak jak prawdziwe uruchomienie i trafia tylko do Ciebie."
+  field_redmine_reporter_dashboards_schedule_enabled: "Włączony"
+  text_reporter_schedule_template_hidden: "Szablon raportu, którego nie możesz zobaczyć"

@@ -190,3 +190,5 @@ es:
   text_reporter_schedule_render_as_info: "Todos los destinatarios reciben la visión de los datos de esta persona, que puede diferir de la suya."
   text_reporter_schedule_enabled_info: "Una programación solo se ejecuta mientras está activada."
   text_reporter_schedule_test_confirm: "¿Enviar un informe de prueba a %{mail}? Se genera exactamente igual que la ejecución real y solo le llega a usted."
+  field_redmine_reporter_dashboards_schedule_enabled: "Activada"
+  text_reporter_schedule_template_hidden: "Una plantilla de informe que no puede ver"

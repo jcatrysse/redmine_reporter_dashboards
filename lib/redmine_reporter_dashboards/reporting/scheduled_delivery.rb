@@ -57,6 +57,7 @@ module RedmineReporterDashboards
       def initialize(mailer: ::ReporterDashboardsMailer, logger: nil)
         @mailer = mailer
         @logger = logger
+        @notify_owner = true
       end
 
       # The port's contract, verbatim: `#call(schedule:, occurrence_date:, actor:, run:)`
@@ -71,7 +72,19 @@ module RedmineReporterDashboards
       #
       # `Runner` never passes it. There is no configuration in which a scheduled run
       # delivers to a list other than the one stored on the schedule.
-      def call(schedule:, occurrence_date:, actor:, run:, recipients: nil)
+      # `notify_owner:` — FALSE FOR A TEST SEND, and the first version had no such flag.
+      #
+      # The class comment and the confirmation dialog both promised a test "goes only to
+      # you", in nine languages. On the FAILURE path it mailed the schedule's owner instead,
+      # telling them their SCHEDULED run had failed when no run happened — so ten clicks on
+      # a broken template were ten false alarms aimed at a third party. Measured by an
+      # independent review.
+      #
+      # The presser already sees the failure in the flash, so a test send needs no notice at
+      # all; a real run has nobody watching and needs one.
+      def call(schedule:, occurrence_date:, actor:, run:, recipients: nil,
+               notify_owner: true)
+        @notify_owner = notify_owner
         correlation_id = run.correlation_id
 
         recipients = recipients ? Array(recipients) : active_recipients(schedule)
@@ -330,6 +343,8 @@ module RedmineReporterDashboards
       end
 
       def notify_owner(schedule, occurrence_date, diagnostic)
+        return unless @notify_owner
+
         owner = schedule.author
         return unless owner&.active? && owner.mail.present?
 

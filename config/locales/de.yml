@@ -190,3 +190,5 @@ de:
   text_reporter_schedule_render_as_info: "Alle Empfänger erhalten die Sicht dieser Person auf die Daten, die von ihrer eigenen abweichen kann."
   text_reporter_schedule_enabled_info: "Ein Zeitplan läuft nur, solange er aktiviert ist."
   text_reporter_schedule_test_confirm: "Einen Testbericht an %{mail} senden? Er wird genau wie der echte Lauf erzeugt und geht nur an Sie."
+  field_redmine_reporter_dashboards_schedule_enabled: "Aktiviert"
+  text_reporter_schedule_template_hidden: "Eine Berichtsvorlage, die Sie nicht sehen können"
