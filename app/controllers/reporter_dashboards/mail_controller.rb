@@ -193,8 +193,21 @@ module ReporterDashboards
     # report contains what the requester could see, and no more. Mailing a colleague a
     # report is the capability, and `mail_…_reports` is the grant for it.
     def resolve_recipients
-      ids = Array(params[:recipient_user_ids]).reject(&:blank?)
+      ids = Array(params[:recipient_user_ids]).reject(&:blank?).uniq
       users = ids.empty? ? [] : ::User.active.where(id: ids).to_a
+
+      # AN ID THAT DOES NOT RESOLVE IS A REFUSAL, NOT A DROP — and the first version
+      # dropped, one line above the twenty lines explaining why dropping is wrong. Found by
+      # an independent review: a locked account, a GROUP id and a nonexistent id all
+      # vanished from `User.active.where(id: …)`, the send proceeded, and the flash reported
+      # one recipient for a request that named four.
+      #
+      # A locked user is the case that makes it matter: locking is how Redmine offboards
+      # somebody, so a stale compose form is the ordinary way to reach this, and "we sent it
+      # to the others and said nothing" is precisely the silence T-32 keeps deleting.
+      if users.length != ids.length
+        return [users, [], :recipients_not_permitted]
+      end
 
       # THE RECIPIENT MUST BE ENTITLED TO REPORTS IN THIS PROJECT — curator decision,
       # §Findings S-20, replacing "any active account in the instance".
@@ -258,7 +271,35 @@ module ReporterDashboards
     # not listed, because listing every administrator in the picker is noise for the common
     # case and they are reachable by anybody who really means to name them.
     def recipient_choices
-      @project.users.active.sorted.select { |user| may_receive_reports?(user) }
+      # ONE QUERY FOR THE ROLES, NOT ONE PER MEMBER — and the first version introduced an
+      # N+1 in the commit whose whole purpose was removing one. Measured by an independent
+      # review: 30 queries at 2 members, 50 at 12, 130 at 52, i.e. +2 per member, because
+      # `allowed_to?` resolves `roles_for_project` per User object.
+      #
+      # The permission is a property of a ROLE, so the roles that carry it are asked for
+      # once and the members are filtered against their membership rows.
+      permitted = ::Role.where(id: permitted_role_ids)
+      members = @project.memberships.active.preload(:principal, :roles).to_a
+      chosen = members.select { |member| (member.roles & permitted).any? }
+                      .map(&:principal)
+                      .select { |principal| principal.is_a?(::User) && principal.active? }
+
+      # THE REQUESTER, EVEN WHEN THEY ARE NOT A MEMBER. §4.1's `require: :loggedin` exists
+      # so *"a logged-in non-member legitimately mails themselves a report they can already
+      # read"* — and the review measured that flow getting an EMPTY picker, because the list
+      # was members-only while the check is permission-based. They are the one person the
+      # form must always be able to name.
+      chosen << User.current if may_receive_reports?(User.current)
+
+      chosen.uniq.sort_by { |user| user.name.to_s.downcase }
+    end
+
+    # The roles that grant the reports permission, asked of Redmine's own registry rather
+    # than of each user in turn. `Role#allowed_to?` is a set lookup on an already-loaded
+    # role, so this is bounded by the number of ROLES an installation has.
+    def permitted_role_ids
+      ::Role.givable.select { |role| role.allowed_to?(:view_reporter_dashboards_reports) }
+            .map(&:id)
     end
     helper_method :recipient_choices
 

@@ -609,9 +609,12 @@ Four things about it are deliberate, and each one is a thing the report you send
 * **Recipients must be allowed to open reports in that project.** You can send to a
   colleague who could open the report themselves, and to yourself; you cannot use it to
   put a PDF in front of somebody with no business in the project. A project member whose
-  role does not include *View report templates* is refused, and so is anybody outside the
-  project. If one recipient in the list is not permitted, **nothing is sent** rather than
-  the rest of the list receiving it quietly.
+  role does not include *View report templates* is refused. So is anybody the project does
+  not entitle — which, said precisely, means anybody who could not open the report
+  themselves: in a **public** project that can include a non-member, if you have granted the
+  permission to the Non-member role, and it always includes administrators. If one recipient
+  in the list is not permitted — or is locked, or no longer exists — **nothing is sent**
+  rather than the rest of the list receiving it quietly.
 * **Recipients are Redmine users** unless an administrator has enabled external addresses
   in *Administration → Plugins → Reporter dashboards* **and** listed the permitted domains
   there. An empty domain list means no external address is accepted, whatever the checkbox

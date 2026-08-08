@@ -737,6 +737,89 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
     assert_equal 0, ActionMailer::Base.deliveries.length
   end
 
+  # M-1: AN ID THAT DOES NOT RESOLVE IS A REFUSAL, NOT A DROP.
+  #
+  # Found by an independent review: a locked account, a group id and a nonexistent id all
+  # vanished from `User.active.where(id: …)`, the send proceeded, and the flash reported one
+  # recipient for a request that named several. Locking is how Redmine offboards somebody,
+  # so a stale compose form is the ordinary route to this.
+  def test_a_locked_recipient_refuses_the_send_rather_than_being_dropped
+    @colleague.update_columns(status: User::STATUS_LOCKED)
+    other = User.active.where(id: @project.users.map(&:id)).where.not(id: @colleague.id).first
+    skip 'the fixture needs a second active member' unless other
+
+    with_engine do
+      post :create, params: send_params(recipient_user_ids: [other.id.to_s,
+                                                             @colleague.id.to_s])
+    end
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length,
+                 'the resolvable recipient was mailed while the locked one was dropped'
+  end
+
+  def test_a_nonexistent_recipient_id_refuses_the_send
+    with_engine do
+      post :create, params: send_params(recipient_user_ids: [@colleague.id.to_s, '999999'])
+    end
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length
+  end
+
+  # A GROUP is a `Principal` and not a `User`, so it silently fell out of `User.active`.
+  def test_a_group_id_refuses_the_send
+    group = Group.first || Group.create!(lastname: 'Testers')
+
+    with_engine do
+      post :create, params: send_params(recipient_user_ids: [group.id.to_s])
+    end
+
+    assert_response :unprocessable_entity
+    assert_equal 0, ActionMailer::Base.deliveries.length
+  end
+
+  # M-3: THE REQUESTER IS ALWAYS OFFERED, INCLUDING WHEN THEY ARE NOT A MEMBER.
+  #
+  # §4.1's `require: :loggedin` exists for exactly one flow — a logged-in non-member mailing
+  # themselves a report they can already read — and the review measured that flow getting an
+  # EMPTY picker with no empty state, because the list was members-only while the check is
+  # permission-based.
+  def test_the_picker_offers_the_requester_even_when_they_are_not_a_member
+    Member.where(project_id: @project.id, user_id: @requester.id).destroy_all
+    Role.non_member.update!(permissions: [:view_issues, :view_reporter_dashboards_reports,
+                                          :mail_reporter_dashboards_reports])
+    @project.update_columns(is_public: true)
+    @requester = User.find(@requester.id)
+
+    get :new, params: { project_id: @project.id, template_id: @template.id }
+
+    assert_response :success
+    assert_includes @controller.send(:recipient_choices).map(&:id), @requester.id
+  end
+
+  # M-2: THE PICKER'S COST MUST NOT SCALE WITH THE MEMBERSHIP.
+  #
+  # The first version asked `allowed_to?` per member, which the review measured at +2
+  # queries each — 130 at 52 members — introduced in the commit whose stated purpose was
+  # removing an N+1 one page over.
+  def test_the_compose_form_costs_the_same_for_two_members_and_for_twenty
+    get :new, params: { project_id: @project.id, template_id: @template.id }
+
+    small = count_queries { get :new, params: { project_id: @project.id, template_id: @template.id } }
+    18.times do |n|
+      user = User.create!(login: "member#{n}", firstname: 'A', lastname: "Member#{n}",
+                          mail: "member#{n}@example.com")
+      Member.create!(project: @project, user: user, roles: [@role])
+    end
+
+    large = count_queries { get :new, params: { project_id: @project.id, template_id: @template.id } }
+
+    assert_response :success
+    assert_equal small, large,
+                 "the compose form cost #{small} queries for 2 members and #{large} for 20"
+  end
+
   # MUTATION TESTING FOUND BOTH OF THE NEXT TWO GAPS, and both are the same shape: with
   # every member of the fixture entitled, "filter the ineligible out" and "refuse when any
   # is ineligible" are indistinguishable, and so are "offer the entitled" and "offer

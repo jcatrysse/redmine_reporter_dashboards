@@ -657,6 +657,54 @@ page showed an empty cell instead of "Translation missing" and neither was visib
 instance raises `NoMethodError: undefined method 'new'` from inside `ReportRun#with_pdf`,
 three frames from the cause and reading like a bug in the render layer.
 
+**AN SQL-STATEMENT ASSERTION ANCHORED AT `\A` IS DEFEATED BY ONE LEADING COMMENT, and
+Rails emits them in production.** T-24's central claim — *the importer never writes to the
+base plugin's tables* — was asserted with
+`sql.match?(/\A\s*(INSERT|UPDATE|DELETE|…)/i)`. An independent review planted
+`connection.execute("/* rails */ UPDATE report_templates SET name = 'PWNED'")` **inside the
+runner** and the test stayed GREEN; only the row-comparison test the commit message had
+called insufficient fired. `query_log_tags_enabled` is an ordinary setting and prepends
+`/* app:… controller:… */` to every statement.
+
+The anchor cannot simply be dropped — `SELECT id, updated_on FROM report_templates`
+contains "update" — so the pattern has to match **verb + table**
+(`/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|…)\s+"?report_/i`). And the general rule is
+HANDOVER's own, unlearned once: **negative-test a gate before trusting it.** This one was
+written, believed, and cited in three documents without ever being watched fail. Its
+negative test is now committed rather than performed by hand, with every shape the first
+version missed.
+
+**A CITATION IS PART OF THE CONTROL, AND THIS PROJECT HAS NOW SHIPPED THE SAME DEFECT
+TWICE.** T-32's review found two comments citing spec files that had never been written;
+T-24 then cited `spec/import/runner_spec.rb`, which also does not exist. If a comment says
+"asserted in X", open X. A cited control that is not there is worse than no comment: it
+tells the next reader the question has been answered.
+
+**AN N+1 CAN BE INTRODUCED BY THE COMMIT THAT REMOVES ONE.** T-32's G6 fix preloaded the
+audit page's users — and the same commit added `@project.users.select { allowed_to?(…) }`
+to the compose form, which costs two queries per member (measured: 30 at 2 members, 50 at
+12, **130 at 52**). `allowed_to?` resolves `roles_for_project` per User object. A permission
+is a property of a ROLE: ask which roles carry it once, then filter membership rows.
+
+**`User.active.where(id: ids)` SILENTLY DROPS whatever does not resolve** — a locked
+account, a **Group** id (a `Principal` that is not a `User`), a deleted id. T-32 refused an
+unentitled recipient wholesale and dropped these three in silence, one line above the
+comment explaining why dropping is wrong. Compare `ids.length` with the resolved length;
+locking is how Redmine offboards somebody, so a stale form is the ordinary route to it.
+
+**A LIVENESS SCOPE ON ONE BRANCH AND NOT THE OTHER IS INVISIBLE UNTIL A FIXTURE HAS A
+LOCKED ONE.** `resolve_actor` used `User.active` in its fallback and bare `find_by` in the
+`RRD_ACTOR` branch, so a locked administrator could own every imported template — and
+`author_id` is what `edit_own_…` reads. The mutation that removed `.active` from the
+fallback SURVIVED, because no fixture has a locked admin and the two spellings answer
+identically without one. Build the row the property is about.
+
+**`test/**` CAN LEAVE A NON-PLUGIN TABLE BEHIND AND `migrate_updown.sh` THEN FAILS FOR A
+THIRD REASON.** T-24's importer test creates and drops a stand-in `report_templates`. A run
+that dies before `teardown` leaves it, and the G11 schema snapshot then sees a table on one
+side and not the other. Add it to the drop list in §3's repair command; the recipe is
+otherwise unchanged.
+
 **`Mailer#mail` MERGES `From` WITH `reverse_merge!`, SO A CALLER-SUPPLIED HEADER WINS — the
 sender is server-controlled only because no parameter exists to carry one.** Redmine's
 `app/models/mailer.rb:693` does `headers.reverse_merge! 'From' => from`, and reverse-merge

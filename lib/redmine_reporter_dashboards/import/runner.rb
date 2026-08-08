@@ -22,9 +22,17 @@ module RedmineReporterDashboards
     #
     # **This class never writes to a `report_*` table**, and that is held by construction
     # rather than by care: the only SQL it issues against them is the `SELECT` in `Survey`,
-    # and `spec/import/runner_spec.rb` asserts the source names no writing verb. The
-    # writes all go through `RedmineReporterDashboards::Template`, which cannot address
-    # another plugin's table.
+    # and the writes all go through `RedmineReporterDashboards::Template`, which cannot
+    # address another plugin's table.
+    #
+    # The mechanical evidence is
+    # `test/unit/reporter_dashboards_import_runner_test.rb`'s
+    # `test_it_issues_no_write_against_reporters_tables`, which subscribes to
+    # `sql.active_record` and fails on any writing verb aimed at a `report_*` table. It is
+    # in the FULL-APP suite and not in `spec/` because it needs those tables to exist so
+    # that a write to them would be observable at all. The first version of this comment
+    # cited `spec/import/runner_spec.rb`, which has never existed — the same defect that
+    # got T-32's first attempt rejected, repeated one task later.
     #
     # --- IDEMPOTENT, AND "IDEMPOTENT" HAS FOUR OUTCOMES RATHER THAN TWO ---
     #
@@ -139,12 +147,19 @@ module RedmineReporterDashboards
         # confusing nil.
         def resolve_actor(reference)
           if reference.present?
+            # `User.active` ON BOTH BRANCHES. They disagreed: the fallback below used it
+            # and this one did not, so `RRD_ACTOR=locked-admin` authored every imported
+            # template as an account that cannot log in — and `author_id` is what
+            # `edit_own_…` reads, which is the reason this argument exists. Found by an
+            # independent review; the mutation that removed `.active` from the fallback had
+            # survived, so nothing was testing the property on either side.
+            scope = ::User.active.where(admin: true)
             user = if reference.to_s.match?(/\A\d+\z/)
-                     ::User.find_by(id: Integer(reference, 10))
+                     scope.find_by(id: Integer(reference, 10))
                    else
-                     ::User.find_by(login: reference.to_s)
+                     scope.find_by(login: reference.to_s)
                    end
-            return user&.admin? ? user : nil
+            return user
           end
 
           ::User.active.where(admin: true).order(:id).first
@@ -177,7 +192,15 @@ module RedmineReporterDashboards
           # production database.
           if project_ids
             ids = Array(project_ids).map { |id| Integer(id) }
-            return [] if ids.empty?
+            # AN EMPTY FILTER IS A NOTE, NOT A CLEAN RUN. `RRD_PROJECTS=` expands to `''`,
+            # `''.split(',')` is `[]` and `[]` is truthy — so the task imported nothing and
+            # printed "Every template is imported and matches its source." Exactly the
+            # clean-verdict-over-nothing `ImportReport` exists to prevent.
+            if ids.empty?
+              notes << 'a project filter was given but named no project, so nothing was ' \
+                       'imported. Remove RRD_PROJECTS to import everything.'
+              return []
+            end
 
             sql << " WHERE #{Survey.send(:q, connection, 'project_id')} IN (#{ids.join(', ')})"
           end
@@ -210,14 +233,27 @@ module RedmineReporterDashboards
           end
 
           content = row['content'].to_s
+          # AN EMPTY SOURCE IS SKIPPED, and the file's own comment already said so while the
+          # code imported it: "without it there is nothing to copy and the run reports that
+          # rather than importing a set of empty templates". A NULL `content` produced a
+          # template that renders nothing, reported as `created`.
+          if content.strip.empty?
+            return Outcome.new(source_id: source_id, name: name, status: :skipped,
+                               reason: 'the source template has no content')
+          end
+
           existing = Template.find_by(source_template_id: source_id)
-          return create_copy(row, name, mapped, content, actor, dry_run) if existing.nil?
+          return create_copy(row, name, mapped, content, actor, dry_run, notes) if existing.nil?
 
           refresh_copy(existing, name, mapped, content, dry_run, notes)
         end
 
-        def create_copy(row, name, mapped, content, actor, dry_run)
+        def create_copy(row, name, mapped, content, actor, dry_run, notes = [])
           source_id = row['id']
+          if name.to_s.length > Template::MAX_STRING
+            notes << "source ##{source_id}'s name is longer than " \
+                     "#{Template::MAX_STRING} characters and was shortened."
+          end
           template = Template.new(
             name: name.to_s[0, Template::MAX_STRING],
             content: content,

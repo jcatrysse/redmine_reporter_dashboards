@@ -123,22 +123,70 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
   #
   # Asserted on the STATEMENTS, not on the rows: a row that still looks right proves the
   # importer did not happen to change it, not that it could not.
+  # THE PATTERN MATCHES A VERB AND A TABLE, NOT THE START OF THE STRING.
+  #
+  # The first version anchored at `\A\s*`, and an independent review defeated it with one
+  # leading SQL comment: Rails emits `/* controller:… */ UPDATE …` whenever
+  # `query_log_tags_enabled` is on, which is an ordinary production setting. A real
+  # `connection.execute("/* rails */ UPDATE report_templates SET name = 'PWNED'")` planted
+  # inside the runner left this test GREEN while the row-comparison test below — the one
+  # the commit message called insufficient — was the only thing that fired.
+  #
+  # The anchor cannot simply be dropped: `SELECT id, updated_on FROM report_templates`
+  # contains "update". Matching VERB + `report_` table is what distinguishes them, and
+  # `WRITE_TO_SOURCE` is shared with `#test_status_writes_nothing` so the two cannot drift.
+  #
+  # HANDOVER §1: "Negative-test a gate before trusting it — plant the violation it exists to
+  # catch and watch it fail." This one was not, and that is why it did not work.
+  WRITE_TO_SOURCE = /
+    \b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|TRUNCATE(?:\s+TABLE)?)
+    \s+(?:ONLY\s+)?[`"\[]?report_
+  /xi.freeze
+
+  def writes_to_source(&block)
+    offending = []
+    subscriber = lambda do |_name, _start, _finish, _id, payload|
+      sql = payload[:sql].to_s
+      offending << sql if sql.match?(WRITE_TO_SOURCE)
+    end
+
+    ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record', &block)
+    offending
+  end
+
   def test_it_issues_no_write_against_reporters_tables
     seed_source
     seed_source(name: 'Second')
-    offending = []
 
-    subscriber = lambda do |_name, _start, _finish, _id, payload|
-      sql = payload[:sql].to_s
-      next unless sql.match?(/report_templates|report_schedules/i)
-      next unless sql.match?(/\A\s*(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)/i)
+    assert_equal [], writes_to_source { run_import }
+  end
 
-      offending << sql
-    end
+  # THE GATE'S OWN NEGATIVE TEST, committed rather than performed once by hand.
+  #
+  # Every shape the first version missed, plus the one it caught, driven through the very
+  # predicate the test above uses. Without this the pattern is a regexp nobody has watched
+  # fail, which is what it was.
+  def test_the_no_write_pattern_catches_every_shape_of_write
+    caught = [
+      "INSERT INTO report_templates (name) VALUES ('x')",
+      "insert into report_templates (name) values ('x')",
+      "/* rails */ UPDATE report_templates SET name = 'x'",
+      "/* app:redmine,controller:foo */\nUPDATE report_templates SET name = 'x'",
+      '  DELETE FROM report_templates WHERE id = 1',
+      'UPDATE "report_templates" SET "name" = $1',
+      'DROP TABLE report_schedules',
+      'TRUNCATE TABLE report_schedules_users'
+    ]
+    caught.each { |sql| assert sql.match?(WRITE_TO_SOURCE), "missed: #{sql}" }
 
-    ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record') { run_import }
-
-    assert_equal [], offending
+    # And it must not fire on the SELECTs the importer legitimately issues — a pattern that
+    # matched those would be an assertion nobody could keep green, which is how a guard
+    # gets deleted.
+    [
+      'SELECT id, updated_on FROM report_templates ORDER BY id',
+      'SELECT id, content FROM report_templates LIMIT 5000',
+      'UPDATE reporter_dashboards_templates SET content = $1'
+    ].each { |sql| assert_not sql.match?(WRITE_TO_SOURCE), "false positive: #{sql}" }
   end
 
   def test_the_source_rows_are_untouched
@@ -246,14 +294,8 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
   def test_status_writes_nothing
     seed_source
     run_import
-    offending = []
-    subscriber = lambda do |_n, _s, _f, _i, payload|
-      offending << payload[:sql] if payload[:sql].to_s.match?(/\A\s*(INSERT|UPDATE|DELETE)/i)
-    end
 
-    ActiveSupport::Notifications.subscribed(subscriber, 'sql.active_record') { Runner.status }
-
-    assert_equal [], offending
+    assert_equal [], writes_to_source { Runner.status }
   end
 
   # ------------------------------------------------------------------ absence and bounds
@@ -300,6 +342,29 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
     # `to_i` would turn this into 0 and `find_by(id: 0)` into a confusing nil; the
     # login branch answers honestly instead.
     assert_nil Runner.resolve_actor('0')
+  end
+
+  # THE MUTATION THAT SURVIVED THE FIRST FIX. `User.active` vs `User.all` answer the same
+  # thing on a fixture set with no locked administrator, so the property had no test on
+  # EITHER branch — which is how the two branches came to disagree in the first place.
+  #
+  # It matters because `author_id` is what `edit_own_…` reads: templates authored by an
+  # account that cannot log in are templates whose owner can never edit them.
+  def test_resolve_actor_refuses_an_administrator_who_cannot_log_in
+    locked = User.create!(login: 'lockedadmin', firstname: 'L', lastname: 'Admin',
+                          mail: 'locked@example.com', admin: true,
+                          status: User::STATUS_LOCKED)
+    registered = User.create!(login: 'regadmin', firstname: 'R', lastname: 'Admin',
+                              mail: 'reg@example.com', admin: true,
+                              status: User::STATUS_REGISTERED)
+
+    assert_nil Runner.resolve_actor('lockedadmin'), 'a locked administrator was accepted'
+    assert_nil Runner.resolve_actor(locked.id.to_s)
+    assert_nil Runner.resolve_actor('regadmin'), 'an unactivated administrator was accepted'
+    assert_nil Runner.resolve_actor(registered.id.to_s)
+    # And the fallback must not pick one either — the two branches now share one scope.
+    assert_not_equal locked, Runner.resolve_actor(nil)
+    assert Runner.resolve_actor(nil).active?
   end
 
   def test_resolve_actor_falls_back_to_an_active_administrator

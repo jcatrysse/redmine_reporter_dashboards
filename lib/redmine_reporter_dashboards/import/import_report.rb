@@ -36,8 +36,13 @@ module RedmineReporterDashboards
           lines << heading
           lines << ('=' * heading.length)
           lines << ''
-          lines << 'DRY RUN — nothing was written.' if result.dry_run
-          lines << '' if result.dry_run
+          # `dry_run` is what `import:run --dry` sets. `import:status` also writes nothing
+          # but is not a dry run of anything, and printing "DRY RUN" over it invited the
+          # reader to think a real one would have changed something.
+          if result.dry_run && heading.start_with?('Import run')
+            lines << 'DRY RUN — nothing was written.'
+            lines << ''
+          end
 
           lines.concat(summary_lines(result))
           lines.concat(detail_lines(result))
@@ -50,7 +55,12 @@ module RedmineReporterDashboards
         private
 
         def summary_lines(result)
-          return ['No template was found to import.', ''] if result.outcomes.empty?
+          if result.outcomes.empty?
+            # ONE SENTENCE, NOT TWO THAT DISAGREE. Over zero rows the old code printed
+            # "No template was found to import." and then the verdict added "Every template
+            # is imported and matches its source."
+            return ['Nothing to report: no template has been imported yet.', '']
+          end
 
           lines = ['Summary']
           ORDER.each do |status|
@@ -100,6 +110,8 @@ module RedmineReporterDashboards
         # the small lie this project keeps deleting. `import:run` exits 1 on the same
         # condition, so a script sees it too.
         def verdict_lines(result)
+          return [] if result.outcomes.empty?
+
           if result.count(:skipped).positive?
             ["#{result.count(:skipped)} template(s) were NOT imported. See above; the task " \
              'exits 1.']
