@@ -617,6 +617,55 @@ green, and D-1 live —
 against `agrees (keys [20, 21, nil], total 8.8)` on PostgreSQL. Three buckets collapsed into
 one and the figure was the last group's hours wearing the total's name.
 
+**`Mailer#mail` MERGES `From` WITH `reverse_merge!`, SO A CALLER-SUPPLIED HEADER WINS — the
+sender is server-controlled only because no parameter exists to carry one.** Redmine's
+`app/models/mailer.rb:693` does `headers.reverse_merge! 'From' => from`, and reverse-merge
+keeps what is already there. So "the sender is server-controlled" is NOT a property of
+inheriting `Mailer`; it is a property of no method on the subclass taking a `from:`, a
+`headers:` or an options Hash that could hold one. Written down because the opposite is the
+natural assumption, and because §7b.5's whole finding about the base plugin is a forged
+sender. T-32 asserts it twice: once against the mailer's own `parameters` list, and once
+against the `From` header of a message that actually came out — only the second can see a
+header set somewhere else.
+
+**AND `Mailer#process` RAISES UNLESS `args.first.is_a?(User)`,** because it sets
+`User.current` and the recipient's language from it (`mailer.rb:43-45`). A mail to a bare
+address — FR-61's allowlisted external recipient — therefore cannot take the address as its
+first argument. `User.anonymous` is passed instead and the address goes in `to:`, which is
+honest rather than a workaround: `logged?` is false, so the mail is composed in
+`Setting.default_language`, which is the only language the installation knows for somebody
+it has never met, and `User.current` is the safest value it could be.
+
+**A ROLE-REPLACING `grant` HELPER REMOVES THE CORE PERMISSIONS YOUR SCOPE DEPENDS ON, AND A
+VISIBILITY FIXTURE THEN PROVES NOTHING.** T-32's controller test uses T-25's `grant`
+pattern — `@role.permissions = […]` replaces the set outright, which is what makes "hold ONE
+permission and assert 403" readable. It also dropped `:view_issues`, so
+`Issue.visible(requester)` was **empty**, and the test asserting *"an issue the requester
+cannot see refuses the send"* had no visible issue to contrast it with: it would have gone
+green whether or not the refusal worked. Grant the core permission the scope reads, and
+assert the fixture discriminates.
+
+**AND THE SAME TEST'S "INVISIBLE" ISSUE WAS VISIBLE.** The first version took a fixture issue
+from another project. Fixture project 5 is PUBLIC, so `Issue.visible` includes issue 6 for
+any logged-in user and the negative half was vacuous — caught only because the helper
+asserted `assert_not Issue.visible(actor).exists?(hidden.id)` rather than trusting the
+choice. Build the invisible row (a private issue, `issues_visibility = 'default'`, authored
+by somebody else) so the rule that hides it is one the test sets, and keep the assertion
+anyway.
+
+**AN UNCHECKED CHECKBOX POSTS NOTHING, SO A BOOLEAN SETTING WITHOUT A HIDDEN FIELD CAN BE
+TURNED ON AND NEVER OFF.** `check_box_tag` does not emit the paired hidden input that the
+form-builder helper does, so unticking the box and saving leaves the previous value in
+place — an administrator who has just switched external mail addresses *off* still has them
+on, with a page that shows the box unticked. One `hidden_field_tag(name, '0', id: nil)`
+before the checkbox, and the coercion reads both spellings.
+
+**"ONE `@`" IS NOT AN ADDRESS CHECK.** `MailPolicy` refused `a@b@c` by counting `@`s and then
+took everything after it as the domain — which accepted **`@example.com`**, an address with
+no local part, as being in an allowlisted domain. Found by the spec's "text that is not an
+address at all" table rather than by reading. The local part's grammar is the MTA's business;
+its *existence* is not.
+
 ---
 
 ## 1b. Working agreement — verification, decided by the curator
@@ -1144,6 +1193,43 @@ an ISSUE scope — already frozen in T-01's corpus, so that comparison is alread
    it, the picker does not offer it, and nothing reports time entries against the issue scope. And
    a per-record PREVIEW draws exactly ONE document (`PREVIEW_MAX_DOCUMENTS`), because fifty
    synchronous PDF renders is a worker any member can hold for five minutes.
+
+22. **T-32 is done — ad-hoc report mail, and every clause of §7b.5's indictment is closed by
+   construction.** `app/controllers/reporter_dashboards/mail_controller.rb`,
+   `reporting/{mail_policy,adhoc_delivery}.rb`, migration 009's two audit tables, two models,
+   two mailer actions, four settings, 37 keys × 9 locales, and T-40's promotion of
+   `mail_reporter_dashboards_reports`. Five things a later session should know.
+
+   **THE SENDER IS SERVER-CONTROLLED BECAUSE NO PARAMETER EXISTS, NOT BECAUSE `Mailer` IS
+   INHERITED.** See the new §1 trap: `Mailer#mail` uses `reverse_merge!`, so a caller's own
+   `From` would win. Do not add a `headers:` or an options Hash to either mailer action —
+   a test asserts their `parameters` lists, the same shape `DocumentRequest`'s "no field a
+   credential could travel in" assertion takes.
+
+   **AN ISSUE THE REQUESTER CANNOT SEE REFUSES THE WHOLE SEND, and "drop it" is the wrong
+   fix.** T-32's `Accept:` says *refused, not silently included* — and silently DROPPING it
+   is the plausible-looking alternative with its own defect: the requester asks for twelve
+   issues, gets a report covering nine, and nothing says which three or why. The refusal
+   names the COUNT and not the ids, because naming them would confirm which exist.
+
+   **THE RATE LIMIT COUNTS OFF THE AUDIT TABLE, AND THE BEFORE/AFTER-CLAIM SPLIT IS
+   LOAD-BEARING.** A refusal that happens before any work (rate limit, disallowed address,
+   no recipients) writes **no** row — a quota a refused request consumes is one nobody can
+   recover from. A failure that got as far as rendering **is** audited, because the render is
+   the expensive half. A test for each; the first version of the second one passed for the
+   wrong reason until the split was made explicit.
+
+   **`address` IS THE ONE ADDRESS COLUMN IN THIS SCHEMA AND THE GUARD WAS TIGHTENED TO SAY
+   SO.** `schema_contract_spec.rb` now asserts it exists in exactly one table and is
+   nullable. §Findings **S-19** carries the argument: the columns §7 refuses are delivery
+   INPUTS, this one is a record written after the policy decision, and nothing that sends
+   reads it. Do not add a second one.
+
+   **WHAT IS DELIBERATELY NOT BUILT.** No `render_as` — an ad-hoc send renders as the
+   requester and there is no second identity, so `render_…_as_others` has no counterpart
+   here and adding one would reintroduce T-25's escalation. No failure MAIL: the requester
+   is standing at the page and reads the diagnostics panel, so INV-5 is satisfied by there
+   being no mail at all. And no audit row for a pre-render refusal — see above.
 
 21. **T-30 is done — the failure report, and it is drawn without an engine.**
    `render/minimal_pdf.rb`, `reporting/failure_document.rb`, migration 008,

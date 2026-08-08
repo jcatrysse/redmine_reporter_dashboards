@@ -51,7 +51,22 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
              'asset_policy' => 'bundled',
              'asset_allowlist' => '',
              'inline_max_bytes' => RedmineReporterDashboards::Assets::Policy::DEFAULT_INLINE_MAX_BYTES.to_s,
-             'asset_max_bytes' => RedmineReporterDashboards::Assets::Policy::DEFAULT_ASSET_MAX_BYTES.to_s
+             'asset_max_bytes' => RedmineReporterDashboards::Assets::Policy::DEFAULT_ASSET_MAX_BYTES.to_s,
+             # T-32 / FR-61 — ad-hoc report mail. `false` and an empty allowlist are the
+             # defaults for the same reason `:bundled` is above: recipients are Redmine
+             # users until an administrator says otherwise, and §4.1 puts external
+             # addresses here rather than in a role permission because it is a policy about
+             # the installation ("a report … mailed anywhere" is an egress question, not a
+             # capability of a role in a project).
+             #
+             # The two together FAIL CLOSED: `MailPolicy` collapses "external enabled" to
+             # off whenever the allowlist is empty, so ticking the box and saving nothing
+             # is not "any domain". The settings page says so rather than leaving the
+             # administrator to infer it.
+             'mail_external_addresses' => false,
+             'mail_external_domains' => '',
+             'mail_rate_limit' => RedmineReporterDashboards::Reporting::MailPolicy::DEFAULT_RATE_LIMIT.to_s,
+             'mail_rate_window_minutes' => RedmineReporterDashboards::Reporting::MailPolicy::DEFAULT_RATE_WINDOW_MINUTES.to_s
            },
            partial: 'settings/reporter_dashboards'
 

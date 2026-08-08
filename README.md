@@ -557,6 +557,36 @@ it, whatever the file asks for.
   page: a time entry is not opened and closed, so there is no created/closed flow to plot.
   Use `group_by:` and, if you want a trend, a `spent_on` filter on the saved query.
 
+## Sending a report by e-mail, once
+
+*Send report by e-mail* on a report's page mails it to whoever you choose, now, without
+creating a schedule. It needs two permissions — **Send a report by e-mail** and **View
+report templates** — because mailing a report is a way of reading it.
+
+Four things about it are deliberate, and each one is a thing the report you send cannot do:
+
+* **You can only mail what you can see.** The report is produced with *your* access rights,
+  not the recipient's, and the mail says so. If you name issue IDs and one of them is an
+  issue you cannot see, **nothing is sent** — the whole request is refused rather than
+  quietly reporting on the rest, because a report that silently covers less than it claims
+  is worse than an error.
+* **The sender is this Redmine, and you are in `Reply-To`.** There is no field for a
+  sender, so a report cannot be mailed from an address that is not this installation's.
+  Somebody who replies reaches you.
+* **Recipients are Redmine users** unless an administrator has enabled external addresses
+  in *Administration → Plugins → Reporter dashboards* **and** listed the permitted domains
+  there. An empty domain list means no external address is accepted, whatever the checkbox
+  says — the page warns when that is the state.
+* **Every send is recorded**, with who sent it, when, which template, which issues and
+  which recipients — including the exact address for an external one. Administrators see
+  every row for the project; everybody else sees their own. There is also a per-user rate
+  limit (12 sends an hour by default; `0` switches the feature off for the whole
+  installation).
+
+A render that fails mails nobody at all. You get the diagnostics panel with a correlation
+ID, the same one the audit row carries, so nobody receives a green-looking e-mail with a
+broken report in it.
+
 ## Scheduled reports
 
 A schedule mails a report template to a list of Redmine users on a repeating day —

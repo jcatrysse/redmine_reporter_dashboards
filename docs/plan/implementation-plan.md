@@ -79,6 +79,7 @@ fact that CI has not yet run on this work at all.
 | T-25 | **in progress, two increments landed and NOTHING DELIVERS YET.** (1) `lib/redmine_reporter_dashboards/scheduling/occurrences.rb` — the date arithmetic, pure, no clock: `today:` is a required argument, and a spec asserts the module's own source names no `Date.today`. Month CLAMPING is the whole reason it is not a day-number check (a "monthly" schedule started on the 31st that fires seven times a year is a defect an author finds in August), and `next_occurrence` asks the SAME `due_on?` the runner will, so `next_run_on` and the run can never disagree. (2) `scheduling/runner.rb` — the tick: FR-39's claim (an INSERT against the unique index, never a check-then-act), FR-40's bounded catch-up, FR-41's **two** rescues, FR-42's one render per occurrence, and FR-45's render identity, which **refuses** rather than falling back — an anonymous or locked identity renders an empty report that looks like a success. Pays **S-7's inherited obligation**: run state written with `update_columns`, asserted on the emitted SQL rather than on the row (see HANDOVER §1 — reading the row back cannot tell a narrow write from a full one). A DRAFT (`repeat` or `start_date` still nil) is recorded as `skipped` and does **not** make the tick exit non-zero: a non-zero exit that is always non-zero is one nobody reads. **Every guard was negative-tested, twice.** Ten before review (three examples were vacuous under mutation and were rewritten), then a fresh-subagent review **REJECTED** it with one blocker and five majors, each backed by a probe against the live checkout: the render policy fell through an open `else` to the author and reported success (FR-45, in code sitting eleven lines under a comment refusing exactly that); a raise in the outer rescue *body* escaped `#call` and embargoed every later schedule, which is FR-41 broken by the code written for it; the injected `schedules:` scope dropped the `enabled` filter; a westward timezone edit produced two `occurrence_date`s for one wall-clock day and walked `last_run_on` backwards; `next_run_on` was never refreshed for a schedule with nothing to do, so an ended one advertised a past date for ever; and a fourth vacuous example. All eight fixes landed and were themselves mutation-tested (14 mutations, 13 red); the one that stayed green was **deleted** rather than kept. Two comments that asserted something measurement contradicted were corrected, one of them in migration 004. (3) `reporting/scheduled_delivery.rb` + `ReporterDashboardsMailer` + `scheduling/{heartbeat,run_command}.rb` + two rake tasks + 7 keys x 9 locales — FR-42 (one render, N recipients), FR-43 (owner told, recipients told nothing, and the failure mailer has **nowhere to put an attachment**), FR-44 (both halves: the README's cron contract, and a heartbeat that derives rather than storing state), and §7b.5's server-controlled sender, which holds because no column and no argument could set one. **Its review REJECTED it too** — 1 blocker, 5 majors, 6 minors, 3 nits, all probe-backed, all fixed, 16 mutations red. (4) `SchedulesController` + 5 views + a helper + **T-40's promotion of the two schedule permissions**, with §4.1's rows marked live. **Its review was the third REJECT and the only one to find a privilege escalation — two, both reproduced end to end**: `render_as_user_id` was permitted and filtered against nothing, so an ordinary member could have a report rendered with ADMINISTRATOR visibility and mailed to themselves (measured against a private issue they could not see); and `#test_send` coupled FR-45's stored identity to delivery-to-the-presser, which needed no tampering at all. Eight majors, four visible on the first page an operator opens. All 16 findings fixed, 19 mutations red. **T-25 IS COMPLETE.** **One question is REPORTED AND NOT DECIDED** — see §Findings **S-10** |
 | T-30 | **done** — `render/minimal_pdf.rb` (an engine-free PDF writer), `reporting/failure_document.rb` (the policy over it), migration 008's `failure_document` opt-in, `Diagnostic#template_name`, and 5 keys x 9 locales. **The failure document is drawn WITHOUT an engine, deliberately**: most of the codes that can reach it are engine codes, so drawing it through the engine that just failed is a coin toss whose losing side is *no document at all* — the outcome FR-59 exists to replace. **Its safety clause is held by construction rather than by a payload list**: the page carries `code`, `origin`, `line`, `engine`, `engine_version`, `duration_ms`, `correlation_id` and the template's name, and there is no path from `#message` or `#detail` to it — so the "no exception class, no SQL, no role/member/project id" assertions hold for payloads nobody thought of. `#document` is the ONLY action that can produce one; `#show` and `#preview` stay pages and are asserted to. The status stays the failure's own (500/422/501), because a 200 carrying "this is not your report" is INV-5 one layer up. **Running it found two defects reading it could not**: poppler rejected the first version's bytes (`endstream` running into `endobj` with no delimiter — *"Missing 'endstream' or incorrect stream length"*, which reads exactly like a wrong `/Length` and is not), and `schema_recorder.rb` had no `add_column` verb, so G11 reported **UNKNOWN** on the first migration in this plugin that grows an existing table. **17 mutations run, 17 red.** Raised **S-11** (the schedule half of §7b.3's opt-in) and **S-12** (E-6's zip, now T-29's alone) |
 | T-31 | **DONE — and its second review REJECTED the second attempt too, harder than the first.** Increment 2 built the owned `Aggregation::TimeEntryAggregator` (clauses 4-7): eleven dimensions, `SUM(hours)`, positional grouped reads, an independent Ruby oracle on PostgreSQL 16 and MariaDB 10.11, and **D-1 reproduced live** where the plan had recorded the engine as uninstallable here — `DIVERGES (keys [nil], 0.3 against a real 10.55)` against `agrees` on PostgreSQL. Then a fresh-subagent review found **two BLOCKERS and eight MAJORS while every figure still agreed**, which is the finding worth carrying forward: value agreement proves arithmetic and nothing else. The blockers were a DISCLOSURE — `group_by: issue` printed the subject of an issue the actor may not see, because `time_entries.issue_id` survives the visibility condition core puts in `left_join_issue` — and an UNBOUNDED axis: `limit: 0` meant no cap, so 50 000 buckets came back with `truncated: false`. The majors: ties ordered by engine row order (and past a cap that changes *which* buckets exist), `sort: label` sorting by raw id with a spec whose own name admitted it, the cap folding `(none)` into `(other)`, a project-overridden activity as two identically-labelled buckets, six of eleven drill-through filters naming a filter `TimeEntryQuery` has not got (`author_id` resolving to a plausible WRONG row set), `drill:`/`split_by:`/`period:` dropped in silence against a README that promised them, and **thirteen surviving mutations in the guards the first commit said it had killed**. The dimension set is now core's eight from `time_report.rb`; the corrected version is **34 mutations, 34 red**, with a control run first — because the first harness ran `spec/adapter` and the DB-less specs in one process, where the baseline is already 7 failures, and reported 19 meaningless kills. Recorded rather than absorbed: **S-16** (`SUM` over a duplicating join), **S-18** (no custom-field dimension); **S-17** partially fixed (eight aggregation degradation codes localised in nine languages, mechanism settled for the rest) |
+| T-32 | **done** — `app/controllers/reporter_dashboards/mail_controller.rb` (3 actions), `reporting/{mail_policy,adhoc_delivery}.rb`, two mailer actions with a shared body partial, migration 009's two audit tables, two models, two views, four settings, 37 keys × 9 locales, and **T-40's promotion of `mail_reporter_dashboards_reports`** — the first permission promoted with `require: :loggedin` rather than `:member`. **Each clause of §7b.5's indictment is closed by construction rather than by validation**: the issues resolve through `Reporting::ReportScope` (so `Issue.visible(actor)`), the recipients through `MailPolicy` (admin setting + domain allowlist, `false` and empty by default), and the sender through there being **no parameter a sender could travel in** — asserted against the mailer's own parameter list, because Redmine's `Mailer#mail` merges `From` with `reverse_merge!` and a caller-supplied one would win. **An issue the requester cannot see REFUSES the whole send**, which is T-32's `Accept:` word: silently including it is the base plugin's defect and silently dropping it is the plausible-looking fix, so the count is named and nothing is sent. The rate limit **counts attempts off the audit table** rather than a counter column — one source of truth, and the expensive half of a send is the render — while a refusal that happens before any work consumes nothing, because a quota a refused request consumes is one nobody can recover from. §7's table list names neither table: they are derived from FR-61 and recorded as **S-19**, with the `address` guard **tightened** rather than loosened. **Its own tests found four defects**: an address with no local part (`@example.com`) passed the allowlist; `Template` had no `dependent: :nullify` so an audit row lost its subject's name with it; a visibility fixture proved nothing because the role held no `:view_issues`; and a "a failed send counts against the limit" test passed for the wrong reason until the before/after-claim split was made explicit |
 | T-24, T-26 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -98,6 +99,46 @@ A workflow cannot fork itself without reintroducing the very credential G1 remov
 a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
+
+**S-19 · `technical-spec.md` §7's table list stops before T-32, and FR-61 cannot be built
+without two tables it does not name. DERIVED from stated requirements and RECORDED for the
+curator, exactly as `reporter_dashboards_documents`' columns were in T-22. Owner: the
+curator, to ratify or correct §7's list.** FR-61 asks for two things that are *state* rather
+than behaviour — *"every send is **audited**: who, when, which template, which issues, which
+recipients — visible to admins"* and *"rate-limited per user"* — and §7b.5 says what the
+audit is for in its own words: *"today nothing records what left the building. Now there is
+a log you can answer questions from."* Neither is expressible without a row.
+
+Migration 009 therefore adds `reporter_dashboards_mail_sends` and
+`reporter_dashboards_mail_send_recipients`. Both are pinned to an EXACT column set in
+`spec/migrations/schema_contract_spec.rb` rather than to a minimum, which is stricter than
+the treatment §7's own tables get: adding a column to an audit table should cost somebody an
+argument, because the reason to add one is almost always to make the audit do a second job.
+
+**The one column that needed an argument is `address`,** and the guard was **tightened**
+rather than loosened to take it. `spec/migrations/schema_contract_spec.rb` forbids
+`to`/`cc`/`bcc`/`from`/`to_address`/`from_address`/`sender`/`recipients_raw` in every table
+this plugin creates; `address` was not on that list, so T-32 could have added one silently.
+It is now asserted to exist in **exactly one place** — the audit recipients table — and
+nowhere else, and to be **nullable**, so an ordinary Redmine recipient stores no address at
+all.
+
+What makes it a different thing from the columns §7 refuses is the DIRECTION of the data.
+Those were delivery inputs: a stored string a later run reads and mails to, which is *"a
+report over any issue in the instance, mailed anywhere, with a forged sender"*. This one is
+written **after** `Reporting::MailPolicy` has accepted the address against the
+administrator's setting and the domain allowlist, and nothing reads it back to send
+anything. Without it the audit cannot answer the only question an external address makes
+anybody ask, which is *where did it go* — and an audit that records that a report left the
+building without recording where is not an audit.
+
+**Two things a reader should not mistake for oversights.** A refusal that happens *before*
+any work is done — the rate limit, a disallowed address, no recipients — writes **no** audit
+row: a refused request is not a send, and consuming the quota it was refused by would mean a
+rate-limited user could never recover. A failure that got as far as rendering **is**
+audited, because the expensive half of a send is the render. Both halves have a test, and
+the first version of one of them passed for the wrong reason until the split was made
+explicit.
 
 **S-18 · The time-entry aggregator has no CUSTOM-FIELD dimension, where the issue path has
 one. A NAMED GAP, asserted rather than implied. Owner: a task of its own.** Core's
@@ -2761,7 +2802,9 @@ Phase 4.)*
    today and passes when nothing is debt.
    *Blocked:* actually switching CI to strict. Five of those twelve are the reporting-surface
    integration, which the allowlist has always said *"goes away with Phase 4, when the reporting
-   surface is owned (T-30..T-35)"* — and T-30, T-31, T-32 and T-34 are not started.
+   surface is owned (T-30..T-35)"* — and T-34 is not started. **T-30, T-31 and T-32 have
+   since landed**, so this clause is now blocked on T-34 alone; the five files have not been
+   re-checked against the tree since.
 2. **`glue/legacy/` deleted — BLOCKED, and the original entry was wrong to call it dead.**
    `Liquid::ScopeBinding#bind` (`scope_binding.rb:67`) routes to it on **every render with no owned
    render context**: *"No render context means no owned renderer produced this render, so this is a
@@ -2770,7 +2813,9 @@ Phase 4.)*
    cleanly rather than crashing — `legacy_available?` is a real `const_defined?` check, not a
    swallowed `NameError` — but it degrades to *no scope resolved*, so those tags would silently start
    reporting nothing on exactly the installs the integration exists for. It goes when T-30..T-32 own
-   the surface, not before.
+   the surface, not before. **All three have now landed** — which makes this item checkable rather
+   than done: owning the surface is what removes the NEED for the legacy path, and whether any
+   install still takes it is a question about `scope_binding.rb:67`'s branch, not about this table.
 3. **The secret-gated job deleted — ALREADY DONE**, in T-09. `ci.yml:3-9` records it, and
    `script/gates/no_secrets.sh` is what stops it coming back.
 4. **`scope_resolution.rb` deleted — BLOCKED, same reason as 2**, plus one of its own:

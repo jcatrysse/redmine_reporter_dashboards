@@ -86,3 +86,18 @@ get 'projects/:project_id/reporter/schedules/:id/edit', to: 'reporter_dashboards
 patch 'projects/:project_id/reporter/schedules/:id', to: 'reporter_dashboards/schedules#update'
 delete 'projects/:project_id/reporter/schedules/:id', to: 'reporter_dashboards/schedules#destroy'
 post 'projects/:project_id/reporter/schedules/:id/test_send', to: 'reporter_dashboards/schedules#test_send', as: 'test_send_project_reporter_schedule'
+
+# T-32 — ad-hoc report mail. Written in the same `to:` string form as everything above,
+# for the same reason: `spec/permissions/permission_map_spec.rb` READS these lines and
+# fails on one it cannot parse rather than skipping it.
+#
+# `#create` is POST and nothing else. It puts mail on the wire, so it must not be
+# reachable by following a link, by a prefetcher or by an `<img src>` — the same rule
+# `#test_send` above and the preflight's `#run` follow. The compose form is the GET, and
+# it sends nothing.
+#
+# It is called `create` because it does create something: the `MailSend` audit row. That
+# the mail is the visible half and the row is the durable one is exactly §7b.5's point.
+get 'projects/:project_id/reporter/mail', to: 'reporter_dashboards/mail#index', as: 'project_reporter_mail_sends'
+get 'projects/:project_id/reporter/mail/new', to: 'reporter_dashboards/mail#new', as: 'new_project_reporter_mail'
+post 'projects/:project_id/reporter/mail', to: 'reporter_dashboards/mail#create'

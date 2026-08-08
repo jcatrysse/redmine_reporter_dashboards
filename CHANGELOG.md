@@ -4,6 +4,44 @@ All notable changes to this plugin are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Send a report by e-mail, once, without creating a schedule.** *Send report by e-mail*
+  on a report's page mails the document to Redmine users you choose. It replaces the base
+  plugin's ad-hoc mail, which resolved issues with no visibility check and took the
+  recipients **and the sender** as free text — a report over any issue in the instance,
+  mailed anywhere, from a forged address.
+
+  What is different, and each of these is enforced rather than asked for:
+
+  - **You can only mail what you can see.** The report runs with *your* access rights and
+    the mail says whose they were. Naming an issue you cannot see **refuses the whole
+    send** rather than quietly reporting on the rest.
+  - **The sender is this installation**, with you in `Reply-To`. There is no field, no
+    parameter and no column anywhere on this path that could carry a different one.
+  - **Recipients are Redmine users** by default. External addresses need an administrator
+    to enable them *and* to list the permitted domains; an empty list accepts nothing,
+    whatever the checkbox says, and the settings page warns when that is the state.
+  - **Every send is recorded** — who, when, which template, which issues, which recipients,
+    and the exact address for an external one. Administrators see the whole project's log;
+    everybody else sees their own.
+  - **A per-user rate limit**, 12 sends an hour by default. Setting it to `0` switches the
+    feature off installation-wide.
+
+  A render that fails mails **nobody**: you get the diagnostics panel and a correlation ID,
+  which is also what the audit row carries. Nobody receives a green-looking e-mail with a
+  broken report attached.
+
+  New permission **Send a report by e-mail** (`mail_reporter_dashboards_reports`). It is
+  the only permission this plugin has that a *logged-in non-member* can hold, deliberately:
+  mailing yourself a report you can already read is not a member-level act. Redmine will
+  not offer it to the Anonymous role. Holding it alone is not enough — the controller also
+  requires *View report templates*.
+
+  Adds two tables (`reporter_dashboards_mail_sends`,
+  `reporter_dashboards_mail_send_recipients`) in migration 009, which reverses like every
+  other migration in this plugin.
+
 ### Deprecated
 
 - **`{% geo_version_map %}` will be removed in the next minor version.** It still works

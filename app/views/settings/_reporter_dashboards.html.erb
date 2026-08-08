@@ -34,6 +34,11 @@
   # see a tidy list, and never connect it to the warning below. The warning names what was
   # dropped; the field still holds what they typed, so they can fix it.
   raw_allowlist = raw['asset_allowlist'] || raw[:asset_allowlist] || policy.allowlist.join("\n")
+
+  # T-32 — the ad-hoc mail policy, built from the same posted Hash and for the same reason.
+  mail_policy = RedmineReporterDashboards::Reporting::MailPolicy.from_settings(raw)
+  raw_domains = raw['mail_external_domains'] || raw[:mail_external_domains] ||
+                mail_policy.domains.join("\n")
 %>
 <%# NO WRAPPER. Redmine already renders this partial inside `<div class="box tabular settings">`
     (`app/views/settings/plugin.html.erb`, identical on 5.1 through master), so a second box
@@ -72,6 +77,63 @@
                        size: 12, id: 'settings_asset_max_bytes') %>
     <em class="info"><%= l(:text_reporter_asset_max_bytes_info) %></em>
   </p>
+
+<%# T-32 / FR-61 — ad-hoc report mail. A second fieldset legend rather than four more rows
+    on the asset one: these govern who this installation will put a report in front of,
+    which is a different question from where a document's images come from, and an
+    administrator scanning the page should not have to read the labels to tell them apart. %>
+<fieldset class="box">
+  <legend><%= l(:label_reporter_adhoc_mail_settings) %></legend>
+
+  <p>
+    <label for="settings_mail_external_addresses"><%= l(:label_reporter_mail_external_addresses) %></label>
+    <%# THE HIDDEN FIELD IS NOT DECORATION. An unchecked checkbox posts NOTHING, so without
+        it there is no way to express "turn this off" — the setting would keep its previous
+        value and an administrator who unticked the box and saved would still be permitting
+        external addresses. `check_box_tag` does not add one, unlike the form-builder helper. %>
+    <%= hidden_field_tag('settings[mail_external_addresses]', '0', id: nil) %>
+    <%= check_box_tag('settings[mail_external_addresses]', '1', mail_policy.external_enabled,
+                      id: 'settings_mail_external_addresses') %>
+    <em class="info"><%= l(:text_reporter_mail_external_addresses_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_mail_external_domains"><%= l(:label_reporter_mail_external_domains) %></label>
+    <%= text_area_tag('settings[mail_external_domains]', raw_domains,
+                      rows: 4, cols: 40, id: 'settings_mail_external_domains') %>
+    <em class="info"><%= l(:text_reporter_mail_external_domains_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_mail_rate_limit"><%= l(:label_reporter_mail_rate_limit) %></label>
+    <%= text_field_tag('settings[mail_rate_limit]', mail_policy.rate_limit,
+                       size: 6, id: 'settings_mail_rate_limit') %>
+    <%= text_field_tag('settings[mail_rate_window_minutes]', mail_policy.rate_window_minutes,
+                       size: 6, id: 'settings_mail_rate_window_minutes') %>
+    <em class="info"><%= l(:text_reporter_mail_rate_limit_info) %></em>
+  </p>
+
+<% if mail_policy.collapsed? %>
+  <%# THE COLLAPSE, SAID OUT LOUD. An administrator who ticked the box and saved an empty
+      allowlist has configured nothing, and the page they are looking at would otherwise
+      show a ticked box — which is the "looks like it worked when it did not" failure the
+      asset half of this partial already guards against. %>
+  <div class="warning">
+    <%= l(:text_reporter_mail_external_collapsed) %>
+  </div>
+<% end %>
+
+<% if mail_policy.dropped.any? %>
+  <div class="warning">
+    <p><%= l(:text_reporter_asset_settings_dropped) %></p>
+    <ul>
+      <% mail_policy.dropped.each do |entry| %>
+        <li><%= "#{entry[:key]}: #{entry[:value].inspect} — #{entry[:reason]}" %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+</fieldset>
 
 <% if policy.collapsed? %>
   <div class="warning">

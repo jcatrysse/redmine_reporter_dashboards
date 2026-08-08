@@ -18,6 +18,21 @@
                 edit_project_reporter_template_path(@project, @template),
                 class: 'icon icon-edit' %>
   <% end %>
+  <%# T-32 / FR-61 — the ad-hoc mail entry point.
+
+      OFFERED ONLY WHEN THE ACTOR HOLDS THE PERMISSION, and the check is
+      `mail_…_reports` alone rather than the controller's full conjunction: they are already
+      reading this page, so `view_…_reports` is not in question. Drawing a link that answers
+      403 is the "capability nobody can reach" defect pointed the other way.
+
+      It is drawn for a failed run too, deliberately. The compose form is where somebody
+      chooses recipients and presses send; the render happens then, not now, and a template
+      that failed to draw a preview may well be fine over the scope they are about to pick. %>
+  <% if User.current.allowed_to?(:mail_reporter_dashboards_reports, @project) %>
+    <%= link_to reporter_dashboard_icon('email', l(:label_reporter_adhoc_mail)),
+                new_project_reporter_mail_path(@project, template_id: @template.id),
+                class: 'icon icon-email' %>
+  <% end %>
   <%# THE DOWNLOAD IS OFFERED ONLY WHEN IT CAN SUCCEED. A per-record run over more than
       one issue produces an archive, and building one is still owed (finding E-6). The
       controller refuses it with a 501 for a hand-written URL; here the honest thing is

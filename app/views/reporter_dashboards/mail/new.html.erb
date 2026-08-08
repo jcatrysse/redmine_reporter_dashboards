@@ -1,0 +1,99 @@
+<%#
+  T-32 / FR-61 — the compose form for an ad-hoc report mail.
+
+  Redmine's own chrome only: `.contextual`, `h2`, `.box.tabular`, `em.info`, `.warning`,
+  `p.nodata`. CLAUDE.md §4 forbids plugin-local design tokens in chrome and there are none
+  here.
+
+  --- THIS FORM SENDS NOTHING BY ITSELF ---
+
+  The page is a GET; the button is a POST. That is the same split `#test_send` and the
+  preflight's `#run` use, and the reason is that mail on the wire must not be reachable by
+  following a link, by a prefetching proxy or by an `<img src>`.
+%>
+<div class="contextual">
+  <%= link_to l(:label_reporter_adhoc_mail_audit),
+              project_reporter_mail_sends_path(@project), class: 'icon icon-list' %>
+</div>
+
+<h2><%= l(:label_reporter_adhoc_mail) %></h2>
+
+<p><%= l(:text_reporter_adhoc_mail_intro_form, name: @template.name) %></p>
+
+<%# THE FAILURE NOTICE, in the place the requester is already looking (§9b.2 puts the
+    diagnostics panel "in the editor, next to the code"; this is the same idea one surface
+    over). Nothing was mailed to anybody when this is drawn — see `AdhocDelivery`. %>
+<% if @diagnostic %>
+  <%= render partial: 'reporter_dashboards/templates/diagnostics',
+             locals: { diagnostic: @diagnostic } %>
+<% end %>
+
+<%# THE LIMIT IS SHOWN BEFORE IT BITES. A rate limit an author only meets as a refusal is
+    a limit they experience as a bug; naming the remaining allowance turns it into a
+    number they can plan around. `@remaining` is recomputed after a refusal so the page
+    never contradicts the message above it. %>
+<% if @policy && @policy.rate_limit.zero? %>
+  <div class="warning"><%= l(:text_reporter_adhoc_mail_disabled) %></div>
+<% else %>
+  <p class="nodata">
+    <%= l(:text_reporter_adhoc_mail_remaining, count: @remaining.to_i,
+          minutes: @policy ? @policy.rate_window_minutes : 0) %>
+  </p>
+<% end %>
+
+<%= form_tag(project_reporter_mail_sends_path(@project), method: :post) do %>
+  <%= hidden_field_tag 'template_id', @template.id %>
+
+  <div class="box tabular">
+    <p>
+      <label for="recipient_user_ids"><%= l(:label_reporter_adhoc_mail_recipients) %></label>
+      <%#
+        THE PICKER IS NOT THE CHECK, and this one is deliberately narrow anyway. It offers
+        the project's members, which is the list that is useful; the controller resolves
+        whatever ids arrive through `User.active` regardless, so a posted id outside this
+        list is not an escalation — the bytes were rendered as the REQUESTER, so a
+        recipient with wider access gains the requester nothing.
+      %>
+      <%= select_tag 'recipient_user_ids',
+                     options_from_collection_for_select(@project.users.active.sorted, :id, :name),
+                     multiple: true, size: 8, id: 'recipient_user_ids' %>
+      <em class="info"><%= l(:text_reporter_adhoc_mail_recipients_info) %></em>
+    </p>
+
+    <%# THE EXTERNAL FIELD IS ONLY DRAWN WHEN THE POLICY PERMITS IT. Drawing a disabled box
+        would invite an administrator to believe the feature is merely off for them, and
+        drawing an enabled one that the controller then refuses is worse. The setting is
+        installation-wide (§4.1), so the sentence names where it lives. %>
+    <% if @policy && @policy.external_enabled %>
+      <p>
+        <label for="recipient_addresses"><%= l(:label_reporter_adhoc_mail_addresses) %></label>
+        <%= text_area_tag 'recipient_addresses', params[:recipient_addresses],
+                          rows: 3, cols: 40, id: 'recipient_addresses' %>
+        <em class="info">
+          <%= l(:text_reporter_adhoc_mail_addresses_info,
+                domains: @policy.domains.join(', ')) %>
+        </em>
+      </p>
+    <% end %>
+
+    <p>
+      <label for="issue_ids"><%= l(:label_reporter_adhoc_mail_issue_ids) %></label>
+      <%= text_field_tag 'issue_ids', params[:issue_ids], size: 60, id: 'issue_ids' %>
+      <%# THE REFUSAL IS NAMED IN ADVANCE. An issue the requester cannot see refuses the
+          whole send rather than being dropped from it, and somebody who does not know that
+          would read the refusal as a bug. %>
+      <em class="info"><%= l(:text_reporter_adhoc_mail_issue_ids_info) %></em>
+    </p>
+
+    <p>
+      <label for="subject"><%= l(:label_reporter_adhoc_mail_subject) %></label>
+      <%= text_field_tag 'subject', params[:subject], size: 60, id: 'subject' %>
+      <em class="info"><%= l(:text_reporter_adhoc_mail_subject_info) %></em>
+    </p>
+  </div>
+
+  <p>
+    <%= submit_tag l(:button_reporter_adhoc_mail_send) %>
+    <%= link_to l(:button_cancel), project_reporter_template_path(@project, @template) %>
+  </p>
+<% end %>

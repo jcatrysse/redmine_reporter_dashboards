@@ -112,6 +112,8 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
         reporter_dashboards_schedule_runs
         reporter_dashboards_schedule_recipients
         reporter_dashboards_documents
+        reporter_dashboards_mail_sends
+        reporter_dashboards_mail_send_recipients
       ]
     end
 
@@ -180,6 +182,40 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
                                               source_template_id visibility],
         'reporter_dashboards_schedules' => %w[author_id render_as_user_id],
         'reporter_dashboards_schedule_recipients' => %w[schedule_id]
+      )
+    end
+
+    # T-32's two tables, pinned as EXACT column sets rather than as a minimum.
+    #
+    # §7's table list stops at `reporter_dashboards_documents` and names no column for
+    # either of these — it was written before T-32 — so there is no §7 row to compare
+    # against and the ordinary "required plus argued extras" split has nothing to split.
+    # They are pinned whole instead, which is stricter: adding a column to an AUDIT table
+    # should cost somebody an argument, because the reason to add one is almost always to
+    # make the audit do a second job.
+    #
+    # The columns are derived from FR-61's own sentence — "who, when, which template, which
+    # issues, which recipients" — plus the outcome fields the scheduled path already
+    # records under the same names. See §Findings S-19: the derivation is recorded for the
+    # curator, exactly as `reporter_dashboards_documents`' columns were in T-22.
+    it 'pins T-32 audit tables to exactly the columns FR-61 needs' do
+      expect(column_names('reporter_dashboards_mail_sends')).to contain_exactly(
+        'id',
+        # who, when
+        'author_id', 'created_at', 'project_id',
+        # which template — as a reference AND as the name and source it had at the time,
+        # because a renamed or deleted template must not be able to make the audit describe
+        # something other than what was sent
+        'template_id', 'template_name', 'source',
+        # which issues, and which saved query narrowed them
+        'issue_ids', 'query_id', 'query_type',
+        # what happened
+        'status', 'error', 'correlation_id', 'recipients_count', 'external_count',
+        'document_count', 'bytes_total', 'duration_ms', 'finished_at'
+      )
+
+      expect(column_names('reporter_dashboards_mail_send_recipients')).to contain_exactly(
+        'id', 'mail_send_id', 'user_id', 'address', 'created_at'
       )
     end
 
@@ -279,6 +315,44 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
       end
 
       expect(offenders).to eq([])
+    end
+
+    # T-32 TIGHTENED THIS RATHER THAN LOOSENING IT, and the direction is the point.
+    #
+    # `address` was not on the forbidden list, so T-32's audit table could have added one
+    # and no example would have moved. That is the shape T-26 describes as a ratchet that
+    # only tightens: a name nobody thought to forbid is not a name that was permitted.
+    #
+    # `reporter_dashboards_mail_send_recipients.address` is the ONE address column in this
+    # schema, and what makes it a different thing from the columns above is the DIRECTION
+    # of the data. The ones §7 refuses are delivery inputs: a stored string a later run
+    # reads and mails to, which is *"a report over any issue in the instance, mailed
+    # anywhere"*. This one is written AFTER `Reporting::MailPolicy` has accepted the
+    # address against the administrator's setting and domain allowlist, and nothing reads
+    # it back to send anything — `spec/reporting/adhoc_delivery_spec.rb` asserts that
+    # against the delivery's source rather than against this comment.
+    #
+    # Without it the audit cannot answer the only question an external address makes
+    # anybody ask, which is *where did it go*.
+    it 'permits exactly one address column, on the audit table, and nowhere else' do
+      carrying = tables.flat_map do |table, definition|
+        definition['columns']
+          .map { |c| c['name'] }
+          .select { |name| name == 'address' }
+          .map { |name| "#{table}.#{name}" }
+      end
+
+      expect(carrying).to eq(['reporter_dashboards_mail_send_recipients.address'])
+    end
+
+    # AND IT IS NULLABLE, which is what makes "recipients are Redmine users" the common
+    # case rather than a claim. A Redmine recipient stores `user_id` and no address at all,
+    # so the ordinary send writes none.
+    it 'leaves the audit address nullable, so a Redmine recipient stores no address' do
+      column = column("reporter_dashboards_mail_send_recipients", "address")
+
+      expect(column).not_to be_nil
+      expect(column['null']).to be(true)
     end
 
     it 'gains an id, unlike the join row §7 criticises' do

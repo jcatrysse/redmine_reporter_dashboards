@@ -93,6 +93,20 @@ module RedmineReporterDashboards
              dependent: :nullify,
              inverse_of: :template
 
+    # T-32 — the ad-hoc mail audit, and `:nullify` for exactly the reason above one
+    # sentence stronger. A document is a thing; an audit row is a RECORD OF SOMETHING THAT
+    # HAPPENED, and deleting a template must not be able to delete the evidence that it
+    # mailed sixty people last Tuesday. `template_name` and `source` are copied onto the
+    # row for the same reason, so nullifying the reference costs the audit nothing.
+    #
+    # `MailSend#belongs_to :template` is `optional: true` because of this: after a
+    # template is destroyed the row is legitimately parentless and must still validate.
+    has_many :mail_sends,
+             class_name: 'RedmineReporterDashboards::MailSend',
+             foreign_key: 'template_id',
+             dependent: :nullify,
+             inverse_of: :template
+
     # The same shape as Redmine's `Query` (`app/models/query.rb:265`), including the
     # join-table name being stated rather than derived — Rails would derive
     # `reporter_dashboards_templates_roles` correctly here, but the derivation depends on

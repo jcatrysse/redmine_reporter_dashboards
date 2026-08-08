@@ -58,6 +58,11 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/time_entry_visibility'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/failure_document'
+# T-32 — the ad-hoc mail policy and its delivery. `mail_policy` is required first because
+# `adhoc_delivery` reads it at load time through `require_relative`; listing both here keeps
+# the boot order explicit rather than depending on which file happens to be loaded first.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/mail_policy'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/adhoc_delivery'
 # T-25's delivery. It is required AFTER report_run and the scheduler because it names both,
 # and it lives in reporting/ rather than scheduling/ so that `layer_purity`'s scheduling arm
 # — which forbids that directory from naming Render or Liquid — stays true and enforced.

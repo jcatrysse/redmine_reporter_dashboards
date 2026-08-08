@@ -394,7 +394,8 @@ module RedmineReporterDashboards
 
       it 'sees every controller in the plugin' do
         expect(ControllerSource.all.map(&:name))
-          .to eq(%w[reporter_dashboards/schedules reporter_dashboards/templates
+          .to eq(%w[reporter_dashboards/mail reporter_dashboards/schedules
+                    reporter_dashboards/templates
                     reporter_preflight reporter_project_pages reporter_project_tabs
                     sql_stats])
       end
@@ -888,7 +889,17 @@ module RedmineReporterDashboards
             # behind `manage_…_schedules` rather than opening a door, so holding it alone
             # lets you do nothing — and mapping it would make it sufficient for `authorize`
             # on actions it is not sufficient for.
-            [:render_reporter_dashboards_reports_as_others, {}, { require: :member }]
+            [:render_reporter_dashboards_reports_as_others, {}, { require: :member }],
+            # T-32. `require: :loggedin` AND NOT `:member`, which is the one option value
+            # in this whole expectation that differs from its neighbours and is the reason
+            # the option Hash is asserted rather than the name alone. §4.1: a logged-in
+            # non-member legitimately mails themselves a report they can already read.
+            # Redmine still refuses to OFFER it to Anonymous, because
+            # `Role#setable_permissions` subtracts `loggedin_only_permissions` there — an
+            # anonymous visitor able to make this installation send mail is a spam relay.
+            [:mail_reporter_dashboards_reports,
+             { :'reporter_dashboards/mail' => [:index, :new, :create] },
+             { require: :loggedin }]
           ]
         )
       end

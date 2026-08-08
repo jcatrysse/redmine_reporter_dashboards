@@ -87,6 +87,84 @@ class ReporterDashboardsMailer < Mailer
                     name: report_name(schedule), date: format_date(occurrence_date))
   end
 
+  # T-32 / FR-61 — AN AD-HOC REPORT, TO A REDMINE USER.
+  #
+  # --- `From` IS SERVER-CONTROLLED, AND THE MECHANISM IS THE ABSENCE OF A PARAMETER ---
+  #
+  # §7b.5's finding about the base plugin is that `to`/`cc`/`bcc`/**`from`** are free text:
+  # "a report over any issue in the instance, mailed anywhere, with a forged sender".
+  #
+  # Redmine's `Mailer#mail` builds `From` from `Setting.mail_from` and merges it with
+  # `reverse_merge!`, so a caller passing its own `'From'` header would WIN. Nothing here
+  # passes one, and nothing can: neither of these two methods takes a sender, an address to
+  # put in one, or a Hash that could carry one. `spec/reporting/adhoc_mailer_spec.rb`
+  # asserts that against the parameter list rather than against this comment, which is the
+  # same shape `DocumentRequest`'s "no field a credential could travel in" assertion takes.
+  #
+  # --- `Reply-To` IS THE REQUESTER, WHICH IS WHAT THE `from` FIELD WAS BEING USED FOR ---
+  #
+  # §7b.5: "The requester's address goes in `Reply-To`, which is what people actually wanted
+  # from the field." A recipient who answers the report reaches the colleague who sent it
+  # rather than a no-reply mailbox, and the envelope still says which server sent it.
+  #
+  # `@author` IS DELIBERATELY NOT SET. Redmine uses it to put a person's name in the `From`
+  # display name, and this mail is sent by the installation on somebody's behalf, not by
+  # them — a display name reading like the requester's own account is exactly the ambiguity
+  # "server-controlled sender" is supposed to remove. It also keeps `no_self_notified` out
+  # of the path: a requester who mails a report to themselves gets it.
+  def adhoc_report(user, template, requester, attachments, subject, correlation_id)
+    redmine_headers 'Project' => template&.project&.identifier,
+                    'Template-Id' => template&.id,
+                    'Correlation-Id' => correlation_id
+
+    @user = user
+    @template_name = adhoc_report_name(template)
+    @requester = requester
+    @correlation_id = correlation_id
+    @project = template&.project
+
+    attachments.each { |name, bytes| self.attachments[name] = bytes }
+
+    mail to: user, reply_to: requester&.mail.presence,
+         subject: adhoc_subject(template, subject)
+  end
+
+  # THE SAME MAIL, TO AN ADDRESS THAT IS NOT A REDMINE ACCOUNT (FR-61's allowlisted case).
+  #
+  # --- WHY THE FIRST ARGUMENT IS STILL A USER ---
+  #
+  # `Mailer#process` raises `ArgumentError` unless `args.first.is_a?(User)`, because it uses
+  # it to set `User.current` and the recipient's language for the duration of the render.
+  # An external recipient has no account, so `User.anonymous` is passed — which is honest
+  # rather than a workaround: `logged?` is false, so the mail is composed in
+  # `Setting.default_language`, which is the only language the installation knows for
+  # somebody it has never met.
+  #
+  # It is also the safe value for `User.current`. The report is already BYTES by the time
+  # this runs — `AdhocDelivery` renders once, as the requester, before any recipient is
+  # looked at — so nothing in the view can make a visibility decision, and if a later edit
+  # tried, it would be making it as Anonymous rather than as somebody with access.
+  def adhoc_report_to_address(anonymous, address, template, requester, attachments, subject,
+                              correlation_id)
+    redmine_headers 'Project' => template&.project&.identifier,
+                    'Template-Id' => template&.id,
+                    'Correlation-Id' => correlation_id
+
+    @user = anonymous
+    @template_name = adhoc_report_name(template)
+    @requester = requester
+    @correlation_id = correlation_id
+    @project = template&.project
+    # The view says "somebody at this Redmine sent you this" rather than addressing a name
+    # it does not have.
+    @external = true
+
+    attachments.each { |name, bytes| self.attachments[name] = bytes }
+
+    mail to: address, reply_to: requester&.mail.presence,
+         subject: adhoc_subject(template, subject)
+  end
+
   class << self
     # `deliver_now`, NOT `deliver_later`, and the difference is what the run row means.
     #
@@ -104,9 +182,37 @@ class ReporterDashboardsMailer < Mailer
     def deliver_scheduled_report_failure(user, schedule, occurrence_date, diagnostic)
       scheduled_report_failure(user, schedule, occurrence_date, diagnostic).deliver_now
     end
+
+    # T-32. `deliver_now` for the same reason as above: the audit row records a fact, and
+    # an enqueued mail on an install with no worker would make it record a promise.
+    def deliver_adhoc_report(user, template, requester, attachments, subject, correlation_id)
+      adhoc_report(user, template, requester, attachments, subject,
+                   correlation_id).deliver_now
+    end
+
+    def deliver_adhoc_report_to_address(address, template, requester, attachments, subject,
+                                        correlation_id)
+      adhoc_report_to_address(::User.anonymous, address, template, requester, attachments,
+                              subject, correlation_id).deliver_now
+    end
   end
 
   private
+
+  # T-32. The author's own subject wins when they typed one, exactly as it does for a
+  # schedule — and for the same reason: a report called "Monday numbers" should not arrive
+  # as "[Report] Monday numbers".
+  def adhoc_subject(template, subject)
+    custom = subject.to_s.strip
+    return custom unless custom.empty?
+
+    l(:mail_subject_reporter_adhoc_report, name: adhoc_report_name(template))
+  end
+
+  def adhoc_report_name(template)
+    name = template&.name.to_s.strip
+    name.empty? ? l(:label_reporter_adhoc_mail) : name
+  end
 
   # The author's own subject wins when they set one — that is what the column is for — and
   # the generated one is the fallback rather than a prefix on theirs. A schedule called

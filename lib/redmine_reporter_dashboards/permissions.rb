@@ -186,6 +186,7 @@ module RedmineReporterDashboards
     # guards nothing and looks perfectly correct on the roles screen.
     TEMPLATES_CONTROLLER = :'reporter_dashboards/templates'
     SCHEDULES_CONTROLLER = :'reporter_dashboards/schedules'
+    MAIL_CONTROLLER = :'reporter_dashboards/mail'
 
     # --- ONE ORDERED LIST, AND WHY IT REPLACED TWO -----------------------------------
     #
@@ -430,16 +431,40 @@ module RedmineReporterDashboards
                 'Grants access to everything that user can see'
       ),
       # --- distribution: the two paths that reach outside Redmine's permission model ----
+      # --- PROMOTED BY T-32 ------------------------------------------------------------
+      #
+      # `require: :loggedin` AND NOT `:member`, which §4.1 states and which is the whole
+      # difference between this row and its two neighbours. A logged-in non-member can
+      # legitimately mail themselves a report they can already read — that is the point of
+      # the weaker requirement — and Redmine still refuses to OFFER it to the **Anonymous**
+      # role, because `Role#setable_permissions` subtracts `loggedin_only_permissions` for
+      # Anonymous. An anonymous visitor able to make this installation send mail is a
+      # spam relay, so the requirement is load-bearing rather than descriptive, and
+      # `permission_map_spec.rb` asserts the value rather than trusting it.
+      #
+      # `#index` IS MAPPED TOO, and leaving it out would repeat the defect
+      # `manage_…_schedules` had: a permission that can do a thing but cannot look at what
+      # it did is broken rather than milder. The audit list is also the only surface that
+      # answers FR-61's "visible to admins" — the controller narrows a non-admin to their
+      # own rows, which is a record-level decision no permission can express.
+      #
+      # WHAT MAPPING IT DOES NOT DO is make it sufficient. `authorize` passes on any mapped
+      # permission, so `MailController` additionally requires
+      # `view_reporter_dashboards_reports` on every action: mailing a report is a way of
+      # reading it, and a holder of this permission alone must not be able to read one.
       Entry.new(
         name: :mail_reporter_dashboards_reports,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        actions: { MAIL_CONTROLLER => [:index, :new, :create] },
         read: false,
         requires: :loggedin,
         group: :reports_distribute,
+        # NOT `authoring: true`. Mailing a report runs a template that somebody else
+        # wrote and this actor was already permitted to open; it creates no code and
+        # writes none. The flag would additionally derive `require: :member`, which is
+        # precisely the value §4.1 says this row must not have.
         authoring: false,
-        covers: 'Send a report by e-mail on demand, to Redmine users',
-        lands_in: 'T-32'
+        covers: 'Send a report by e-mail on demand, to Redmine users'
       ),
       Entry.new(
         name: :share_reporter_dashboards_reports,
