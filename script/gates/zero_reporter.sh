@@ -10,12 +10,39 @@ set -euo pipefail
 # WARN mode by default, because the integration still exists: reporter is optional,
 # not gone, so a handful of files legitimately name it and each says why in
 # zero_reporter.allowlist. What the gate enforces is the RATCHET — a file that is not
-# on the list is a failure, and a file on the list that no longer needs to be there is
-# reported so the list shrinks instead of ossifying. At 1.0 the list should be empty.
+# on the list is a failure, AND a file on the list that no longer needs to be there is a
+# failure too, so the list can only shrink.
 #
 # Mode:
-#   ZERO_REPORTER_MODE=warn    (default) new references fail; a stale allowlist entry warns
-#   ZERO_REPORTER_MODE=strict  ANY reference fails, allowlist or not. What 1.0 must pass.
+#   ZERO_REPORTER_MODE=warn    (default) an unlisted file fails; a STALE entry fails
+#   ZERO_REPORTER_MODE=strict  any reference outside the `[permanent]` set fails.
+#                              What 1.0 must pass.
+#
+# --- WHY A STALE ENTRY IS A FAILURE AND NOT A NOTE (T-26, 2026-08-08) ---
+#
+# It was a NOTE, and a note is what a ratchet cannot be made of. The allowlist's own
+# header says "this list may only SHRINK"; nothing enforced that, so an entry whose file
+# had been cleaned up could sit there indefinitely, and the next person to add a
+# reference to that file would find it already permitted. Failing on a stale entry is the
+# difference between a record of accepted debt and folklore. It costs one deletion when
+# it fires, and the failure message says which line to delete.
+#
+# --- WHY STRICT IGNORES `[permanent]`, AND WHO DECIDED THAT (T-26, 2026-08-08) ---
+#
+# Strict used to mean "ANY reference fails, allowlist or not", described as "what 1.0 must
+# pass". **It could never pass.** The curator decided on 2026-08-05 that the 1.0 target is
+# *empty except the importer* — reading the base plugin's data by name is what the importer
+# is FOR, so those references are the opposite of coupling and are not going away. A flag
+# that can never be switched on is not a target, it is a comment.
+#
+# So strict now means what the curator's decision actually implies: **no coupling outside
+# the permanently-exempt set**. An allowlist entry whose reason begins `[permanent]` is
+# exempt from strict; every other entry is debt that strict refuses. That makes strict
+# REACHABLE — after T-30…T-32 own the reporting surface and the integration entries go —
+# rather than aspirational.
+#
+# The exemption is deliberately narrow and deliberately visible: it is written per entry,
+# in the file a reviewer reads, not as a path pattern hidden in this script.
 #
 # The negative lookahead is load-bearing. A plain grep for "redmine_reporter" matches
 # this plugin's own name several hundred times, which is why an earlier version of this
@@ -53,6 +80,14 @@ allowed_paths() {
   sed -E 's/#.*$//' "$ALLOWLIST" | awk 'NF { print $1 }'
 }
 
+# The paths whose REASON begins `[permanent]` — the set strict mode exempts. Matched on
+# the reason rather than on the path so that the exemption is a stated decision about a
+# file, visible in the line a reviewer reads.
+permanent_paths() {
+  [ -f "$ALLOWLIST" ] || return 0
+  sed -E 's/#.*$//' "$ALLOWLIST" | awk 'NF && $2 == "[permanent]" { print $1 }'
+}
+
 FOUND="$(matches | sort -u)"
 ALLOWED="$(allowed_paths | sort -u)"
 
@@ -76,22 +111,37 @@ if [ -n "$UNLISTED" ]; then
   status=1
 fi
 
-# A ratchet needs to be able to tighten: an entry whose file no longer matches is an
-# opportunity to shrink the list, and left alone it turns the allowlist into folklore.
+# A ratchet has to be able to tighten, and only tighten. An entry whose file no longer
+# matches is a permission nobody needs any more, and leaving it costs the next person who
+# adds a reference to that file: the gate would wave it through.
 if [ -n "$STALE" ]; then
   echo >&2
-  echo "NOTE: these allowlist entries no longer match anything and should be deleted:" >&2
+  echo "FAIL: these allowlist entries no longer match anything. Delete them —" >&2
+  echo "      the list may only shrink, and an entry that permits nothing today is one" >&2
+  echo "      that silently permits something tomorrow:" >&2
   echo "$STALE" | sed 's/^/    /' >&2
-fi
-
-if [ "$MODE" = 'strict' ] && [ "$found_count" != '0' ]; then
-  echo >&2
-  echo "FAIL (strict): $found_count file(s) still reference the base plugin or the vendor gem." >&2
-  echo "$FOUND" | sed 's/^/    /' >&2
   status=1
 fi
 
-if [ "$status" = '0' ] && [ -z "$STALE" ]; then
+if [ "$MODE" = 'strict' ]; then
+  PERMANENT="$(permanent_paths | sort -u)"
+  DEBT="$(comm -23 <(echo "$FOUND") <(echo "$PERMANENT") | sed '/^$/d')"
+  debt_count="$(echo "$DEBT" | sed '/^$/d' | wc -l | tr -d ' ')"
+
+  if [ "$debt_count" != '0' ]; then
+    echo >&2
+    echo "FAIL (strict): $debt_count file(s) reference the base plugin or the vendor gem" >&2
+    echo "               outside the permanently-exempt set:" >&2
+    echo "$DEBT" | sed 's/^/    /' >&2
+    echo >&2
+    echo "Strict is the 1.0 target: no coupling except the importer, which reads the base" >&2
+    echo "plugin's data by name because that is what it is for. Most of the list above goes" >&2
+    echo "when T-30..T-32 own the reporting surface." >&2
+    status=1
+  fi
+fi
+
+if [ "$status" = '0' ]; then
   echo "zero_reporter: OK — every reference is accounted for, and no entry is stale."
 fi
 

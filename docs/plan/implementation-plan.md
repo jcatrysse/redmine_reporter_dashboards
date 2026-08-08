@@ -2349,9 +2349,44 @@ logged-in non-member legitimately mails themselves a report they can already rea
 switch stays an **admin setting plus a domain allowlist** and does *not* become a role permission —
 it is a policy about the installation (§4.1).
 
-**T-26 · My-page widgets, locales, and the final gate flip.** *Accept:* `zero_reporter.sh` flips
-from warn to **hard gate**; `glue/legacy/` deleted; the secret-gated job deleted;
-`scope_resolution.rb` deleted.
+**T-26 · My-page widgets, locales, and the final gate flip.** *(deps: T-30, T-31, T-32 — **added
+2026-08-08**, see below; the original entry had none and three of its four items are downstream of
+Phase 4.)*
+
+*Accept, as revised 2026-08-08 after the four items were checked against the tree:*
+
+1. **`zero_reporter.sh` flips from warn to hard gate — PARTLY DONE, and the rest is blocked.**
+   *Done:* the ratchet now only tightens — a STALE allowlist entry is a failure rather than a note,
+   so an entry that permits nothing today cannot silently permit something tomorrow. And `strict`
+   was made **reachable**: it used to mean *"ANY reference fails, allowlist or not"*, described as
+   "what 1.0 must pass", which **could never pass** — the curator decided on 2026-08-05 that the 1.0
+   target is *empty except the importer*, because reading the base plugin's data by name is what the
+   importer is FOR. Strict now exempts entries whose reason begins `[permanent]`, which is only the
+   four importer entries, and refuses everything else on the list. Measured: strict fails on 12 files
+   today and passes when nothing is debt.
+   *Blocked:* actually switching CI to strict. Five of those twelve are the reporting-surface
+   integration, which the allowlist has always said *"goes away with Phase 4, when the reporting
+   surface is owned (T-30..T-35)"* — and T-30, T-31, T-32 and T-34 are not started.
+2. **`glue/legacy/` deleted — BLOCKED, and the original entry was wrong to call it dead.**
+   `Liquid::ScopeBinding#bind` (`scope_binding.rb:67`) routes to it on **every render with no owned
+   render context**: *"No render context means no owned renderer produced this render, so this is a
+   host-plugin install and the legacy glue is what knows how to read it."* That is the path every
+   `{% sql_aggregate %}` inside a **reporter-hosted** template takes today. Deleting it degrades
+   cleanly rather than crashing — `legacy_available?` is a real `const_defined?` check, not a
+   swallowed `NameError` — but it degrades to *no scope resolved*, so those tags would silently start
+   reporting nothing on exactly the installs the integration exists for. It goes when T-30..T-32 own
+   the surface, not before.
+3. **The secret-gated job deleted — ALREADY DONE**, in T-09. `ci.yml:3-9` records it, and
+   `script/gates/no_secrets.sh` is what stops it coming back.
+4. **`scope_resolution.rb` deleted — BLOCKED, same reason as 2**, plus one of its own:
+   `scope_binding.rb:118` records that *"its behaviour is frozen by the scope fixture in
+   `test/unit/golden_scope_fixture_test.rb` and a change to it would move an oracle that cannot be
+   regenerated"*. CLAUDE.md §1's deletion guard has formally expired — the fixture is committed at
+   `ff3406c` — but deleting the module deletes the subject the oracle tests, so the two must move
+   together and deliberately.
+
+**Still owed by T-26:** the my-page widgets and locales its title names, and the CI flip to strict
+once Phase 4 lands.
 
 **T-33 · The asset-resolution triple + `asset_policy`** *(deps: T-12; blocks nothing after T-13)*
 **DONE 2026-08-06.** *Touches (as built, and the address moved — findings F-13/F-13b):*

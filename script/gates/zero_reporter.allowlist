@@ -1,8 +1,18 @@
 # Files allowed to mention redmine_reporter, Redmineup or up_acts_as_list, with the
 # reason for each. Gate: script/gates/zero_reporter.sh.
 #
-# This list may only SHRINK. Adding an entry is a decision to take in review, with a
-# reason written here, not a way to make the gate green.
+# This list may only SHRINK, and since 2026-08-08 that is ENFORCED rather than asked for:
+# an entry whose file no longer matches anything fails the gate. Adding an entry is a
+# decision to take in review, with a reason written here, not a way to make the gate green.
+#
+# --- THE `[permanent]` MARKER ---
+#
+# An entry whose reason begins `[permanent]` is exempt from `ZERO_REPORTER_MODE=strict`.
+# Everything else on this list is DEBT that strict refuses, which is what makes strict a
+# reachable target rather than an aspiration: before 2026-08-08 strict meant "any reference
+# fails, allowlist or not", and the curator's own decision below made that unpassable for
+# ever. Only the importer carries the marker, and adding it to anything else is a curator
+# decision, not a way to get a gate green.
 #
 # THE 1.0 TARGET, decided by the curator 2026-08-05: **empty except the importer.** The
 # importer ships permanently, and reading the base plugin's data by name is what it is
@@ -49,15 +59,16 @@ db/migrate/001_create_reporter_dashboards_tables.rb    migration comment referri
 #      say which plugin's data it reads, the report has to name the tables it looked
 #      for, and the usage groups have to say that six accessors come from paid
 #      RedmineUP plugins — an operator deciding what to drop needs that.
-#   2. The header above says "At 1.0 it should be empty." With an importer that ships,
-#      it cannot be. The honest 1.0 target is "empty except the importer", and whether
-#      to restate it that way, exclude lib/.../import/** from the gate's search paths,
-#      or drop the importer before 1.0, is a curator call. Recorded in
-#      implementation-plan.md §Findings rather than resolved by widening this list.
-lib/redmine_reporter_dashboards/import/survey.rb         reads reporter's tables by name; that is the task
-lib/redmine_reporter_dashboards/import/plan_report.rb    tells the operator which plugin's data was surveyed
-lib/redmine_reporter_dashboards/template_linter.rb       usage groups name the gem the accessors come from
-lib/tasks/reporter_dashboards.rake                       `rake -T` must say what import:plan surveys
+#   2. The header above said "At 1.0 it should be empty." With an importer that ships, it
+#      cannot be — and the question of what to do about that was left to the curator.
+#      **ANSWERED 2026-08-08, in T-26:** the 1.0 target is "empty except the importer", and
+#      the mechanism is the `[permanent]` marker rather than an exclusion hidden in the
+#      gate's search paths. These four entries carry it; nothing else does, and strict mode
+#      now refuses everything else on this list.
+lib/redmine_reporter_dashboards/import/survey.rb         [permanent] reads reporter's tables by name; that is the task
+lib/redmine_reporter_dashboards/import/plan_report.rb    [permanent] tells the operator which plugin's data was surveyed
+lib/redmine_reporter_dashboards/template_linter.rb       [permanent] usage groups name the gem the accessors come from
+lib/tasks/reporter_dashboards.rake                       [permanent] `rake -T` must say what import:plan surveys
 
 # --- The legacy glue itself (T-07). Named because naming it is the point: this
 # --- directory exists only while the base plugin does, and it is deleted at 1.0.

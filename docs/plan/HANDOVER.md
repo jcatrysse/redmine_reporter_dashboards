@@ -446,6 +446,23 @@ test-sent by any schedule manager, and the output landed in their mailbox. When 
 couples "act as X" with "deliver to Y", the requirement that fixes it is whichever of the
 two is written down — here FR-45 — and the other half gives way.
 
+**A GATE FLAG THAT CAN NEVER BE SWITCHED ON IS A COMMENT, NOT A TARGET.**
+`ZERO_REPORTER_MODE=strict` meant *"ANY reference fails, allowlist or not"* and was described in the
+script as "what 1.0 must pass" — while the curator had decided months earlier that the 1.0 target is
+*empty except the importer*, because reading the base plugin's data by name is what the importer is
+FOR. So the mode could not pass, ever, and T-26's `Accept:` said to switch it on. Fixed in T-26 by
+making the exemption explicit and per entry (`[permanent]` in the allowlist's reason column) rather
+than by widening the list. **When a gate has an aspirational mode, check it is reachable before
+planning work that turns it on.**
+
+**T-26's `Accept:` LIST WAS WRONG ABOUT THREE OF ITS FOUR ITEMS**, and the check took twenty minutes
+of reading rather than any measurement — see the revised entry in `implementation-plan.md`. The one
+worth remembering: `glue/legacy/` is NOT dead code. `Liquid::ScopeBinding#bind` routes to it whenever
+there is no owned render context, which is every `{% sql_aggregate %}` inside a reporter-hosted
+template. Deleting it degrades cleanly (the `const_defined?` check is real) — to *no scope resolved*,
+silently, on exactly the installs the integration exists for. **Before deleting a "legacy" directory,
+grep for the guarded fallback that still routes to it**, not only for hard references.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
