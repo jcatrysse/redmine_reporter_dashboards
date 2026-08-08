@@ -1,0 +1,329 @@
+# frozen_string_literal: true
+
+require 'digest'
+
+require_relative 'survey'
+require_relative '../reporting/exchange'
+
+module RedmineReporterDashboards
+  module Import
+    # T-24 — `rake reporter_dashboards:import:run`, the write half of the migration path.
+    #
+    # `import:plan` (T-02) surveys and writes nothing. This copies.
+    #
+    # --- COPY. FORWARD-ONLY. NEVER ADOPT. ---
+    #
+    # `technical-spec.md` §7's *Adopt vs copy* section settles this and the reason is not a
+    # preference: an operator following Redmine's own documented uninstall
+    # (`migrate NAME=redmine_reporter VERSION=0`) runs the BASE plugin's down-migrations,
+    # which drop `report_templates`. A plugin that had adopted those rows would lose them,
+    # and *"nothing inside the new plugin can prevent that"*. So every row is copied into a
+    # table this plugin owns, and the original is left exactly where it was.
+    #
+    # **This class never writes to a `report_*` table**, and that is held by construction
+    # rather than by care: the only SQL it issues against them is the `SELECT` in `Survey`,
+    # and `spec/import/runner_spec.rb` asserts the source names no writing verb. The
+    # writes all go through `RedmineReporterDashboards::Template`, which cannot address
+    # another plugin's table.
+    #
+    # --- IDEMPOTENT, AND "IDEMPOTENT" HAS FOUR OUTCOMES RATHER THAN TWO ---
+    #
+    # `source_template_id` is the key and `source_digest` is the fingerprint of the content
+    # that was copied. Re-running is therefore not "create or overwrite" but a decision:
+    #
+    #   :created    no copy exists for this source id
+    #   :unchanged  a copy exists, and neither side has moved
+    #   :updated    the SOURCE moved and the copy did not — a safe fast-forward
+    #   :diverged   the COPY was edited here since it was imported. NOT overwritten
+    #
+    # The fourth is the one the task's `Accept:` line is about: *"`import_status` reports
+    # divergence so drift is **visible rather than silent**"*. An importer that overwrote a
+    # locally-edited template would destroy the work somebody did after migrating, once,
+    # quietly, on a re-run somebody triggered for an unrelated reason. Refusing and NAMING
+    # it is the only outcome that cannot lose data.
+    #
+    # A template imported and then edited here is the EXPECTED state after a migration, not
+    # an error — which is why `:diverged` is reported as a count and a list rather than as a
+    # failure, and why the task's exit code does not turn non-zero for it.
+    module Runner
+      # What one source template became. `reason` is only set for the outcomes that need a
+      # sentence — a skipped or diverged row is useless without one.
+      Outcome = Struct.new(:source_id, :name, :status, :template_id, :reason,
+                           keyword_init: true)
+
+      Result = Struct.new(:outcomes, :notes, :dry_run, keyword_init: true) do
+        def counts
+          outcomes.group_by(&:status).transform_values(&:length)
+        end
+
+        def count(status)
+          counts.fetch(status, 0)
+        end
+
+        # `:skipped` is the only outcome that means "this template did not migrate". The
+        # other four all leave a usable copy behind, `:diverged` included — that one has a
+        # copy, it is simply not the source's current content.
+        def failed?
+          count(:skipped).positive?
+        end
+      end
+
+      # The columns this needs beyond what `Survey` asks for. `content` is the point of the
+      # exercise; without it there is nothing to copy and the run reports that rather than
+      # importing a set of empty templates.
+      REQUIRED_COLUMNS = %w[id type content].freeze
+      OPTIONAL_COLUMNS = %w[name project_id].freeze
+
+      class << self
+        # `actor` OWNS EVERY IMPORTED TEMPLATE, and it is a required argument for the same
+        # reason `RenderContext`'s is. `author_id` decides who `edit_own_…` lets through, so
+        # a nil here would either fail validation or — worse, if the column were nullable —
+        # produce templates nobody can edit. The rake task passes the administrator running
+        # it.
+        #
+        # `project_id` COMES FROM THE SOURCE ROW and is not remapped. A template belongs to
+        # the project it was written for; inventing a different one would silently move
+        # somebody's report between projects, and the permission that governs it with it.
+        def call(actor:, connection: nil, dry_run: false, project_ids: nil)
+          connection ||= ::ActiveRecord::Base.connection
+          notes = []
+          rows = read_source(connection, notes, project_ids)
+
+          outcomes = rows.map { |row| import_one(row, actor, dry_run, notes) }
+
+          Result.new(outcomes: outcomes, notes: notes, dry_run: dry_run)
+        end
+
+        # The divergence report, on its own, writing nothing. `import:status` is this.
+        #
+        # It is deliberately NOT a second traversal of reporter's tables: it asks OUR
+        # templates which source they came from and whether they still match it, so it
+        # keeps working after the base plugin has been uninstalled — which is exactly when
+        # an operator wants to know what state their migration is in.
+        def status(connection: nil)
+          connection ||= ::ActiveRecord::Base.connection
+          notes = []
+          imported = Template.where.not(source_template_id: nil).order(:id).to_a
+          sources = source_digests(connection, notes)
+
+          rows = imported.map do |template|
+            source_digest = sources[template.source_template_id]
+            Outcome.new(source_id: template.source_template_id, name: template.name,
+                        template_id: template.id,
+                        status: compare(template, source_digest),
+                        reason: status_reason(template, source_digest))
+          end
+
+          Result.new(outcomes: rows, notes: notes, dry_run: true)
+        end
+
+        # THE FINGERPRINT. SHA-256 over the content bytes and nothing else.
+        #
+        # Not `Digest::MD5` — CLAUDE.md §5 forbids it for anything security-bearing, and
+        # while this one is a change detector rather than a token, using the same primitive
+        # everywhere means nobody has to work out which is which. Not the whole row either:
+        # the question this answers is "has the CONTENT moved", and including `updated_on`
+        # would make every touch look like an edit.
+        def digest(content)
+          ::Digest::SHA256.hexdigest(content.to_s)
+        end
+
+        # Who owns the copies. A rake task runs as Anonymous, so the caller has to name
+        # somebody — and it must be an ADMINISTRATOR, because an imported template can land
+        # in any project the source used and no single non-admin is guaranteed to be a
+        # member of all of them. `nil` when there is nobody, so the task can refuse with a
+        # sentence instead of raising a validation error per template.
+        #
+        # `RRD_ACTOR` accepts a login or an id. The id branch is `Integer()`-guarded rather
+        # than `to_i`, because `to_i` turns "jsmith" into 0 and `find_by(id: 0)` into a
+        # confusing nil.
+        def resolve_actor(reference)
+          if reference.present?
+            user = if reference.to_s.match?(/\A\d+\z/)
+                     ::User.find_by(id: Integer(reference, 10))
+                   else
+                     ::User.find_by(login: reference.to_s)
+                   end
+            return user&.admin? ? user : nil
+          end
+
+          ::User.active.where(admin: true).order(:id).first
+        end
+
+        private
+
+        def read_source(connection, notes, project_ids)
+          unless Survey.send(:table_exists?, connection, Survey::TEMPLATES)
+            notes << "#{Survey::TEMPLATES} does not exist, so there is nothing to import. " \
+                     'This is the expected state on an installation that never had the ' \
+                     'base plugin.'
+            return []
+          end
+
+          available = Survey.send(:column_names, connection, Survey::TEMPLATES)
+          missing = REQUIRED_COLUMNS - available
+          unless missing.empty?
+            notes << "#{Survey::TEMPLATES} has no #{missing.join(', ')} column, so nothing " \
+                     'could be imported. This is a missing answer, not an empty result.'
+            return []
+          end
+
+          columns = (REQUIRED_COLUMNS + OPTIONAL_COLUMNS) & available
+          sql = +"SELECT #{columns.map { |c| Survey.send(:q, connection, c) }.join(', ')} " \
+                 "FROM #{Survey.send(:qt, connection, Survey::TEMPLATES)}"
+          # THE ONLY VALUE THAT REACHES THE SQL, and it is cast to Integer first. Every
+          # other identifier in this file comes from a frozen constant — same rule as
+          # `Survey`, and the reason it is a rule is that this runs against an operator's
+          # production database.
+          if project_ids
+            ids = Array(project_ids).map { |id| Integer(id) }
+            return [] if ids.empty?
+
+            sql << " WHERE #{Survey.send(:q, connection, 'project_id')} IN (#{ids.join(', ')})"
+          end
+          sql << " ORDER BY #{Survey.send(:q, connection, 'id')} " \
+                 "LIMIT #{Survey::MAX_TEMPLATES + 1}"
+
+          rows = Survey.send(:select_rows, connection, sql)
+          if rows.length > Survey::MAX_TEMPLATES
+            rows = rows.first(Survey::MAX_TEMPLATES)
+            notes << "more than #{Survey::MAX_TEMPLATES} templates: only the first " \
+                     "#{Survey::MAX_TEMPLATES} by id were imported. Re-run to continue."
+          end
+
+          rows.map { |row| columns.zip(row).to_h }
+        end
+
+        def import_one(row, actor, dry_run, notes)
+          source_id = row['id']
+          name = row['name'].presence || "Imported template #{source_id}"
+          mapped = Reporting::Exchange::TYPE_MAP[row['type'].to_s]
+
+          # AN UNKNOWN TYPE IS SKIPPED WITH ITS NAME, not guessed at. FR-55's closed map is
+          # what stops a file naming a class, and the same map is what stops a DATABASE
+          # naming one: `constantize` on `report_templates.type` would be the identical
+          # defect with a different input channel.
+          unless mapped
+            return Outcome.new(source_id: source_id, name: name, status: :skipped,
+                               reason: "unknown template type #{row['type'].inspect}. " \
+                                       "Known: #{Reporting::Exchange::TYPE_MAP.keys.join(', ')}")
+          end
+
+          content = row['content'].to_s
+          existing = Template.find_by(source_template_id: source_id)
+          return create_copy(row, name, mapped, content, actor, dry_run) if existing.nil?
+
+          refresh_copy(existing, name, mapped, content, dry_run, notes)
+        end
+
+        def create_copy(row, name, mapped, content, actor, dry_run)
+          source_id = row['id']
+          template = Template.new(
+            name: name.to_s[0, Template::MAX_STRING],
+            content: content,
+            project_id: row['project_id'],
+            author_id: actor.id,
+            source: mapped['source'],
+            output: mapped['output'],
+            # PRIVATE TO THE IMPORTER, exactly as a bundle import is (T-23). The source
+            # plugin has its own visibility vocabulary and this one does not know how to
+            # translate it, so the safe answer is the narrow one — widening is a decision
+            # `manage_public_…` exists to govern and an administrator makes it afterwards.
+            visibility: Template::VISIBILITY_PRIVATE,
+            source_template_id: source_id,
+            source_digest: digest(content)
+          )
+
+          return Outcome.new(source_id: source_id, name: name, status: :created) if dry_run
+
+          if template.save
+            Outcome.new(source_id: source_id, name: name, status: :created,
+                        template_id: template.id)
+          else
+            Outcome.new(source_id: source_id, name: name, status: :skipped,
+                        reason: template.errors.full_messages.join(', '))
+          end
+        end
+
+        # THE FOUR-WAY DECISION. See the class comment; the case that matters is the last.
+        def refresh_copy(existing, name, mapped, content, dry_run, notes)
+          source_digest = digest(content)
+          local_digest = digest(existing.content)
+
+          if existing.source_digest == source_digest && local_digest == source_digest
+            return Outcome.new(source_id: existing.source_template_id, name: existing.name,
+                               status: :unchanged, template_id: existing.id)
+          end
+
+          # THE COPY WAS EDITED HERE. Whether or not the source also moved, overwriting
+          # would throw away somebody's work — so it is reported and left alone, and the
+          # note says what an operator can do about it.
+          if local_digest != existing.source_digest
+            notes << "template #{existing.id} (#{existing.name}) has been edited since it " \
+                     'was imported, so it was left alone. Delete it and re-run to take the ' \
+                     "source's version, or leave it if the local edits are the ones you want."
+            return Outcome.new(source_id: existing.source_template_id, name: existing.name,
+                               status: :diverged, template_id: existing.id,
+                               reason: 'edited here since import')
+          end
+
+          return Outcome.new(source_id: existing.source_template_id, name: existing.name,
+                             status: :updated, template_id: existing.id) if dry_run
+
+          existing.content = content
+          existing.source = mapped['source']
+          existing.output = mapped['output']
+          existing.source_digest = source_digest
+
+          if existing.save
+            Outcome.new(source_id: existing.source_template_id, name: existing.name,
+                        status: :updated, template_id: existing.id)
+          else
+            Outcome.new(source_id: existing.source_template_id, name: existing.name,
+                        status: :skipped, template_id: existing.id,
+                        reason: existing.errors.full_messages.join(', '))
+          end
+        end
+
+        # `{source_id => digest}` for every source template still readable. Empty — not an
+        # error — when the base plugin is gone, which is a state `#status` must survive.
+        def source_digests(connection, notes)
+          unless Survey.send(:table_exists?, connection, Survey::TEMPLATES)
+            notes << "#{Survey::TEMPLATES} is gone, so the source content cannot be " \
+                     'compared. Everything below is reported as source-absent rather than ' \
+                     'as up to date.'
+            return {}
+          end
+
+          rows = Survey.send(:select_rows, connection, <<~SQL)
+            SELECT #{Survey.send(:q, connection, 'id')}, #{Survey.send(:q, connection, 'content')}
+            FROM #{Survey.send(:qt, connection, Survey::TEMPLATES)}
+            ORDER BY #{Survey.send(:q, connection, 'id')}
+            LIMIT #{Survey::MAX_TEMPLATES}
+          SQL
+
+          rows.to_h { |id, content| [id, digest(content)] }
+        end
+
+        def compare(template, source_digest)
+          local_digest = digest(template.content)
+
+          return :source_absent if source_digest.nil?
+          return :diverged if local_digest != template.source_digest
+          return :stale if source_digest != template.source_digest
+
+          :unchanged
+        end
+
+        def status_reason(template, source_digest)
+          case compare(template, source_digest)
+          when :source_absent
+            'the source template no longer exists'
+          when :diverged then 'edited here since it was imported'
+          when :stale then 'the source has changed; re-run import:run to take it'
+          end
+        end
+      end
+    end
+  end
+end

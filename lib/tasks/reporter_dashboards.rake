@@ -18,6 +18,50 @@ namespace :reporter_dashboards do
       result = RedmineReporterDashboards::Import::Survey.run
       puts RedmineReporterDashboards::Import::PlanReport.render(result)
     end
+
+    # T-24. The write half. COPY-ONLY and FORWARD-ONLY — see `Import::Runner`, and
+    # `technical-spec.md` §7's *Adopt vs copy*: adopting the base plugin's rows would mean
+    # its own uninstall drops the tables this plugin is live on.
+    #
+    # `RRD_DRY_RUN=1` decides every outcome and writes nothing, which is what an operator
+    # should run first. It is NOT the same thing as `import:plan`: plan surveys the source,
+    # this says what a run would do to THIS side, divergence included.
+    desc 'Copy redmine_reporter templates into this plugin (RRD_DRY_RUN=1 to decide ' \
+         'without writing, RRD_PROJECTS=1,2 to limit; exit 1 if any template was skipped)'
+    task run: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/import/runner', __dir__)
+      require File.expand_path('../redmine_reporter_dashboards/import/import_report', __dir__)
+
+      # AN ADMINISTRATOR OWNS THE COPIES, and the task refuses rather than guessing. A rake
+      # task runs as Anonymous, so without this every imported template would either fail
+      # validation or land owned by nobody — and `author_id` is what `edit_own_…` reads.
+      actor = RedmineReporterDashboards::Import::Runner.resolve_actor(ENV['RRD_ACTOR'])
+      unless actor
+        warn 'No administrator to own the imported templates. Set RRD_ACTOR to a login ' \
+             'or user id, or create an administrator first.'
+        exit 2
+      end
+
+      result = RedmineReporterDashboards::Import::Runner.call(
+        actor: actor,
+        dry_run: ENV['RRD_DRY_RUN'].to_s == '1',
+        project_ids: ENV['RRD_PROJECTS']&.split(',')
+      )
+      puts RedmineReporterDashboards::Import::ImportReport.render(result)
+      exit(result.failed? ? 1 : 0)
+    end
+
+    # T-24's "drift is visible rather than silent". Writes nothing, and deliberately reads
+    # OUR templates rather than the source's, so it still answers after the base plugin has
+    # been uninstalled — which is exactly when somebody asks what state the migration is in.
+    desc 'Report which imported templates have drifted from their source (writes nothing)'
+    task status: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/import/runner', __dir__)
+      require File.expand_path('../redmine_reporter_dashboards/import/import_report', __dir__)
+
+      result = RedmineReporterDashboards::Import::Runner.status
+      puts RedmineReporterDashboards::Import::ImportReport.render(result, heading: 'Import status')
+    end
   end
 
   # T-25. FR-44's first half is that this contract is DOCUMENTED: the scheduler does not

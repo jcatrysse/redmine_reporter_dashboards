@@ -557,6 +557,39 @@ it, whatever the file asks for.
   page: a time entry is not opened and closed, so there is no created/closed flow to plot.
   Use `group_by:` and, if you want a trend, a `spent_on` filter on the saved query.
 
+## Migrating from `redmine_reporter`
+
+Three rake tasks, in the order you would run them:
+
+```
+rake reporter_dashboards:import:plan     # survey the old data. Writes nothing.
+rake reporter_dashboards:import:run      # copy the templates across
+rake reporter_dashboards:import:status   # what has drifted since
+```
+
+**It copies. It never adopts, and it never writes to the old plugin's tables.** That is not
+tidiness: uninstalling `redmine_reporter` the documented way runs *its* down-migrations,
+which drop its tables. If this plugin were live on those rows, they would go with it. So
+your old templates stay exactly where they are, and you can uninstall the old plugin — or
+not — without touching what has been migrated.
+
+**Re-running is safe, and there are four outcomes rather than two.** A template is
+*created* the first time, *unchanged* when nothing has moved, *updated* when the original
+changed and your copy has not, and — the important one — **left alone** when you have
+edited the copy here. It is never overwritten. `import:status` lists exactly those, so
+drift is something you can see rather than something you discover.
+
+`RRD_DRY_RUN=1` decides everything and writes nothing. `RRD_PROJECTS=1,5` limits it.
+`RRD_ACTOR=login` chooses which administrator owns the copies; without it the task takes
+the first active administrator, and refuses rather than guessing if there is none.
+
+Imported templates are **private to the importer** — the old plugin's visibility settings
+are not translated, and widening one is a deliberate act afterwards.
+
+**Not built yet:** `import:verify`, which is meant to compare aggregation results rather
+than HTML. What it should compare them *against* is an open question — the old plugin is
+usually uninstalled by then — so it is reported rather than half-built.
+
 ## Sending a report by e-mail, once
 
 *Send report by e-mail* on a report's page mails it to whoever you choose, now, without

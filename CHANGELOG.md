@@ -6,6 +6,27 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **Migrating from `redmine_reporter` now copies your templates across.**
+  `rake reporter_dashboards:import:run` reads the old plugin's templates and writes copies
+  into this one's tables; `rake reporter_dashboards:import:status` says what has drifted
+  since. `import:plan` still surveys without writing.
+
+  **It copies and never adopts, and it never writes to the old plugin's tables.**
+  Uninstalling `redmine_reporter` the documented way runs its own down-migrations and drops
+  its tables — anything living on those rows would go with them. Your originals stay put.
+
+  **Re-running is safe.** A copy you have edited here is *never* overwritten: it is
+  reported as diverged and left alone, because an importer that clobbered it would destroy
+  post-migration work quietly, on a re-run somebody triggered for another reason. The other
+  outcomes are created, unchanged, and updated-from-source when your copy is untouched.
+
+  `RRD_DRY_RUN=1` decides everything and writes nothing; `RRD_PROJECTS=` limits it;
+  `RRD_ACTOR=` chooses the owning administrator. An unrecognised template type is skipped
+  **by name** rather than guessed at, and the task exits 1 so a script notices. Imported
+  templates are private to the importer.
+
+  `import:verify` is not built yet — see the README.
+
 - **Send a report by e-mail, once, without creating a schedule.** *Send report by e-mail*
   on a report's page mails the document to Redmine users you choose. It replaces the base
   plugin's ad-hoc mail, which resolved issues with no visibility check and took the
