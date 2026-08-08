@@ -67,3 +67,22 @@ post 'admin/reporter_dashboards/preflight', to: 'reporter_preflight#run', as: 'r
 # always renders JSON via render json: so no .json suffix needed, and omitting
 # the default keeps params[:format] nil so Redmine's session auth is not bypassed.
 get 'sql/stats/monthly_flow', to: 'sql_stats#monthly_flow', as: :sql_stats_monthly_flow
+
+# T-25 — schedules. Same shape as the template routes above, and written the same way for
+# the same reason: `spec/permissions/permission_map_spec.rb` READS these lines to check
+# that every registered action is reachable, and it cannot parse a form it does not know.
+#
+# Do not spell the controller-and-action pair inside a comment on this file either — the
+# reader matches the literal and reports a route to a controller that does not exist. T-23
+# lost a few minutes to exactly that, twice.
+#
+# `test_send` is POST and nothing else. It puts mail on the wire, so it must not be
+# reachable by following a link, by a prefetcher, or by an <img src>.
+get 'projects/:project_id/reporter/schedules', to: 'reporter_dashboards/schedules#index', as: 'project_reporter_schedules'
+get 'projects/:project_id/reporter/schedules/new', to: 'reporter_dashboards/schedules#new', as: 'new_project_reporter_schedule'
+post 'projects/:project_id/reporter/schedules', to: 'reporter_dashboards/schedules#create'
+get 'projects/:project_id/reporter/schedules/:id', to: 'reporter_dashboards/schedules#show', as: 'project_reporter_schedule'
+get 'projects/:project_id/reporter/schedules/:id/edit', to: 'reporter_dashboards/schedules#edit', as: 'edit_project_reporter_schedule'
+patch 'projects/:project_id/reporter/schedules/:id', to: 'reporter_dashboards/schedules#update'
+delete 'projects/:project_id/reporter/schedules/:id', to: 'reporter_dashboards/schedules#destroy'
+post 'projects/:project_id/reporter/schedules/:id/test_send', to: 'reporter_dashboards/schedules#test_send', as: 'test_send_project_reporter_schedule'

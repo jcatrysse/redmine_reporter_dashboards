@@ -62,10 +62,19 @@ module RedmineReporterDashboards
       # The port's contract, verbatim: `#call(schedule:, occurrence_date:, actor:, run:)`
       # answering a `Delivered`. It may also raise — `Runner` handles both identically —
       # but it prefers to answer, because a `Delivered` carries the counts a raise cannot.
-      def call(schedule:, occurrence_date:, actor:, run:)
+      # `recipients:` OVERRIDES THE SCHEDULE'S LIST, and exists for exactly one caller:
+      # the UI's "Send a test" button, which renders as the schedule's identity — FR-45's
+      # "a test send uses the SAME identity as the real run" — but delivers to the person
+      # who pressed it and to nobody else. Mailing twenty people every time an author
+      # adjusts a template would make the button unusable, and the tester needs to see what
+      # recipients WOULD get rather than to send it to them.
+      #
+      # `Runner` never passes it. There is no configuration in which a scheduled run
+      # delivers to a list other than the one stored on the schedule.
+      def call(schedule:, occurrence_date:, actor:, run:, recipients: nil)
         correlation_id = run.correlation_id
 
-        recipients = active_recipients(schedule)
+        recipients = recipients ? Array(recipients) : active_recipients(schedule)
         if recipients.empty?
           # THE OWNER IS TOLD, and this goes through the same notice as a render failure
           # rather than only into `last_error`. A schedule whose last recipient was locked

@@ -394,8 +394,9 @@ module RedmineReporterDashboards
 
       it 'sees every controller in the plugin' do
         expect(ControllerSource.all.map(&:name))
-          .to eq(%w[reporter_dashboards/templates reporter_preflight
-                    reporter_project_pages reporter_project_tabs sql_stats])
+          .to eq(%w[reporter_dashboards/schedules reporter_dashboards/templates
+                    reporter_preflight reporter_project_pages reporter_project_tabs
+                    sql_stats])
       end
 
       # T-23's controller is the first one in a subdirectory, which is the case the
@@ -841,7 +842,7 @@ module RedmineReporterDashboards
       # T-23 adds a second module and must not disturb the first, so the first block below
       # is unchanged from T-40's expectation and the second is the new registration.
       it 'reproduces the three registrations init.rb used to make literally, and adds ' \
-         "T-23's five" do
+         "T-23's five and T-25's two" do
         expect(described_class.registrations_by_module).to eq(
           reporter_project_dashboards: [
             [:view_reporter_project_page,
@@ -859,6 +860,9 @@ module RedmineReporterDashboards
             [:view_reporter_dashboards_reports,
              { :'reporter_dashboards/templates' => [:index, :show, :document] },
              { read: true }],
+            [:view_reporter_dashboards_schedules,
+             { :'reporter_dashboards/schedules' => [:index, :show] },
+             { read: true }],
             [:add_reporter_dashboards_templates,
              { :'reporter_dashboards/templates' => [:new, :create, :preview, :import] },
              { require: :member }],
@@ -872,6 +876,13 @@ module RedmineReporterDashboards
              { require: :member }],
             [:manage_public_reporter_dashboards_templates,
              { :'reporter_dashboards/templates' => [:new, :create, :edit, :update] },
+             { require: :member }],
+            # T-25. `#test_send` is here and not in the viewing set: it is the only action
+            # in the plugin that puts mail on the wire without a schedule firing, and a
+            # read permission that could send e-mail would not be a read permission.
+            [:manage_reporter_dashboards_schedules,
+             { :'reporter_dashboards/schedules' => [:new, :create, :edit, :update,
+                                                    :destroy, :test_send] },
              { require: :member }]
           ]
         )

@@ -1,0 +1,98 @@
+<div class="contextual">
+  <% if User.current.allowed_to?(:manage_reporter_dashboards_schedules, @project) %>
+    <%= link_to reporter_dashboard_icon('edit', l(:button_edit)),
+                edit_project_reporter_schedule_path(@project, @schedule),
+                class: 'icon icon-edit' %>
+    <%#
+      POST, AND A CONFIRMATION. It puts mail on the wire, so it must not be reachable by
+      following a link, by a prefetcher or by an <img src> — which is also why the route
+      accepts nothing but POST.
+    %>
+    <%= link_to reporter_dashboard_icon('email', l(:button_reporter_schedule_test_send)),
+                test_send_project_reporter_schedule_path(@project, @schedule),
+                method: :post,
+                data: { confirm: l(:text_reporter_schedule_test_confirm, mail: User.current.mail) },
+                class: 'icon icon-email' %>
+    <%= delete_link project_reporter_schedule_path(@project, @schedule) %>
+  <% end %>
+</div>
+
+<h2><%= reporter_schedule_name(@schedule) %></h2>
+
+<div class="box">
+  <table class="attributes">
+    <tr>
+      <th><%= l(:field_redmine_reporter_dashboards_schedule_template) %></th>
+      <td><%= reporter_schedule_template_link(@schedule) %></td>
+    </tr>
+    <tr>
+      <th><%= l(:field_redmine_reporter_dashboards_schedule_repeat) %></th>
+      <td><%= reporter_schedule_repeat_label(@schedule) %></td>
+    </tr>
+    <tr>
+      <th><%= l(:field_redmine_reporter_dashboards_schedule_start_date) %></th>
+      <td><%= format_date(@schedule.start_date) || '-' %></td>
+    </tr>
+    <tr>
+      <th><%= l(:field_redmine_reporter_dashboards_schedule_end_date) %></th>
+      <td><%= format_date(@schedule.end_date) || '-' %></td>
+    </tr>
+    <tr>
+      <th><%= l(:label_reporter_schedule_next_run) %></th>
+      <td><%= format_date(@schedule.next_run_on_or_nil) || '-' %></td>
+    </tr>
+    <tr>
+      <%#
+        FR-45 / FR-47 ON THE PAGE, not only in the mail. Two schedules over the same
+        template can legitimately produce different numbers, and the only thing that
+        explains the difference is whose visibility produced them.
+      %>
+      <th><%= l(:field_redmine_reporter_dashboards_schedule_render_as) %></th>
+      <td><%= reporter_schedule_identity_label(@schedule) %></td>
+    </tr>
+    <tr>
+      <th><%= l(:label_reporter_schedule_recipients) %></th>
+      <td><%= reporter_schedule_recipients_label(@schedule) %></td>
+    </tr>
+    <tr>
+      <th><%= l(:field_enabled) %></th>
+      <td><%= @schedule.enabled ? l(:general_text_Yes) : l(:general_text_No) %></td>
+    </tr>
+  </table>
+</div>
+
+<h3><%= l(:label_reporter_schedule_runs) %></h3>
+
+<%#
+  THE RUN HISTORY IS WHAT `view_…_schedules` EXISTS FOR — §4.1: "See a schedule and its
+  run state — last run, status, duration, error — without being able to change it." Every
+  column below is one an operator needs to answer "did it run, and what happened".
+%>
+<% if @runs.any? %>
+  <table class="list">
+    <thead>
+      <tr>
+        <th><%= l(:label_reporter_schedule_occurrence) %></th>
+        <th><%= l(:field_status) %></th>
+        <th><%= l(:label_reporter_schedule_recipients) %></th>
+        <th><%= l(:label_reporter_schedule_duration) %></th>
+        <th><%= l(:label_reporter_report_diagnostic_correlation_id) %></th>
+        <th><%= l(:field_redmine_reporter_dashboards_schedule_last_error) %></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @runs.each do |run| %>
+        <tr class="<%= cycle('odd', 'even') %>">
+          <td><%= format_date(run.occurrence_date) %></td>
+          <td><%= l(:"label_reporter_schedule_status_#{run.status}", default: run.status.to_s) %></td>
+          <td><%= run.recipients_count || '-' %></td>
+          <td><%= run.duration_ms ? "#{run.duration_ms} ms" : '-' %></td>
+          <td><%= run.correlation_id %></td>
+          <td><%= run.error %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% else %>
+  <p class="nodata"><%= l(:text_reporter_schedule_never_run) %></p>
+<% end %>

@@ -591,12 +591,12 @@ asks that question). `Req` is Redmine's `require:`; `read` is Redmine's `read: t
 | `manage_reporter_project_page` | D | — | — | Add, remove, move and configure dashboard widgets | **live** |
 | `manage_reporter_project_tabs` | D | — | — | Create, rename, reorder and delete dashboard tabs | **live** |
 | `view_reporter_dashboards_reports` | R | ✓ | — | See the templates a project offers; open or download the document one produces | **live** |
-| `view_reporter_dashboards_schedules` | R | ✓ | — | See a schedule and its run state — last run, status, duration, error — without changing it | T-25 |
+| `view_reporter_dashboards_schedules` | R | ✓ | — | See a schedule and its run state — last run, status, duration, error — without changing it | **live** |
 | **`add_reporter_dashboards_templates`** | R | — | `member` | **Create a report template. Code execution (INV-9)** | **live** |
 | **`edit_own_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete the templates you authored** | **live** |
 | **`edit_reporter_dashboards_templates`** | R | — | `member` | **Edit and delete any template in the project** | **live** |
 | **`manage_public_reporter_dashboards_templates`** | R | — | `member` | **Give a template a visibility wider than its author** — Redmine's `manage_public_queries` decision, for templates | **live** |
-| `manage_reporter_dashboards_schedules` | R | — | `member` | Create, edit, disable and delete schedules, choose recipients, send a test run | T-25 |
+| `manage_reporter_dashboards_schedules` | R | — | `member` | Create, edit, disable and delete schedules, choose recipients, send a test run | **live** |
 | `mail_reporter_dashboards_reports` | R | — | `loggedin` | Send a report by e-mail on demand, to Redmine users | T-32 |
 | `share_reporter_dashboards_reports` | R | — | `member` | Create a share link: an expiring, revocable URL serving a snapshot to whoever holds it | T-28 |
 | `publish_reporter_dashboards_reports` | R | — | `member` | Turn a share link into a **public** link, reachable without a Redmine account (FR-62) | T-28 |

@@ -185,6 +185,7 @@ module RedmineReporterDashboards
     # the slash. Written as a constant because a typo in it produces a permission that
     # guards nothing and looks perfectly correct on the roles screen.
     TEMPLATES_CONTROLLER = :'reporter_dashboards/templates'
+    SCHEDULES_CONTROLLER = :'reporter_dashboards/schedules'
 
     # --- ONE ORDERED LIST, AND WHY IT REPLACED TWO -----------------------------------
     #
@@ -273,14 +274,17 @@ module RedmineReporterDashboards
       Entry.new(
         name: :view_reporter_dashboards_schedules,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        # READ-ONLY, AND THE SPLIT IS THE POINT (§4.1, T-25's Accept:). "an operator can
+        # answer *did it run* without being able to change who receives it." So `#index`
+        # and `#show` and nothing else: not `#test_send`, which sends mail, and not
+        # `#destroy`, which throws away the run history that answers the question.
+        actions: { SCHEDULES_CONTROLLER => [:index, :show] },
         read: true,
         requires: nil,
         group: :reports_consume,
         authoring: false,
         covers: 'See a schedule and its run state — last run, status, duration, error — ' \
-                'without being able to change it',
-        lands_in: 'T-25'
+                'without being able to change it'
       ),
       # --- authoring: every one of these is a code-execution privilege (INV-9) ----------
       #
@@ -351,14 +355,22 @@ module RedmineReporterDashboards
       Entry.new(
         name: :manage_reporter_dashboards_schedules,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        # `#test_send` IS IN THIS SET AND NOT IN THE VIEWING ONE, because it puts mail on
+        # the wire. It is the only action in the plugin that reaches outside Redmine
+        # without a schedule firing, and a read permission that could send e-mail would
+        # not be a read permission.
+        #
+        # NOT `authoring: true` even so. A schedule chooses a template, it does not write
+        # one, so this is not the code-execution class INV-9 governs — which is exactly why
+        # `manage_…_schedules` alone cannot create a template to point at.
+        actions: { SCHEDULES_CONTROLLER => [:new, :create, :edit, :update, :destroy,
+                                            :test_send] },
         read: false,
         requires: :member,
         group: :reports_schedule,
         authoring: false,
         covers: 'Create, edit, disable and delete schedules, choose their recipients, ' \
-                'and send a test run',
-        lands_in: 'T-25'
+                'and send a test run'
       ),
       # --- distribution: the two paths that reach outside Redmine's permission model ----
       Entry.new(

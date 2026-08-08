@@ -90,6 +90,61 @@ module RedmineReporterDashboards
       RedmineReporterDashboards::Compat.column_present?(table_name, :consecutive_failures)
     end
 
+    # WHOSE NUMBERS A REPORT FROM THIS SCHEDULE HOLDS. FR-45: "the render identity of a
+    # scheduled report is explicit, stored and auditable, **and a test send uses the same
+    # identity as the real run**."
+    #
+    # It lives on the model rather than in the runner because of that last clause. The
+    # runner asks it at 06:00 and the controller asks it when somebody presses "Send a test"
+    # — and if those were two implementations they would answer differently the first time
+    # anybody touched one, which is precisely the promise FR-45 makes. One method, two
+    # callers, no way for them to disagree.
+    #
+    # EVERY ARM THAT CANNOT ANSWER RAISES, and none falls back. The three fallbacks a reader
+    # might expect are each a way of mailing the wrong report:
+    #
+    #   User.current   — nobody, in a rake task. Whatever the last request left behind.
+    #   User.anonymous — renders an EMPTY report that looks like a successful one. Nothing
+    #                    raises, an e-mail goes out, and it contains no issues.
+    #   the author,    — silently ignores the policy this row stores, which IS the audit
+    #   regardless       trail FR-45 asks for.
+    #
+    # The POLICY is a closed set for the same reason `repeat` is: a value the column accepts
+    # and this code does not implement must not produce a schedule that is valid, saved,
+    # enabled and silently rendered as somebody else. `validates … inclusion:` does not close
+    # it, because `update_columns` and `update_all` bypass validation and this plugin uses
+    # both.
+    #
+    # A LOCKED user is refused too. A departed employee's schedule that keeps mailing their
+    # view of the data is the same leak as a share link nobody revoked.
+    class IdentityUnavailable < StandardError; end
+
+    def render_identity
+      user = case render_as
+             when nil, RENDER_AS_AUTHOR then author
+             when RENDER_AS_USER then render_as_user
+             else
+               raise IdentityUnavailable,
+                     "schedule #{id} names render policy #{render_as.inspect}, which this " \
+                     "version of the plugin cannot honour. Accepted: #{RENDER_AS.join(', ')}"
+             end
+
+      if user.nil?
+        raise IdentityUnavailable,
+              "schedule #{id} names no user to render as (render_as=#{render_as.inspect}); " \
+              'the render identity has to be stored, not guessed at delivery time'
+      end
+
+      unless user.logged? && user.active?
+        raise IdentityUnavailable,
+              "schedule #{id} renders as user #{user.id}, which is not an active account; " \
+              'a locked or anonymous identity produces a report that looks successful and ' \
+              "holds nobody's data"
+      end
+
+      user
+    end
+
     def next_run_on_or_nil
       self.class.next_run_on_supported? ? self[:next_run_on] : nil
     end

@@ -105,6 +105,21 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
              User.current.allowed_to?(:view_reporter_dashboards_reports, project))
        }
 
+  # T-25. A THIRD project menu item, gated on the READ permission rather than on the
+  # authoring one: `view_reporter_dashboards_schedules` exists so an operator can answer
+  # "did it run" without being able to change who receives it, and a link they cannot see
+  # is a question they cannot answer.
+  menu :project_menu, :reporter_dashboards_schedules,
+       { controller: 'reporter_dashboards/schedules', action: 'index' },
+       caption: :label_reporter_schedule_plural,
+       after: :reporter_dashboards_templates,
+       param: :project_id,
+       if: proc { |project|
+         project.module_enabled?(:reporter_dashboards_reports) &&
+           (User.current.admin? ||
+             User.current.allowed_to?(:view_reporter_dashboards_schedules, project))
+       }
+
   menu :project_menu, :reporter_project_page,
        { controller: 'reporter_project_pages', action: 'show' },
        caption: :label_reporter_project_page,

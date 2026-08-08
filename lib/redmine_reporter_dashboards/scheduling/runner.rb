@@ -95,12 +95,6 @@ module RedmineReporterDashboards
         end
       end
 
-      # An error the RUNNER raised about a schedule, as opposed to one the delivery raised
-      # about a report. Both are recorded the same way; naming this one separately is what
-      # lets a reader of a `last_error` tell "this schedule is misconfigured" from "this
-      # render broke".
-      class IdentityUnavailable < StandardError; end
-
       # `reporter_dashboards_schedules.last_error` and `…_runs.error` are `t.text`, which
       # is 64 KiB on MySQL and unbounded on PostgreSQL. A backtrace from a deep render
       # failure clears 64 KiB without trying, and the failure mode is the worst available:
@@ -606,72 +600,12 @@ module RedmineReporterDashboards
 
       # --- render identity (FR-45) -----------------------------------------------------
 
-      # WHOSE NUMBERS THE REPORT HOLDS. FR-45: "explicit, stored and auditable, and a test
-      # send uses the same identity as the real run."
-      #
-      # Every arm that cannot answer RAISES, and none of them falls back. The three
-      # fallbacks a reader might expect are each a way of mailing the wrong report:
-      #
-      #   User.current   — nobody, in a rake task. Whatever the last request left behind.
-      #   User.anonymous — renders an EMPTY report that looks like a successful one. This
-      #                    is the case that looks right until it is tried: nothing raises,
-      #                    an e-mail goes out, and it contains no issues.
-      #   the author,    — silently ignores the policy the schedule stores, which is the
-      #   regardless       audit trail FR-45 asks for.
-      #
-      # A LOCKED user is refused too. A departed employee's schedule that keeps mailing
-      # their view of the data is the same leak as a share link nobody revoked, and
-      # `User#active?` is the question Redmine itself asks everywhere else.
-      #
-      # --- THE POLICY IS A CLOSED SET, AND THE FIRST VERSION OF THIS METHOD WAS NOT ---
-      #
-      # It read `if render_as == RENDER_AS_USER … else author end`, so every value that was
-      # not exactly `'user'` — an unknown policy, a case variant, a value written by a later
-      # version of this plugin — took the AUTHOR branch silently and the tick exited 0. That
-      # is the third fallback listed above, committed by the code eleven lines under the
-      # comment refusing it. The independent review measured it: `render_as='recipient'` with
-      # a stored identity of dlopper rendered as jsmith and reported success.
-      #
-      # `validates :render_as, inclusion:` does not close it — `update_columns` and
-      # `update_all` bypass validation and this plugin uses both — and §7's rule 5 makes the
-      # state routine rather than exotic: roll the plugin back one minor while keeping the
-      # schema AND ITS DATA, and every schedule carrying a policy the older code does not
-      # know reverts to mailing the author's view.
-      #
-      # So it is closed the same way `Occurrences` closes the repeat rule, and for the
-      # reason c37cfb2 gave there: a value the model accepts and the code does not implement
-      # must not produce a schedule that is valid, saved, enabled and silently wrong. This
-      # one decides whose data is mailed to whom, so it gets the stronger treatment, not the
-      # weaker one.
+      # ONE IMPLEMENTATION, ON THE MODEL. This used to be forty lines here, and FR-45's
+      # "a test send uses the SAME identity as the real run" is exactly the promise a second
+      # copy breaks — the controller's Send-a-test button asks the same question, and two
+      # implementations answer differently the first time anybody edits one.
       def render_identity(schedule)
-        policy = schedule.render_as
-        user = case policy
-               when nil, ::RedmineReporterDashboards::Schedule::RENDER_AS_AUTHOR
-                 schedule.author
-               when ::RedmineReporterDashboards::Schedule::RENDER_AS_USER
-                 schedule.render_as_user
-               else
-                 raise IdentityUnavailable,
-                       "schedule #{schedule.id} names render policy #{policy.inspect}, " \
-                       'which this version of the plugin cannot honour. Accepted: ' \
-                       "#{::RedmineReporterDashboards::Schedule::RENDER_AS.join(', ')}"
-               end
-
-        if user.nil?
-          raise IdentityUnavailable,
-                "schedule #{schedule.id} names no user to render as " \
-                "(render_as=#{policy.inspect}); the render identity has to be stored, " \
-                'not guessed at delivery time'
-        end
-
-        unless user.logged? && user.active?
-          raise IdentityUnavailable,
-                "schedule #{schedule.id} renders as user #{user.id}, which is not an " \
-                'active account; a locked or anonymous identity produces a report that ' \
-                "looks successful and holds nobody's data"
-        end
-
-        user
+        schedule.render_identity
       end
 
       # --- bookkeeping -------------------------------------------------------------------
@@ -704,7 +638,8 @@ module RedmineReporterDashboards
       # raised with a sentence already in it.
       def describe(error)
         return error.to_s unless error.is_a?(::StandardError)
-        return error.message if error.is_a?(IdentityUnavailable)
+        return error.message if
+          error.is_a?(::RedmineReporterDashboards::Schedule::IdentityUnavailable)
 
         "#{error.class}: #{error.message}"
       end
