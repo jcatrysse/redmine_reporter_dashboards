@@ -22,6 +22,16 @@
 
 <table class="list">
   <tbody>
+    <%# FR-58 NAMES THE TEMPLATE FIRST, and until T-30 this panel did not.
+        The page around it does carry a heading — but a preview's subject is an UNSAVED
+        copy of what is in the editor, so the heading and the thing that failed are not
+        always the same object, and the panel is also what a future serialiser reads. %>
+    <% if diagnostic.template_name.present? %>
+      <tr>
+        <th><%= l(:label_reporter_template) %></th>
+        <td><%= diagnostic.template_name %></td>
+      </tr>
+    <% end %>
     <tr>
       <th><%= l(:label_reporter_report_diagnostic_code) %></th>
       <td><%= diagnostic.code %></td>

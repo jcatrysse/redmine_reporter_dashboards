@@ -113,9 +113,21 @@ RSpec.describe RedmineReporterDashboards::Reporting::Diagnostic do
     end
 
     it 'serialises every field FR-58 names' do
+      # `template` was added by T-30. FR-58's list is *"what failed, THE TEMPLATE, the
+      # Liquid line where applicable, engine and version, duration and a correlation
+      # id"*, and it was the one noun this object did not carry — so a failure document
+      # or a mail built from `to_h` could not name the report it was about.
       expect(diagnostic.to_h.keys)
-        .to eq(%w[origin code message line engine engine_version duration_ms
+        .to eq(%w[origin code message template line engine engine_version duration_ms
                   correlation_id])
+    end
+
+    # AND `detail` IS STILL NOT AMONG THEM. Adding a field to this Hash is the moment the
+    # question gets asked again, so it is asserted next to the addition rather than three
+    # examples away.
+    it 'still refuses to serialise the detail' do
+      expect(diagnostic.to_h.keys).not_to include('detail')
+      expect(diagnostic.to_h.values.map(&:to_s).join(' ')).not_to include('PG::')
     end
 
     it 'is frozen, so a view cannot edit the record of what went wrong' do

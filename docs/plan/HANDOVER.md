@@ -463,6 +463,60 @@ template. Deleting it degrades cleanly (the `const_defined?` check is real) — 
 silently, on exactly the installs the integration exists for. **Before deleting a "legacy" directory,
 grep for the guarded fallback that still routes to it**, not only for hard references.
 
+**A PDF THAT `pdfinfo` READS PERFECTLY CAN STILL BE MALFORMED, AND `pdftotext` PUTS THE
+PROOF ON STDERR.** T-30 wrote an engine-free PDF writer. Its first output opened with
+`%PDF-`, ended with `%%EOF`, was over the minimum size, and `pdfinfo` reported *Title,
+Pages: 1, Page size: A4* with no complaint at all — every assertion a reasonable spec would
+have made. `pdftotext` extracted the text too, **and wrote three syntax errors to stderr**:
+*"Missing 'endstream' or incorrect stream length"*, *"Unknown operator
+'endstreamendobj'"*. The cause was one absent newline — the stream object's body ends
+`endstream` and `endobj` followed it directly, so the file carried `endstreamendobj`, which
+is ONE TOKEN to a PDF lexer. The error names `/Length`, which is not the problem.
+
+Two rules. **Read a generated PDF's stderr, not only its stdout** — poppler recovers from a
+damaged file and tells you on the other channel, so a check that only looks at extracted
+text passes on a broken document. And **`pdfinfo` alone is not a validity check**: it reads
+the trailer and the catalogue and never touches the content stream.
+
+**A MIGRATION THAT GROWS AN EXISTING TABLE MEETS A RECORDER THAT HAD NEVER SEEN ONE.**
+`spec/migrations/schema_recorder.rb` implemented `create_table`, `add_index` and
+`table_exists?` and nothing else, because migrations 001-007 each create a table. T-30's 008
+is the first `add_column` in the plugin, and the recorder raised `NoMethodError` — which is
+the module's own stated design working (an unknown DDL call must be loud), and
+`script/migrate_updown.sh` correctly reported **G11 UNKNOWN rather than passing**. Worth
+knowing twice over: the recorder gives every migration a **fresh instance**, so an
+`add_column` cannot see a table an earlier migration created. It records a pending
+alteration and the driver applies it against the accumulated schema; writing it the obvious
+way raises on a perfectly correct migration.
+
+**THE MINITEST SUITE LEAVES THE PLUGIN TABLES WITHOUT THEIR `schema_migrations` ROWS, AND
+`migrate_updown.sh` THEN CANNOT START.** Known, and here is what it actually looks like from
+the inside so the next session recognises it in one line rather than five. After
+`rake redmine:plugins:test`, `schema_migrations` holds only `1-redmine_reporter_dashboards`
+while tables 002-008 all exist. `migrate 0` therefore reverses only 001, the reinstall then
+hits `PG::DuplicateTable: relation "reporter_dashboards_templates" already exists`, and the
+gate reports FAILED — which reads as a broken migration and is a dirty database. Recovery is
+to drop the orphans and run again:
+
+    cd redmine && RAILS_ENV=test bundle exec rails runner \
+      'c=ActiveRecord::Base.connection; %w[reporter_dashboards_documents \
+       reporter_dashboards_schedule_recipients reporter_dashboards_schedule_runs \
+       reporter_dashboards_schedules reporter_dashboards_template_versions \
+       reporter_dashboards_templates_roles reporter_dashboards_templates].each { |t| \
+       c.drop_table(t, if_exists: true) }'
+
+Run the gates BEFORE the Minitest suite whenever a migration is touched, and this never
+happens.
+
+**AND A FAILED `migrate_updown.sh` RUN POISONS THE NEXT ONE, WITH A DIFFERENT MESSAGE.**
+Second half of the same afternoon. After the run above failed on `PG::DuplicateTable`, the
+next invocation's `preseeded` arm passed and its `fresh` arm failed with *"VERSION=0 left
+plugin rows in schema_migrations"*, listing all eight — which reads as a broken
+down-migration and is the previous run's wreckage. Reset **both halves** before believing
+either arm: drop the plugin tables AND delete the `%-redmine_reporter_dashboards` rows from
+`schema_migrations`, then run the script exactly once. From a clean start both arms pass
+with migration 008 in place.
+
 **A CI step that needs the plugin checkout needs `working-directory` EVERY TIME.** The
 `corpus` job checks out into `plugin/`; one step of six was missing it and failed in all
 three engines for the one reason that step must never fail for — having found nothing to
@@ -625,6 +679,8 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-25 part 4's independent review: a third REJECT, and the only one to find a privilege escalation** | **yes, locally (2026-08-08)** | **Two blockers, both escalations, both reproduced end to end**: `render_as_user_id` permitted and unfiltered (admin-visibility report into an ordinary member's inbox, with a private issue in it), and `#test_send` coupling FR-45's stored identity to delivery-to-the-presser with no tampering at all. Eight majors, four of them visible on the first page an operator opens — a `Translation missing` header, a private template's NAME disclosed as the page heading, an identity picker that never pre-selected (so no `render_as: user` schedule could be saved from its own form), and a partial PATCH silently deleting every recipient. All 16 fixed; **19 mutations run, 19 red**, two of which needed sharper examples after mutation showed the first attempt vacuous |
 | **T-25 (part 3): the delivery, the mailer, the rake task and FR-44 — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-07), POST-REVIEW figures** | `rake redmine:plugins:test` — **451 runs, 2256 assertions, 0 failures, 0 errors, 4 skips** (was 390/0/0/4 before T-25 part 2 — **skip count unchanged throughout**). DB-less unchanged at **2123 examples, 0 failures, 126 pending** — the delivery is application layer and has no DB-less half. Nine gates green, `layer_purity` strict, locale parity **129 keys x 9 files** with identical interpolation placeholders in every language |
 | **T-25 part 3's independent review: a second REJECT, 1 blocker + 5 majors + 6 minors + 3 nits, every one probe-backed** | **yes, locally (2026-08-07)** | The blocker was the heartbeat crying wolf on a healthy install (see §1). The majors: the owner's failure notice quoted a correlation id that existed nowhere else (`ReportRun` mints its own per document — run row `3a8cd94c…`, owner mail `23688ef7…`); **no owner notice at all** for the three failures that happen BEFORE `delivery.call`, of which a locked render identity is the likeliest in production, while the README said otherwise; an empty per-record report mailed as a success **with no attachment**; `#as`'s `ensure` unenforced (deleting it left the suite green); and the query-count bound set to the pre-change value, so it could not detect the regression it was written for. All 15 fixed and **16 mutations run, 16 red** — two examples were rewritten after mutation showed them vacuous. A test written for a MINOR then found an unlisted defect: a dangling `template_id` was a `NoMethodError` on nil rather than a failure |
+| **T-30: the failure report — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-08)** | `rake redmine:plugins:test` — **514 runs, 2455 assertions, 0 failures, 0 errors, 4 skips** (was 498/4 — **skip count unchanged**). DB-less **2171 examples, 0 failures, 102 pending** (was 2123/126; the pending count FELL because `poppler-utils` is now installed in this container, so ~24 previously-skipped examples actually ran). Nine gates green with `LAYER_PURITY_MODE=strict`, locale parity **182 keys x 9 files** with identical placeholders, and `script/migrate_updown.sh` green on BOTH arms with migration 008 — the first migration in this plugin that grows an existing table |
+| **T-30: every guard, mutation-tested one at a time** | **yes, locally (2026-08-08)** | 17 mutations, **17 red**: the `endobj` delimiter, the PDF string escaping, `encodable?` answering honestly, the message and the detail each planted onto the page, the filename character filter and its empty fallback, `ORIGIN_KEYS.fetch` being a `fetch`, an undrawable VALUE degrading rather than raising, `to_h` carrying the template, the opt-in being consulted at all, the failure keeping the failure's own status, `#show` staying a page, rule 5's column guard, a nil in the column reading as off, the diagnostic naming the template, and the failure notice really having no attachment. An eighteenth was observed red during development rather than planted: deleting `add_column` from `schema_recorder.rb` makes G11 report UNKNOWN |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -904,6 +960,50 @@ of a CI that runs on fork pull requests.
    it, the picker does not offer it, and nothing reports time entries against the issue scope. And
    a per-record PREVIEW draws exactly ONE document (`PREVIEW_MAX_DOCUMENTS`), because fifty
    synchronous PDF renders is a worker any member can hold for five minutes.
+
+21. **T-30 is done — the failure report, and it is drawn without an engine.**
+   `render/minimal_pdf.rb`, `reporting/failure_document.rb`, migration 008,
+   `Diagnostic#template_name`, and the `#document` action's one new branch. Five things a
+   later session should know.
+
+   **THE WRITER EXISTS BECAUSE THE ENGINE IS THE THING THAT FAILED.** Most of the codes that
+   can reach a failure document are engine codes — `engine_crashed`, `engine_unavailable`,
+   `readiness_timeout`, `output_not_pdf` — so drawing it through the configured adapter is a
+   coin toss whose losing side is *no document at all*, which is precisely the outcome FR-59
+   replaces. `MinimalPdf` has no process, no socket and no asset, and the DB-less suite
+   drives all of it. **It is not a general PDF library and must not become one**: the moment
+   it needs an image or a table, the answer is an engine.
+
+   **THE SAFETY CLAIM IS HELD BY CONSTRUCTION, NOT BY A PAYLOAD LIST.** T-30's `Accept:`
+   asks for tests that the document carries no exception class, no SQL and no role, member
+   or project id — and a test can only name the strings somebody thought of. So
+   `FailureDocument` reads `code`, `origin`, `line`, `engine`, `engine_version`,
+   `duration_ms`, `correlation_id` and the template's name, and there is **no path from
+   `#message` or `#detail` to the page** — `message` is safe by contract and is still absent,
+   because the document travels further than the panel does. The example that would notice a
+   future edit is *"does not carry the diagnostic message either, safe though it is"*; the
+   three payload examples would all go on passing without it.
+
+   **ONLY `#document` CAN PRODUCE ONE, and the status stays the failure's own.** `#show` and
+   `#preview` are pages — §9b.2 puts the diagnostics panel there and a page that downloads a
+   PDF instead of answering is a worse page — and both are asserted to stay pages even when
+   the template asks for a document. The response carries 500/422/501 rather than 200,
+   because a 200 carrying "this is not your report" is INV-5 one layer up: every script,
+   monitor and `curl` against that endpoint would record a success.
+
+   **THE BASE-14 FONTS DRAW WINDOWS-1252 AND NOTHING ELSE, and the caller is told rather
+   than the text mangled.** `encodable?` is public for that reason. A label in a locale the
+   writer cannot draw falls back to the **English** string for that line and sets
+   `locale_degraded?`, which the controller logs; a VALUE has no second language, so an
+   undrawable template name is replaced and the run is marked degraded. Silently drawing
+   `?????` for a Russian operator is the plausible-looking wrong answer this repository keeps
+   deleting.
+
+   **WHAT IS DELIBERATELY NOT BUILT.** The schedule half of §7b.3's *"per template/schedule"*
+   opt-in — §Findings **S-11**, because the owner's notice is required to carry no attachment
+   and the document store is T-28's, so there is no scheduled consumer for the bytes. And
+   E-6's zip is **still owed**, now T-29's alone (§Findings **S-12**); T-30 made the 501
+   answer with a failure document, which is not the same as building an archive.
 
 20. **T-25 is PART DONE and nothing delivers yet.** Two increments: `scheduling/occurrences.rb`
    (the date arithmetic, pure) and `scheduling/runner.rb` (the tick). Still owed: the delivery

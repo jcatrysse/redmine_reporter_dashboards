@@ -29,6 +29,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engine_cat
 # controller and the rake task both reach it, and a load error should surface on the
 # branch that broke it rather than the first time an administrator asks whether their
 # render path works.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/minimal_pdf'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/pdf_inspector'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight_suite'
@@ -54,6 +55,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/runner
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/diagnostic'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/exchange'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/failure_document'
 # T-25's delivery. It is required AFTER report_run and the scheduler because it names both,
 # and it lives in reporting/ rather than scheduling/ so that `layer_purity`'s scheduling arm
 # — which forbids that directory from naming Render or Liquid — stays true and enforced.

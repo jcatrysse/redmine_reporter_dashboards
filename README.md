@@ -499,6 +499,30 @@ the engine, the version and a correlation id rather than showing you the HTML an
 you assume. Preview is bounded to **50 issues** and prints *"Preview of 50 of 1 284
 issues"* when there are more.
 
+### When a report cannot be generated
+
+The page tells you: which template, what kind of failure, the code, the Liquid line number
+where there is one, the engine and its version, how long it took, and a **correlation id**
+to quote when you ask an administrator to look at the log. What it never shows you is the
+raw exception — that goes to the application log, where the person who can read a stack
+trace is.
+
+**Optionally, you can get that as a PDF.** Tick *Produce a failure document* on the
+template (off by default). Then, when a report cannot be produced, the download gives you a
+real one-page PDF titled *"Report could not be generated"* and named
+`report-FAILED-<correlation id>.pdf`, so it can never be filed as the report. It carries the
+same safe summary as the panel and nothing else — no exception class, no SQL, no role,
+member or project ids — because it is built from a fixed list of fields rather than from the
+error text.
+
+It is drawn without the PDF engine, on purpose: most of the reasons a report fails are
+reasons the engine failed, so a failure document that needed the engine would be missing
+exactly when you wanted it. Nothing is saved: downloading one writes no attachment and no
+row anywhere.
+
+A **scheduled** report that fails is unchanged by this — its owner gets a notice with the
+correlation id and no attachment, and its recipients get nothing.
+
 ### Import and export
 
 **Export** writes a JSON file containing the template only — no ids, no project, no

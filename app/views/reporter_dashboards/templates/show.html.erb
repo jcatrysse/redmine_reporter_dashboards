@@ -27,6 +27,23 @@
                 document_project_reporter_template_path(@project, @template,
                                                         query_id: params[:query_id]),
                 class: 'icon icon-download' %>
+  <% elsif @diagnostic && @template.failure_document? %>
+    <%# T-30 / FR-59, AND THE UX PASS FOUND THIS. The branch above draws the download only
+        when the run SUCCEEDED — so on a failed render, which is the only time a failure
+        document exists, there was no button at all and the feature could be reached only
+        by hand-writing the URL. A capability an administrator can switch on and nobody can
+        reach is the same defect as one that is switched on and does nothing.
+
+        It is a SEPARATE LABEL and not the same button with a different outcome: clicking
+        "Download as PDF" and receiving a file called `report-FAILED-…` would be the small
+        lie §7b.3 is about. The link goes to the same action, which re-runs and fails again
+        — that is what makes the id on the page and the id in the document differ, and the
+        panel says which one to quote for THIS attempt. %>
+    <%= link_to reporter_dashboard_icon('download',
+                                        l(:label_reporter_failure_document_download)),
+                document_project_reporter_template_path(@project, @template,
+                                                        query_id: params[:query_id]),
+                class: 'icon icon-download' %>
   <% end %>
 </div>
 

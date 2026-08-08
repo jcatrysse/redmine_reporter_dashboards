@@ -235,4 +235,48 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
     assert_not Template.engine_hint_supported?
     assert_nil template.engine_hint_or_nil, 'the guard is not consulted by the reader'
   end
+  # ---------------------------------------------------------------- T-30 / FR-59
+
+  def test_the_failure_document_flag_is_off_by_default
+    template = Template.create!(project: @project, author_id: @author.id, name: 'x')
+
+    assert_equal false, template.failure_document?, 'FR-59 says default off'
+    assert_equal false, template.reload.failure_document?
+  end
+
+  def test_the_failure_document_flag_reads_true_once_it_is_set
+    template = Template.create!(project: @project, author_id: @author.id, name: 'x',
+                                failure_document: true)
+
+    assert_equal true, template.reload.failure_document?
+  end
+
+  # A NIL IN THE COLUMN MUST READ AS OFF, not as nil. The column is NOT NULL with a
+  # default, so this cannot happen through the form — it can happen through an install
+  # that migrated while rows existed, and a predicate answering nil would make
+  # `if template.failure_document?` right and `failure_document? == false` wrong in the
+  # same codebase.
+  def test_a_nil_in_the_column_reads_as_off_rather_than_as_nil
+    template = Template.new(project: @project, author_id: @author.id, name: 'x')
+    template[:failure_document] = nil
+
+    assert_equal false, template.failure_document?
+  end
+
+  # §7 rule 5, exactly as `engine_hint` does it: BOTH states asserted against a
+  # non-degraded value, because an example that only checks the stubbed-absent side passes
+  # even when the reader ignores the guard.
+  def test_the_failure_document_guard_degrades_rather_than_raising_when_the_column_is_absent
+    template = Template.create!(project: @project, author_id: @author.id, name: 'x',
+                                failure_document: true)
+
+    assert Template.failure_document_supported?
+    assert_equal true, template.failure_document?
+
+    RedmineReporterDashboards::Compat.stubs(:column_present?).returns(false)
+
+    assert_not Template.failure_document_supported?
+    assert_equal false, template.failure_document?,
+                 'the guard is not consulted by the reader'
+  end
 end

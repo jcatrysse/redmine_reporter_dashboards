@@ -44,6 +44,35 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **A report that cannot be generated can now hand you a real PDF that says so.**
+
+  Turn on *Produce a failure document* on a report template (it is off, and stays off,
+  unless you ask for it). When that report cannot be produced, downloading it gives you a
+  genuine one-page PDF titled *"Report could not be generated"*, named
+  `report-FAILED-<correlation id>.pdf` so it can never be filed as the report itself.
+
+  It carries what you need to get the problem looked at — which template, when, what kind
+  of failure, the Liquid line number where there is one, the engine and its version, how
+  long it took, and a correlation id to quote — and it carries **none** of what the old
+  behaviour leaked. The plugin this one replaces wrote the exception message into the file
+  and called it a PDF: SQL fragments, role ids and project ids went to whoever the report
+  reached. The failure document is built from a fixed list of safe fields, so there is no
+  route for an exception or a query to reach it, whatever goes wrong.
+
+  It is drawn without a browser, deliberately: most of the reasons a report fails are
+  reasons the PDF engine failed, and a failure document you cannot produce when things are
+  broken is not much of a failure document.
+
+  Two things it does **not** do. It is never saved anywhere — downloading one writes no
+  attachment and no row. And a scheduled report that fails still notifies its owner with
+  the correlation id and **no attachment**, exactly as before.
+
+- **The diagnostics panel now names the template it is about.**
+
+  It always showed the code, the line, the engine and the correlation id; the one thing
+  missing was which report failed. That matters most on the preview screen, where what
+  failed is the unsaved text in the editor rather than the template named in the heading.
+
 - **The engine support matrix now covers wkhtmltopdf, with real results instead of
   "not verified".**
 

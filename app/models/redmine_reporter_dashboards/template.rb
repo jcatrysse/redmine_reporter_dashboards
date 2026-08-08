@@ -347,6 +347,23 @@ module RedmineReporterDashboards
       self.class.engine_hint_supported? ? self[:engine_hint] : nil
     end
 
+    # T-30's opt-in, read the same way and for the same reason (§7 rule 5). The column
+    # arrives in migration 008, so an install one minor behind does not have it — and the
+    # answer there is `false`, which is both the safe answer and the column's own default,
+    # so a rolled-back install behaves exactly as it did before the feature existed.
+    def self.failure_document_supported?
+      RedmineReporterDashboards::Compat.column_present?(table_name, :failure_document)
+    end
+
+    # `!!` rather than the raw column: a nil in the column (an install that migrated but
+    # whose row predates the default) must read as OFF. FR-59 says default off, and
+    # "nil is falsey in Ruby" is not the same claim as "this predicate answers false".
+    def failure_document?
+      return false unless self.class.failure_document_supported?
+
+      self[:failure_document] ? true : false
+    end
+
     private
 
     def roles_present_when_visible_to_roles

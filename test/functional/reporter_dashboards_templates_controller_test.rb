@@ -159,6 +159,50 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     end
   end
 
+  # Reads a response body back as text with poppler, or nil when poppler is absent. The
+  # ONE assertion in this file that needs it is T-30's safety clause, and it skips naming
+  # the package rather than passing vacuously (CLAUDE.md §6): a test that cannot read the
+  # document cannot tell a safe one from a leaking one.
+  def pdf_text(bytes)
+    inspector = RedmineReporterDashboards::Render::PdfInspector
+    return nil unless inspector.available?
+
+    inspector.text(bytes)
+  end
+
+  # An adapter that always fails, so the `:engine` origin can be driven DETERMINISTICALLY.
+  # The obvious way to get an engine failure — register nothing and let the run report
+  # "no engine" — is not deterministic: this container has a real Chromium on PATH, so the
+  # run reached `engine_crashed` instead of `engine_unavailable` and the first version of
+  # `test_an_engine_that_is_not_there_answers_with_a_failure_document_too` failed for a
+  # reason that was about the container rather than about the code. CLAUDE.md §6: set it in
+  # the test, do not inherit it.
+  class FailingEngine
+    def capabilities
+      []
+    end
+
+    def id
+      'fake'
+    end
+
+    def render(request)
+      RedmineReporterDashboards::Render::Failure.new(
+        code: :engine_crashed, message: 'the engine stopped before it drew anything',
+        engine: 'fake', engine_version: '1.0', duration_ms: 7,
+        correlation_id: request.correlation_id,
+        detail: 'RuntimeError: PG::UndefinedColumn on members.role_id for project_id 17'
+      )
+    end
+  end
+
+  def with_failing_engine(&block)
+    RedmineReporterDashboards::Render::Registry.isolated do
+      RedmineReporterDashboards::Render::Registry.register(:fake, FailingEngine)
+      block.call
+    end
+  end
+
   def with_engine(&block)
     RedmineReporterDashboards::Render::Registry.isolated do
       RedmineReporterDashboards::Render::Registry.register(:fake, FakeEngine)
@@ -959,5 +1003,261 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
                          query_id: 999_999 }
 
     assert_response :success
+  end
+  # ------------------------------------------------------------------ T-30 / FR-59
+  #
+  # The failure document. Every one of these drives `#document`, because that is the only
+  # action that can produce one — a page that downloads a PDF instead of answering is a
+  # worse page, and `#show`/`#preview` are asserted to stay pages further down.
+
+  def test_the_failure_document_is_off_by_default
+    template = create_template(content: '{% for %}')
+    grant(:view_reporter_dashboards_reports)
+
+    assert_equal false, template.failure_document?, 'FR-59 says default off'
+
+    get :document, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :internal_server_error
+    assert_equal 'text/html', response.media_type
+  end
+
+  def test_a_failed_render_produces_a_failure_document_when_the_template_asks_for_one
+    template = create_template(content: '{% for %}', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :document, params: { project_id: @project.identifier, id: template.id }
+
+    assert_equal 'application/pdf', response.media_type
+    assert response.body.start_with?('%PDF-'), 'the failure document is not a PDF'
+    assert_include '%%EOF', response.body
+  end
+
+  # §7b.3: "named so it can never be mistaken for the report".
+  def test_the_failure_document_is_named_so_it_cannot_be_mistaken_for_the_report
+    template = create_template(name: 'Quarterly report', content: '{% for %}',
+                               failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :document, params: { project_id: @project.identifier, id: template.id }
+
+    disposition = response.headers['Content-Disposition']
+    assert_include 'report-FAILED-', disposition
+    assert_include '.pdf', disposition
+    assert_include 'attachment', disposition
+    assert_not_include 'Quarterly_report.pdf', disposition
+  end
+
+  # A 200 carrying a document that says "this is not your report" is INV-5 one layer up:
+  # every automated consumer of this endpoint would record a success.
+  def test_the_failure_document_answers_with_the_failures_own_status
+    template = create_template(content: '{% for %}', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :document, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :internal_server_error
+  end
+
+  # A REFUSAL IS NOT A CRASH, and the status has to keep saying so even when the answer is
+  # a document. This is the archive path — E-6's third owed bullet — which answers 501.
+  def test_a_refusal_answers_with_a_failure_document_at_the_refusals_own_status
+    template = create_template(output: 'per_record', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+    assert Issue.visible(@jsmith).where(project_id: @project.id).count > 1
+
+    with_engine do
+      get :document, params: { project_id: @project.identifier, id: template.id }
+    end
+
+    assert_response :not_implemented
+    assert_equal 'application/pdf', response.media_type
+    assert_include 'report-FAILED-', response.headers['Content-Disposition']
+  end
+
+  # THE SAFETY CLAUSE, AGAINST A REAL RENDER RATHER THAN A CONSTRUCTED DIAGNOSTIC. The
+  # DB-less spec proves `FailureDocument` cannot carry `detail`; this proves the thing an
+  # actual Liquid failure produces does not either, which is the claim T-30's `Accept:`
+  # makes and the one the base plugin broke.
+  def test_the_failure_document_carries_the_correlation_id_and_no_exception_text
+    template = create_template(content: '{% for %}', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :document, params: { project_id: @project.identifier, id: template.id }
+
+    text = pdf_text(response.body)
+    skip 'poppler-utils is not installed' if text.nil?
+
+    assert_match(/[0-9a-f]{8}-[0-9a-f]{4}-/, text, 'no correlation id on the page')
+    assert_include 'syntax_error', text
+    assert_not_include 'Liquid::SyntaxError', text
+    refute_match(/[A-Za-z]+::[A-Za-z]+Error/, text)
+    assert_not_include 'SELECT', text
+  end
+
+  # Serving a failure document must not write one either. §7b.3: "never persisted as an
+  # attachment unless requested", and nothing here requests persistence.
+  def test_producing_a_failure_document_persists_nothing
+    template = create_template(content: '{% for %}', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    assert_no_difference ['Attachment.count', 'Journal.count',
+                          'RedmineReporterDashboards::Document.count'] do
+      get :document, params: { project_id: @project.identifier, id: template.id }
+    end
+
+    assert_equal 'application/pdf', response.media_type
+  end
+
+  def test_show_stays_a_page_even_when_the_template_asks_for_a_failure_document
+    template = create_template(content: '{% for %}', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :internal_server_error
+    assert_equal 'text/html', response.media_type
+    assert_not_include '%PDF-', response.body
+  end
+
+  def test_preview_stays_a_page_even_when_the_template_asks_for_a_failure_document
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates)
+
+    post :preview, params: { project_id: @project.identifier,
+                             template: { name: 'Draft', content: '{% for %}',
+                                         source: 'issues', output: 'combined',
+                                         failure_document: '1' } }
+
+    assert_response :success
+    assert_equal 'text/html', response.media_type
+    assert_not_include '%PDF-', response.body
+  end
+
+  # A SUCCESSFUL RENDER IS UNAFFECTED. The flag changes what a FAILURE answers with and
+  # nothing else; without this, a bug that always drew the failure document would still
+  # pass every example above.
+  def test_a_template_asking_for_a_failure_document_still_downloads_a_working_report
+    template = create_template(name: 'Quarterly report', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    with_engine do
+      get :document, params: { project_id: @project.identifier, id: template.id }
+    end
+
+    assert_response :success
+    assert_include 'Quarterly_report.pdf', response.headers['Content-Disposition']
+    assert_not_include 'report-FAILED-', response.headers['Content-Disposition']
+  end
+
+  # QA: EVERY ORIGIN A DIAGNOSTIC CAN HAVE, THROUGH A REAL RUN. The DB-less spec drives
+  # `FailureDocument` with CONSTRUCTED diagnostics, which proves the policy and says
+  # nothing about whether the three real paths reach it. `:template` is covered above; the
+  # other two are here.
+
+  # `:engine` — an adapter that fails, and one carrying a `detail` full of exactly what
+  # §7b.3 says must never reach a reader. This is the safety clause driven through the
+  # ENGINE path rather than the template one.
+  def test_an_engine_failure_answers_with_a_failure_document_carrying_none_of_its_detail
+    template = create_template(failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    with_failing_engine do
+      get :document, params: { project_id: @project.identifier, id: template.id }
+    end
+
+    assert_response :internal_server_error
+    assert_equal 'application/pdf', response.media_type
+
+    text = pdf_text(response.body)
+    skip 'poppler-utils is not installed' if text.nil?
+    assert_include 'engine_crashed', text
+    assert_include l(:label_reporter_report_failed_engine), text
+    assert_not_include 'RuntimeError', text
+    assert_not_include 'PG::UndefinedColumn', text
+    assert_not_include 'role_id', text
+    assert_not_include 'project_id', text
+  end
+
+  # `:batch` — the cap, which is a REFUSAL and must not read as a crash. 422, and the
+  # headline is the refusal's rather than the engine's.
+  def test_a_batch_over_the_cap_answers_with_a_failure_document_at_422
+    create_issues_past_the_cap
+    template = create_template(output: 'per_record', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :document, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :unprocessable_entity
+    assert_equal 'application/pdf', response.media_type
+
+    text = pdf_text(response.body)
+    skip 'poppler-utils is not installed' if text.nil?
+    assert_include l(:label_reporter_report_refused), text
+    assert_not_include l(:label_reporter_report_failed_engine), text
+  end
+
+  # An EMPTY report is not a failure of the engine either, and its correlation id is the
+  # literal `-` rather than a UUID — which the filename filter has to survive rather than
+  # reduce to nothing.
+  def test_an_empty_report_answers_with_a_failure_document_whose_name_is_still_usable
+    template = create_template(output: 'per_record', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+    Issue.where(project_id: @project.id).destroy_all
+
+    get :document, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :unprocessable_entity
+    assert_equal 'application/pdf', response.media_type
+    assert_include 'report-FAILED-', response.headers['Content-Disposition']
+    assert_not_include 'report-FAILED-.pdf', response.headers['Content-Disposition']
+  end
+
+  # THE UX PASS'S FINDING, as a test. Without this branch the failure document exists and
+  # nothing on the page reaches it: the download button is drawn only for a run that
+  # SUCCEEDED, which is never the run that has a failure document.
+  def test_a_failed_show_offers_the_failure_document_when_the_template_asks_for_one
+    template = create_template(content: '{% for %}', failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :internal_server_error
+    assert_select 'div.contextual a', text: /#{Regexp.escape(l(:label_reporter_failure_document_download))}/
+    assert_not_include l(:label_reporter_template_download_pdf), response.body
+  end
+
+  def test_a_failed_show_offers_nothing_to_download_when_the_flag_is_off
+    template = create_template(content: '{% for %}')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :internal_server_error
+    assert_select 'div.contextual a.icon-download', count: 0
+  end
+
+  # A SUCCESSFUL RUN STILL OFFERS THE REPORT, not the failure document. Without this, a
+  # branch that drew the failure link unconditionally would pass both examples above.
+  def test_a_successful_show_still_offers_the_report_itself
+    template = create_template(failure_document: true)
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include l(:label_reporter_template_download_pdf), response.body
+    assert_not_include l(:label_reporter_failure_document_download), response.body
+  end
+
+  # FR-58's first noun, in the panel rather than only in the page heading.
+  def test_the_diagnostics_panel_names_the_template
+    template = create_template(name: 'Named in the panel', content: '{% for %}')
+    grant(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :internal_server_error
+    assert_select 'table.list th', text: l(:label_reporter_template)
+    assert_include 'Named in the panel', response.body
   end
 end

@@ -527,6 +527,33 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
                  mail.attachments.first.body.decoded.gsub(/\r\n/, "\n")
   end
 
+  # T-30's third acceptance clause, against the REAL mailer rather than the double.
+  # `test_a_failure_notice_carries_no_attachment_argument_at_all` proves the signature
+  # cannot express an attachment; this proves the message that actually goes out has none
+  # and carries the id, which is what an owner is asked to quote. A double cannot fail
+  # either way, and neither can a signature: only a delivered `Mail::Message` can.
+  def test_the_real_failure_notice_carries_the_correlation_id_and_no_attachment
+    add_recipient(@recipient)
+    @template.update_columns(content: '{% this is not a tag %}')
+
+    result = Delivery.new.call(schedule: @schedule, occurrence_date: OCCURRENCE,
+                               actor: @author, run: @run)
+
+    assert_not result.ok?
+    assert_equal 1, ActionMailer::Base.deliveries.length,
+                 'the owner is told, and nobody else is'
+    mail = ActionMailer::Base.deliveries.last
+    assert_equal [@author.mail], mail.to
+    assert_equal 0, mail.attachments.length, 'FR-43: a failure notice has no attachment'
+
+    body = mail.parts.map { |part| part.body.decoded }.join("\n")
+    # The id the owner is asked to quote is the id the RUN ROW carries — asserted against
+    # the row rather than against a shape, because a well-formed id that belongs to
+    # nothing is the defect T-25's review found (`ReportRun` minting its own per document).
+    assert_include @run.correlation_id, body
+    assert_not_include '%PDF-', body
+  end
+
   def test_the_sender_is_the_server_and_there_is_no_way_to_set_it
     # §7b.5's finding: the base plugin let a schedule specify `from` as free text — "a
     # report over any issue in the instance, mailed anywhere, with a forged sender". The

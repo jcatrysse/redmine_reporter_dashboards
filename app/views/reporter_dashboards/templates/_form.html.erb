@@ -40,6 +40,18 @@
   <p>
     <%= f.check_box :enabled %>
   </p>
+  <%# T-30 / FR-59 — default off, and the checkbox is not drawn at all on an install whose
+      schema predates migration 008 (§7 rule 5). A control for a column that is not there
+      would save nothing and report success, which is the silent wrong answer this project
+      keeps deleting. `label:` is passed explicitly rather than relying on the builder's
+      `field_<attr>` convention, because the plugin's keys are namespaced. %>
+  <% if RedmineReporterDashboards::Template.failure_document_supported? %>
+    <p>
+      <%= f.check_box :failure_document,
+                      label: :label_reporter_template_failure_document %>
+      <em class="info"><%= l(:text_reporter_template_failure_document_info) %></em>
+    </p>
+  <% end %>
 
   <% if @template.visibility_editable_by?(User.current) %>
     <p>

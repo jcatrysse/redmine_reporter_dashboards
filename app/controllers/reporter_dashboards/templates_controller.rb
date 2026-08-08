@@ -79,7 +79,7 @@ module ReporterDashboards
     # count, from a controller, before anything is rendered.
     def document
       run(pdf: true)
-      return render_show(outcome_status) if @diagnostic
+      return respond_to_failure(outcome_status) if @diagnostic
 
       send_document
     end
@@ -293,8 +293,15 @@ module ReporterDashboards
     # `apply_visibility` after a permission check, the way core's
     # `update_query_from_params` does it. Neither is `source`: see below.
     def template_params
-      params.require(:template).permit(:name, :description, :content, :output,
-                                       :orientation, :page_size, :margins, :enabled)
+      # `failure_document` IS SAFE TO PERMIT, and it is worth saying why rather than
+      # assuming it. HANDOVER §1's rule is that a field NAMING A USER is a privilege field
+      # and `permit` is not a filter; this one names no identity, widens no visibility and
+      # selects no engine — it decides whether a refusal answers with a page or with a PDF
+      # saying the same three facts. The action already requires an authoring permission on
+      # this template.
+      permitted = %i[name description content output orientation page_size margins enabled]
+      permitted << :failure_document if Template.failure_document_supported?
+      params.require(:template).permit(*permitted)
     end
 
     # Core's rule (`queries_controller.rb:139`) applied to templates: without
@@ -413,10 +420,10 @@ module ReporterDashboards
       # instead, and the page it renders says the same thing.
       if documents.empty?
         @diagnostic = Reporting::Diagnostic.new(
-          origin: :batch, code: :no_documents,
+          origin: :batch, code: :no_documents, template_name: @template.name,
           message: l(:text_reporter_template_no_issues), correlation_id: '-'
         )
-        return render_show(:unprocessable_entity)
+        return respond_to_failure(:unprocessable_entity)
       end
 
       # ONE document is served as itself. More than one would be an archive, and building
@@ -429,6 +436,7 @@ module ReporterDashboards
         @diagnostic = Reporting::Diagnostic.new(
           origin: :batch,
           code: :archive_not_available,
+          template_name: @template.name,
           message: l(:error_reporter_template_archive_not_available, count: documents.length),
           # THE SECTION'S id, not the document's: `Render::Success` carries bytes, an
           # engine and a version and has NO `correlation_id` — the id is minted per JOB in
@@ -437,7 +445,7 @@ module ReporterDashboards
           # moment it stopped being shadowed by "no engine registered".
           correlation_id: @outcome.sections.first&.job&.correlation_id.to_s
         )
-        return render_show(:not_implemented)
+        return respond_to_failure(:not_implemented)
       end
 
       document = documents.first
@@ -445,6 +453,53 @@ module ReporterDashboards
                 filename: download_filename(@template, 'pdf'),
                 type: 'application/pdf',
                 disposition: 'attachment'
+    end
+
+    # T-30 / FR-59 — the failure document, and the ONE place that decides whether there
+    # is one.
+    #
+    # --- WHY ONLY `#document`, AND NOT `#show` OR `#preview` ---
+    #
+    # A failure document exists because somebody asked for a FILE and there is no report to
+    # give them. `#show` and `#preview` are pages; §9b.2 puts the diagnostics panel there
+    # and a page that downloads a PDF instead of answering is a worse page. So the panel is
+    # what those two render, always, and this action is the only one that can produce a
+    # document — which also means the feature adds no second render path and no second
+    # place a failure is decided.
+    #
+    # --- THE STATUS IS THE FAILURE'S STATUS, NOT 200 ---
+    #
+    # A 200 carrying a document that says "this is not your report" is the shape INV-5
+    # exists to forbid, one layer up: every automated consumer of this endpoint — a script,
+    # a monitor, a `curl` in a cron entry — would record a success. The bytes are honest and
+    # so is the status line, and a browser still offers the file.
+    def respond_to_failure(status)
+      return render_show(status) unless @template.failure_document?
+
+      failure = Reporting::FailureDocument.new(
+        diagnostic: @diagnostic,
+        generated_at: format_time(Time.current),
+        # `I18n.t` and not `l`: the helper resolves against the CURRENT locale and this
+        # needs to be able to ask for a second one (see `FailureDocument#text`).
+        translate: ->(key, locale) { ::I18n.t(key, locale: locale) },
+        locale: ::I18n.locale
+      )
+
+      if failure.locale_degraded?
+        # VISIBLE RATHER THAN SILENT (INV-4). The document is still correct and still
+        # readable; what it is not is written in the locale it was asked for, and an
+        # operator wondering why their Russian install mailed them English prose has one
+        # line to find.
+        Rails.logger.warn("[reporting] failure document for correlation_id=" \
+                          "#{@diagnostic.correlation_id} fell back to English: locale " \
+                          "#{::I18n.locale} is outside the base-14 font encoding")
+      end
+
+      send_data failure.bytes,
+                filename: failure.filename,
+                type: failure.content_type,
+                disposition: 'attachment',
+                status: status
     end
 
     def refuse_import(message)

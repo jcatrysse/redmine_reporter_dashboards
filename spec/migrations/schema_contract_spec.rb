@@ -171,7 +171,13 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
       end
 
       expect(extra).to eq(
-        'reporter_dashboards_templates' => %w[output source source_digest source_template_id visibility],
+        # `failure_document` is T-30's FR-59 opt-in, added by migration 008 — the first
+        # migration in this plugin that grows an existing table. §7 rule 6 pins
+        # `lock_version` and unique indexes to their table's own migration and this is
+        # neither; rule 5 is the one that applies, and `Template#failure_document?` reads
+        # it through `Compat.column_present?` for exactly that reason.
+        'reporter_dashboards_templates' => %w[failure_document output source source_digest
+                                              source_template_id visibility],
         'reporter_dashboards_schedules' => %w[author_id render_as_user_id],
         'reporter_dashboards_schedule_recipients' => %w[schedule_id]
       )

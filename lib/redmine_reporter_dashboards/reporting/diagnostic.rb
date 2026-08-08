@@ -24,10 +24,22 @@ module RedmineReporterDashboards
       ORIGINS = %i[template engine batch].freeze
 
       attr_reader :origin, :code, :message, :line, :engine, :engine_version,
-                  :duration_ms, :correlation_id, :detail
+                  :duration_ms, :correlation_id, :detail, :template_name
 
+      # `template_name` is FR-58's first noun — *"what failed, **the template**, the Liquid
+      # line where applicable, …"* — and it was the one field of that list this class did
+      # not carry (T-30). It is deliberately the NAME rather than the record: a diagnostic
+      # is serialised into a mail, a failure document and a log line, and none of those may
+      # hold something that can be dereferenced into a visibility decision later.
+      #
+      # It defaults to nil rather than being required because two of the three factories
+      # below are handed a failure by a layer that has never heard of a template, and a
+      # required argument there would be filled in with `''` at every call site — which is
+      # a field that is present and empty, the shape §Findings keeps recording as worse
+      # than an absent one.
       def initialize(origin:, code:, message:, correlation_id:, line: nil, engine: nil,
-                     engine_version: nil, duration_ms: nil, detail: nil)
+                     engine_version: nil, duration_ms: nil, detail: nil,
+                     template_name: nil)
         unless ORIGINS.include?(origin)
           raise ArgumentError, "#{origin.inspect} is not a diagnostic origin"
         end
@@ -35,6 +47,7 @@ module RedmineReporterDashboards
         @origin = origin
         @code = code
         @message = message.to_s.freeze
+        @template_name = template_name&.to_s&.freeze
         @line = line
         @engine = engine
         @engine_version = engine_version
@@ -54,25 +67,28 @@ module RedmineReporterDashboards
       # Hash, and this Hash cannot carry it.
       def to_h
         { 'origin' => origin.to_s, 'code' => code.to_s, 'message' => message,
+          'template' => template_name,
           'line' => line, 'engine' => engine, 'engine_version' => engine_version,
           'duration_ms' => duration_ms, 'correlation_id' => correlation_id }.freeze
       end
 
       class << self
-        def from_template_failure(failure, correlation_id: nil)
+        def from_template_failure(failure, correlation_id: nil, template_name: nil)
           new(origin: :template,
               code: failure.code,
               message: failure.message,
+              template_name: template_name,
               line: failure.line,
               duration_ms: failure.duration_ms,
               detail: failure.detail,
               correlation_id: failure.correlation_id || correlation_id)
         end
 
-        def from_render_failure(failure)
+        def from_render_failure(failure, template_name: nil)
           new(origin: :engine,
               code: failure.code,
               message: failure.message,
+              template_name: template_name,
               engine: failure.engine,
               engine_version: failure.engine_version,
               duration_ms: failure.duration_ms,
@@ -85,10 +101,11 @@ module RedmineReporterDashboards
         # was drawn, no engine was started, and the remedy is "select fewer", not "check
         # the engine". Same class, different origin, and the origin is what the panel
         # reads.
-        def from_batch_refusal(failure)
+        def from_batch_refusal(failure, template_name: nil)
           new(origin: :batch,
               code: failure.code,
               message: failure.message,
+              template_name: template_name,
               duration_ms: failure.duration_ms,
               detail: failure.detail,
               correlation_id: failure.correlation_id)

@@ -183,7 +183,8 @@ module RedmineReporterDashboards
           section = render_section(job)
           if section.respond_to?(:failure?) && section.failure?
             return failed(Diagnostic.from_template_failure(section,
-                                                           correlation_id: job.correlation_id),
+                                                           correlation_id: job.correlation_id,
+                                                           template_name: template.name),
                           total, started)
           end
 
@@ -344,8 +345,9 @@ module RedmineReporterDashboards
 
         first_failure = batch.failures.first
         if first_failure
-          return failed(Diagnostic.from_render_failure(first_failure), total, started,
-                        sections: sections, pdf_attempted: true)
+          return failed(Diagnostic.from_render_failure(first_failure,
+                                                      template_name: template.name),
+                        total, started, sections: sections, pdf_attempted: true)
         end
 
         Outcome.new(sections: sections, documents: batch.successes, diagnostic: nil,
@@ -412,6 +414,7 @@ module RedmineReporterDashboards
         Diagnostic.new(
           origin: :template,
           code: :unsupported_source,
+          template_name: template.name,
           message: "this template reports on #{template.source.inspect}, which this " \
                    'version of the plugin cannot render; time-entry reporting arrives ' \
                    'with T-31',
@@ -424,6 +427,7 @@ module RedmineReporterDashboards
         Diagnostic.new(
           origin: :engine,
           code: :engine_unavailable,
+          template_name: template.name,
           message: 'no render engine is registered, so no PDF could be produced',
           correlation_id: sections.first&.job&.correlation_id || mint_id,
           detail: 'Render::Registry.ids is empty'
@@ -434,7 +438,8 @@ module RedmineReporterDashboards
 
       def refused(refusal, total, started, sections: [])
         Outcome.new(sections: sections, documents: [],
-                    diagnostic: Diagnostic.from_batch_refusal(refusal),
+                    diagnostic: Diagnostic.from_batch_refusal(refusal,
+                                                              template_name: template.name),
                     total_count: total, shown_count: 0, truncated: false,
                     duration_ms: elapsed(started), degradations: [], pdf_attempted: false)
       end

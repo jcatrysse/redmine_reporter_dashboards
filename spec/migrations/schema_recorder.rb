@@ -44,11 +44,12 @@ module ActiveRecord
       self
     end
 
-    attr_reader :recorded_tables, :recorded_indexes
+    attr_reader :recorded_tables, :recorded_indexes, :recorded_column_additions
 
     def initialize
       @recorded_tables = {}
       @recorded_indexes = []
+      @recorded_column_additions = []
     end
 
     def create_table(name, **options)
@@ -72,6 +73,26 @@ module ActiveRecord
                     "index_#{name}_on_#{index['columns'].join('_and_')}"
         )
       end
+    end
+
+    # T-30 added the first migration that grows an EXISTING table, and this recorder had
+    # no verb for it: `add_column` raised `NoMethodError`, which is the loud failure the
+    # module comment above asks for — `script/migrate_updown.sh` reported G11 UNKNOWN
+    # rather than passing over a schema it could not see, which is the honest answer and
+    # is why the failure was found in one run.
+    #
+    # IT IS RECORDED AS A PENDING ALTERATION RATHER THAN APPLIED HERE, because the driver
+    # below gives every migration a FRESH instance: 008's instance has never heard of the
+    # table 002 created, so an `add_column` that tried to find it would raise on a
+    # perfectly correct migration. The driver applies these against the accumulated schema
+    # in file order, which is also the order the database will see them in.
+    def add_column(table, name, type, **options)
+      @recorded_column_additions << {
+        'table' => table.to_s,
+        'column' => { 'name' => name.to_s, 'type' => type.to_s,
+                      'null' => options.fetch(:null, true),
+                      'default' => options[:default] }
+      }
     end
 
     def add_index(table, columns, **options)
@@ -211,6 +232,19 @@ files.each do |path|
   }
   result['tables'].merge!(instance.recorded_tables)
   result['indexes'].concat(instance.recorded_indexes)
+
+  # Applied AFTER this migration's own tables, and against the accumulated schema, so a
+  # migration may both create a table and add a column to it. A column added to a table no
+  # migration creates is refused rather than inventing one: that is a bug in the migration,
+  # and a recorder that papered over it would describe a schema the database cannot have.
+  instance.recorded_column_additions.each do |addition|
+    table = result['tables'][addition['table']]
+    if table.nil?
+      raise "#{path}: add_column names #{addition['table']}, which no migration creates"
+    end
+
+    table['columns'] << addition['column']
+  end
 end
 
 puts JSON.pretty_generate(result)
