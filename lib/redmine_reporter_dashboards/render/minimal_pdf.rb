@@ -58,12 +58,53 @@ module RedmineReporterDashboards
       LINE_HEIGHT = 16
       LABEL_WIDTH = 150     # points reserved for the label column
 
-      # Helvetica at 11pt averages a little under 5.5pt per character. Wrapping is by
-      # character count rather than by real font metrics on purpose: the alternative is
-      # shipping the AFM widths of two fonts to lay out a page nobody reads twice, and a
-      # wrap that is a few characters early costs nothing here.
-      WRAP_COLUMNS = 62
-      PARAGRAPH_COLUMNS = 86
+      # --- WRAPPING IS BY REAL ADVANCE WIDTH, AND THE FIRST VERSION GUESSED ---
+      #
+      # It wrapped at 62 characters on the reasoning that Helvetica at 11pt "averages a
+      # little under 5.5pt per character". The independent review measured the drawn text
+      # with `pdftotext -bbox-layout` and the average is not the bound: the ordinary
+      # template name
+      #
+      #   QUARTERLY CONSOLIDATED PROGRAMME STATUS REPORT NORTHERN REGION 2026 Q3 FINAL
+      #
+      # — 76 characters, well inside the model's 255 — drew to x = 600.2pt, which is 61pt
+      # past the right margin and **5pt past the edge of the paper**. Capitals average
+      # 0.68em, not 0.49em. That is the same defect as the vertical overflow this file
+      # already fixed, on the other axis, reachable with data an author types in.
+      #
+      # So the widths are the FONT'S widths. These are Adobe's Helvetica and
+      # Helvetica-Bold AFM advance widths for ASCII, in 1/1000 em, and anything outside
+      # that range is charged `WIDEST_GLYPH` — a true upper bound for WinAnsi Helvetica,
+      # not an average — so an accented or box-drawing character can never be
+      # under-measured. A table can be mistyped, which is why the specs assert the DRAWN
+      # geometry with poppler rather than trusting the numbers here.
+      HELVETICA_WIDTHS = [
+        278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+        556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+        1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+        667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+        333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+        556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584
+      ].freeze
+
+      HELVETICA_BOLD_WIDTHS = [
+        278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278,
+        556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611,
+        975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778,
+        667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556,
+        333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+        611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584
+      ].freeze
+
+      # Charged for every byte outside ASCII. `@` is the widest ASCII glyph in Helvetica at
+      # 1015/1000; nothing in WinAnsi Helvetica exceeds it, so this cannot under-measure.
+      WIDEST_GLYPH = 1015
+      FIRST_MEASURED_BYTE = 32
+      LAST_MEASURED_BYTE = 126
+
+      # A gutter between the label column and the value column, so a label that fills its
+      # column does not touch the value beside it.
+      COLUMN_GAP = 12
 
       # --- WHY OVERFLOW IS BOUNDED TWICE ---
       #
@@ -77,8 +118,9 @@ module RedmineReporterDashboards
       # Bounded per VALUE first, because that removes the failure by construction rather
       # than by arithmetic: with every value capped the row set cannot exceed the page, and
       # a reader gets a truncation marker instead of a missing sentence. `room?` is then a
-      # second bound on the LAYOUT, so a future caller passing forty rows is refused a
-      # silent overflow rather than trusted to have read this comment.
+      # second bound on the LAYOUT — and when it fires it SAYS SO, because the first
+      # version's comment claimed it "refused" a silent overflow while in fact dropping the
+      # remaining rows without a mark.
       MAX_VALUE_LINES = 3
       MAX_PARAGRAPH_LINES = 5
 
@@ -131,18 +173,36 @@ module RedmineReporterDashboards
       def content_stream(title, rows)
         out = binary('BT')
         y = PAGE_HEIGHT - MARGIN - TITLE_SIZE
+        dropped = false
 
         out << "\n/F2 #{TITLE_SIZE} Tf"
-        out << "\n" << text_op(MARGIN, y, title)
+        out << "\n" << text_op(MARGIN, y, clip_to_width(title, body_width, TITLE_SIZE, bold: true))
 
         y -= LINE_HEIGHT * 2
 
+        # THE LABEL COLUMN IS MEASURED, NOT ASSUMED. It used to be a fixed 150pt, which the
+        # Polish and Hungarian labels come close to filling — and a label wider than its
+        # column would have drawn straight over the value beside it. Taking the widest label
+        # actually present also gives the value column every point the labels do not need.
+        label_column = label_column_width(rows)
+        value_x = MARGIN + label_column + COLUMN_GAP
+        value_width = PAGE_WIDTH - MARGIN - value_x
+
         rows.each do |label, value|
           label = label.to_s
-          break unless room?(y)
+
+          # ONE LINE IS RESERVED so the marker below can be drawn. Asking `room?(y)` here
+          # stopped exactly when there was no longer room for anything, marker included —
+          # so the page that most needed to admit it was incomplete was the one that could
+          # not say so.
+          unless room?(y - LINE_HEIGHT)
+            dropped = true
+            break
+          end
 
           if label.empty?
-            clip(wrap(value.to_s, PARAGRAPH_COLUMNS), MAX_PARAGRAPH_LINES).each do |line|
+            clip(wrap(value.to_s, body_width, BODY_SIZE), MAX_PARAGRAPH_LINES,
+                 body_width, BODY_SIZE).each do |line|
               break unless room?(y)
 
               out << "\n/F1 #{BODY_SIZE} Tf"
@@ -153,11 +213,12 @@ module RedmineReporterDashboards
             out << "\n/F2 #{BODY_SIZE} Tf"
             out << "\n" << text_op(MARGIN, y, label)
 
-            clip(wrap(value.to_s, WRAP_COLUMNS), MAX_VALUE_LINES).each do |line|
+            clip(wrap(value.to_s, value_width, BODY_SIZE), MAX_VALUE_LINES,
+                 value_width, BODY_SIZE).each do |line|
               break unless room?(y)
 
               out << "\n/F1 #{BODY_SIZE} Tf"
-              out << "\n" << text_op(MARGIN + LABEL_WIDTH, y, line)
+              out << "\n" << text_op(value_x, y, line)
               y -= LINE_HEIGHT
             end
           end
@@ -165,8 +226,31 @@ module RedmineReporterDashboards
           y -= LINE_HEIGHT / 2
         end
 
+        # A DROPPED ROW SAYS SO. The bound used to `break` in silence while its own comment
+        # claimed it refused a silent overflow — which is the shape of claim this file
+        # exists to stop making. Unreachable with FR-59's nine rows; present so that a
+        # future caller with forty gets a page that admits it is incomplete.
+        if dropped && room?(y)
+          out << "\n/F1 #{BODY_SIZE} Tf"
+          out << "\n" << text_op(MARGIN, y, TRUNCATION_MARKER)
+        end
+
         out << "\nET"
         out
+      end
+
+      # The full text column, used by the title and by the full-width paragraphs.
+      def body_width
+        PAGE_WIDTH - (MARGIN * 2)
+      end
+
+      # Bounded so a pathological label cannot take the whole page and leave the value no
+      # room; `clip_to_width` then cuts anything past it.
+      def label_column_width(rows)
+        cap = ((PAGE_WIDTH - (MARGIN * 2)) * 0.4).floor
+        widest = rows.map { |label, _| advance(label.to_s, BODY_SIZE, bold: true) }.max.to_f
+
+        [[widest.ceil, cap].min, 1].max
       end
 
       # THE BOUND IS ON THE COORDINATE, NOT ON A LINE COUNT, and the first version was a
@@ -178,15 +262,41 @@ module RedmineReporterDashboards
         y >= MARGIN
       end
 
-      # Keeps at most `limit` lines and says so on the last one. The marker is APPENDED
-      # rather than replacing the line, because "the value continues" and "the value ended
-      # here" are different facts and a reader cannot tell them apart otherwise.
-      def clip(lines, limit)
-        return lines if lines.length <= limit
+      # --- measurement -------------------------------------------------------------------
 
-        kept = lines[0, limit]
-        kept[-1] = "#{kept[-1]} #{TRUNCATION_MARKER}"
-        kept
+      # The drawn width of `text` at `size`, in points. Bytes outside the measured ASCII
+      # range are charged the widest glyph in the font, so this is never an under-estimate
+      # — which is the only direction that matters for a bound.
+      def advance(text, size, bold: false)
+        widths = bold ? HELVETICA_BOLD_WIDTHS : HELVETICA_WIDTHS
+        total = 0
+
+        encode(text.to_s).each_byte do |byte|
+          total += if byte >= FIRST_MEASURED_BYTE && byte <= LAST_MEASURED_BYTE
+                     widths[byte - FIRST_MEASURED_BYTE]
+                   else
+                     WIDEST_GLYPH
+                   end
+        end
+
+        total * size / 1000.0
+      end
+
+      # One line, cut to fit, with the marker inside the width rather than appended past it
+      # — appending was how `clip` pushed its last line six characters over.
+      def clip_to_width(text, width, size, bold: false)
+        string = text.to_s
+        return string if advance(string, size, bold: bold) <= width
+
+        marker_room = width - advance(TRUNCATION_MARKER, size, bold: bold) - 2
+        kept = +''
+        string.each_char do |char|
+          break if advance(kept + char, size, bold: bold) > marker_room
+
+          kept << char
+        end
+
+        "#{kept}#{TRUNCATION_MARKER}"
       end
 
       def text_op(x, y, text)
@@ -196,11 +306,12 @@ module RedmineReporterDashboards
         out
       end
 
-      # A word longer than the column (a correlation id has no spaces in it, and neither
-      # does a URL) is HARD-BROKEN rather than allowed to run off the page. A value that
-      # silently leaves the paper is the same class of defect as one that is silently
-      # truncated.
-      def wrap(text, columns)
+      # Wraps to a WIDTH IN POINTS rather than to a character count — see the note on the
+      # width tables. A word wider than the column (a correlation id has no spaces in it,
+      # and neither does a URL) is HARD-BROKEN rather than allowed to run off the page. A
+      # value that silently leaves the paper is the same class of defect as one that is
+      # silently truncated, and it is what the first version did for any name in capitals.
+      def wrap(text, width, size, bold: false)
         words = text.to_s.split(/\s+/).reject(&:empty?)
         return [''] if words.empty?
 
@@ -208,15 +319,18 @@ module RedmineReporterDashboards
         current = +''
 
         words.each do |word|
-          while word.length > columns
+          # A word wider than the whole column is broken into fitting chunks first.
+          while advance(word, size, bold: bold) > width
             lines << current unless current.empty?
             current = +''
-            lines << word[0, columns]
-            word = word[columns..]
+            chunk = fitting_prefix(word, width, size, bold)
+            lines << chunk
+            word = word[chunk.length..] || ''
           end
+          next if word.empty?
 
           candidate = current.empty? ? word : "#{current} #{word}"
-          if candidate.length > columns
+          if !current.empty? && advance(candidate, size, bold: bold) > width
             lines << current
             current = +word
           else
@@ -226,6 +340,37 @@ module RedmineReporterDashboards
 
         lines << current unless current.empty?
         lines
+      end
+
+      # The longest leading run of `word` that fits. Answers one character when even that
+      # does not fit, which cannot happen at these sizes and stops the loop above being
+      # infinite if it ever does.
+      def fitting_prefix(word, width, size, bold)
+        kept = +''
+        word.each_char do |char|
+          break if advance(kept + char, size, bold: bold) > width
+
+          kept << char
+        end
+
+        kept.empty? ? word[0, 1] : kept
+      end
+
+      # Keeps at most `limit` lines and says so on the last one. The marker is fitted INTO
+      # the column rather than appended past it: appending made the last line six
+      # characters wider than the column it had just been wrapped to fit, which is how the
+      # first version drew past the right margin even after wrapping correctly.
+      def clip(lines, limit, width, size, bold: false)
+        return lines if lines.length <= limit
+
+        kept = lines[0, limit]
+        candidate = "#{kept[-1]} #{TRUNCATION_MARKER}"
+        kept[-1] = if advance(candidate, size, bold: bold) <= width
+                     candidate
+                   else
+                     clip_to_width(candidate, width, size, bold: bold)
+                   end
+        kept
       end
 
       # --- bytes -------------------------------------------------------------------------

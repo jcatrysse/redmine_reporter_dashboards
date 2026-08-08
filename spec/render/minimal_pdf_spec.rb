@@ -222,12 +222,39 @@ RSpec.describe RedmineReporterDashboards::Render::MinimalPdf do
     end
 
     it 'keeps exactly MAX_VALUE_LINES lines of a long value' do
-      expect(described_class.clip(%w[a b c d e], described_class::MAX_VALUE_LINES).length)
+      expect(described_class.clip(%w[a b c d e], described_class::MAX_VALUE_LINES, 200, 11)
+                            .length)
         .to eq(described_class::MAX_VALUE_LINES)
     end
 
     it 'leaves a value that fits completely alone, marker included' do
-      expect(described_class.clip(%w[a b], described_class::MAX_VALUE_LINES)).to eq(%w[a b])
+      expect(described_class.clip(%w[a b], described_class::MAX_VALUE_LINES, 200, 11))
+        .to eq(%w[a b])
+    end
+
+    # The marker used to be APPENDED, which made the last line six characters wider than
+    # the column it had just been wrapped to fit.
+    # THE LAST KEPT LINE HAS TO BE A FULL ONE, or the example proves nothing: appending
+    # " [...]" to a short line fits anyway, which is how the first version of this passed
+    # under mutation. The lines here come out of `wrap` itself, so each is as wide as the
+    # column allows — which is the case that actually occurs.
+    it 'fits the truncation marker into the column rather than past it' do
+      lines = described_class.wrap('x' * 400, 120, 11)
+      expect(lines.length).to be > 2
+
+      clipped = described_class.clip(lines, 2, 120, 11)
+
+      expect(clipped.last).to end_with(described_class::TRUNCATION_MARKER)
+      expect(described_class.advance(clipped.last, 11)).to be <= 120
+    end
+
+    # A DROPPED ROW SAYS SO. The bound used to `break` in silence while its comment claimed
+    # it refused a silent overflow.
+    it 'marks the page when it had to drop rows entirely' do
+      many = described_class.build(title: 't',
+                                   rows: Array.new(60) { |i| ["label #{i}", "value #{i}"] })
+
+      expect(many).to include(described_class::TRUNCATION_MARKER)
     end
 
     # The layout bound is the second one, and it exists for a caller that passes more ROWS
@@ -243,16 +270,31 @@ RSpec.describe RedmineReporterDashboards::Render::MinimalPdf do
 
   describe 'wrapping' do
     it 'breaks a long unbroken value rather than letting it run off the page' do
-      expect(described_class.wrap('a' * 150, 62).map(&:length)).to eq([62, 62, 26])
+      lines = described_class.wrap('a' * 150, 200, 11)
+
+      expect(lines.length).to be > 1
+      expect(lines).to all(satisfy { |line| described_class.advance(line, 11) <= 200 })
     end
 
     it 'wraps on spaces when it can' do
-      expect(described_class.wrap(([('word')] * 20).join(' '), 24))
-        .to all(satisfy { |line| line.length <= 24 })
+      expect(described_class.wrap((['word'] * 20).join(' '), 120, 11))
+        .to all(satisfy { |line| described_class.advance(line, 11) <= 120 })
     end
 
     it 'answers one empty line for empty input, so a nil value still draws a row' do
-      expect(described_class.wrap('', 62)).to eq([''])
+      expect(described_class.wrap('', 200, 11)).to eq([''])
+    end
+
+    # THE WIDTHS ARE THE FONT'S, AND THE FIRST VERSION GUESSED AN AVERAGE. Capitals are
+    # ~0.68em against the 0.49em the character-count bound assumed, which is how an
+    # ordinary 76-character name drew 5pt past the edge of the paper.
+    it 'charges capitals what they actually cost, not an average' do
+      expect(described_class.advance('W' * 10, 11)).to be > described_class.advance('i' * 10, 11)
+    end
+
+    it 'never under-measures a character outside the ASCII table' do
+      expect(described_class.advance("\u00e9", 11))
+        .to eq(described_class::WIDEST_GLYPH * 11 / 1000.0)
     end
   end
 end

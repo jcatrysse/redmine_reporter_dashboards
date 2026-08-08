@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative '../render/failure'
+require_relative '../liquid/template_renderer'
+
 module RedmineReporterDashboards
   module Reporting
     # FR-58's diagnostics view, as data — *"what failed, the template, the Liquid line
@@ -23,6 +26,37 @@ module RedmineReporterDashboards
     class Diagnostic
       ORIGINS = %i[template engine batch].freeze
 
+      # THE CODE SET IS CLOSED TOO, AND IT WAS NOT. `FailureDocument`'s whole safety
+      # argument is that `code` "is a vocabulary rather than text" — but this constructor
+      # accepted any symbol at all while `Render::Failure` and
+      # `Liquid::TemplateRenderer::Failure` both raise on an unknown one, and four call
+      # sites build a `Diagnostic` directly. No leak today; the guard the design leans on
+      # simply was not here. Found by the independent review of T-30.
+      #
+      # It is the UNION of the two failure vocabularies plus the four this plugin's
+      # application layer adds, read from the two classes rather than retyped, so a code
+      # added to either of them is a code this accepts without anybody remembering to.
+      # THIS LIST WAS THREE ENTRIES SHORT OF REALITY ON ITS FIRST RUN, and the full-app
+      # suite found six of the missing ones in one go — `partial_delivery`,
+      # `attachments_too_large`, `no_recipients`, `schedule_unusable`, `scope_unavailable`
+      # and `template_missing`, all minted by T-25's delivery path. A closed set that is
+      # wrong is worse than no set, because it turns a working install into an
+      # `ArgumentError`; `spec/reporting/diagnostic_spec.rb` therefore GREPS the tree for
+      # every `code:` literal handed to a Diagnostic and fails if one is not here, rather
+      # than trusting the next author to remember.
+      APPLICATION_CODES = %i[
+        unsupported_source no_documents archive_not_available
+        partial_delivery attachments_too_large no_recipients
+        schedule_unusable scope_unavailable template_missing
+        diagnostics_truncated
+      ].freeze
+
+      def self.codes
+        @codes ||= (::RedmineReporterDashboards::Render::Failure::CODES +
+                    ::RedmineReporterDashboards::Liquid::TemplateRenderer::FAILURE_CODES +
+                    APPLICATION_CODES).uniq.freeze
+      end
+
       attr_reader :origin, :code, :message, :line, :engine, :engine_version,
                   :duration_ms, :correlation_id, :detail, :template_name
 
@@ -42,6 +76,9 @@ module RedmineReporterDashboards
                      template_name: nil)
         unless ORIGINS.include?(origin)
           raise ArgumentError, "#{origin.inspect} is not a diagnostic origin"
+        end
+        unless self.class.codes.include?(code)
+          raise ArgumentError, "#{code.inspect} is not a diagnostic code"
         end
 
         @origin = origin

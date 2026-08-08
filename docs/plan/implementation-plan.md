@@ -98,6 +98,76 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
+**S-13 · T-31's central premise is FALSE, and the kernel does not raise — it answers ISSUE
+counts under time-entry labels. MEASURED 2026-08-08.** `technical-spec.md:1411` (§7b.4) and
+`implementation-plan.md`'s T-31 entry both say *"the aggregation core already takes a scope
+— so `{% sql_aggregate from: time_entries %}` works with every dimension that applies, and
+`spent_hours` measures stop being a special case"*. It was checked by handing
+`TimeEntryQuery#base_scope` to the frozen kernel on a real Redmine 6.1 / PostgreSQL 16, as
+`User.current = admin` over project 1:
+
+    time entries in scope: 4          (over 2 distinct issues)
+
+    author     -> {"buckets"=>[{"label"=>"Redmine Admin", "count"=>2, ...
+    tracker    -> {"buckets"=>[{"label"=>"Bug",           "count"=>2, ...
+    status     -> {"buckets"=>[{"label"=>"New",           "count"=>2, ...
+    priority   -> {"buckets"=>[{"label"=>"Low",           "count"=>2, ...
+    project    -> nil
+    activity   -> nil
+    user       -> nil
+    dimension_breakdown(scope, group_by: 'project', measure: 'spent_hours') -> nil
+
+    COUNT(DISTINCT issues.id) over that scope = 2
+    COUNT(time_entries.id)                    = 4
+    SUM(time_entries.hours)                   = 162.9
+
+Three separate facts, and the first is the dangerous one.
+
+1. **It does not raise. It answers the wrong number, plausibly.** `QueryAggregator`'s unit
+   of count is the constant `DISTINCT_ISSUES = 'DISTINCT issues.id'`
+   (`aggregation/query_aggregator.rb:100`), so every bucket above counts ISSUES. A
+   time-entry report grouped by author would print *"Redmine Admin: 2"* where the truth is
+   four entries and 162.9 hours. `TimeEntryQuery#base_scope` calls `.left_join_issue`
+   (`redmine/app/models/time_entry_query.rb:166`), which is exactly why the issue columns
+   resolve rather than erroring — the join makes the wrong answer available.
+2. **The time-entry-native dimensions do not exist.** `activity` and `user` are not in
+   `DIMENSION_COLUMNS` (`:184-188`), and `project` — which IS in it, as
+   `issues.project_id` — also came back nil, because the time-entry scope already joins
+   `projects` on its own terms. Each of those is the aggregator logging and degrading
+   (HANDOVER §1: *"every aggregator entry point LOGS AND DEGRADES on an argument it cannot
+   use"*), so a template asking for them renders empty rather than failing.
+3. **`spent_hours` answers nothing at all** on this scope, which is the one measure the
+   spec singles out as the point of the change.
+
+**Why this cannot simply be fixed here.** The fix is to the counted unit, the dimension
+table and the measure resolution — all inside `query_aggregator.rb`, which gate **G7** holds
+byte-identical to its `v0.5.0` blob **plus exactly ONE declared hunk** (D-1's), through
+`spec/golden/kernel_exception.rb`. Generalising `DISTINCT_ISSUES` is a second declared hunk
+in the one file this plan freezes hardest, and it would move the oracle the 176-case corpus
+is measured against. **That is a curator decision, not a task decision** (CLAUDE.md §11.3,
+and §1's deletion/ordering guard is the same instinct).
+
+**Two routes, and the choice is the curator's:**
+
+* **A declared G7 hunk** generalising the counted unit and the dimension table. Smallest
+  code, largest blast radius: every one of the 176 corpus values is computed by the method
+  that would change, so the regeneration argument has to be made and the exception written
+  by hand with its reason.
+* **A second, OWNED aggregator** — `aggregation/time_entry_aggregator.rb`, a new file and
+  therefore outside `KERNEL_FILES` — reproducing the vocabulary for the dimensions that
+  apply to a time entry. No G7 exposure at all, and the corpus does not move. The cost is a
+  second implementation of the same shapes, which §5's *"no second way of doing something
+  that already has a way"* is against, and it needs its own golden corpus or it becomes the
+  untested half.
+
+**What T-31 can deliver without either decision** is the rest of its acceptance list, which
+does not depend on the kernel: `source` accepted end to end, ONE controller/CRUD/preview
+serving both sources, a `TimeEntryQuery`-backed scope bound to the render, the existing
+`Drops::TimeEntriesDrop` (built in T-18 and still without a producer) getting one, and a
+template that puts issue data and time data side by side. **Recorded rather than decided,
+and nothing was silently built against the false premise** — in particular, nothing hands a
+time-entry scope to `QueryAggregator`, because the measurement above is what that produces.
+
 **S-11 · §7b.3 says the failure-document opt-in is "per template/schedule", and T-30 built
 only the template half. REPORTED, NOT DECIDED.** `technical-spec.md:1393` reads *"Optional
 failure document (per template/schedule, default off)"*. Migration 008 puts

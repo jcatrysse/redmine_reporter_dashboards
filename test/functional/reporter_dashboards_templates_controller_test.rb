@@ -1158,7 +1158,11 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   # §7b.3 says must never reach a reader. This is the safety clause driven through the
   # ENGINE path rather than the template one.
   def test_an_engine_failure_answers_with_a_failure_document_carrying_none_of_its_detail
-    template = create_template(failure_document: true)
+    # A DISTINCTIVE NAME, because FR-58's first noun reaches the panel and the document
+    # from `ReportRun` on THIS origin by a different call than the template one — and the
+    # independent review deleted `template_name:` from both `from_render_failure` and
+    # `from_batch_refusal` with the whole suite staying green.
+    template = create_template(name: 'Engine origin subject', failure_document: true)
     grant(:view_reporter_dashboards_reports)
 
     with_failing_engine do
@@ -1171,6 +1175,7 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     text = pdf_text(response.body)
     skip 'poppler-utils is not installed' if text.nil?
     assert_include 'engine_crashed', text
+    assert_include 'Engine origin subject', text, 'FR-58: the document must name the template'
     assert_include l(:label_reporter_report_failed_engine), text
     assert_not_include 'RuntimeError', text
     assert_not_include 'PG::UndefinedColumn', text
@@ -1182,7 +1187,10 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   # headline is the refusal's rather than the engine's.
   def test_a_batch_over_the_cap_answers_with_a_failure_document_at_422
     create_issues_past_the_cap
-    template = create_template(output: 'per_record', failure_document: true)
+    # Distinctive for the same reason as the engine case above: this is the `:batch`
+    # origin, and its `template_name` came from a call nothing asserted.
+    template = create_template(name: 'Batch origin subject', output: 'per_record',
+                               failure_document: true)
     grant(:view_reporter_dashboards_reports)
 
     get :document, params: { project_id: @project.identifier, id: template.id }
@@ -1193,6 +1201,7 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     text = pdf_text(response.body)
     skip 'poppler-utils is not installed' if text.nil?
     assert_include l(:label_reporter_report_refused), text
+    assert_include 'Batch origin subject', text, 'FR-58: the document must name the template'
     assert_not_include l(:label_reporter_report_failed_engine), text
   end
 
@@ -1208,8 +1217,41 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
 
     assert_response :unprocessable_entity
     assert_equal 'application/pdf', response.media_type
-    assert_include 'report-FAILED-', response.headers['Content-Disposition']
-    assert_not_include 'report-FAILED-.pdf', response.headers['Content-Disposition']
+    # A REAL ID, not merely a non-empty one. This used to assert the filename was not
+    # `report-FAILED-.pdf`, which the literal `-` this path used to carry satisfied — it
+    # produced `report-FAILED--.pdf` and told the reader to quote an id that identifies
+    # nothing. Asserted as a UUID shape, and asserted on the page as well as in the name.
+    assert_match(/report-FAILED-[0-9a-f]{8}-[0-9a-f]{4}-/,
+                 response.headers['Content-Disposition'])
+
+    text = pdf_text(response.body)
+    skip 'poppler-utils is not installed' if text.nil?
+    assert_match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/, text,
+                 'the page tells the reader to quote an id it does not carry')
+  end
+
+  # The flag has to SURVIVE a round trip. It was missing from `Exchange::EXPORTED_FIELDS`
+  # at first, so export -> import silently turned it off — and FR-57's byte-identity still
+  # held, because both ends agreed about a field neither carried. Found by the independent
+  # review; asserted here through the two real HTTP actions rather than at the seam.
+  def test_export_round_trips_the_failure_document_flag
+    template = create_template(name: 'Round trip', failure_document: true)
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates,
+          :edit_reporter_dashboards_templates)
+
+    get :export, params: { project_id: @project.identifier, id: template.id }
+    assert_response :success
+    bundle = response.body
+    assert_equal true, JSON.parse(bundle)['template']['failure_document']
+
+    file = Rack::Test::UploadedFile.new(StringIO.new(bundle), 'application/json',
+                                        original_filename: 'round-trip.json')
+    assert_difference 'RedmineReporterDashboards::Template.count', 1 do
+      post :import, params: { project_id: @project.identifier, file: file }
+    end
+
+    imported = RedmineReporterDashboards::Template.order(:id).last
+    assert_equal true, imported.failure_document?, 'the flag did not survive the round trip'
   end
 
   # THE UX PASS'S FINDING, as a test. Without this branch the failure document exists and

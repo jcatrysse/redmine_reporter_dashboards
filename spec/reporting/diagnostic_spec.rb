@@ -135,6 +135,66 @@ RSpec.describe RedmineReporterDashboards::Reporting::Diagnostic do
     end
   end
 
+  # THE CLOSED CODE SET, AND THE CHECK THAT KEEPS IT HONEST.
+  #
+  # `FailureDocument`'s safety argument is that `code` is a vocabulary rather than text, so
+  # the constructor validates it — and a closed set that is WRONG is worse than none, since
+  # it turns a working install into an `ArgumentError` on the failure path. The first
+  # version of `APPLICATION_CODES` was six entries short and the full-application suite
+  # found all six at once.
+  #
+  # So this reads the tree rather than a list somebody maintains: every `code:` literal
+  # passed to a `Diagnostic` anywhere under `app/` or `lib/` must be a member. It is the
+  # same mechanism `permission_map_spec.rb` uses for controller actions, and for the same
+  # reason — the failure mode of a hand-kept inventory is that it is silently stale.
+  describe 'the closed code set' do
+    # A METHOD AND NOT A CONSTANT. `ROOT_DIR = …` inside an `RSpec.describe` block defines
+    # `Object::ROOT_DIR` for the whole process — HANDOVER §1, which cost a session when
+    # two files each defined `FIXTURES` and the collision only appeared in the randomised
+    # full run. `spec/shipped_templates_lint_spec.rb` already owns `ROOT`.
+    def plugin_root
+      File.expand_path('../..', __dir__)
+    end
+
+    def diagnostic_code_literals
+      files = Dir[File.join(plugin_root, 'app', '**', '*.rb')] +
+              Dir[File.join(plugin_root, 'lib', '**', '*.rb')]
+
+      files.flat_map do |path|
+        source = File.read(path, encoding: 'UTF-8')
+        # `Diagnostic.new(... code: :x ...)` and the `code: :x` inside a `Diagnostic.new`
+        # spanning several lines. Narrowed to files that mention Diagnostic at all, so a
+        # `code:` belonging to something else is not swept in.
+        next [] unless source.include?('Diagnostic')
+
+        source.scan(/Diagnostic\.new\((.*?)\)/m).flatten
+              .flat_map { |args| args.scan(/code:\s*:(\w+)/).flatten }
+      end.uniq.map(&:to_sym)
+    end
+
+    it 'finds some literals at all, or it is asserting nothing' do
+      expect(diagnostic_code_literals).not_to be_empty
+    end
+
+    it 'accepts every code the tree actually constructs one with' do
+      expect(diagnostic_code_literals - described_class.codes).to eq([])
+    end
+
+    it 'accepts every code the two failure vocabularies can produce' do
+      expect(RedmineReporterDashboards::Render::Failure::CODES - described_class.codes)
+        .to eq([])
+      expect(RedmineReporterDashboards::Liquid::TemplateRenderer::FAILURE_CODES -
+             described_class.codes).to eq([])
+    end
+
+    it 'refuses a code no vocabulary contains' do
+      expect do
+        described_class.new(origin: :engine, code: :invented, message: 'x',
+                            correlation_id: 'c')
+      end.to raise_error(ArgumentError, /not a diagnostic code/)
+    end
+  end
+
   describe 'the closed origin set' do
     it 'refuses an origin the views have no branch for' do
       expect do

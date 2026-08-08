@@ -39,7 +39,22 @@ module FailureDocumentSpecSupport
     label_reporter_report_diagnostic_line: 'Line',
     label_reporter_report_diagnostic_correlation_id: 'Correlation id',
     label_reporter_preflight_engine_version: 'Engine',
-    label_reporter_preflight_duration: 'Duration'
+    label_reporter_preflight_duration: 'Duration',
+    text_reporter_failure_document_value_unavailable:
+      'This value could not be shown in this document.'
+  }.freeze
+
+  # A locale where SOME keys are drawable and some are not — Polish, measured: 7 of the 12
+  # draw and 5 do not. This is the case that produced a half-English document.
+  POLISH = {
+    label_reporter_template: 'Szablon raportu',
+    label_reporter_failure_document_generated_at: 'Utworzono',
+    label_reporter_report_diagnostic_code: 'Kod',
+    label_reporter_report_diagnostic_correlation_id: 'Identyfikator korelacji',
+    label_reporter_preflight_duration: 'Czas trwania',
+    # The two that carry a character WinAnsi cannot draw.
+    label_reporter_failure_document_title: "Nie udało się wygenerować raportu",
+    label_reporter_report_failed_engine: "Obsługa nie zdołała utworzyć dokumentu"
   }.freeze
 
   RUSSIAN = {
@@ -56,6 +71,14 @@ module FailureDocumentSpecSupport
   def self.russian
     lambda do |key, locale|
       return RUSSIAN.fetch(key, ENGLISH.fetch(key)) if locale != :en
+
+      ENGLISH.fetch(key)
+    end
+  end
+
+  def self.polish
+    lambda do |key, locale|
+      return POLISH.fetch(key, ENGLISH.fetch(key)) if locale != :en
 
       ENGLISH.fetch(key)
     end
@@ -259,7 +282,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::FailureDocument do
       expect(document.locale_degraded?).to be(true)
     end
 
-    it 'falls back to the English string for the line it could not draw' do
+    it 'draws the WHOLE document in English rather than a line of it' do
       skip 'poppler-utils is not installed' unless FailureDocumentSpecSupport::INSPECTOR.available?
 
       expect(FailureDocumentSpecSupport::INSPECTOR.text(document.bytes))
@@ -273,6 +296,41 @@ RSpec.describe RedmineReporterDashboards::Reporting::FailureDocument do
                                      locale: :de)
 
       expect(drawable.locale_degraded?).to be(false)
+    end
+  end
+
+  # A PARTIALLY DRAWABLE LOCALE IS THE INTERESTING CASE, and per-key fallback got it
+  # wrong: measured across the nine shipped locales, Polish draws 7 of 12 keys and
+  # Hungarian 8 of 12, so the first version produced a Polish document with an English
+  # title and an English closing paragraph. A document half in each language is worse than
+  # either whole one, and this is the artefact that travels.
+  describe 'a locale the fonts can only half draw' do
+    subject(:document) do
+      described_class.new(diagnostic: diagnostic,
+                          generated_at: '2026-08-08 09:14:02 UTC',
+                          translate: FailureDocumentSpecSupport.polish,
+                          locale: :pl)
+    end
+
+    let(:text) do
+      skip 'poppler-utils is not installed' unless FailureDocumentSpecSupport::INSPECTOR.available?
+
+      FailureDocumentSpecSupport::INSPECTOR.text(document.bytes)
+    end
+
+    it 'says it fell back' do
+      expect(document.locale_degraded?).to be(true)
+    end
+
+    it 'draws the labels it COULD have drawn in Polish in English instead' do
+      expect(text).to include('Report template')
+      expect(text).not_to include('Szablon raportu')
+    end
+
+    it 'is not a mixture: no Polish string survives anywhere in the document' do
+      %w[Utworzono Kod Identyfikator].each do |polish|
+        expect(text).not_to include(polish)
+      end
     end
   end
 
@@ -299,6 +357,18 @@ RSpec.describe RedmineReporterDashboards::Reporting::FailureDocument do
       skip 'poppler-utils is not installed' unless FailureDocumentSpecSupport::INSPECTOR.available?
 
       expect(FailureDocumentSpecSupport::INSPECTOR.text(document.bytes)).to include('cid-1')
+    end
+
+    # IT DOES NOT BECOME A ROW OF QUESTION MARKS, which is what the first version drew —
+    # `???????????? ????? ?` — while both this class's comment and `MinimalPdf`'s said in
+    # as many words that this code does not do that.
+    it 'replaces the value with one sentence rather than one ? per character' do
+      skip 'poppler-utils is not installed' unless FailureDocumentSpecSupport::INSPECTOR.available?
+
+      text = FailureDocumentSpecSupport::INSPECTOR.text(document.bytes)
+
+      expect(text).to include('This value could not be shown in this document.')
+      expect(text).not_to match(/\?{3}/)
     end
   end
 

@@ -67,6 +67,13 @@ All notable changes to this plugin are documented in this file.
   attachment and no row. And a scheduled report that fails still notifies its owner with
   the correlation id and **no attachment**, exactly as before.
 
+  **And one limitation worth knowing before you switch it on.** It is drawn with the fonts
+  every PDF reader is required to have, which cover the Latin-1 alphabet only. On a Russian,
+  Chinese, Polish or Hungarian installation the document is written in English — the whole
+  document, never half of each — and a template name outside that alphabet is replaced by a
+  sentence saying it could not be shown. The correlation id and everything else identifying
+  the run are unaffected, and the diagnostics panel in the browser has no such limit.
+
 - **The diagnostics panel now names the template it is about.**
 
   It always showed the code, the line, the engine and the correlation id; the one thing

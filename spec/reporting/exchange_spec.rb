@@ -19,14 +19,18 @@ require_relative '../../lib/redmine_reporter_dashboards/reporting/exchange'
 # nothing to do with charts.
 module ExchangeSpecSupport
   # A stand-in for the model. Deliberately not the real one: this must be readable and
-  # writable without ActiveRecord, and answering the ten exported fields is the whole
-  # contract. `engine_hint_or_nil` is here because `Exchange.export` reads `engine_hint`
-  # through the model's DEGRADING reader (§7 rule 5), not off the column.
+  # writable without ActiveRecord, and answering the exported fields is the whole
+  # contract. `engine_hint_or_nil` and `failure_document?` are here because `Exchange`
+  # reads both columns through the model's DEGRADING readers (§7 rule 5), not off the row.
   FakeTemplate = Struct.new(:name, :description, :content, :source, :output, :orientation,
                             :page_size, :margins, :engine_hint, :enabled,
-                            keyword_init: true) do
+                            :failure_document, keyword_init: true) do
     def engine_hint_or_nil
       engine_hint
+    end
+
+    def failure_document?
+      failure_document ? true : false
     end
   end
 

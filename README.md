@@ -520,6 +520,14 @@ reasons the engine failed, so a failure document that needed the engine would be
 exactly when you wanted it. Nothing is saved: downloading one writes no attachment and no
 row anywhere.
 
+**One limitation, stated rather than discovered.** The failure document is drawn with the
+fonts every PDF reader is required to have, and those cover the Latin-1 alphabet and nothing
+else. On an installation running in Russian, Chinese, Polish or Hungarian the document is
+therefore written **in English** — the whole document, not a mixture — and a template whose
+name uses characters outside that alphabet has that one line replaced with a sentence saying
+so. Everything that identifies the run, the correlation id included, is unaffected. The
+diagnostics panel in the browser has no such limit and is in your own language.
+
 A **scheduled** report that fails is unchanged by this — its owner gets a notice with the
 correlation id and no attachment, and its recipients get nothing.
 

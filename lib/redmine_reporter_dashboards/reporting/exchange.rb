@@ -60,7 +60,7 @@ module RedmineReporterDashboards
       # rather than an accident.
       EXPORTED_FIELDS = %w[
         name description content source output orientation page_size margins
-        engine_hint enabled
+        engine_hint enabled failure_document
       ].freeze
 
       # THE CLOSED TYPE MAP. `technical-spec.md` §7b.2 asks for
@@ -102,7 +102,15 @@ module RedmineReporterDashboards
         # the one install the rule was written for — `ReportRun#resolve_engine` already
         # got this right, which is what made the inconsistency worth fixing rather than
         # arguing about.
-        DEGRADING_READERS = { 'engine_hint' => :engine_hint_or_nil }.freeze
+        # Both entries are §7 rule 5 columns, read through the guard rather than off the
+        # row, so an export from an install one minor behind answers `nil`/`false` instead
+        # of raising. `failure_document` was added by T-30 and was MISSING FROM THE LIST
+        # ABOVE at first — which this comment says out loud must be a decision rather than
+        # an accident, and it silently turned the flag off on every export → import
+        # round trip. FR-57's byte-identity still held, so no gate saw it; the independent
+        # review did.
+        DEGRADING_READERS = { 'engine_hint' => :engine_hint_or_nil,
+                              'failure_document' => :failure_document? }.freeze
 
         # A plain Hash. Not JSON, not YAML, not a string: T-23's `Accept:` says "export
         # is a plain Hash", and the reason is that the serialisation belongs to the

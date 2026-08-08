@@ -421,7 +421,12 @@ module ReporterDashboards
       if documents.empty?
         @diagnostic = Reporting::Diagnostic.new(
           origin: :batch, code: :no_documents, template_name: @template.name,
-          message: l(:text_reporter_template_no_issues), correlation_id: '-'
+          # A MINTED ID, not the literal '-' this used to carry. Both refusals tell the
+          # reader to quote the correlation id, and `-` identifies nothing while an empty
+          # one drew the label with nothing beside it. `ReportRun` already mints one for
+          # its own refusal (`cap_refusal_for_count`) for exactly this reason.
+          message: l(:text_reporter_template_no_issues),
+          correlation_id: SecureRandom.uuid
         )
         return respond_to_failure(:unprocessable_entity)
       end
@@ -443,7 +448,8 @@ module ReporterDashboards
           # `ReportRun`. Reading it off the wrong object was a NoMethodError on the one
           # branch nothing had reached, and the strengthened archive test found it the
           # moment it stopped being shadowed by "no engine registered".
-          correlation_id: @outcome.sections.first&.job&.correlation_id.to_s
+          correlation_id: @outcome.sections.first&.job&.correlation_id.presence ||
+                          SecureRandom.uuid
         )
         return respond_to_failure(:not_implemented)
       end

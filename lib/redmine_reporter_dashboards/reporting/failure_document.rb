@@ -68,6 +68,14 @@ module RedmineReporterDashboards
       CORRELATION_KEY = :label_reporter_report_diagnostic_correlation_id
       ENGINE_KEY = :label_reporter_preflight_engine_version
       DURATION_KEY = :label_reporter_preflight_duration
+      UNDRAWABLE_KEY = :text_reporter_failure_document_value_unavailable
+
+      # Every key that can appear on the page, so `effective_locale` can ask about the
+      # document as a whole rather than one string at a time. The three origin sentences
+      # are all in it because the locale decision must not depend on which failure this is.
+      ALL_KEYS = (ORIGIN_KEYS.values + [TITLE_KEY, NOTICE_KEY, TEMPLATE_KEY, GENERATED_KEY,
+                                        CODE_KEY, LINE_KEY, CORRELATION_KEY, ENGINE_KEY,
+                                        DURATION_KEY, UNDRAWABLE_KEY]).freeze
 
       attr_reader :diagnostic, :generated_at, :locale
 
@@ -138,31 +146,61 @@ module RedmineReporterDashboards
         list
       end
 
-      # A translated string, falling back to English when this locale cannot be drawn.
-      def text(key)
-        localized = @translate.call(key, locale).to_s
-        return localized if ::RedmineReporterDashboards::Render::MinimalPdf.encodable?(localized)
+      # THE LANGUAGE IS DECIDED ONCE, FOR THE WHOLE DOCUMENT, and the first version decided
+      # it per key. Measured by the independent review across the nine shipped locales:
+      #
+      #   de en es it pt-BR  12/12 keys drawable
+      #   hu                  8/12   (title, notice, duration, failed_engine undrawable)
+      #   pl                  7/12
+      #   ru zh               0/12
+      #
+      # Per-key fallback therefore produced a Polish document with an English title and an
+      # English closing paragraph, and a Hungarian one whose only English word was
+      # "Duration". A document half in each language is worse than either whole one, and
+      # this is the artefact that TRAVELS. So: if any string on the page cannot be drawn in
+      # the requested locale, the whole document is drawn in English and `locale_degraded?`
+      # says so.
+      def effective_locale
+        return @effective_locale if defined?(@effective_locale)
 
-        @fell_back = true
-        english = @translate.call(key, :en).to_s
-        return english if ::RedmineReporterDashboards::Render::MinimalPdf.encodable?(english)
-
-        # An English string this writer cannot draw would be a bug in the locale file
-        # rather than a property of the language, so it is not silently dropped either.
-        @fell_back = true
-        english.encode(::RedmineReporterDashboards::Render::MinimalPdf::ENCODING,
-                       invalid: :replace, undef: :replace, replace: '?')
+        @effective_locale = if locale.to_s == 'en' || every_key_drawable?(locale)
+                              locale
+                            else
+                              @fell_back = true
+                              :en
+                            end
       end
 
-      # Data rather than copy: there is no second language to fall back to, so an
-      # undrawable value is marked as one.
+      def every_key_drawable?(candidate)
+        ALL_KEYS.all? do |key|
+          ::RedmineReporterDashboards::Render::MinimalPdf
+            .encodable?(@translate.call(key, candidate).to_s)
+        end
+      end
+
+      def text(key)
+        string = @translate.call(key, effective_locale).to_s
+        return string if ::RedmineReporterDashboards::Render::MinimalPdf.encodable?(string)
+
+        # An English string this writer cannot draw is a defect in the locale file rather
+        # than a property of the language, so it is not silently dropped either.
+        @fell_back = true
+        string.encode(::RedmineReporterDashboards::Render::MinimalPdf::ENCODING,
+                      invalid: :replace, undef: :replace, replace: '?')
+      end
+
+      # A VALUE HAS NO SECOND LANGUAGE TO FALL BACK TO, AND IT DOES NOT BECOME `?????`.
+      # The first version encoded with `replace: '?'`, so a Cyrillic template name came out
+      # as `???????????? ????? ?` — which is exactly the "page of question marks" both this
+      # file and `MinimalPdf` say in as many words that this code does not produce. One
+      # explicit sentence instead: the reader is told the value could not be shown, and the
+      # correlation id below it is what identifies the run anyway.
       def value(raw)
         string = raw.to_s
         return string if ::RedmineReporterDashboards::Render::MinimalPdf.encodable?(string)
 
         @fell_back = true
-        string.encode(::RedmineReporterDashboards::Render::MinimalPdf::ENCODING,
-                      invalid: :replace, undef: :replace, replace: '?')
+        text(UNDRAWABLE_KEY)
       end
 
       def safe_id

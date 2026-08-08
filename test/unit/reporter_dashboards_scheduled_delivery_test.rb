@@ -658,7 +658,12 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
     # §7b.3's leak prevention. `detail` holds the raw exception and can hold SQL, role ids
     # and project ids; `Diagnostic#to_h` omits it and so must the mail.
     add_recipient(@recipient)
-    diagnostic = Diagnostic.new(origin: :template, code: :boom, message: 'the safe summary',
+    # A REAL CODE. This said `:boom` until T-30 closed the code set — `FailureDocument`'s
+    # safety argument is that `code` is a vocabulary rather than text, so the constructor
+    # now refuses one no vocabulary contains, and this example's subject was never the
+    # code anyway.
+    diagnostic = Diagnostic.new(origin: :template, code: :syntax_error,
+                                message: 'the safe summary',
                                 correlation_id: 'cid-9',
                                 detail: 'SELECT secret FROM issues WHERE role_id = 4')
 
