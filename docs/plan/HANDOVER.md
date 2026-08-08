@@ -522,6 +522,32 @@ with migration 008 in place.
 three engines for the one reason that step must never fail for — having found nothing to
 check. `working-directory` is per step, not per job.
 
+**VALUE AGREEMENT PROVES ARITHMETIC AND NOTHING ELSE. T-31's oracle compared every figure
+two ways, on two engines, and a fresh-subagent review then found TWO BLOCKERS and EIGHT MAJORS
+without a single figure disagreeing.** Worth reading before writing another oracle, because
+the instinct after building one is that correctness is settled:
+
+| what agreement could not see | what it was |
+|---|---|
+| a LABEL read off a different query | `group_by: issue` printed the subject of an issue the actor may not see — `time_entries.issue_id` is a column on the ENTRY, so it survives the visibility condition core puts in `left_join_issue` |
+| the absence of a CEILING | `limit: 0` meant "no cap", so 50 000 buckets came back with `truncated: false`. Every figure in them was right |
+| ORDER, and therefore membership | `sort_by` is not stable, so ties followed the engine's row order; past a cap that changes WHICH buckets exist |
+| a SORT MODE doing something else | `sort: label` sorted by the raw id, and the spec's own name said "orders by key when asked for a label sort" |
+| WHICH bucket the cap folded | `(none)` merged into `(other)`: unclassified hours reported as "some other activity" |
+| a key that should have been TWO | a project-overridden activity as two buckets carrying the same name |
+| a FILTER NAME | six of eleven drill-throughs named an `IssueQuery` filter; `author_id` exists on `TimeEntryQuery` and means the ENTRY's author, so it resolved to a plausible WRONG row set |
+| an argument DROPPED | `drill:`, `split_by:`, `period:` silently ignored, against a README that promised them |
+
+The pattern: an oracle checks the NUMBER in the bucket. It says nothing about the bucket's
+label, its order, its existence, or the link on it. Those need the rows under the example's own
+control (a recording double), a real `TimeEntryQuery`, and a real invisible record — three
+different processes, which is why T-31's tests ended up in three files.
+
+**AND A "MUTATION-TESTED" CLAIM IS ONLY AS GOOD AS THE MUTATIONS SOMEBODY ELSE CHOOSES.** The
+same review re-ran 21 mutations of its own against a commit whose message said "27 mutations,
+27 red" and **thirteen survived** — every one in a guard the commit named as killed. Choosing
+your own mutations tests the examples you were already thinking about. Ask a reviewer to pick.
+
 **NEVER PUT `spec/adapter` AND THE DB-LESS SPECS IN ONE RSPEC PROCESS. It produces a
 CONSTANT SEVEN-FAILURE FLOOR, and a mutation harness built on it reports every mutation as
 "red" whether or not the mutation did anything.** `adapter_helper.rb` says the two must be

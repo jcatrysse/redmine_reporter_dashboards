@@ -208,3 +208,24 @@ pl:
   field_redmine_reporter_dashboards_schedule_enabled: "Włączony"
   text_reporter_schedule_template_hidden: "Szablon raportu, którego nie możesz zobaczyć"
   permission_render_reporter_dashboards_reports_as_others: "Generowanie raportów jako inny użytkownik — daje dostęp do wszystkiego, co widzi ten użytkownik"
+
+# T-31 - the aggregation degradations, as sentences rather than as raw symbols.
+#
+# `_degradations.html.erb` used to print `Degradation#to_s`: a code and an English sentence
+# built in `lib/`. These eight keys are the codes T-31 introduced or inherited on that path;
+# the remaining degradation codes still print raw and that gap is §Findings S-17, with the
+# mechanism (a key per code, `data` as interpolation, `to_s` as the fallback) settled here.
+#
+# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all nine files.
+# A key whose placeholder does not match its emit site raises
+# `I18n::MissingInterpolationArgument`, which `reporter_degradation_text` catches into the raw
+# fallback - so a mistake here loses the translation, never the message.
+
+  text_reporter_degradation_aggregation_group_by_required: "Raportu o spędzonym czasie nie można podsumować bez wymiaru. Dodaj group_by: do tagu agregacji — na przykład group_by: activity."
+  text_reporter_degradation_aggregation_dimension_unknown: "Raportu o spędzonym czasie nie można grupować według %{group_by}."
+  text_reporter_degradation_aggregation_measure_unknown: "%{measure} nie jest miarą, którą raport o spędzonym czasie może obliczyć."
+  text_reporter_degradation_aggregation_dimension_unavailable: "Grupowanie według %{group_by} wymaga powiązania każdego wpisu z jego zagadnieniem, co zapewnia tylko zapisane zapytanie o spędzony czas. Wybierz je dla tego raportu."
+  text_reporter_degradation_aggregation_sort_unsupported: "Sortowanie według %{sort} nie jest dostępne dla spędzonego czasu, więc grupy są uporządkowane według rozmiaru."
+  text_reporter_degradation_aggregation_axis_truncated: "%{group_by} ma zbyt wiele wartości, aby je pokazać: wymieniono %{kept}, a %{folded} zostało połączonych."
+  text_reporter_degradation_aggregation_params_unsupported: "%{params} nie może być użyte w raporcie o spędzonym czasie. Pozostała część agregacji została obliczona."
+  text_reporter_degradation_aggregation_source_unsupported: "Źródło danych tego raportu (%{source}) nie może być podsumowane przez %{tag}."

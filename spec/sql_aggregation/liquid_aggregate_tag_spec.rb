@@ -412,9 +412,15 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   # over two issues came back as `2` in every bucket, and `spent_hours` answered nil. A
   # wrong number under a right heading is the outcome this whole guard exists to prevent.
   describe 'a scope over a table this kernel does not count' do
+    # THE ACTOR IS A NAMED OBJECT, so an example can assert the tag handed THAT one to the
+    # aggregator. `Object.new` inline made the actor unassertable, and a mutation replacing
+    # `actor: render_context&.actor` with `actor: nil` stayed green — which is the wiring the
+    # `issue` dimension's visibility scoping depends on entirely.
+    let(:the_actor) { Object.new }
+
     def owned_context(source)
       render_context = RedmineReporterDashboards::Liquid::RenderContext.new(
-        actor: Object.new, scope: scope, source: source
+        actor: the_actor, scope: scope, source: source
       )
       build_context({}, { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY =>
                           render_context })
@@ -456,6 +462,101 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
         .render(ctx)
 
       expect(ctx.scopes.last['stats']).to eq(dimension_result)
+    end
+
+    # THE ACTOR IS CARRIED, EXPLICITLY (INV-1). The aggregator needs it to scope the `issue`
+    # dimension's labels by visibility, and `actor: nil` there means it withholds them — so a
+    # dispatch that dropped the actor would silently stop labelling issues on every report.
+    # MUTATION-TESTED: replacing it with `nil` left the whole suite green before this.
+    it 'hands the render context\'s own actor to the aggregator' do
+      expect(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown).with(scope, hash_including(actor: the_actor))
+        .and_return(dimension_result)
+
+      build_tag('group_by: activity, assign_to: stats').render(owned_context(:time_entries))
+    end
+
+    # AND THE DEFAULTS ARE THE AGGREGATOR'S OWN, not a second copy the two can disagree
+    # about. `limit: 0` in particular is "the author set none", which the aggregator answers
+    # with its 200-bucket ceiling; a tag that substituted its own number would move the
+    # ceiling without touching the module that documents it.
+    it 'passes the aggregator\'s own defaults when the markup names none' do
+      aggregator = RedmineReporterDashboards::Aggregation::TimeEntryAggregator
+      expect(aggregator)
+        .to receive(:breakdown)
+        .with(scope, hash_including(measure: aggregator::DEFAULT_MEASURE,
+                                    sort: aggregator::DEFAULT_SORT,
+                                    limit: aggregator::DEFAULT_LIMIT,
+                                    other_label: aggregator::DEFAULT_OTHER_LABEL,
+                                    empty_label: nil))
+        .and_return(dimension_result)
+
+      build_tag('group_by: activity, assign_to: stats').render(owned_context(:time_entries))
+    end
+
+    # AN ARGUMENT THE TIME-ENTRY PATH CANNOT HONOUR IS NAMED, not dropped. An independent
+    # review measured `drill: true` and `split_by:` vanishing in silence — no `bucket.url`, no
+    # crosstab, nothing on the page — against a README that promised drill-through.
+    %w[split_by period periods drill age_buckets of fields].each do |param|
+      it "degrades visibly on #{param}, which it cannot use" do
+        ctx = owned_context(:time_entries)
+        allow(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+          .to receive(:breakdown).and_return(dimension_result)
+
+        build_tag("group_by: activity, #{param}: x, assign_to: stats").render(ctx)
+
+        expect(codes(ctx)).to include('aggregation_params_unsupported')
+      end
+    end
+
+    it 'names WHICH arguments, so the author can remove them' do
+      ctx = owned_context(:time_entries)
+      allow(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown).and_return(dimension_result)
+
+      build_tag('group_by: activity, split_by: user, drill: true, assign_to: stats').render(ctx)
+
+      recorded = ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
+                    .diagnostics.to_a.to_s
+      expect(recorded).to include('split_by')
+      expect(recorded).to include('drill')
+    end
+
+    # `empty_label:` AND `logger:` ARE CARRIED. Both were surviving mutations, and both are
+    # small on purpose: `empty_label` is the only way an author renames the unclassified
+    # bucket, and the logger is the half of a refusal that reaches whoever is on call rather
+    # than whoever is authoring. Asserted on the CALL, because a renamed bucket and a missing
+    # log line are invisible in a result.
+    it 'carries the author\'s own empty_label and a real logger' do
+      expect(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown)
+        .with(scope, hash_including(empty_label: 'unclassified', logger: Rails.logger))
+        .and_return(dimension_result)
+
+      build_tag('group_by: activity, empty_label: unclassified, assign_to: stats')
+        .render(owned_context(:time_entries))
+    end
+
+    it 'says nothing when every argument is one it can use' do
+      ctx = owned_context(:time_entries)
+      allow(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown).and_return(dimension_result)
+
+      build_tag('group_by: activity, measure: count, sort: label, limit: 5, ' \
+                'other_label: rest, empty_label: none, assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).to eq([])
+    end
+
+    # AND THE ISSUE PATH IS UNTOUCHED BY ALL OF IT: `drill:` and `split_by:` are real there.
+    it 'does not degrade those arguments on an issue-source template' do
+      ctx = owned_context(:issues)
+      allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .and_return(dimension_result)
+
+      build_tag('group_by: status, split_by: tracker, assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).to eq([])
     end
 
     # A TIME-ENTRY AGGREGATION WITH NO DIMENSION IS STILL A REFUSAL. There is no time-entry

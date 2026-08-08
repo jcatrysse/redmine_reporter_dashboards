@@ -19,8 +19,12 @@
   <div class="reporter-degradations">
     <p><strong><%= l(:label_reporter_preview_degradations) %></strong></p>
     <ul>
+      <%# `reporter_degradation_text` and not `to_s`: a code with a locale key becomes a
+          sentence in the reader's language, and one without still prints its raw `to_s` so
+          nothing disappears. See the helper for which codes are covered and why the rest
+          are §Findings S-17 rather than this partial's problem. %>
       <% outcome.degradations.each do |degradation| %>
-        <li><%= degradation.to_s %></li>
+        <li><%= reporter_degradation_text(degradation) %></li>
       <% end %>
     </ul>
   </div>

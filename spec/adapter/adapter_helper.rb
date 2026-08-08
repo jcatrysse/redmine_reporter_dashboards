@@ -87,6 +87,12 @@ module RrdAdapterHarness
   PROJECT_WIDE     = 4 # active; holds the cap-boundary fixture (see seed_wide!)
   PROJECT_BENCH    = 5 # active; empty unless seed_bench! is called (T-03, see below)
   PROJECT_HOURS    = 6 # active; T-31's time-entry fixture (see seed_hours!)
+  # Active, and NOBODY is a member — so `Issue.visible` excludes its issues for every actor
+  # while a time entry in PROJECT_HOURS may still point at one. That is the disclosure fixture;
+  # see HOURS_ENTRIES. It is its own project rather than PROJECT_ARCHIVED because the corpus's
+  # `reported` scope is `[PROJECT_MAIN, PROJECT_ARCHIVED]` — an issue added there would move
+  # recorded values, and the point of a separate project is that none of them can.
+  PROJECT_HIDDEN   = 7
 
   CF_DEPARTMENT = 10 # list,  visible everywhere
   CF_POINTS     = 11 # int,   visible everywhere
@@ -192,9 +198,21 @@ module RrdAdapterHarness
   ACTIVITY_DESIGN      = 20
   ACTIVITY_DEVELOPMENT = 21
   ACTIVITY_UNUSED      = 22 # no entry carries it — so it must never appear as a bucket
+  # A PROJECT OVERRIDE of ACTIVITY_DESIGN: Redmine creates a CHILD enumeration with its own
+  # id when a project overrides an activity, and entries logged before the override keep the
+  # parent id while later ones get the child. Two buckets with one label unless the
+  # aggregator rolls the child up, which core does at `time_report.rb:125`. An ordinary
+  # administrator action, and the fixture for the finding.
+  ACTIVITY_DESIGN_LOCAL = 23
+  # A LABEL THAT DISAGREES WITH ITS ID ORDER, which is the only way `sort: label` can be
+  # told apart from `sort by raw id`. The first version's fixture had Design(20) before
+  # Development(21) both ways round, so its label-sort example passed while the code sorted
+  # by id — and the example's own name said "orders by key when asked for a label sort".
+  ACTIVITY_ANALYSIS = 24
 
-  HOURS_ISSUE_BUG     = 6 # tracker 1, STATUS_NEW,    priority 2, version 2, category 1
-  HOURS_ISSUE_FEATURE = 7 # tracker 2, STATUS_CLOSED, priority 3, no version, no category
+  HOURS_ISSUE_BUG     = 6 # tracker 1, STATUS_NEW,    version 3, category 2, in PROJECT_HOURS
+  HOURS_ISSUE_FEATURE = 7 # tracker 2, STATUS_CLOSED, no version, no category, in PROJECT_HOURS
+  HOURS_ISSUE_HIDDEN  = 8 # in PROJECT_HIDDEN, so visible to NOBODY — see HOURS_ENTRIES
 
   # Six entries, and every one of them is carrying a case:
   #
@@ -216,12 +234,39 @@ module RrdAdapterHarness
   # `[issue_id, user_id, activity_id, hours]`, written out rather than generated: which
   # row carries which case is the whole point of the fixture.
   HOURS_ENTRIES = [
-    [HOURS_ISSUE_BUG,     ACTORS[:manager],   ACTIVITY_DESIGN,      0.1],
-    [HOURS_ISSUE_BUG,     ACTORS[:manager],   ACTIVITY_DESIGN,      0.2],
-    [HOURS_ISSUE_BUG,     ACTORS[:developer], ACTIVITY_DEVELOPMENT, 1.25],
-    [HOURS_ISSUE_FEATURE, ACTORS[:developer], ACTIVITY_DEVELOPMENT, 2.5],
-    [HOURS_ISSUE_FEATURE, ACTORS[:manager],   nil,                  0.75],
-    [nil,                 ACTORS[:manager],   ACTIVITY_DEVELOPMENT, 4.0]
+    [HOURS_ISSUE_BUG,     ACTORS[:manager],   ACTIVITY_DESIGN,       0.5],
+    [HOURS_ISSUE_BUG,     ACTORS[:developer], ACTIVITY_DEVELOPMENT,  1.25],
+    [HOURS_ISSUE_FEATURE, ACTORS[:developer], ACTIVITY_DEVELOPMENT,  2.5],
+    [HOURS_ISSUE_FEATURE, ACTORS[:manager],   nil,                   0.75],
+    [nil,                 ACTORS[:manager],   ACTIVITY_DEVELOPMENT,  4.0],
+    # THE OVERRIDE, logged against the project-local child of ACTIVITY_DESIGN. Rolled up it
+    # joins ACTIVITY_DESIGN's bucket for a total of 0.75; not rolled up it is a SECOND bucket
+    # also labelled "Design", which is the finding.
+    [HOURS_ISSUE_BUG,     ACTORS[:developer], ACTIVITY_DESIGN_LOCAL, 0.25],
+    # THE DISCLOSURE CASE, and the fixture for a leak an independent review measured. The
+    # ENTRY is in PROJECT_HOURS and visible; its ISSUE is HOURS_ISSUE_HIDDEN, which lives in
+    # PROJECT_HIDDEN, where nobody is a member, so it is visible to nobody. `time_entries.issue_id` is a column on
+    # the entry, so it survives core's visibility-carrying `left_join_issue` — and the first
+    # version then read the SUBJECT off an unscoped `Issue.where(id:)`. Redmine prints
+    # `"##{id}"` instead (`timelog_helper.rb:80-85`); so must this.
+    #
+    # An issue in an unreachable project rather than an `is_private` one because this harness
+    # has no `is_private` column — structurally the same fact, which is that
+    # `Issue.visible(actor)` excludes the id while the entry keeps it. The review that found
+    # the leak used a real private issue on a booted Redmine and got the same shape.
+    [HOURS_ISSUE_HIDDEN,  ACTORS[:manager],   ACTIVITY_DEVELOPMENT,  1.0],
+    # ALPHABETICALLY FIRST, NUMERICALLY LAST, AND THE SMALLEST FIGURE — see
+    # ACTIVITY_ANALYSIS: a label sort and a figure sort then disagree at both ends at once.
+    #
+    # AND ITS TWO ROWS ARE THE ROUNDING FIXTURE. `0.1 + 0.2` is 0.30000000000000004 while the
+    # nearest double to `0.3` is 0.29999999999999998889, so the sum is NOT `== 0.3` in Ruby or
+    # in any engine's float arithmetic — which is what makes `number`'s `.round(2)`
+    # observable. MEASURED: a three-row bucket of 0.1 + 0.2 + 0.5 IS exactly `== 0.8`, so an
+    # earlier fixture asserted a rounding hazard it did not contain and deleting the
+    # `.round(2)` stayed green. Two rows, and float addition is commutative, so no engine's
+    # summation order can make it representable by accident.
+    [HOURS_ISSUE_FEATURE, ACTORS[:developer], ACTIVITY_ANALYSIS,     0.1],
+    [HOURS_ISSUE_BUG,     ACTORS[:developer], ACTIVITY_ANALYSIS,     0.2]
   ].freeze
 
   class << self
@@ -303,8 +348,14 @@ module RrdAdapterHarness
       end
 
       c.create_table(:enumerations, force: true) do |t|
-        t.string :name
-        t.string :type
+        t.string  :name
+        t.string  :type
+        # T-31. Redmine's own column, and the reason it is here is a wrong number: a project
+        # may OVERRIDE a time-entry activity, which creates a CHILD enumeration with its own
+        # id, so grouping on the bare `time_entries.activity_id` produces two buckets with the
+        # same label. Core rolls the child up — `time_report.rb:125` — and so does
+        # `TimeEntryAggregator`, which needs the column to do it.
+        t.integer :parent_id
       end
 
       c.create_table(:users, force: true) do |t|
@@ -457,14 +508,24 @@ module RrdAdapterHarness
         belongs_to :user, optional: true
         belongs_to :activity, class_name: 'TimeEntryActivity', optional: true
         # T-31. `belongs_to :issue` and `left_join_issue` are BOTH Redmine's own
-        # (`app/models/time_entry.rb`), and `TimeEntryAggregator`'s :issue dimensions exist
-        # only because `TimeEntryQuery#base_scope` calls the scope. Spelled as the raw LEFT
-        # OUTER JOIN core spells it, because `joined_to_issues?` reads the statement's text
-        # and an association join would be a different string — a stand-in that produced
+        # (`app/models/time_entry.rb:64-70`), and `TimeEntryAggregator`'s :issue dimensions
+        # exist only because `TimeEntryQuery#base_scope` calls the scope. Spelled as the raw
+        # LEFT OUTER JOIN core spells it, because `joined_to_issues?` reads the statement's
+        # text and an association join would be a different string — a stand-in that produced
         # `INNER JOIN` would turn the join into a filter and quietly drop the no-issue entry.
+        #
+        # AND IT CARRIES `Issue.visible_condition` IN THE ON CLAUSE, because core's does. An
+        # independent review found the first version omitting it and called the omission
+        # correctly: without it the ISSUE-attribute dimensions inherit no visibility at all, so
+        # the oracle would have agreed with a leak on seven of eight dimensions. With it, an
+        # issue the actor cannot see contributes its hours to the `(none)` bucket — which is
+        # core's behaviour and is what the `issue` dimension's label scoping has to match.
         belongs_to :issue, optional: true
         scope :left_join_issue, -> {
-          joins('LEFT OUTER JOIN issues ON issues.id = time_entries.issue_id')
+          joins(
+            'LEFT OUTER JOIN issues ON issues.id = time_entries.issue_id ' \
+            "AND (#{RrdAdapterHarness.issue_visibility_sql})"
+          )
         }
 
         def self.visible_condition(user)
@@ -760,7 +821,8 @@ module RrdAdapterHarness
         { id: PROJECT_SWEEP,    name: 'Sweep',    status: 1 },
         { id: PROJECT_WIDE,     name: 'Wide',     status: 1 },
         { id: PROJECT_BENCH,    name: 'Bench',    status: 1 },
-        { id: PROJECT_HOURS,    name: 'Hours',    status: 1 }
+        { id: PROJECT_HOURS,    name: 'Hours',    status: 1 },
+        { id: PROJECT_HIDDEN,   name: 'Hidden',   status: 1 }
       ])
 
       ::IssueStatus.insert_all!([
@@ -783,9 +845,18 @@ module RrdAdapterHarness
       # `TimeEntryActivity` stand-in carries no `type` default scope and a colliding id would
       # let an hours-by-activity axis borrow a priority's name and still look right.
       ::TimeEntryActivity.insert_all!([
-        { id: ACTIVITY_DESIGN,      name: 'Design',      type: 'TimeEntryActivity' },
-        { id: ACTIVITY_DEVELOPMENT, name: 'Development', type: 'TimeEntryActivity' },
-        { id: ACTIVITY_UNUSED,      name: 'Unused',      type: 'TimeEntryActivity' }
+        { id: ACTIVITY_DESIGN,      name: 'Design',      type: 'TimeEntryActivity',
+          parent_id: nil },
+        { id: ACTIVITY_DEVELOPMENT, name: 'Development', type: 'TimeEntryActivity',
+          parent_id: nil },
+        { id: ACTIVITY_UNUSED,      name: 'Unused',      type: 'TimeEntryActivity',
+          parent_id: nil },
+        # The project-local override. Redmine copies the parent's name onto the child, which
+        # is exactly why an un-rolled-up axis shows two buckets a reader cannot tell apart.
+        { id: ACTIVITY_DESIGN_LOCAL, name: 'Design',     type: 'TimeEntryActivity',
+          parent_id: ACTIVITY_DESIGN },
+        { id: ACTIVITY_ANALYSIS,    name: 'Analysis',    type: 'TimeEntryActivity',
+          parent_id: nil }
       ])
       ::User.insert_all!([
         { id: ACTORS[:manager],   login: 'alice', firstname: 'Alice', lastname: 'Adams' },
@@ -848,7 +919,15 @@ module RrdAdapterHarness
           author_id: ACTORS[:developer], assigned_to_id: nil, parent_id: nil, done_ratio: 100,
           subject: 'billable feature', description: nil, estimated_hours: 3.0,
           start_date: today - 20, due_date: nil, created_on: at(20), updated_on: at(6),
-          closed_on: at(6) }
+          closed_on: at(6) },
+        # The one no actor may see. Its SUBJECT is the string a leak would print, so it is
+        # written to be unmistakable in a failure message.
+        { id: HOURS_ISSUE_HIDDEN, project_id: PROJECT_HIDDEN, tracker_id: 1,
+          status_id: STATUS_NEW, priority_id: 3, category_id: nil, fixed_version_id: nil,
+          author_id: ACTORS[:manager], assigned_to_id: ACTORS[:manager], parent_id: nil,
+          done_ratio: 0, subject: 'CONFIDENTIAL ACQUISITION', description: nil,
+          estimated_hours: nil, start_date: today - 30, due_date: nil, created_on: at(30),
+          updated_on: at(30), closed_on: nil }
       ])
 
       ::TimeEntry.insert_all!(HOURS_ENTRIES.each_with_index.map do |(issue_id, user_id, activity_id, hours), i|
@@ -863,10 +942,25 @@ module RrdAdapterHarness
     # project — the latter so the 40 invisible hours seeded there have to be excluded by the
     # visibility condition rather than by the project filter. `joined: false` is the other
     # shape a caller may hold: `TimeEntry.visible` on its own, with no issues join at all.
+    #
+    # INSIDE `as_actor`, because core's `left_join_issue` interpolates
+    # `Issue.visible_condition(User.current)` at scope-construction time — an ambient read in
+    # Redmine's own code, which this stand-in reproduces rather than improves. The SQL string
+    # is baked when the lambda runs, so the relation carries the right actor afterwards.
     def hours_scope(actor_name, joined: true)
-      scope = ::TimeEntry.visible(actor(actor_name))
-                         .where(project_id: [PROJECT_HOURS, PROJECT_ARCHIVED])
-      joined ? scope.left_join_issue : scope
+      as_actor(actor_name) do
+        scope = ::TimeEntry.visible(actor(actor_name))
+                           .where(project_id: [PROJECT_HOURS, PROJECT_ARCHIVED])
+        joined ? scope.left_join_issue : scope
+      end
+    end
+
+    # The condition core's `left_join_issue` puts in its ON clause. Defaults to `User.current`
+    # exactly as `Issue.visible_condition` does, and answers `1=0` for nobody — fail closed.
+    def issue_visibility_sql(user = ::User.current)
+      return '1=0' if user.nil?
+
+      entitled_projects_subquery_sql(user, role_ids_for(user))
     end
 
     # Three roles, four actors, six memberships. Written out one row at a time

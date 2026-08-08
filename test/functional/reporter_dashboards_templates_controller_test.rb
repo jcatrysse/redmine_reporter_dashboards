@@ -1526,7 +1526,13 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
 
     assert_response :success
     assert_select 'div.reporter-degradations'
-    assert_include 'aggregation_group_by_required', response.body
+    # THE SENTENCE, NOT THE SYMBOL. Asserting `aggregation_group_by_required` pinned the raw
+    # identifier as a tested contract, which is what an independent review objected to: the
+    # panel printed `Degradation#to_s` and nine locale files had no key for any code. The key
+    # exists now, so what the reader sees is what is asserted.
+    assert_include ERB::Util.html_escape(l(:text_reporter_degradation_aggregation_group_by_required)),
+                   response.body
+    assert_not_include 'aggregation_group_by_required', response.body
     assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body
   end
 
@@ -1541,7 +1547,50 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     }
 
     assert_response :success
-    assert_include 'aggregation_group_by_required', response.body
+    assert_include ERB::Util.html_escape(l(:text_reporter_degradation_aggregation_group_by_required)),
+                   response.body
+  end
+
+  # AN ARGUMENT THE TIME-ENTRY PATH CANNOT HONOUR IS NAMED ON THE PAGE. An independent review
+  # measured `drill: true` and `split_by:` being dropped in SILENCE — no `bucket.url`, no
+  # crosstab, nothing said — while the README promised drill-through. HANDOVER §1's rule is
+  # that every aggregator entry point LOGS AND DEGRADES on an argument it cannot use.
+  def test_an_argument_the_time_entry_path_cannot_use_is_named_on_the_page
+    template = create_template(
+      source: 'time_entries',
+      content: '{% sql_aggregate group_by: activity, drill: true, split_by: user, ' \
+               'assign_to: stats %}TOTAL=[{{ stats.total }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_select 'div.reporter-degradations'
+    # The sentence interpolates the parameter names, so the author is told WHICH arguments —
+    # a degradation that only said "unsupported parameters" would not be actionable.
+    assert_include ERB::Util.html_escape('split_by'), response.body
+    assert_include ERB::Util.html_escape('drill'), response.body
+    # ...and the aggregation still ran, because the dimension it CAN use was given.
+    assert_not_include ERB::Util.html_escape('TOTAL=[0]'), response.body
+  end
+
+  # AND A MISTYPED DIMENSION IS NAMED TOO, in the reader's language, from a code the
+  # aggregator raised rather than the tag — two layers, one panel (INV-4).
+  def test_a_mistyped_dimension_is_named_on_the_page
+    template = create_template(
+      source: 'time_entries',
+      content: '{% sql_aggregate group_by: activty, assign_to: stats %}TOTAL=[{{ stats.total }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include ERB::Util.html_escape(
+      l(:text_reporter_degradation_aggregation_dimension_unknown, group_by: 'activty')
+    ), response.body
+    assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body
   end
 
   # AND A CLEAN ISSUE RENDER SAYS NOTHING, so the block is not simply always drawn.

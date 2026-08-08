@@ -156,18 +156,16 @@ module SqlAggregation
         return ''
       end
 
-      # THIS KERNEL COUNTS ISSUES, SO IT IS ONLY EVER GIVEN AN ISSUE SCOPE — T-31, and the
-      # argument, the measurement and the reason it is not a relation sniff all live on
-      # `ScopeBinding.issue_kernel_permitted?`, which `{% version_rollup %}` shares. It
-      # degrades to the empty result rather than raising, which is what every other unusable
-      # argument on this path does (HANDOVER §1: "every aggregator entry point LOGS AND
-      # DEGRADES"). The owned time-entry aggregator that replaces this branch is T-31's
-      # second increment.
-      # T-31 increment 2: A TIME-ENTRY SCOPE GOES TO THE TIME-ENTRY AGGREGATOR. Increment 1
-      # refused here, because answering with the issue kernel is §Findings S-13 — it counts
-      # `DISTINCT issues.id` and would report issue counts under time-entry labels. Now there
-      # is somewhere correct to send it, and the refusal survives only for a source with no
-      # aggregator at all, which is what `time_entry_result` answering nil means.
+      # A TIME-ENTRY SCOPE GOES TO THE TIME-ENTRY AGGREGATOR — T-31 increment 2. This kernel
+      # counts `DISTINCT issues.id`, so answering a time-entry scope with it is §Findings
+      # S-13: issue counts under time-entry labels. Increment 1 refused here because there was
+      # nowhere correct to send it; now there is, and what remains refused is a source with no
+      # aggregator at all — see `time_entry_result`.
+      #
+      # `{% version_rollup %}` still REFUSES rather than dispatching, through
+      # `ScopeBinding.issue_kernel_permitted?`, which is why that method still exists with one
+      # caller: a per-target-version rollup over time entries is a different report nobody has
+      # specified.
       source = RedmineReporterDashboards::Liquid::ScopeBinding.report_source(context)
       if source != :issues
         result = time_entry_result(scope, context, source)
@@ -222,31 +220,39 @@ module SqlAggregation
     # and closed — so a tag with no dimension has nothing to ask for, and answering the empty
     # result says that more honestly than inventing a series.
     def time_entry_result(scope, context, source)
-      diagnostics = RedmineReporterDashboards::Liquid::RenderContext.from(context)&.diagnostics
+      render_context = RedmineReporterDashboards::Liquid::RenderContext.from(context)
+      diagnostics    = render_context&.diagnostics
+      aggregator     = RedmineReporterDashboards::Aggregation::TimeEntryAggregator
 
       unless source == :time_entries
-        diagnostics&.degrade(:aggregation_source_unsupported, source: source.to_s,
-                                                             tag: 'sql_aggregate')
-        Rails.logger.warn("[sql_aggregate] no aggregator for a #{source} scope")
+        degrade_here(diagnostics, :aggregation_source_unsupported,
+                     "no aggregator for a #{source} scope",
+                     source: source.to_s, tag: 'sql_aggregate')
         return nil
       end
 
       group_by = str_param(@raw_params['group_by'], context)
       if group_by.strip.empty?
-        diagnostics&.degrade(:aggregation_group_by_required, source: source.to_s)
-        Rails.logger.warn('[sql_aggregate] a time-entry aggregation needs group_by')
+        degrade_here(diagnostics, :aggregation_group_by_required,
+                     'a time-entry aggregation needs group_by',
+                     source: source.to_s)
         return nil
       end
 
-      RedmineReporterDashboards::Aggregation::TimeEntryAggregator.breakdown(
+      report_unsupported_params(diagnostics, context)
+
+      aggregator.breakdown(
         scope,
         group_by: group_by,
-        measure: str_param(@raw_params['measure'], context,
-                           default: RedmineReporterDashboards::Aggregation::TimeEntryAggregator::DEFAULT_MEASURE),
-        sort: str_param(@raw_params['sort'], context, default: 'count'),
-        limit: int_param(@raw_params['limit'], context, default: 0),
+        # EXPLICIT, NEVER `User.current` (INV-1). The aggregator needs it for exactly one
+        # thing — scoping the `issue` dimension's labels by visibility — and a nil actor makes
+        # it withhold those labels rather than read them unscoped.
+        actor: render_context&.actor,
+        measure: str_param(@raw_params['measure'], context, default: aggregator::DEFAULT_MEASURE),
+        sort: str_param(@raw_params['sort'], context, default: aggregator::DEFAULT_SORT),
+        limit: int_param(@raw_params['limit'], context, default: aggregator::DEFAULT_LIMIT),
         other_label: str_param(@raw_params['other_label'], context,
-                               default: RedmineReporterDashboards::Aggregation::TimeEntryAggregator::DEFAULT_OTHER_LABEL),
+                               default: aggregator::DEFAULT_OTHER_LABEL),
         empty_label: str_param(@raw_params['empty_label'], context, default: nil),
         logger: Rails.logger,
         # THE AUTHOR SEES THE REFUSAL TOO. A mistyped `group_by` used to answer the empty
@@ -254,6 +260,49 @@ module SqlAggregation
         # review raised against increment 1, one layer down (INV-4).
         diagnostics: diagnostics
       )
+    end
+
+    # Parameters the issue path understands and the time-entry path does not. **They used to
+    # be dropped in silence**, which an independent review measured end to end: a template
+    # asking for a crosstab got a single axis, `drill: true` produced no `bucket.url` at all,
+    # and nothing on the page said either — while the README promised drill-through. HANDOVER
+    # §1's rule is that every aggregator entry point LOGS AND DEGRADES on an argument it
+    # cannot use, and these are arguments it cannot use.
+    #
+    # Named individually rather than as "anything not in the supported list", because a typo
+    # is a different finding from an unsupported feature and the message has to say which.
+    TIME_ENTRY_UNSUPPORTED_PARAMS = {
+      'split_by' => 'a crosstab over two dimensions',
+      'period' => 'period bucketing',
+      'periods' => 'period bucketing',
+      'months' => 'period bucketing',
+      'drill' => 'drill-through URLs',
+      'age_buckets' => 'age bucketing',
+      'age_field' => 'age bucketing',
+      'date_field' => 'date-field selection',
+      'user_label' => 'the user-label switch',
+      'of' => 'a measured custom field',
+      'fields' => 'the completeness field list',
+      'closed_statuses' => 'the closed-status list'
+    }.freeze
+
+    def report_unsupported_params(diagnostics, _context)
+      present = TIME_ENTRY_UNSUPPORTED_PARAMS.keys.select { |key| @raw_params.key?(key) }
+      return if present.empty?
+
+      wanted = present.map { |key| TIME_ENTRY_UNSUPPORTED_PARAMS[key] }.uniq
+      degrade_here(diagnostics, :aggregation_params_unsupported,
+                   "#{present.join(', ')} #{present.one? ? 'is' : 'are'} not supported over " \
+                   "time entries (#{wanted.join('; ')}); the aggregation ran without " \
+                   "#{present.one? ? 'it' : 'them'}",
+                   params: present.join(','))
+    end
+
+    # Both halves, in one place: the log line for whoever is on call and the degradation the
+    # template author reads on the page.
+    def degrade_here(diagnostics, code, message, **data)
+      Rails.logger.warn("[sql_aggregate] #{message}")
+      diagnostics&.degrade(code, detail: message, **data)
     end
 
     # Scope resolution (resolve_scope, resolve_query) lives in

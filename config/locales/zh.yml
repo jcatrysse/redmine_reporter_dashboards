@@ -208,3 +208,24 @@ zh:
   field_redmine_reporter_dashboards_schedule_enabled: "已启用"
   text_reporter_schedule_template_hidden: "您无权查看的报表模板"
   permission_render_reporter_dashboards_reports_as_others: "以其他用户身份生成报表 — 授予访问该用户可见的全部内容的权限"
+
+# T-31 - the aggregation degradations, as sentences rather than as raw symbols.
+#
+# `_degradations.html.erb` used to print `Degradation#to_s`: a code and an English sentence
+# built in `lib/`. These eight keys are the codes T-31 introduced or inherited on that path;
+# the remaining degradation codes still print raw and that gap is §Findings S-17, with the
+# mechanism (a key per code, `data` as interpolation, `to_s` as the fallback) settled here.
+#
+# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all nine files.
+# A key whose placeholder does not match its emit site raises
+# `I18n::MissingInterpolationArgument`, which `reporter_degradation_text` catches into the raw
+# fallback - so a mistake here loses the translation, never the message.
+
+  text_reporter_degradation_aggregation_group_by_required: "耗时报告在没有维度的情况下无法汇总。请在聚合标签中加上 group_by:，例如 group_by: activity。"
+  text_reporter_degradation_aggregation_dimension_unknown: "耗时报告无法按 %{group_by} 分组。"
+  text_reporter_degradation_aggregation_measure_unknown: "%{measure} 不是耗时报告能够计算的度量。"
+  text_reporter_degradation_aggregation_dimension_unavailable: "按 %{group_by} 分组要求每条记录都关联到它的问题，只有已保存的耗时查询才能提供这一点。请为本报告选择一个。"
+  text_reporter_degradation_aggregation_sort_unsupported: "耗时报告不支持按 %{sort} 排序，因此各分组按大小排列。"
+  text_reporter_degradation_aggregation_axis_truncated: "%{group_by} 的取值过多，无法全部显示：已列出 %{kept} 个，%{folded} 个已合并。"
+  text_reporter_degradation_aggregation_params_unsupported: "%{params} 不能用于耗时报告。聚合的其余部分已经计算完成。"
+  text_reporter_degradation_aggregation_source_unsupported: "本报告的数据源（%{source}）无法由 %{tag} 汇总。"

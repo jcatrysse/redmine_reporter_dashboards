@@ -114,6 +114,43 @@ module ReporterDashboards
       end
     end
 
+    # ONE DEGRADATION, AS A SENTENCE A READER CAN ACT ON — and, where a key exists, in their
+    # own language.
+    #
+    # --- WHAT THIS FIXES, AND WHAT IT DELIBERATELY DOES NOT ---
+    #
+    # `Degradation#to_s` answers `aggregation_dimension_unknown: group_by: "activty" is not a
+    # time-entry dimension (2x)` — a symbol and an English sentence built in `lib/`, printed
+    # verbatim. An independent review of T-31 called that correctly: CLAUDE.md §10's letter is
+    # kept, because `to_s` is not a literal in an ERB, and its purpose is missed.
+    #
+    # The whole gap is §Findings **S-17** and it spans fifteen codes across four layers,
+    # which is its own task. What this closes is the eight `aggregation_*` codes — the ones
+    # T-31 introduced or inherited on the same path — through the mechanism S-17's full fix
+    # will use: a key per code, the degradation's own `data` as interpolation, and the RAW
+    # `to_s` as the fallback. So every other code prints exactly as it did today, and adding
+    # a key later is the only change needed to localise it.
+    #
+    # THE FALLBACK IS NOT DECORATION. `technical-spec.md` §7 rule 5 makes "an install one
+    # minor behind reading a newer row" routine, and a code from a newer version of this
+    # plugin — or a typo in a key — must still print something the reader can quote into a
+    # bug report rather than nothing at all. `default: ''` and `rescue` are what guarantee
+    # that; a missing interpolation argument is the realistic failure and it is caught.
+    def reporter_degradation_text(degradation)
+      body = reporter_degradation_sentence(degradation) || degradation.to_s
+      return body unless degradation.count > 1
+
+      "#{body} (#{degradation.count}x)"
+    end
+
+    def reporter_degradation_sentence(degradation)
+      key = :"text_reporter_degradation_#{degradation.code}"
+      sentence = l(key, default: '', **degradation.data.transform_keys(&:to_sym))
+      sentence.to_s.strip.empty? ? nil : sentence
+    rescue ::I18n::MissingInterpolationArgument, ::ArgumentError
+      nil
+    end
+
     # THE OPAQUE-ORIGIN SANDBOX — `technical-spec.md` §4, and INV-9's third mechanism.
     #
     # --- WHY A REPORT BODY MAY NOT BE INLINED INTO THE PAGE ---

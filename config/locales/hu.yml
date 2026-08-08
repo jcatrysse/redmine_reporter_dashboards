@@ -208,3 +208,24 @@ hu:
   field_redmine_reporter_dashboards_schedule_enabled: "Engedélyezve"
   text_reporter_schedule_template_hidden: "Egy jelentéssablon, amelyet nem láthat"
   permission_render_reporter_dashboards_reports_as_others: "Jelentések készítése más felhasználó nevében — hozzáférést ad mindenhez, amit az a felhasználó lát"
+
+# T-31 - the aggregation degradations, as sentences rather than as raw symbols.
+#
+# `_degradations.html.erb` used to print `Degradation#to_s`: a code and an English sentence
+# built in `lib/`. These eight keys are the codes T-31 introduced or inherited on that path;
+# the remaining degradation codes still print raw and that gap is §Findings S-17, with the
+# mechanism (a key per code, `data` as interpolation, `to_s` as the fallback) settled here.
+#
+# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all nine files.
+# A key whose placeholder does not match its emit site raises
+# `I18n::MissingInterpolationArgument`, which `reporter_degradation_text` catches into the raw
+# fallback - so a mistake here loses the translation, never the message.
+
+  text_reporter_degradation_aggregation_group_by_required: "Egy ráfordított időről szóló jelentés dimenzió nélkül nem összegezhető. Adja meg a group_by: paramétert az aggregációs tagban — például group_by: activity."
+  text_reporter_degradation_aggregation_dimension_unknown: "A ráfordított időről szóló jelentés nem csoportosítható %{group_by} szerint."
+  text_reporter_degradation_aggregation_measure_unknown: "A %{measure} nem olyan érték, amelyet egy ráfordított időről szóló jelentés ki tud számítani."
+  text_reporter_degradation_aggregation_dimension_unavailable: "A %{group_by} szerinti csoportosításhoz minden bejegyzésnek a feladatához kell kapcsolódnia, amit csak egy mentett ráfordított idő szűrő biztosít. Válasszon egyet ehhez a jelentéshez."
+  text_reporter_degradation_aggregation_sort_unsupported: "A %{sort} szerinti rendezés ráfordított időnél nem elérhető, ezért a csoportok méret szerint vannak rendezve."
+  text_reporter_degradation_aggregation_axis_truncated: "A %{group_by} túl sok értéket tartalmaz: %{kept} látható, %{folded} pedig össze lett vonva."
+  text_reporter_degradation_aggregation_params_unsupported: "A %{params} nem használható ráfordított időről szóló jelentésben. Az aggregáció többi része elkészült."
+  text_reporter_degradation_aggregation_source_unsupported: "Ennek a jelentésnek az adatforrása (%{source}) nem összegezhető a %{tag} taggal."

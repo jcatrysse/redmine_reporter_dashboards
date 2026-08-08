@@ -208,3 +208,24 @@ en:
   field_redmine_reporter_dashboards_schedule_enabled: "Enabled"
   text_reporter_schedule_template_hidden: "A report template you cannot see"
   permission_render_reporter_dashboards_reports_as_others: "Render reports as another user — grants access to everything that user can see"
+
+# T-31 - the aggregation degradations, as sentences rather than as raw symbols.
+#
+# `_degradations.html.erb` used to print `Degradation#to_s`: a code and an English sentence
+# built in `lib/`. These eight keys are the codes T-31 introduced or inherited on that path;
+# the remaining degradation codes still print raw and that gap is §Findings S-17, with the
+# mechanism (a key per code, `data` as interpolation, `to_s` as the fallback) settled here.
+#
+# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all nine files.
+# A key whose placeholder does not match its emit site raises
+# `I18n::MissingInterpolationArgument`, which `reporter_degradation_text` catches into the raw
+# fallback - so a mistake here loses the translation, never the message.
+
+  text_reporter_degradation_aggregation_group_by_required: "A spent-time report cannot be summarised without a dimension. Add group_by: to the aggregation tag — for example group_by: activity."
+  text_reporter_degradation_aggregation_dimension_unknown: "%{group_by} is not something a spent-time report can be grouped by."
+  text_reporter_degradation_aggregation_measure_unknown: "%{measure} is not something a spent-time report can measure."
+  text_reporter_degradation_aggregation_dimension_unavailable: "Grouping by %{group_by} needs each entry linked to its issue, which only a saved spent-time query provides. Pick one for this report."
+  text_reporter_degradation_aggregation_sort_unsupported: "Sorting by %{sort} is not available for spent time, so the buckets are ordered by size."
+  text_reporter_degradation_aggregation_axis_truncated: "%{group_by} has too many values to show: %{kept} are listed and %{folded} were folded together."
+  text_reporter_degradation_aggregation_params_unsupported: "%{params} cannot be used in a spent-time report. The rest of the aggregation was computed."
+  text_reporter_degradation_aggregation_source_unsupported: "The data source of this report (%{source}) cannot be summarised by %{tag}."

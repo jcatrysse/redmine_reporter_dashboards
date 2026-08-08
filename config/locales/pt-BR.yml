@@ -208,3 +208,24 @@ pt-BR:
   field_redmine_reporter_dashboards_schedule_enabled: "Ativado"
   text_reporter_schedule_template_hidden: "Um modelo de relatório que você não pode ver"
   permission_render_reporter_dashboards_reports_as_others: "Gerar relatórios como outro usuário — concede acesso a tudo o que esse usuário pode ver"
+
+# T-31 - the aggregation degradations, as sentences rather than as raw symbols.
+#
+# `_degradations.html.erb` used to print `Degradation#to_s`: a code and an English sentence
+# built in `lib/`. These eight keys are the codes T-31 introduced or inherited on that path;
+# the remaining degradation codes still print raw and that gap is §Findings S-17, with the
+# mechanism (a key per code, `data` as interpolation, `to_s` as the fallback) settled here.
+#
+# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all nine files.
+# A key whose placeholder does not match its emit site raises
+# `I18n::MissingInterpolationArgument`, which `reporter_degradation_text` catches into the raw
+# fallback - so a mistake here loses the translation, never the message.
+
+  text_reporter_degradation_aggregation_group_by_required: "Um relatório de tempo gasto não pode ser resumido sem uma dimensão. Adicione group_by: à tag de agregação — por exemplo group_by: activity."
+  text_reporter_degradation_aggregation_dimension_unknown: "Um relatório de tempo gasto não pode ser agrupado por %{group_by}."
+  text_reporter_degradation_aggregation_measure_unknown: "%{measure} não é algo que um relatório de tempo gasto possa medir."
+  text_reporter_degradation_aggregation_dimension_unavailable: "Agrupar por %{group_by} exige que cada registro esteja vinculado à sua tarefa, o que somente uma consulta salva de tempo gasto fornece. Selecione uma para este relatório."
+  text_reporter_degradation_aggregation_sort_unsupported: "A ordenação por %{sort} não está disponível para tempo gasto, portanto os grupos são ordenados por tamanho."
+  text_reporter_degradation_aggregation_axis_truncated: "%{group_by} tem valores demais para exibir: %{kept} estão listados e %{folded} foram agrupados."
+  text_reporter_degradation_aggregation_params_unsupported: "%{params} não pode ser usado em um relatório de tempo gasto. O restante da agregação foi calculado."
+  text_reporter_degradation_aggregation_source_unsupported: "A fonte de dados deste relatório (%{source}) não pode ser resumida por %{tag}."

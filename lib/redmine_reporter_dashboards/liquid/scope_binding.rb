@@ -59,7 +59,15 @@ module RedmineReporterDashboards
       end
 
       class << self
-        # --- THE ISSUE-KERNEL GUARD, SHARED BY BOTH TAGS THAT USE ONE ---
+        # --- THE ISSUE-KERNEL GUARD. ONE CALLER TODAY, AND THAT IS DELIBERATE ---
+        #
+        # It was written for both tags. T-31 increment 2 gave `{% sql_aggregate %}` an owned
+        # time-entry aggregator, so that tag now DISPATCHES where it used to refuse and this
+        # method's only caller is `{% version_rollup %}` — which still refuses, because a
+        # per-target-version rollup over spent time is a different report nobody has
+        # specified. The guard stays here rather than moving into that tag: it is the answer
+        # to "may this scope reach the issue kernel", and the next tag to reach for the kernel
+        # should find it already written.
         #
         # `SqlAggregation::QueryAggregator` counts `DISTINCT issues.id` and reads issue
         # columns throughout. Handed a TIME-ENTRY relation it does not raise —

@@ -552,7 +552,7 @@ it, whatever the file asks for.
   renders all the documents as HTML and the download button is not offered. Combined
   templates — one document for the whole set — download normally.
 * **A `source: time_entries` report has no time series.** Hours by activity, by user, by
-  project, by issue and by seven issue attributes all work (see *Reporting on spent time*
+  project, by issue and by four issue attributes all work (see *Reporting on spent time*
   below), but `{% sql_aggregate %}` with no `group_by` is refused there and says so on the
   page: a time entry is not opened and closed, so there is no created/closed flow to plot.
   Use `group_by:` and, if you want a trend, a `spent_on` filter on the saved query.
@@ -1455,9 +1455,9 @@ stay clickable in the PDF, which is the reason the URLs are absolute.
 
 ## Reporting on spent time
 
-A report template has a **data source**. Set it to *Spent time* and the same tag, the same
-bucket structure and the same drill-through links report **hours** instead of issue counts —
-one template model, one editor, one preview, two sources.
+A report template has a **data source**. Set it to *Spent time* and the same tag and the same
+bucket structure report **hours** instead of issue counts — one template model, one editor,
+one preview, two sources.
 
 ```liquid
 {% sql_aggregate group_by: activity, assign_to: by_activity %}
@@ -1471,7 +1471,8 @@ Total: {{ by_activity.total }} h
 `bucket.count` carries the **measure**, which is hours here — the same key an issue report
 uses for its counts, so a template written against one source reads the other. `measure`
 and `measure_field` on the result say which you are looking at (`hours`/`hours` or
-`count`/`nil`).
+`count`/`nil`), and the result's key set is asserted against a real issue-path call by a test
+rather than promised here.
 
 ### `from:` is not used on a time-entry template
 
@@ -1491,8 +1492,16 @@ which a saved spent-time query provides; without one they are refused and the pa
 rather than reporting a wrong number.
 
 An entry with no activity, or logged against a project rather than an issue, lands in the
-`(none)` bucket, and its drill-through link filters for *none* rather than for an empty
-value.
+`(none)` bucket — never folded into `(other)`, however tight the `limit:` — and its filter
+payload asks for *none* rather than for an empty value.
+
+An hours-by-issue axis names each issue `#42: subject`. **An issue you may not see is named
+`#42` and nothing else**, exactly as Redmine's own spent-time report does it: the hours are
+still yours to see and count, the issue's subject is not yours to read.
+
+Activities a project has **overridden** are rolled up to the activity they override, so you
+get one bucket rather than two carrying the same name — again matching the report Redmine
+ships.
 
 ### Measures
 
@@ -1501,14 +1510,31 @@ value.
 | `hours` (default) | `SUM` of the hours logged, rounded to two places |
 | `count` | how many entries, counted distinctly |
 
-`sort:`, `limit:`, `other_label:` and `empty_label:` behave exactly as they do on the issue
-path, including the folded `(other)` bucket and the `truncated` flag that admits to it.
+`limit:`, `other_label:` and `empty_label:` behave as they do on the issue path, including the
+folded `(other)` bucket and the `truncated` flag that admits to it. **An axis is capped at 200
+buckets whether or not you set a `limit:`** — the same ceiling the issue path has — and the
+tail is folded rather than dropped, with a note on the page saying how many.
+
+`sort:` takes `count` (default) or `label`. `position` is not available here, and asking for
+it says so on the page rather than quietly ordering by something else. Ties are broken
+deterministically, so two engines and two page loads agree on the order — and, past the cap,
+on which buckets exist at all.
 
 ### What it does not do
+
+Each of these is **refused visibly** — the aggregation still returns what it can, and the page
+lists what it could not do. None of them fails silently.
 
 - **No time series.** `{% sql_aggregate %}` with no `group_by` is refused: a time entry is
   not opened and closed, so there is nothing to plot over time. Filter by `spent_on` on the
   saved query instead.
+- **No `split_by:`**, so no crosstab over two dimensions.
+- **No `drill: true`.** Buckets carry the filter payload a drill-through would be built from,
+  and a spent-time URL is not built from it yet, so `bucket.url` is not set. The payloads are
+  checked against Redmine's real spent-time filter list by a test, so what is there is right;
+  it is the link that is missing.
+- **No custom-field dimensions.** The issue path can group by `cf_92`; this one cannot group
+  by a time-entry, project or issue custom field yet.
 - **`{% version_rollup %}` is issue-only** and is refused on a time-entry template, visibly.
 - **Mixing sources in one template is not supported** and is not planned. A report is about
   issues or about hours.

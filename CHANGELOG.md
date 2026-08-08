@@ -47,14 +47,13 @@ All notable changes to this plugin are documented in this file.
 - **A report template can now report on spent time, and it reports HOURS.**
 
   Set a template's data source to *Spent time* and `{% sql_aggregate %}` sums hours instead
-  of counting issues. Same tag, same bucket structure, same drill-through links, same
-  editor, same preview — one template model for both sources rather than a parallel world
-  for each.
+  of counting issues. Same tag, same bucket structure, same editor, same preview — one
+  template model for both sources rather than a parallel world for each.
 
-  Eleven dimensions: `activity`, `user`, `project` and `issue` on the entry itself, and
-  `tracker`, `status`, `priority`, `author`, `assignee`, `version` and `category` through
-  the entry's issue. The first two do not exist on the issue path at all, and they are the
-  two an hours report is usually about. `measure: count` gives the number of entries
+  **The same eight dimensions Redmine's own spent-time report offers:** `activity`, `user`,
+  `project` and `issue` on the entry itself, and `tracker`, `status`, `version` and `category`
+  through the entry's issue. The first two do not exist on the issue path at all, and they are
+  the two an hours report is usually about. `measure: count` gives the number of entries
   instead.
 
   **You see the hours your role lets you see, and the report says when that is less.**
@@ -64,16 +63,25 @@ All notable changes to this plugin are documented in this file.
   own timesheet. The page now carries a notice when your role narrowed the data. A project
   with *Time tracking* switched off reports no hours and says so instead of showing zero.
 
-  Two things it deliberately does not do. There is **no time series** — a time entry is not
-  opened and closed, so a tag with no `group_by` is refused and explains itself on the page
-  rather than inventing a trend. And a template reports on **one** source: mixing issue data
-  and hours in one body is not supported and is not planned.
+  **And an issue you may not see is named `#42` rather than by its subject** — exactly as
+  Redmine's own spent-time report does it. The hours are still counted; the subject is not
+  printed.
+
+  A template reports on **one** source: mixing issue data and hours in one body is not
+  supported and is not planned.
+
+  An axis is capped at 200 buckets, the tail folded rather than dropped and the page says how
+  many. Buckets with equal figures come out in the same order on every engine and every page
+  load. Activities a project has overridden are rolled up, so you get one bucket rather than
+  two carrying the same name. And an argument the spent-time path cannot honour — `drill:`,
+  `split_by:`, `period:`, a mistyped dimension, an unsupported `sort:` — is **named on the
+  page in your own language** rather than ignored.
 
   Correctness here is established by computing every figure twice — once in SQL and once by
   loading the rows and adding them up in Ruby — on PostgreSQL, MySQL and MariaDB, rather
   than by recording what the code answered on its first day. The README's *Reporting on
-  spent time* section has the details, including the one join shape whose hours sum would
-  over-count and why no `DISTINCT` can fix it.
+  spent time* section has the details, including what it deliberately does not do yet and the
+  one join shape whose hours sum would over-count.
 
 - **A report that cannot be generated can now hand you a real PDF that says so.**
 
@@ -385,6 +393,12 @@ All notable changes to this plugin are documented in this file.
     edited by hand — the build compares it with a fresh run.
 
 ### Changed
+
+- **The "what could not be produced" list now reads as sentences, in your language, for
+  everything a spent-time aggregation can report.** It printed internal identifiers —
+  `aggregation_dimension_unknown: group_by: "activty" is not a time-entry dimension` — in
+  every language. Eight aggregation messages are now translated into all nine; the remaining
+  codes (assets, charts, truncated collections) still print their identifier and are next.
 
 - **The "what could not be produced" list on a report page no longer blames the render
   engine for everything in it.** It was headed *"The engine reported these degradations"*,

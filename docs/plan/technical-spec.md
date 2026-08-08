@@ -1449,16 +1449,27 @@ entry point, `breakdown`, answering `QueryAggregator`'s `single_result` keys exa
 against a real call rather than against a copied list, so the vocabulary claim above is a test and
 not a promise.
 
+**REVISED after the review round of 2026-08-08.** The first version's table claimed parity
+with the issue kernel's result vocabulary; an independent review found six ways that was false
+while every figure still agreed, and the entries below are the corrected ones. Each cites the
+kernel or the core file it copies, because "as the kernel does" turned out to need checking.
+
 | | |
 |---|---|
 | **Unit of count** | `COUNT(DISTINCT time_entries.id)`, named as a constant so the difference from the kernel's `DISTINCT issues.id` is greppable |
 | **Measures** | `hours` → `SUM(time_entries.hours)` (default) · `count` → the distinct entry count |
-| **Dimensions** | four on `time_entries` — `activity`, `user`, `project`, `issue`, of which the first two the issue kernel does not have at all — and seven on `issues`: `tracker`, `status`, `priority`, `author`, `assignee`, `version`, `category` |
-| **The issues join is ASKED ABOUT** | the seven issue dimensions need `TimeEntryQuery#base_scope`'s `left_join_issue`. `applicable?` reads the statement rather than assuming, and refuses **before issuing anything** — the `rescue` behind it is a backstop, not the mechanism (HANDOVER §1: forcing the guard true left every example green) |
+| **Dimensions** | **exactly core's eight**, from `Redmine::Helpers::TimeReport#load_available_criteria` (`time_report.rb:106-131`): `activity`, `user`, `project`, `issue` on the entry and `tracker`, `status`, `version`, `category` through its issue. `activity` and `user` the issue kernel does not have at all. The first version added `priority`, `author` and `assignee` — the three with no `TimeEntryQuery` filter, and `author` resolved to the ENTRY's author, a plausible wrong answer |
+| **Activity is ROLLED UP** | `COALESCE(rrd_activity.parent_id, rrd_activity.id)` over a join this module adds, matching `time_report.rb:125`. A project-overridden activity is one bucket; grouping on the bare column produced two carrying the same name |
+| **The issues join is ASKED ABOUT** | the four issue dimensions need `TimeEntryQuery#base_scope`'s `left_join_issue`. `applicable?` reads the statement rather than assuming, and refuses **before issuing anything** — the `rescue` behind it is a backstop, not the mechanism (HANDOVER §1: forcing the guard true left every example green) |
+| **The `issue` LABEL is visibility-scoped** | `time_entries.issue_id` survives the `Issue.visible_condition` core puts in `left_join_issue`, so the label is read through `Issue.visible(actor)` and falls back to `#<id>` — `timelog_helper.rb:80-85` and `application_helper.rb:307`. The first version read an unscoped `Issue.where(id:)` and printed a private issue's subject on the actor's own report |
+| **The axis has a CEILING** | `MAX_KEYS = 200`, the kernel's `MAX_DIMENSION_KEYS`, and `limit:` can only tighten it (`query_aggregator.rb:1684`). `limit: 0` means "no limit asked for", not "no limit": without the ceiling a `group_by: issue` emitted 50 000 buckets with `truncated: false` |
+| **The order is TOTAL** | figure descending, tie-broken on the raw key. `sort_by` is not stable, so ties followed the engine's row order — and past a cap that changes WHICH buckets exist. `sort: label` sorts by the LABEL with the kernel's `natural_key` rule (`query_aggregator.rb:1731`); `position` is refused visibly |
+| **`(none)` and `(other)` are LAST and are not each other** | blank keys are partitioned out before the cap, so unclassified hours are never folded into "some other activity"; `(other)` carries `values` and a filter over them (`query_aggregator.rb:1518`), `(none)` carries `!*` with `['']` (`:1563`) |
+| **Drill-through filters are `TimeEntryQuery`'s names** | `issue.tracker_id`, not `tracker_id`; `nil` where there is no filter (`project`). A test asserts every non-nil field is in a real `TimeEntryQuery#available_filters` |
 | **Every grouped aggregate is read POSITIONALLY** | `Accept:` clause 5. One `group`, one `pluck`, no `.sum`/`.average`/`.count` on a grouped relation anywhere — `spec/aggregation/time_entry_aggregator_source_spec.rb` asserts it of the module's own source and a double asserts the positions are not swapped |
-| **Refusals are VISIBLE** | a `diagnostics:` port, duck-typed on `#degrade` so the aggregation layer names no Liquid class. `aggregation_dimension_unknown`, `aggregation_measure_unknown`, `aggregation_dimension_unavailable`, plus the tag's `aggregation_group_by_required` and `aggregation_source_unsupported` |
-| **Statement count is fixed** | three per hours breakdown (grouped read, one label lookup for all buckets, the scalar total), two per count breakdown — a counted axis is totalled from its buckets exactly as `QueryAggregator.result_total` does it. Independent of the bucket count (FR-48) |
-| **Known limit** | `SUM` over a row-duplicating join over-counts and no `DISTINCT` fixes it — §Findings **S-16**, asserted in both directions over a deliberately tripling join |
+| **Refusals and degradations are VISIBLE** | a `diagnostics:` port, duck-typed on `#degrade` so the aggregation layer names no Liquid class. Eight codes, all eight localised in nine languages (§Findings S-17): `aggregation_dimension_unknown`, `_measure_unknown`, `_dimension_unavailable`, `_sort_unsupported`, `_axis_truncated`, plus the tag's `_group_by_required`, `_params_unsupported` and `_source_unsupported` |
+| **Statement count is fixed** | three per hours breakdown (grouped read, one label lookup for the buckets that survived the cap, the scalar total), two per count breakdown — a counted axis is totalled from its buckets exactly as `QueryAggregator.result_total` does it (`:1360`). Four for `group_by: issue`, the extra one being the visibility check. Independent of the bucket count (FR-48) |
+| **Known limits** | `SUM` over a row-duplicating join over-counts and no `DISTINCT` fixes it (§Findings **S-16**, asserted in both directions over a tripling join) · no `split_by:`, `period:` or `drill:` — each degrades visibly rather than being dropped · no custom-field dimension (§Findings **S-18**) |
 
 **No `group_by`, no aggregation.** There is no time-entry equivalent of `aggregate`'s
 created/closed flow — a time entry is not opened and closed — so `{% sql_aggregate %}` with no

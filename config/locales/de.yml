@@ -208,3 +208,24 @@ de:
   field_redmine_reporter_dashboards_schedule_enabled: "Aktiviert"
   text_reporter_schedule_template_hidden: "Eine Berichtsvorlage, die Sie nicht sehen können"
   permission_render_reporter_dashboards_reports_as_others: "Berichte als anderer Benutzer erzeugen — gewährt Zugriff auf alles, was dieser Benutzer sehen kann"
+
+# T-31 - the aggregation degradations, as sentences rather than as raw symbols.
+#
+# `_degradations.html.erb` used to print `Degradation#to_s`: a code and an English sentence
+# built in `lib/`. These eight keys are the codes T-31 introduced or inherited on that path;
+# the remaining degradation codes still print raw and that gap is §Findings S-17, with the
+# mechanism (a key per code, `data` as interpolation, `to_s` as the fallback) settled here.
+#
+# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all nine files.
+# A key whose placeholder does not match its emit site raises
+# `I18n::MissingInterpolationArgument`, which `reporter_degradation_text` catches into the raw
+# fallback - so a mistake here loses the translation, never the message.
+
+  text_reporter_degradation_aggregation_group_by_required: "Ein Bericht über aufgewendete Zeit kann ohne Dimension nicht zusammengefasst werden. Ergänzen Sie group_by: im Aggregations-Tag — zum Beispiel group_by: activity."
+  text_reporter_degradation_aggregation_dimension_unknown: "Nach %{group_by} kann ein Bericht über aufgewendete Zeit nicht gruppiert werden."
+  text_reporter_degradation_aggregation_measure_unknown: "%{measure} kann in einem Bericht über aufgewendete Zeit nicht berechnet werden."
+  text_reporter_degradation_aggregation_dimension_unavailable: "Die Gruppierung nach %{group_by} setzt voraus, dass jeder Eintrag mit seinem Ticket verknüpft ist; das leistet nur eine gespeicherte Abfrage für aufgewendete Zeit. Wählen Sie eine für diesen Bericht aus."
+  text_reporter_degradation_aggregation_sort_unsupported: "Die Sortierung nach %{sort} ist für aufgewendete Zeit nicht verfügbar; die Gruppen sind daher nach Größe sortiert."
+  text_reporter_degradation_aggregation_axis_truncated: "%{group_by} hat zu viele Werte, um sie alle anzuzeigen: %{kept} werden aufgeführt, %{folded} wurden zusammengefasst."
+  text_reporter_degradation_aggregation_params_unsupported: "%{params} kann in einem Bericht über aufgewendete Zeit nicht verwendet werden. Der übrige Teil der Aggregation wurde berechnet."
+  text_reporter_degradation_aggregation_source_unsupported: "Die Datenquelle dieses Berichts (%{source}) kann von %{tag} nicht zusammengefasst werden."
