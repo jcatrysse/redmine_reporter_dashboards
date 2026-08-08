@@ -741,6 +741,20 @@ of a CI that runs on fork pull requests.
 
 ---
 
+## 4b. What the next session should start with
+
+**T-31 IS BLOCKED ON A DECISION, AND THE MEASUREMENT THAT BLOCKS IT IS ALREADY DONE.** Do not
+start by trying to make `{% sql_aggregate from: time_entries %}` work — it was tried, on a
+real Redmine 6.1 / PostgreSQL 16, and the frozen kernel accepts a `TimeEntryQuery` scope
+**without raising** while answering `COUNT(DISTINCT issues.id)` under time-entry labels: four
+time entries over two issues came back as "2" in every bucket, and `spent_hours` came back
+`nil`. The numbers, both routes out of it and their costs are in `implementation-plan.md`
+§Findings **S-13**. The half of T-31 that does not depend on the decision — `source` accepted
+end to end, one controller for both, a `TimeEntryQuery`-backed scope, and
+`Drops::TimeEntriesDrop` finally getting a producer — is startable today.
+
+---
+
 ## 5. Where to pick up
 
 `implementation-plan.md` §Status is authoritative; verify it against `git log` per

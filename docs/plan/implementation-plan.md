@@ -2442,6 +2442,25 @@ default off; never persisted as an attachment unless requested; scheduled failur
 with the correlation id and **no attachment**.
 
 **T-31 · Time-entry reporting as a `source` field** *(deps: T-23; replaces a third template type)*
+
+**BLOCKED ON A CURATOR DECISION as of 2026-08-08 — read §Findings S-13 before starting.** The
+clause *"a `TimeEntryQuery`-backed scope feeds the same aggregation core"* was checked by
+running it, and it is false in the way that matters: the kernel does **not** raise on a
+time-entry scope, it answers ISSUE counts under time-entry labels, because its unit of
+count is the constant `DISTINCT_ISSUES = 'DISTINCT issues.id'` and
+`TimeEntryQuery#base_scope` calls `.left_join_issue`, which makes the wrong answer
+available. `spent_hours` — the one measure this task exists for — answers nothing at all,
+and `activity`, `user` and `project` degrade to nil. Fixing it means changing
+`query_aggregator.rb`, which gate **G7** holds byte-identical to its `v0.5.0` blob plus
+exactly ONE declared hunk. **The choice between a second declared hunk and a second, owned
+aggregator is the curator's**; the measurement, both routes and their costs are in S-13.
+
+**The rest of the list does not depend on that decision and is what T-31 can start with**:
+`source` accepted end to end, one controller/CRUD/preview serving both, a
+`TimeEntryQuery`-backed scope bound to the render, `Drops::TimeEntriesDrop` (built in T-18,
+still without a producer) getting one, and a template putting issue data and time data side
+by side.
+
 *Accept:* `source` ∈ `issues | time_entries` on the template model; **one** controller, CRUD and
 preview serve both; a `TimeEntryQuery`-backed scope feeds the same aggregation core;
 `{% sql_aggregate from: time_entries %}` works with every applicable dimension; a test puts issue data
