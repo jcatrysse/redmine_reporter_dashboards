@@ -222,6 +222,39 @@ module RedmineReporterDashboards
           expect(result.refusals.first.reason).to include('does not fetch')
         end
 
+        # WHO CAUSED THE REFUSAL, AS DATA — and this is the assertion whose absence let a
+        # real defect ship. `refusal_reason` APPENDS a policy sentence to every refusal it
+        # composes, so anything deciding the cause by searching that prose for
+        # `asset_policy` answers "the policy" for a missing file too, and
+        # `Render::AssetBinding` then tells an administrator to enable network egress for a
+        # file that is simply not there. Measured end to end by an independent QA pass;
+        # five of seven causes got that remedy.
+        #
+        # Both directions in one example, on purpose: `policy_caused` being *true* for the
+        # third-party case is what stops a fix that just returns false everywhere, and the
+        # two refusals below are otherwise indistinguishable to a reader of the prose.
+        it 'marks WHICH refusals the policy really caused, and the prose cannot say' do
+          missing = resolver.call(%(<img src="#{local('missing.png')}">)).refusals.first
+          third = resolver.call('<img src="https://third.example/a.png">').refusals.first
+
+          expect(third.policy_caused?).to be(true)
+          expect(missing.policy_caused?).to be(false)
+
+          # The discriminator: both reasons mention the policy, so nothing that reads them
+          # can tell these two apart. That is why the field exists.
+          expect(missing.reason).to include('asset_policy')
+          expect(third.reason).to include('asset_policy')
+        end
+
+        it 'does not blame the policy for a wrongly-typed local file either' do
+          # A `.css` referenced by an `<img>`. Refused with the WIDEST policy this plugin
+          # permits, so "enable egress" is a remedy that provably does nothing.
+          result = resolver.call(%(<img src="#{local('app.css')}">))
+
+          expect(result).to be_refused
+          expect(result.refusals.first.policy_caused?).to be(false)
+        end
+
         it 'refuses a relative reference, because a render has no base to resolve it against' do
           result = resolver.call('<img src="logo.png">')
 

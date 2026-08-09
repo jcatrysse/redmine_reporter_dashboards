@@ -18,9 +18,17 @@ module RedmineReporterDashboards
         Assets::Resolution.new(**{ body: '<html><body>ok</body></html>' }.merge(overrides))
       end
 
-      def refusal(url, reason: 'asset_policy bundled does not fetch third_party references')
+      # `policy_caused` IS AN ARGUMENT NOW, and that field is the whole fix. The cause used
+      # to be inferred from the reason PROSE, and an independent QA pass measured the
+      # inference wrong for five of the seven refusal shapes: `Resolver#refusal_reason`
+      # appends a policy sentence to every refusal it composes, so "does the reason mention
+      # asset_policy" answered yes for a missing file and for an attachment the viewer may
+      # not see. The default matches the Struct's: NOT policy-caused, because that is the
+      # direction which cannot invent a remedy.
+      def refusal(url, reason: 'asset_policy bundled does not fetch third_party references',
+                  policy_caused: true)
         Assets::Resolution::Refusal.new(url: url, usage: :image, classification: :third_party,
-                                        reason: reason)
+                                        reason: reason, policy_caused: policy_caused)
       end
 
       describe 'a clean resolution' do
@@ -170,12 +178,22 @@ module RedmineReporterDashboards
           expect(result.message).to include('logo.png')
         end
 
+        # THE REASON STRINGS HERE WERE NOT WHAT THE RESOLVER EMITS, and it mattered. The
+        # wrongly-typed one lacked the `", and asset_policy bundled does not fetch …"` tail
+        # that `refusal_reason` really appends — so this example passed against an
+        # implementation that blamed the policy for every refusal, which is what shipped.
+        # HANDOVER §1's fixture-that-cannot-discriminate, in the one place built to catch
+        # this. The reasons are corrected to the composed shape and the cause is carried as
+        # data; `spec/assets/resolver_spec.rb` asserts the resolver SETS that data, which
+        # is the half no fixture in this file can see.
         it 'does NOT blame the policy for an oversize or wrongly-typed asset' do
           [['is 9000000 bytes, above the 8388608-byte asset_max_bytes cap', :local_path],
-           ['is on disk, but its type is not usable for the way the document references it',
+           ['is on disk, but its type is not usable for the way the document references it, ' \
+            'and asset_policy bundled does not fetch same_origin references',
             :local_path]].each do |reason, classification|
             refused = Assets::Resolution::Refusal.new(url: '/plugin_assets/x/a.png', usage: :image,
-                                                      classification: classification, reason: reason)
+                                                      classification: classification, reason: reason,
+                                                      policy_caused: false)
             result = described_class.apply(resolution: resolution(refusals: [refused]),
                                           correlation_id: 'c')
 

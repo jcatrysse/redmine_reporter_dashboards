@@ -62,7 +62,10 @@ module RedmineReporterDashboards
       DOWNLOAD_PATH = %r{\A/attachments/download/(\d+)(?:/[^/]*)?\z}
 
       def initialize(actor:, logger: nil)
-        raise ArgumentError, 'an attachment mapper needs an actor (INV-1)' if actor.nil?
+        # `unless actor` and not `if actor.nil?`. The nil form let `false` through — the
+        # guard read stronger than it was, which is the one thing a guard must not do. It
+        # failed closed downstream either way; this is about the message being true.
+        raise ArgumentError, 'an attachment mapper needs an actor (INV-1)' unless actor
 
         @actor = actor
         @logger = logger

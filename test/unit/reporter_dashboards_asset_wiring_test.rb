@@ -55,10 +55,42 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     end
 
     def render(request)
-      self.class.requests << request
+      # `RecordingEngine.requests` and NOT `self.class.requests`: a class-level
+      # accessor is per class, so every subclass below would silently record into its
+      # own nil and every assertion about the request would fail as `nil.body`.
+      RecordingEngine.requests << request
       RedmineReporterDashboards::Render::Success.new(
         bytes: PDF_BYTES, engine: 'recording', engine_version: '1.0'
       )
+    end
+  end
+
+  # AN ENGINE WHOSE `#capabilities` RAISES. `Render::Registry` is open, so this is an
+  # ordinary third-party adapter as far as `ReportRun` is concerned.
+  class RaisingEngine < RecordingEngine
+    def capabilities
+      raise 'engine exploded while being asked'
+    end
+
+    def id
+      'raising'
+    end
+  end
+
+  # Counts how many times it is INSTANTIATED, which is the claim — one adapter object per
+  # run, shared by the asset binding and the renderer.
+  class CountingEngine < RecordingEngine
+    class << self
+      attr_accessor :instances
+    end
+
+    def initialize
+      self.class.instances = (self.class.instances || 0) + 1
+      super
+    end
+
+    def id
+      'counting'
     end
   end
 
@@ -68,6 +100,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     # tree is what makes attachment 16 a real file rather than a row about one.
     set_fixtures_attachments_directory
     RecordingEngine.requests = []
+    CountingEngine.instances = 0
 
     @project = Project.find(3)
     @project.enable_module!(:reporter_dashboards_reports)
@@ -133,6 +166,16 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
   def test_an_upgraded_mode_with_an_empty_allowlist_still_gets_no_fetcher
     with_settings plugin_redmine_reporter_dashboards: { 'asset_policy' => 'external',
                                                         'asset_allowlist' => '' } do
+      # THE ASSERTION THIS TEST'S NAME PROMISES, and the first version did not make it.
+      # It checked only the refusal WORDING — which `Resolver#fetched` decides by consulting
+      # `policy.fetch_allowed?` BEFORE it looks at `@fetcher`, so the wording is identical
+      # whether or not a fetcher was built. An independent review mutated
+      # `asset_fetch_possible?` to `policy.mode != :bundled` — under which a collapsed
+      # `:external` policy DOES construct the plugin's only egress object while failing
+      # closed — and the mutation SURVIVED all three suites. The construction claim needs a
+      # construction assertion, exactly as the raw-`:bundled` case above.
+      Assets::Fetcher.expects(:new).never
+
       resolution = resolve('<img src="https://cdn.example.net/a.png">')
 
       assert resolution.refused?
@@ -158,6 +201,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     } do
       resolver = RedmineReporterDashboards.asset_resolver(engine_capabilities: %i[asset_inline])
       resolution = resolver.call('<img src="https://no-such-host.invalid/a.png">')
+
 
       # THE MODE THE OPERATOR CONFIGURED REALLY REACHED THE RESOLVER. Asserted directly,
       # and it is not redundant: without it, a factory that ignored the settings entirely
@@ -377,26 +421,144 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     assert_empty request.assets
   end
 
+  # AN ADAPTER THAT RAISES WHEN ASKED A QUESTION MUST NOT TAKE THE REQUEST OUT (INV-5).
+  # `Render::Registry` is open, and F-16 introduced the first call to `#capabilities` that
+  # is NOT wrapped by `Renderer` — so before this guard a third-party engine turned an
+  # asset-free report, which used to render perfectly, into a 500. Found by an independent
+  # QA pass.
+  def test_an_engine_that_raises_when_asked_for_capabilities_does_not_escape_the_run
+    outcome = nil
+    assert_nothing_raised do
+      outcome = render('<p>plain, not one asset reference</p>', engine: RaisingEngine)
+    end
+
+    # A TYPED DIAGNOSTIC, NOT A RAISE — which is the whole claim (INV-5). It is not `ok?`,
+    # and the first version of this example asserted that it would be: `Renderer` asks the
+    # same broken adapter for its capabilities when it negotiates, so the run legitimately
+    # fails one stage later. That is the right outcome and it arrives through
+    # `safe_capabilities`, which has rescued this since T-10 — the hole F-16 opened was the
+    # ONE call outside `Renderer`, and this asserts it is closed rather than asserting a
+    # broken engine somehow works.
+    assert_not outcome.ok?
+    assert_not_nil outcome.diagnostic
+    assert_includes RedmineReporterDashboards::Reporting::Diagnostic::ORIGINS,
+                    outcome.diagnostic.origin
+  end
+
+  # AND THE FAIL-CLOSED HALF: the same broken adapter must refuse a reference by NAME
+  # rather than passing the URL through to an engine that cannot embed it. Without this,
+  # `rescue => []` would look identical to "declare everything".
+  def test_a_raising_engine_refuses_references_by_name_rather_than_passing_them_through
+    outcome = render('<p><img src="/attachments/download/16/testfile.png"></p>',
+                     engine: RaisingEngine)
+
+    assert_not outcome.ok?
+    assert_equal :asset_unresolved, outcome.diagnostic.code
+    assert_equal :assets, outcome.diagnostic.origin
+  end
+
+  # FR-58: the id in the panel is the id in the log line. A mutation nulling
+  # `correlation_id` in `bind_assets` survived an independent review's harness, because
+  # nothing downstream of the binding asserted it.
+  def test_the_request_carries_the_section_correlation_id
+    request = render_body('<p>no assets</p>')
+
+    assert request.correlation_id.to_s.length > 8,
+           "expected a minted correlation id, got #{request.correlation_id.inspect}"
+    assert_not_equal 'batch', request.correlation_id
+  end
+
+  # ONE ENGINE INSTANCE, shared by the asset binding and the renderer. Two would mean two
+  # `ProcessPool`s for `:chromium_cdp` and a capability answer from a different object than
+  # the one that draws — which the source comment claims and nothing asserted, so a
+  # mutation putting `adapter.new` back inline survived.
+  def test_the_engine_that_answers_capabilities_is_the_engine_that_draws
+    render_body('<p>no assets</p>', engine: CountingEngine)
+
+    assert_equal 1, CountingEngine.instances,
+                 'the adapter must be instantiated once per run, not once per collaborator'
+  end
+
+  # A PER-RECORD RUN WHERE A LATER DOCUMENT REFUSES. The only multi-document asset example
+  # used a body with no references at all, so the loop's failure branch was never taken
+  # past the first section — and a mutation that aborted only on the FIRST section's
+  # refusal survived, pushing a `Render::Failure` into the request list where
+  # `Renderer#render` met it as a `NoMethodError`.
+  def test_a_refusal_in_a_later_document_refuses_the_whole_run
+    @template.update!(output: 'per_record')
+    bodies = ['<p><img src="/attachments/download/16/testfile.png"></p>',
+              '<p><img src="https://cdn.example.net/tracker.png"></p>']
+    outcome = render_per_record(bodies)
+
+    assert_not outcome.ok?
+    assert_equal :asset_unresolved, outcome.diagnostic.code
+    assert_includes outcome.diagnostic.message, 'https://cdn.example.net/tracker.png'
+    assert_empty RecordingEngine.requests,
+                 'nothing may be drawn when any document in the run was refused'
+  end
+
   private
 
   def resolve(html)
     RedmineReporterDashboards.asset_resolver(engine_capabilities: %i[asset_inline]).call(html)
   end
 
-  def render_body(html)
-    outcome = render(html)
+  def render_body(html, engine: RecordingEngine)
+    outcome = render(html, engine: engine)
     assert outcome.ok?, "expected a successful run, got #{outcome.diagnostic&.message.inspect}"
     RecordingEngine.requests.first
   end
 
-  def render(html)
+  def render(html, engine: RecordingEngine)
     @template.update!(content: html)
-    RedmineReporterDashboards::Render::Registry.isolated do
-      RedmineReporterDashboards::Render::Registry.register(:recording, RecordingEngine)
+    run_with(engine) do
       ReportRun.new(template: @template, actor: @actor,
                     scope: Issue.visible(@actor).where(project_id: @project.id),
                     guard: RedmineReporterDashboards::Render::BatchGuard.new(max_documents: 5))
                .call(pdf: true)
+    end
+  end
+
+  # A PER-RECORD RUN WHOSE SECTIONS HAVE DIFFERENT BODIES. The Liquid renderer is injected
+  # rather than driven through a template, because what is under test is `bind_assets`'
+  # loop over several sections — one template cannot produce two different bodies without
+  # writing Liquid that would then be the thing being tested.
+  def render_per_record(bodies)
+    renderer = Class.new do
+      def initialize(bodies)
+        @bodies = bodies
+        @calls = 0
+      end
+
+      def render(_source, **_kwargs)
+        body = @bodies[@calls] || @bodies.last
+        @calls += 1
+        RedmineReporterDashboards::Liquid::TemplateRenderer::Document.new(
+          body: body, duration_ms: 1, output_class: :report
+        )
+      end
+    end.new(bodies)
+
+    run_with(RecordingEngine) do
+      ReportRun.new(template: @template, actor: @actor,
+                    scope: Issue.visible(@actor).where(project_id: @project.id),
+                    template_renderer: renderer,
+                    guard: RedmineReporterDashboards::Render::BatchGuard.new(max_documents: 5))
+               .call(pdf: true)
+    end
+  end
+
+  # DERIVED FROM THE CLASS, never from an instance: `CountingEngine` counts how many
+  # times it is built, so constructing one here to ask its id would make the number
+  # under test always wrong by one.
+  def registry_id(engine)
+    engine.name.split("::").last.gsub(/Engine\z/, "").downcase.to_sym
+  end
+
+  def run_with(engine)
+    RedmineReporterDashboards::Render::Registry.isolated do
+      RedmineReporterDashboards::Render::Registry.register(registry_id(engine), engine)
+      yield
     end
   end
 end

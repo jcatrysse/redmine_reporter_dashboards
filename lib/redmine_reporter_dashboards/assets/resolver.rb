@@ -121,14 +121,18 @@ module RedmineReporterDashboards
         references = suppress_nested_element_spans(DocumentScanner.scan(document, origin: @origin))
         state = State.new
 
-        references.each_with_index do |reference, index|
-          if index >= MAX_REFERENCES
+        references.each do |reference|
+          # `references_exhausted?` and not `index >=`: the budget is spent by nested
+          # stylesheet references too, so a document whose first `<link>` used the whole
+          # allowance must not then resolve 500 more of its own. See `State#spend_reference`.
+          if state.references_exhausted?
             state.refuse(reference,
                          "is past the #{MAX_REFERENCES}-reference cap for one document and was " \
                          'not resolved')
             next
           end
 
+          state.spend_reference
           resolve_one(reference, state)
         end
         if references.length > MAX_REFERENCES
@@ -217,7 +221,34 @@ module RedmineReporterDashboards
           @counts = { passthrough: 0, inlined: 0, uploaded: 0, fetched: 0, refused: 0 }
           @encoded = {}
           @embedded_bytes = 0
+          @references_spent = 0
         end
+
+        # THE REFERENCE CAP IS A BUDGET FOR THE WHOLE WALK, not a bound on the document's
+        # own reference list — and it was the second of those, which left a hole.
+        #
+        # `MAX_REFERENCES` was applied only to `DocumentScanner.scan`'s results in `call`.
+        # `resolve_stylesheet` recursed with NO cap at all, and a stylesheet is document
+        # content: an author attaches a CSS file and references it, so `<link>` costs one
+        # reference and the file behind it costs as many as it likes. Measured by an
+        # independent QA pass — 3 200 inner references produced 3 201 inlines in 11 s,
+        # strictly linear at ~3.5 ms each, one `Attachment.find_by` AND one `File.binread`
+        # apiece, with no memoisation. An 8 MB stylesheet of `url()` rules is ~200 000
+        # references, and `bind_assets` repeats the whole thing per document.
+        #
+        # Counting spends rather than positions closes it, because a nested reference and a
+        # top-level one now draw on the same budget. The output was already bounded — the
+        # spliced CSS eventually trips `asset_max_bytes` — so what this bounds is the WORK,
+        # which is the half a size cap cannot see.
+        def spend_reference
+          @references_spent += 1
+        end
+
+        def references_exhausted?
+          @references_spent >= MAX_REFERENCES
+        end
+
+        attr_reader :references_spent
 
         def embed_bytes(size)
           @embedded_bytes += size
@@ -231,10 +262,14 @@ module RedmineReporterDashboards
           @degradations << { code: code, detail: detail || DEGRADATIONS[code], data: data }
         end
 
-        def refuse(reference, reason)
+        # `policy_caused` DEFAULTS TO FALSE so that adding a refusal site cannot silently
+        # start blaming the asset policy — the direction that matters, because that is the
+        # answer which sends an administrator to enable egress.
+        def refuse(reference, reason, policy_caused: false)
           @refusals << Resolution::Refusal.new(
             url: reference.display, usage: reference.usage,
-            classification: reference.classification, reason: reason
+            classification: reference.classification, reason: reason,
+            policy_caused: policy_caused
           )
           @counts[:refused] += 1
         end
@@ -303,6 +338,20 @@ module RedmineReporterDashboards
         inner.each do |nested|
           next state.count(:passthrough) if nested.passthrough?
 
+          # THE SAME BUDGET AS THE DOCUMENT'S OWN REFERENCES. Refusing rather than
+          # degrading, and returning nil rather than continuing, because a stylesheet that
+          # is only half resolved would embed the rest of its `url()`s as LIVE URLs — the
+          # egress this method exists to close (the review of T-33 called that its worst
+          # finding). A refusal inside a stylesheet already fails the document closed;
+          # running out of budget is one more way to be inside one.
+          if state.references_exhausted?
+            state.refuse(nested,
+                         "is past the #{MAX_REFERENCES}-reference cap for one document and was " \
+                         'not resolved')
+            return nil
+          end
+
+          state.spend_reference
           nested_payload = obtain(nested, state)
           return nil if nested_payload.nil?
 
@@ -355,7 +404,15 @@ module RedmineReporterDashboards
         # disk was already answered above; reaching here means it is not, and under
         # `:bundled` there is no second chance — "never fetched", in §5.1's words.
         unless policy.fetch_allowed?(reference.fetch_classification, reference.host)
-          state.refuse(reference, refusal_reason(reference, local_reason))
+          # THE POLICY IS THE CAUSE ONLY WHEN THE DISK HAD NOTHING TO SAY. A `local_reason`
+          # means the reference named something on this install and `LocalStore` already
+          # explained why it did not answer — the file is absent, the type is wrong for the
+          # way the document uses it, the actor may not see the attachment. Widening the
+          # policy fixes none of those, and an anonymous fetch (FR-65) cannot fetch an
+          # attachment that needs a session at all. So the causal sentence is reserved for
+          # the case where the ONLY thing standing in the way is the policy.
+          state.refuse(reference, refusal_reason(reference, local_reason),
+                       policy_caused: local_reason.nil?)
           return nil
         end
 

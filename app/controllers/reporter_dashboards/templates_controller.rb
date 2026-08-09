@@ -411,9 +411,26 @@ module ReporterDashboards
     # first version answered this question twice and `#show` got it wrong: a per-record
     # template over the cap returned 500 Internal Server Error for "you asked for too
     # many documents", which is the opposite of T-15's point and pages an operator.
+    # A CLOSED SET READ THROUGH AN `else` IS NOT CLOSED, and this method was the second
+    # instance of that in F-16's own change — the first was
+    # `TemplatesHelper#reporter_diagnostic_headline`, which the change fixed while leaving
+    # this one, so a new origin was labelled correctly and given the wrong status code.
+    #
+    # `:assets` belongs with `:batch`, not with `:engine`. Both are refusals of a
+    # well-formed request decided BEFORE any engine started: a member pastes a CDN image
+    # URL into a template, and a 500 pages an operator for something no server fault
+    # caused. The comment below this method already argues exactly that for the cap
+    # refusal — *"which is the opposite of T-15's point and pages an operator"* — and the
+    # argument did not become weaker for having a second instance.
+    #
+    # `REFUSAL_ORIGINS` rather than a second `||`: the next origin added must be a
+    # decision somebody takes here, and `Diagnostic::ORIGINS` minus this set is the list
+    # of origins that really are server faults.
+    REFUSAL_ORIGINS = %i[batch assets].freeze
+
     def outcome_status
       return :ok unless @diagnostic
-      return :unprocessable_entity if @diagnostic.origin == :batch
+      return :unprocessable_entity if REFUSAL_ORIGINS.include?(@diagnostic.origin)
 
       :internal_server_error
     end

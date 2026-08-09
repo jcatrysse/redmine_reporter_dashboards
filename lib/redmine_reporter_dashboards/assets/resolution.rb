@@ -16,10 +16,34 @@ module RedmineReporterDashboards
     # `DocumentRequest#assets`, and `render/` must be able to carry it without naming a
     # type from here.
     class Resolution
-      Refusal = Struct.new(:url, :usage, :classification, :reason, keyword_init: true) do
+      # `policy_caused` IS A FIELD BECAUSE THE ALTERNATIVE WAS READING THE PROSE, AND THAT
+      # WAS MEASURED WRONG.
+      #
+      # `Render::AssetBinding` has to decide whether to print "…which the current asset
+      # policy does not permit", because telling an administrator to enable egress for a
+      # refusal egress cannot fix is a remedy that provably does nothing (INV-4, and
+      # `asset_binding.rb` argues it at length). It decided by looking for the substring
+      # `asset_policy` in `reason` — and `Resolver#refusal_reason` appends
+      # `policy_reason` to EVERY refusal it composes, so the guard matched everything and
+      # five of the seven refusal causes got the wrong remedy. Found end to end by an
+      # independent QA pass; the spec that "covered" it hand-wrote a reason string the
+      # resolver cannot produce, which is HANDOVER §1's fixture-that-cannot-discriminate.
+      #
+      # So the classification is made where the decision is made — in `Resolver`, which
+      # knows whether it consulted the policy or the disk — and travels as data. Prose is
+      # for the reader; this is for the caller.
+      Refusal = Struct.new(:url, :usage, :classification, :reason, :policy_caused,
+                           keyword_init: true) do
+        # DEFAULTS TO FALSE, and that direction matters: a refusal nobody classified must
+        # not claim the policy is at fault, because that is the answer that sends somebody
+        # to open the network.
+        def policy_caused?
+          policy_caused ? true : false
+        end
+
         def to_h
           { 'url' => url, 'usage' => usage.to_s, 'classification' => classification.to_s,
-            'reason' => reason }.freeze
+            'reason' => reason, 'policy_caused' => policy_caused? }.freeze
         end
       end
 

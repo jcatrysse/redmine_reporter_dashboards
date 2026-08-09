@@ -130,14 +130,26 @@ module RedmineReporterDashboards
             'each is in the render diagnostics for this correlation id.'
         end
 
-        # A refusal the asset policy is genuinely responsible for. Keyed on the reason's own
-        # words rather than a code, because `Resolution::Refusal` carries prose — and the two
-        # phrases below are the ones `Assets::Resolver#policy_reason` produces, which is the only
-        # place a policy refusal is worded.
+        # A refusal the asset policy is genuinely responsible for — ASKED AS DATA, and the
+        # previous version asked it as prose and was wrong for five of the seven causes.
+        #
+        # It read `refusal.reason.include?('asset_policy')`. `Resolver#refusal_reason`
+        # APPENDS `policy_reason` to every refusal it composes, so the guard matched a
+        # missing file, a wrongly-typed file and an attachment the viewer may not see —
+        # each of which was then told the remedy is to enable network egress, which cannot
+        # fix any of them and does open the network. Exactly the outcome the long comment
+        # above says this method exists to prevent. Measured end to end by an independent
+        # QA pass; the spec that appeared to cover it hand-wrote a reason string the
+        # resolver never emits, so it discriminated nothing.
+        #
+        # `Resolution::Refusal#policy_caused?` is set by the resolver at the point the
+        # decision is taken, defaults to false, and is the only thing consulted here. The
+        # classification check stays: it is about which references CAN be policy-refused at
+        # all, which is a different question and still worth asking.
         def policy_refusal?(refusal)
           return false unless POLICY_CLASSIFICATIONS.include?(refusal.classification)
 
-          refusal.reason.to_s.include?('asset_policy') || refusal.reason.to_s.include?('allowlist')
+          refusal.policy_caused?
         end
       end
     end

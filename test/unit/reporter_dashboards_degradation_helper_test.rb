@@ -38,11 +38,29 @@ class ReporterDashboardsDegradationHelperTest < ActionView::TestCase
 
   # --- the render vocabulary, which used to raise -----------------------------------
 
+  # `legacy_engine` NOW HAS A KEY, so this asserts the localised sentence rather than the
+  # raw `to_s`. It gained one in the same round for a reason worth keeping: until E-25 was
+  # fixed the lookup RAISED, so the code could never render and never needed a translation
+  # — and the moment it could render, it would have printed English to every operator on
+  # every wkhtmltopdf report.
   def test_a_render_degradation_renders_instead_of_raising
     degradation = Render::Degradation.new(capability: :legacy_engine,
                                           detail: 'drawn by a legacy engine')
 
-    assert_equal 'legacy_engine: drawn by a legacy engine',
+    assert_equal l(:text_reporter_degradation_legacy_engine),
+                 reporter_degradation_text(degradation)
+  end
+
+  # AND THE RAW FALLBACK IS STILL THE ANSWER FOR A CODE NOBODY HAS TRANSLATED. §7 rule 5
+  # makes "an install one minor behind reading a newer code" routine, so an unknown
+  # capability must still print something a reader can quote into a bug report. An invented
+  # capability, because every shipped one now has a key — which is what makes this the
+  # example that would notice the fallback being deleted.
+  def test_a_render_degradation_without_a_key_still_prints_its_raw_form
+    degradation = Render::Degradation.new(capability: :rrd_unshipped_probe,
+                                          detail: 'something a newer version knows about')
+
+    assert_equal 'rrd_unshipped_probe: something a newer version knows about',
                  reporter_degradation_text(degradation)
   end
 
@@ -133,7 +151,12 @@ class ReporterDashboardsDegradationHelperTest < ActionView::TestCase
 
     rendered = list.map { |entry| reporter_degradation_text(entry) }
 
-    assert_equal ['unbounded_collection: capped', 'asset_srcset_collapsed: dropped 1'],
+    # One of each vocabulary, and they take DIFFERENT routes through the helper: the Liquid
+    # one has no key and falls back to its raw `to_s`, the render one is translated. That
+    # asymmetry is the point — a mixed list is what `Outcome#degradations` actually is, and
+    # before E-25 the second entry raised rather than rendering at all.
+    assert_equal ['unbounded_collection: capped',
+                  l(:text_reporter_degradation_asset_srcset_collapsed)],
                  rendered
   end
 

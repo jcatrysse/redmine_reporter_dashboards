@@ -496,13 +496,40 @@ module RedmineReporterDashboards
       # `User.current`, which a scheduled render leaves as Anonymous until something else
       # sets it.
       def asset_resolver_for(engine)
-        return @asset_resolver.call(engine_capabilities: engine.capabilities) if @asset_resolver
+        capabilities = engine_capabilities(engine)
+        return @asset_resolver.call(engine_capabilities: capabilities) if @asset_resolver
 
         ::RedmineReporterDashboards.asset_resolver(
-          engine_capabilities: engine.capabilities,
+          engine_capabilities: capabilities,
           mappers: [AttachmentMapper.new(actor: actor, logger: logger)],
           logger: logger
         )
+      end
+
+      # ASKING AN ADAPTER A QUESTION IS CALLING THIRD-PARTY CODE, AND `Render::Registry` IS
+      # OPEN. Before F-16 nothing here called `#capabilities` — `adapter.new` went straight
+      # into `Renderer.new`, and every adapter method was reached through `Renderer`, which
+      # is where INV-5 is enforced. This call is outside it, so an adapter that raises took
+      # the whole request out as an untyped exception: a 500, from a document with no
+      # assets in it at all, which also falsified this change's own claim that an
+      # asset-free report is unchanged. Found by an independent QA pass with a registered
+      # engine whose `#capabilities` raises.
+      #
+      # An empty set is the FAIL-CLOSED answer and not a guess: `Resolver` refuses every
+      # reference for an engine that declares neither `:asset_inline` nor `:asset_upload`,
+      # so a broken adapter produces a NAMED refusal rather than either a crash or a
+      # document with silently unresolved URLs in it. A report with no references still
+      # renders, which is the behaviour that was there before.
+      #
+      # `StandardError` and not a wider rescue: `NoMemoryError` and `SignalException` must
+      # still take the process (CLAUDE.md §5), and `Renderer` makes the same choice.
+      def engine_capabilities(engine)
+        Array(engine.capabilities)
+      rescue StandardError => e
+        warn_line("[reporting] engine #{engine.class} raised #{e.class} when asked for its " \
+                  'capabilities; treating it as declaring none, so every asset reference ' \
+                  'will be refused by name rather than silently passed through')
+        []
       end
 
       # The three geometry arguments, spelled once. `AssetBinding.apply` passes whatever
