@@ -445,6 +445,63 @@ class ReporterDashboardsShareLinkFlowTest < Redmine::IntegrationTest
     assert_equal %w[served served served], link.accesses.reload.map(&:outcome)
   end
 
+  # ------------------------------------------------------------------ FR-54 / INV-8
+
+  # FR-54 SAYS *"attachment URLs are scoped to the share link that produced them, and expire
+  # and revoke with it"*. THIS IMPLEMENTATION SATISFIES IT BY ISSUING NO ATTACHMENT URL AT
+  # ALL, which is stronger, and §7b.1 anticipates exactly that: *"`| inline` means most
+  # reports need no external asset URL in the first place."*
+  #
+  # Read out of the source rather than assumed: `Assets::Policy`'s default mode is
+  # `:bundled`, whose table says a same-origin Redmine URL is *"rewritten to disk, NEVER
+  # fetched"* and a third-party URL is *refused*. So the bytes handed to the engine carry no
+  # live reference, and the PDF a recipient receives is self-contained.
+  #
+  # The mechanical form of "no scoped URL is needed" is that the endpoint HAS NOTHING ELSE
+  # TO GIVE: one route parameter, one document, and no way to ask it for a second thing. A
+  # scoped-URL scheme would have been a SECOND bearer-token surface to expire and revoke;
+  # not issuing one removes the problem rather than managing it.
+  def test_the_endpoint_cannot_be_asked_for_anything_but_its_own_document
+    _link, token = mint(max_uses: nil)
+    other = build_snapshot
+
+    open_link(token)
+    expected = response.body
+
+    # Every parameter a caller might hope means "give me that one instead". None of them is
+    # read, so all of them answer the same bytes.
+    [{ id: other.id }, { document_id: other.id }, { attachment_id: @document.attachment_id },
+     { rendered_document_id: other.id }, { template_id: @template.id }].each do |extra|
+      get "/reporter/s/#{token}", params: extra
+
+      assert_response :success
+      assert_equal expected, response.body, "#{extra.inspect} changed what was served"
+    end
+  end
+
+  # AND THE SHARE LINK NEVER WIDENS ACCESS TO ANYTHING ELSE. A template author can write a
+  # literal `<a href="/attachments/download/1">` into a report, and that hyperlink survives
+  # into the PDF. Following it does NOT get the file: it reaches core's own
+  # `AttachmentsController`, which asks `Attachment#visible?` about the person clicking —
+  # who, for a public link, is anonymous.
+  #
+  # Pinned because the claim being made is *"a share link authorises one document and
+  # nothing it points at"*, and that claim depends on core behaviour this plugin does not
+  # own.
+  def test_holding_a_share_link_grants_nothing_at_redmines_own_attachment_route
+    _link, token = mint
+
+    open_link(token)
+    assert_response :success
+
+    # Same anonymous session, immediately afterwards.
+    get "/attachments/download/#{@document.attachment_id}"
+    assert_response :redirect
+
+    get "/attachments/#{@document.attachment_id}"
+    assert_response :redirect
+  end
+
   # ------------------------------------------------------------------ the token itself
 
   # THE TOKEN IS A CREDENTIAL AND MUST NOT COME BACK IN THE PAGE. A refusal page echoing it

@@ -120,3 +120,19 @@ post 'projects/:project_id/reporter/mail', to: 'reporter_dashboards/mail#create'
 # not a token this plugin ever minted and 404s in the router rather than reaching a digest
 # lookup.
 get 'reporter/s/:token', to: 'reporter_dashboards/shares#show', as: 'reporter_share', constraints: { token: /[A-Za-z0-9_-]+/ }
+
+# T-28 increment 3 — the OWNER'S side of a share link: see what you have shared, and take
+# it back. Nested under the template because a link is always about one report, and every
+# action here is project-scoped and permission-checked — unlike `reporter/s/:token` above,
+# which is the public endpoint and is guarded by the token itself.
+#
+# `revoke` is POST and `revoke_all` is DELETE, and neither is a GET: both change what the
+# outside world can reach, so neither may be fireable by following a link, by a prefetching
+# proxy or by an <img src>. They differ in verb because they differ in scope — one link
+# versus every link this actor may revoke — and a reader of an access log should be able to
+# tell those apart without opening the parameters.
+get 'projects/:project_id/reporter/templates/:template_id/shares', to: 'reporter_dashboards/share_links#index', as: 'project_reporter_template_share_links'
+get 'projects/:project_id/reporter/templates/:template_id/shares/new', to: 'reporter_dashboards/share_links#new', as: 'new_project_reporter_template_share_link'
+post 'projects/:project_id/reporter/templates/:template_id/shares', to: 'reporter_dashboards/share_links#create'
+post 'projects/:project_id/reporter/templates/:template_id/shares/:id/revoke', to: 'reporter_dashboards/share_links#revoke', as: 'revoke_project_reporter_template_share_link'
+delete 'projects/:project_id/reporter/templates/:template_id/shares', to: 'reporter_dashboards/share_links#revoke_all', as: 'revoke_all_project_reporter_template_share_links'

@@ -187,6 +187,11 @@ module RedmineReporterDashboards
     TEMPLATES_CONTROLLER = :'reporter_dashboards/templates'
     SCHEDULES_CONTROLLER = :'reporter_dashboards/schedules'
     MAIL_CONTROLLER = :'reporter_dashboards/mail'
+    # T-28. The MANAGEMENT surface, not the public one: `reporter_dashboards/shares` is the
+    # token endpoint and is deliberately mapped to no permission at all (see
+    # `NON_PERMISSION_GUARDS`), because "may whoever holds this token have these bytes" has
+    # no person in it.
+    SHARE_LINKS_CONTROLLER = :'reporter_dashboards/share_links'
 
     # --- ONE ORDERED LIST, AND WHY IT REPLACED TWO -----------------------------------
     #
@@ -466,29 +471,45 @@ module RedmineReporterDashboards
         authoring: false,
         covers: 'Send a report by e-mail on demand, to Redmine users'
       ),
+      # T-28 PROMOTES BOTH, and they map to the SAME action set on purpose. Redmine cannot
+      # express "this one action additionally needs a second permission", so `#create` is
+      # mapped to both and the controller carries the real rule: `share_…` is what lets you
+      # reach the form at all, and `publish_…` is checked separately, per request, only when
+      # the form asks for a PUBLIC link. That is the same shape `TemplatesController` uses
+      # for `manage_public_…` and the same reason — a conjunction the permission model has
+      # no word for.
+      #
+      # `#index` and `#revoke`/`#revoke_all` are mapped here too, but the controller does
+      # NOT let `share_…` revoke somebody else's link: revocation is OWNERSHIP (FR-53), and
+      # a test asserts a third party holding every grantable permission still cannot.
       Entry.new(
         name: :share_reporter_dashboards_reports,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        actions: {
+          SHARE_LINKS_CONTROLLER => [:index, :new, :create, :revoke, :revoke_all]
+        },
         read: false,
         requires: :member,
         group: :reports_distribute,
         authoring: false,
         covers: 'Create a share link: an expiring, revocable URL that serves a snapshot ' \
-                'to whoever holds it',
-        lands_in: 'T-28'
+                'to whoever holds it'
       ),
       Entry.new(
         name: :publish_reporter_dashboards_reports,
         project_module: REPORTS_MODULE,
-        actions: nil,
+        # THE SAME TWO ACTIONS, because Redmine's map answers "may this actor reach this
+        # action" and the public/private distinction is a property of the REQUEST BODY
+        # rather than of the route. Mapping `publish_…` to a route of its own would have
+        # meant a second create endpoint whose only difference was a boolean — two ways to
+        # do one thing, and the one without a caller is the one that drifts.
+        actions: { SHARE_LINKS_CONTROLLER => [:new, :create] },
         read: false,
         requires: :member,
         group: :reports_distribute,
         authoring: false,
         covers: 'Turn a share link into a PUBLIC link, reachable without a Redmine ' \
-                'account. Off by default per template (FR-62)',
-        lands_in: 'T-28'
+                'account. Off by default per template (FR-62)'
       )
     ].freeze
     # REGISTERED and PLANNED are DERIVED from ENTRIES, in ENTRIES' order, so that

@@ -395,9 +395,24 @@ module RedmineReporterDashboards
       it 'sees every controller in the plugin' do
         expect(ControllerSource.all.map(&:name))
           .to eq(%w[reporter_dashboards/mail reporter_dashboards/schedules
-                    reporter_dashboards/shares reporter_dashboards/templates
+                    reporter_dashboards/share_links reporter_dashboards/shares
+                    reporter_dashboards/templates
                     reporter_preflight reporter_project_pages reporter_project_tabs
                     sql_stats])
+      end
+
+      # T-28's TWO CONTROLLERS ARE NEXT TO EACH OTHER IN THIS LIST AND ARE OPPOSITES, which
+      # is the one thing a reader of the list might not notice: `shares` is the public token
+      # endpoint with NO permission, `share_links` is the owner's surface where every action
+      # has one. Pinned so that neither can quietly acquire the other's shape.
+      it 'reads the share-link management controller, with its exact action set' do
+        links = ControllerSource.new('reporter_dashboards/share_links')
+
+        expect(links.exist?).to be(true)
+        expect(links.public_actions.sort).to eq(%i[create index new revoke revoke_all])
+        # `authorize` is UNSCOPED here, unlike the public endpoint, which never declares one.
+        expect(links.actions_guarded_by(:authorize)).to be_nil
+        expect(links.before_action_symbols).to include(:require_share_permission)
       end
 
       # T-28's share endpoint is the ONLY controller in this plugin that runs neither
@@ -913,7 +928,21 @@ module RedmineReporterDashboards
             # anonymous visitor able to make this installation send mail is a spam relay.
             [:mail_reporter_dashboards_reports,
              { :'reporter_dashboards/mail' => [:index, :new, :create] },
-             { require: :loggedin }]
+             { require: :loggedin }],
+            # T-28's two, and they map to the SAME controller and overlapping actions on
+            # purpose. Redmine's map answers "may this actor reach this action"; the
+            # public/private choice is a property of the request body, so `publish_…` maps
+            # the two actions the form lives on and the controller checks it where the field
+            # is read. `share_…` additionally maps `#index` — a list of what you have shared
+            # that you may not open is not a control — and `#revoke`/`#revoke_all`, which
+            # the map makes REACHABLE while `ShareLink#revocable_by?` decides them.
+            [:share_reporter_dashboards_reports,
+             { :'reporter_dashboards/share_links' => [:index, :new, :create, :revoke,
+                                                      :revoke_all] },
+             { require: :member }],
+            [:publish_reporter_dashboards_reports,
+             { :'reporter_dashboards/share_links' => [:new, :create] },
+             { require: :member }]
           ]
         )
       end
@@ -1002,6 +1031,29 @@ module RedmineReporterDashboards
 
       it 'is not registered' do
         expect(described_class.registered_names & described_class.planned_names).to be_empty
+      end
+
+      # T-28 EMPTIED `PLANNED`, AND THAT HAS TO BE SAID OUT LOUD RATHER THAN DISCOVERED.
+      #
+      # Every permission §4.1 names is now registered and guards a real controller action.
+      # That is a milestone — but it also means every example in this `describe` block that
+      # iterates `PLANNED` now passes over an empty list, which is CLAUDE.md's own warning:
+      # *a test that does not exist and a test that passes look identical in a summary line*.
+      #
+      # The four that are now VACUOUS, named so a reader knows what they are worth today:
+      #
+      #   'namespaces every name it adds'
+      #   "§4.1's row says which task lands it"
+      #   'no locale labels a planned permission'
+      #   'is not registered' (above — trivially true over two empty sets)
+      #
+      # They are kept rather than deleted: each becomes load-bearing again the moment a task
+      # adds a permission ahead of its controller, which is the whole point of the PLANNED
+      # mechanism. This example is what makes their vacuity a fact on the record — if it
+      # ever fails, `PLANNED` has grown and those four are live again.
+      it 'is EMPTY as of T-28, which makes four examples above vacuous — see the comment' do
+        expect(described_class::PLANNED.map(&:name)).to eq([])
+        expect(described_class::REGISTERED.length).to eq(described_class::ALL.length)
       end
     end
 
@@ -1253,15 +1305,28 @@ module RedmineReporterDashboards
         expect(described_class.find('view_reporter_project_page').registered?).to be(true)
       end
 
-      it 'finds a planned entry and reports it as not registered' do
-        # `add_…` used to be this example's subject and T-23 registered it, which is the
-        # promotion working. A still-planned entry replaces it rather than the example
-        # being deleted: "PLANNED entries answer registered? => false" is the property,
-        # not the particular permission that happened to be planned in 2026-08.
-        entry = described_class.find(:share_reporter_dashboards_reports)
+      it 'reports an unplanned entry as not registered' do
+        # `add_…` was this example's subject until T-23 registered it; `share_…` replaced it
+        # until T-28 registered that too — and with T-28 there is **no planned permission
+        # left at all** (see the example below, which asserts exactly that).
+        #
+        # So the subject is now SYNTHETIC, which is the honest form rather than deleting the
+        # example: the property being tested is "`registered?` is `lands_in.nil?`", and that
+        # property must keep working for the next task that adds a permission before it
+        # builds the controller. The file already constructs `Entry` this way for the
+        # `authoring` derivation, for the same reason.
+        entry = described_class::Entry.new(name: :probe_reporter_dashboards_thing,
+                                          project_module: described_class::REPORTS_MODULE,
+                                          actions: nil, read: false, group: :reports_distribute,
+                                          authoring: false, covers: 'probe',
+                                          lands_in: 'T-99')
 
         expect(entry.registered?).to be(false)
-        expect(entry.lands_in).to eq('T-28')
+        expect(entry.lands_in).to eq('T-99')
+        expect(described_class::Entry.new(name: :probe2, project_module: :m, actions: nil,
+                                          read: false, group: :reports_distribute,
+                                          authoring: false, covers: 'probe')
+                                    .registered?).to be(true)
       end
 
       it 'finds a permission T-23 promoted and reports it as registered' do

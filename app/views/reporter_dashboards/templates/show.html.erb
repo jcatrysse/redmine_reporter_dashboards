@@ -33,6 +33,20 @@
                 new_project_reporter_mail_path(@project, template_id: @template.id),
                 class: 'icon icon-email' %>
   <% end %>
+  <%# T-28 — THE SHARE LINKS OF THIS REPORT, and the link goes to the LIST rather than
+      straight to the form. §7b.1's requirement is *"you can see what you have shared… and
+      take it back"*, so the page somebody lands on is the one that answers "what is out
+      there", with the "new" button on it. Sending them to the form first would make
+      revocation the harder of the two things to reach, which is backwards for a control.
+
+      `share_…_reports` alone, not the controller's full set: they are already reading this
+      page, so `view_…_reports` is not in question, and `publish_…` decides one FIELD on the
+      form rather than access to it. %>
+  <% if User.current.allowed_to?(:share_reporter_dashboards_reports, @project) %>
+    <%= link_to reporter_dashboard_icon('link', l(:label_reporter_share_link_plural)),
+                project_reporter_template_share_links_path(@project, @template),
+                class: 'icon icon-link' %>
+  <% end %>
   <%# THE DOWNLOAD IS OFFERED WHENEVER IT CAN SUCCEED, WHICH NOW INCLUDES THE ARCHIVE.
       T-29 built it (finding E-6's third bullet), so the `sections.length == 1` condition
       that used to be here — written when a multi-document export answered 501 — would now
