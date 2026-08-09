@@ -229,8 +229,12 @@ module RedmineReporterDashboards
                            'under that name' }
         end
 
-        notes << "#{name}: the content already here is kept in the template's version " \
-                 'history and can be rolled back to.'
+        # CONDITIONAL, because this note is written at DECISION time and the overwrite can
+        # still fail. `apply` rolls the version snapshot back with the rest of the entry's
+        # savepoint, so an unconditional "is kept" would be a report of something that did
+        # not happen — on exactly the entry a reader is most likely to check.
+        notes << "#{name}: if this is overwritten, the content already here is kept in " \
+                 "the template's version history and can be rolled back to."
         { action: :update, existing: existing, applied_name: name }
       end
 
@@ -333,8 +337,25 @@ module RedmineReporterDashboards
         { errors: nil, warnings: nil }
       end
 
+      # NON-THROWING, AND THAT IS THE WHOLE POINT OF IT BEING ONE METHOD.
+      #
+      # HANDOVER §1, twice in one task: *"AN OPTIONAL LOG LINE IS A RESCUE PATH"* and
+      # *"anything a rescue body calls is part of the rescue's correctness, including
+      # logging, including a second rescue's own logging. The fix is one non-throwing choke
+      # point, not six `begin`s."*
+      #
+      # Both rescue bodies in this class call this method. `logger.warn` can raise —
+      # `Errno::EPIPE` from a closed log pipe, `ENOSPC` from a full log volume — and a raise
+      # from inside `apply_entry`'s rescue would leave `#apply` entirely, so the REST OF THE
+      # BUNDLE WOULD NOT BE IMPORTED. That is FR-56's "one bad template does not abort the
+      # bundle" violated by the code written to satisfy it, which is exactly what T-25's
+      # runner shipped before an independent review measured it with a raising logger.
       def warn_line(line)
         logger.warn(line) if logger.respond_to?(:warn)
+      rescue StandardError
+        # A log line that cannot be written is not a reason to stop importing. There is
+        # nowhere to report this to — the reporting channel is the thing that failed.
+        nil
       end
 
       # RESOLVED AT CALL TIME, NOT AT LOAD TIME, and that is not a style choice.

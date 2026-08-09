@@ -11,8 +11,9 @@ All notable changes to this plugin are documented in this file.
   download button, because serving one of fifty PDFs and calling it the report is worse
   than refusing.
 
-  **The archive is streamed, not assembled.** It goes out as it is written, so the
-  response has no `Content-Length` and the plugin never holds a copy of the whole file.
+  **The archive is streamed, not assembled.** The response carries no `Content-Length`
+  and the plugin never holds a copy of the whole file — the peak is one document, whatever
+  the size of the export.
   Each member is one issue's PDF, named after that issue; two issues whose names sanitise
   to the same thing get distinct members rather than one overwriting the other.
 

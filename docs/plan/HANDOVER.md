@@ -298,6 +298,26 @@ contradiction by trusting either half: **name every file under `lib/` after the 
 defines** and the question never arises. `compat.rb` is one file for this reason, and
 `result.rb` now defines a `Result` module as well as the two classes.
 
+**AND A THIRD MEASUREMENT ON THE SAME QUESTION, 2026-08-09: A CONSTANT UNDER THIS
+PLUGIN'S `lib/` RESOLVES BY AUTOLOAD.** The entry above has been corrected twice and still
+left a reader unsure what is true. T-29 measured the remaining half directly, in a booted
+application that had touched nothing:
+
+    loaded before touch? false
+    resolved            : RedmineReporterDashboards::Reporting::BundleReport
+    loaded after touch?  true
+
+`reporting/bundle_report.rb` is required at boot by nothing — deliberately, it is a rake
+formatter — and naming the constant loads the file. So the practical rule is unchanged and
+now has a reason on both sides: **name every file under `lib/` after the constant it
+defines**, because the loader will both ENFORCE that (T-10's `Zeitwerk::NameError` on
+`result.rb`) and USE it. Two consequences worth knowing. A missing `require` in a test can
+hide behind the autoloader, so "it passes alone" does not prove the requires are right —
+T-29 wrote a finding claiming the opposite and negative-testing refuted it. And a
+load-time reference to an autoloaded constant from a file being `require`d is still a real
+hazard, which is why `bundle_import.rb` reaches its model through a method rather than a
+class-body constant.
+
 **Redmine 6.0 is where BOTH `ApplicationRecord` and `IconsHelper#sprite_icon` arrived.**
 Neither exists on 5.1, and calling either raises rather than degrading. Both were in this
 plugin from v0.5.0 (D-2, D-3). If you add anything that touches a Redmine core class or

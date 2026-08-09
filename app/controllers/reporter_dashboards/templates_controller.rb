@@ -491,6 +491,20 @@ module ReporterDashboards
     # before the last entry is pulled), and the functional test proves this response
     # carries no `Content-Length` and hands Rack a non-Array body. Claiming the whole
     # pipeline is lazy would be the overclaim; it is not, and the reason is above.
+    #
+    # --- AND ONE MORE THING THAT IS TRUE AND UNCOMFORTABLE: §Findings S-23 ---
+    #
+    # `Rack::ETag` sits in Redmine's stack and gates on `body.respond_to?(:to_ary)`, which
+    # `ActionDispatch::Response::Buffer` answers unconditionally — so it DIGESTS the whole
+    # archive and the body is then re-enumerated for the wire. The archive is therefore
+    # produced TWICE. Measured by counting pulls from the entry source: 0 -> 3 -> 6.
+    #
+    # It does not cost memory (the digest is incremental, and the peak working set is still
+    # one member) and it does not add a `Content-Length`, so both of E-6's requirements
+    # hold. It costs a second pass. The two obvious repairs — a `Last-Modified` header, or
+    # an `ETag` of our own — each make `Rack::ETag` skip and then let `Rack::ContentLength`
+    # measure the body instead, which hands back exactly the header this action exists to
+    # withhold. S-23 has the table. Do not "fix" this without re-running it.
     def stream_archive(documents)
       sections = @outcome.sections
 

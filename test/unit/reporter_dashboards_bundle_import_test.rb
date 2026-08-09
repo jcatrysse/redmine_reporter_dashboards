@@ -4,6 +4,25 @@ require File.expand_path('../test_helper', __dir__)
 require File.expand_path(
   '../../lib/redmine_reporter_dashboards/reporting/bundle_import', __dir__
 )
+# REQUIRED BECAUSE THIS FILE USES IT — and the reason first written here was WRONG, so it
+# is corrected rather than quietly deleted.
+#
+# The claim was that without this line the file passes only inside the full run, because
+# `exchange_rake_test.rb` happens to load `bundle_report` first. Negative-tested: with the
+# require removed, `bin/rails test <this file>` on its own is **26 runs, 0 failures**. The
+# constant AUTOLOADS. Measured in a booted app that had touched nothing:
+#
+#     loaded before touch? false
+#     resolved            : RedmineReporterDashboards::Reporting::BundleReport
+#     loaded after touch?  true
+#
+# So this plugin's `lib/` is on an autoload path after all — see the HANDOVER §1 entry
+# this sharpens. The require stays because it states a real dependency of this file rather
+# than relying on one, which is cheap; it is not load-bearing, and nothing here should say
+# it is.
+require File.expand_path(
+  '../../lib/redmine_reporter_dashboards/reporting/bundle_report', __dir__
+)
 
 # T-29 — FR-56, the two-step bundle import, against a real database.
 #
@@ -450,6 +469,66 @@ class ReporterDashboardsBundleImportTest < ActiveSupport::TestCase
                  'an older schema must degrade, not raise'
     assert log.any? { |line| line.include?('failure_document') },
            "the dropped field must be named in the log (INV-4). Saw:\n#{log.join("\n")}"
+  end
+
+  # ------------------------------------------------------------------ two thin branches
+
+  # THE TRUNCATION EXISTS BECAUSE `" (2)"` ON A 255-CHARACTER NAME IS 259, which validates
+  # nowhere and raises `ValueTooLong` on MySQL — an engine this project runs and this
+  # container cannot install (HANDOVER §4). So the branch is asserted on the length rather
+  # than left for that CI cell to discover.
+  def test_a_rename_at_the_length_limit_truncates_instead_of_overrunning_it
+    long = 'N' * Template::MAX_STRING
+    create_template(name: long)
+
+    report = importer(on_conflict: 'rename').apply(bundle(entry('name' => long)))
+
+    applied = report.outcomes.first.applied_name
+    assert_equal :rename, report.outcomes.first.action
+    assert applied.length <= Template::MAX_STRING,
+           "the renamed name is #{applied.length} characters and the column takes " \
+           "#{Template::MAX_STRING}"
+    assert applied.end_with?(' (2)')
+    assert Template.exists?(project_id: @project.id, name: applied)
+  end
+
+  # A LINTER FAILURE IS NOT AN IMPORT FAILURE. The lint is advice printed beside the
+  # decision; if it raises on some pathological body the operator must still be told what
+  # the import will do, and the report must not print "0 errors", which is a claim nobody
+  # made. `BundleReport` prints `[lint did not run]` for the nil case and nothing reached
+  # it until this test.
+  def test_a_linter_that_raises_does_not_fail_the_import_and_is_not_reported_as_clean
+    RedmineReporterDashboards::TemplateLinter.stubs(:analyse)
+                                             .raises(RuntimeError, 'linter exploded')
+
+    report = importer.plan(bundle(entry))
+
+    assert_equal [:create], report.outcomes.map(&:action)
+    assert_nil report.outcomes.first.lint_errors
+    assert_include '[lint did not run]',
+                   RedmineReporterDashboards::Reporting::BundleReport.render(report)
+  end
+
+  # AND A LOGGER THAT RAISES MUST NOT ABORT THE BUNDLE — T-25's defect, in the shape it
+  # took there: an exception from a log line inside a rescue body leaves the loop, so every
+  # LATER item silently does not happen. FR-56's "one bad template does not abort the
+  # bundle" is the claim it would break, using the code written to satisfy it.
+  def test_a_logger_that_raises_does_not_stop_the_rest_of_the_bundle
+    exploding = Object.new
+    exploding.define_singleton_method(:warn) { |_line| raise Errno::EPIPE }
+    subject = BundleImport.new(project: @project, actor: @admin, on_conflict: 'skip',
+                               logger: exploding)
+    content = bundle(entry('name' => 'Broken', 'page_size' => 'A9'),
+                     entry('name' => 'After the broken one'))
+
+    report = nil
+    assert_difference 'RedmineReporterDashboards::Template.count', 1 do
+      report = subject.apply(content)
+    end
+
+    assert_equal %i[failed create], report.outcomes.map(&:action)
+    assert Template.exists?(project_id: @project.id, name: 'After the broken one'),
+           'the entry after the failure was never imported: the log line took the loop down'
   end
 
   # ------------------------------------------------------------------ the report
