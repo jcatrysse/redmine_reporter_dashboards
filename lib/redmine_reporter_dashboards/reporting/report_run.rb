@@ -508,8 +508,9 @@ module RedmineReporterDashboards
       # The three geometry arguments, spelled once. `AssetBinding.apply` passes whatever
       # it is given straight through to `DocumentRequest`, adding `body` and `assets`.
       def request_geometry
-        { page_size: 'A4',
-          orientation: :portrait }
+        { page_size: template.page_size,
+          orientation: template.orientation.to_sym,
+          margins_mm: margins }
       end
 
       # `margins` is "top,right,bottom,left" in millimetres, validated by the model's
