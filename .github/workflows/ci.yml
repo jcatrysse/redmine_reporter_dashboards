@@ -409,29 +409,63 @@ jobs:
   # `implementation-plan.md` §Findings records it as owed.
   # ------------------------------------------------------------------
   migrate-updown:
-    name: Migrate up/down (Redmine ${{ matrix.redmine }})
+    name: Migrate up/down (Redmine ${{ matrix.redmine }}, ${{ matrix.db.label }})
     runs-on: ubuntu-latest
+    # A DATABASE AXIS, added 2026-08-09 by curator decision on §Findings S-9.
+    #
+    # G11 asks whether a migration's reverse actually restores the database. Until now it
+    # asked that on FOUR REDMINE VERSIONS and ONE ENGINE — and the properties most likely
+    # to break are the engine-specific ones: identifier length limits, a unique index over
+    # a nullable column, `date` round-tripping. One such defect has already aborted a
+    # migration on PostgreSQL that would have SUCCEEDED on MySQL. A version axis cannot see
+    # any of them.
+    #
+    # NOT THE FULL CROSS-PRODUCT, and the reason is that the two axes answer different
+    # questions: VERSION is about Rails' DDL changing under us, ENGINE is about the
+    # database's own semantics. Every branch keeps PostgreSQL; MySQL and MariaDB are added
+    # on 6.1-stable (current stable) and 7.0-stable (newest Rails, where a DDL change lands
+    # first). Eight cells rather than twelve.
+    #
+    # `sql_type` in the snapshot is ENGINE-NATIVE — `int(11)`/`varchar(255)` on MySQL where
+    # PostgreSQL says `integer`/`character varying`. That is correct and is the point: the
+    # comparison is before-against-after on ONE engine, never across two.
+    #
+    # MEASURED BEFORE IT WAS WIRED rather than pushed and hoped for: `migrate_updown.sh`
+    # was run locally against MariaDB 10.11 and passed BOTH arms. MySQL 8 is CI's first
+    # look, which is the honest state to be in (INV-7).
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { redmine: '5.1-stable', ruby: '3.2' }
-          - { redmine: '6.0-stable', ruby: '3.3' }
-          - { redmine: '6.1-stable', ruby: '3.4' }
-          - { redmine: '7.0-stable', ruby: '3.4' }
+          - { redmine: '5.1-stable', ruby: '3.2', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '6.0-stable', ruby: '3.3', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '6.1-stable', ruby: '3.4', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '7.0-stable', ruby: '3.4', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '6.1-stable', ruby: '3.4', db: { label: MySQL 8.0, image: 'mysql:8.0', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '7.0-stable', ruby: '3.4', db: { label: MySQL 8.0, image: 'mysql:8.0', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '6.1-stable', ruby: '3.4', db: { label: MariaDB 11, image: 'mariadb:11', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '7.0-stable', ruby: '3.4', db: { label: MariaDB 11, image: 'mariadb:11', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 10s --health-timeout 5s --health-retries 20' } }
 
     services:
-      postgres:
-        image: postgres:16
+      # One service definition for three engines: each image reads only the variables it
+      # knows and ignores the others. The same shape the `adapter` job uses.
+      db:
+        image: ${{ matrix.db.image }}
+        ports:
+          - ${{ matrix.db.port }}:${{ matrix.db.port }}
         env:
           POSTGRES_USER: redmine
           POSTGRES_PASSWORD: redmine
           POSTGRES_DB: redmine_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s --health-timeout 5s --health-retries 10
+          MYSQL_ROOT_PASSWORD: redmine
+          MYSQL_DATABASE: redmine_test
+          MYSQL_USER: redmine
+          MYSQL_PASSWORD: redmine
+          MARIADB_ROOT_PASSWORD: redmine
+          MARIADB_DATABASE: redmine_test
+          MARIADB_USER: redmine
+          MARIADB_PASSWORD: redmine
+        options: ${{ matrix.db.options }}
 
     env:
       RAILS_ENV: test
@@ -451,18 +485,17 @@ jobs:
             plugin/ plugin/redmine/plugins/redmine_reporter_dashboards/
 
       - name: Install system packages
-        run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential ${{ matrix.db.packages }}
 
       - name: Configure test database
         run: |
           cat > config/database.yml <<EOF
           test:
-            adapter: postgresql
+            adapter: ${{ matrix.db.adapter }}
             database: redmine_test
             host: 127.0.0.1
             username: redmine
             password: redmine
-            encoding: unicode
           EOF
         working-directory: plugin/redmine
 

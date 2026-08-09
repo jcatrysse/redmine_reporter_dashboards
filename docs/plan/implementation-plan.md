@@ -882,6 +882,21 @@ refusal raised `NoMethodError` — `Render::Success` has no `correlation_id` —
 for it stopped being shadowed by "no engine registered". All three were invisible while a test was
 weak, and each became a one-line fix the moment the test was not.
 
+**~~S-9~~ · CLOSED by curator decision, 2026-08-09: the `migrate-updown` job gained a
+DATABASE AXIS.** Eight cells rather than four — every Redmine branch still on PostgreSQL,
+plus MySQL 8 and MariaDB 11 on 6.1-stable and 7.0-stable. The two axes answer different
+questions (Rails' DDL changing under us; the database's own semantics), so the full
+4x3 cross-product buys little for triple the cost.
+
+**Measured before it was wired, not pushed and hoped for.** `script/migrate_updown.sh` was
+run locally against **MariaDB 10.11** and passed BOTH arms — which also confirmed the
+premise the axis rests on: `script/schema_snapshot.rb` uses ActiveRecord's `columns` and
+`indexes`, so it records ENGINE-NATIVE types (`int(11)`, `varchar(255)` where PostgreSQL
+says `integer`, `character varying`) and the comparison is before-against-after on ONE
+engine. Nothing compares two engines to each other, which is what would have broken.
+**MySQL 8 is CI's first look** — that cell is honestly unverified until it runs (INV-7).
+The original report follows.
+
 **S-9 · G11's engine coverage is PostgreSQL only, and the CI comment first claimed otherwise.**
 The `migrate-updown` job runs four Redmine branches on PostgreSQL. The engine-dependent properties —
 identifier length limits (the defect that aborted migration 002 on PostgreSQL and would have
