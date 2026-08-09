@@ -153,6 +153,8 @@ it:
   text_reporter_failure_document_notice: "Questo documento non è il report. Attesta che il report non ha potuto essere prodotto. Citare l'identificativo di correlazione qui sopra quando si chiede a un amministratore di consultare il registro."
   text_reporter_failure_document_value_unavailable: "Non è stato possibile mostrare questo valore in questo documento."
   error_reporter_template_import_no_file: "Scegliere un file da importare."
+  error_reporter_template_import_many: "Questo file contiene %{count} modelli di report e questo modulo ne importa uno solo. Usi i task rake reporter_dashboards:exchange:plan e :apply per importare un intero pacchetto."
+  error_reporter_template_import_too_large: "Questo file è troppo grande per essere importato. Il limite è di %{limit} byte."
   warning_reporter_template_import_fields_dropped: "Lo schema di questa installazione non ha la colonna %{fields}, quindi il modello è stato importato senza di essa."
   label_reporter_schedule: "Report pianificato"
   mail_subject_reporter_schedule_report: "%{name} - %{date}"

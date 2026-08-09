@@ -307,6 +307,18 @@ RSpec.describe RedmineReporterDashboards::Archive::ZipStream do
       expect(date & 0x1F).to eq(1)
     end
 
+    # THE UPPER END TOO. The 7-bit year field stops at 2107, and `pack('v')` would have
+    # truncated a later one into a plausible date — the one direction this file's own
+    # "refuse rather than truncate" rule was not applied in. Found by an independent review.
+    it 'clamps a post-2107 timestamp instead of truncating it into a plausible year' do
+      bytes = archive([entry('a.pdf', 'b')], at: Time.utc(2200, 6, 5, 1, 2, 3))
+      date = bytes[12, 2].unpack1('v')
+
+      expect(date >> 9).to eq(127)
+      expect((date >> 5) & 0x0F).to eq(12)
+      expect(date & 0x1F).to eq(31)
+    end
+
     it 'is the same for two archives built from the same entries at the same instant' do
       expect(archive([entry('a.pdf', 'b')])).to eq(archive([entry('a.pdf', 'b')]))
     end

@@ -72,15 +72,35 @@ module RedmineReporterDashboards
         actor = Import::Runner.resolve_actor(reference)
         return actor if actor
 
+        # THE MESSAGE DISTINGUISHES THE TWO CASES, because they need different actions. It
+        # used to say "set RRD_ACTOR" even when RRD_ACTOR *was* set and named a locked or
+        # non-administrator account — sending the operator to fix the thing they had
+        # already done.
+        if reference.to_s.strip.empty?
+          raise Refused,
+                'no active administrator to own the imported templates. Set RRD_ACTOR to ' \
+                'a login or user id, or create an administrator first.'
+        end
+
         raise Refused,
-              'no active administrator to own the imported templates. Set RRD_ACTOR to a ' \
-              'login or user id, or create an administrator first.'
+              "RRD_ACTOR=#{reference} did not resolve to an ACTIVE ADMINISTRATOR. It must " \
+              'name an administrator account that is not locked.'
       end
 
       def read_file(path)
         raise Refused, 'set RRD_FILE to the bundle to read' if path.nil? || path.to_s.empty?
         raise Refused, "#{path} does not exist" unless File.exist?(path)
         raise Refused, "#{path} is a directory" if File.directory?(path)
+
+        # THE SIZE IS CHECKED BEFORE THE BYTES ARE READ, not after. `Bundle::MAX_BYTES`
+        # bounds what the PARSER accepts, which is one `File.binread` too late: a 4 GB file
+        # is already in this process by the time the parser can refuse it. One `File.size`
+        # makes the bound real on the path where the input is a filename.
+        size = File.size(path)
+        if size > Reporting::Bundle::MAX_BYTES
+          raise Refused,
+                "#{path} is #{size} bytes and the limit is #{Reporting::Bundle::MAX_BYTES}"
+        end
 
         # `binread` AND NOT `read`. HANDOVER §1: `File.read` applies the locale's external
         # encoding, so a bundle containing an em-dash raises `invalid byte sequence in

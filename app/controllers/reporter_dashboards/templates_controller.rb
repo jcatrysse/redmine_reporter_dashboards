@@ -190,7 +190,37 @@ module ReporterDashboards
       return refuse_import(l(:error_reporter_template_import_no_file)) if file.blank?
       return refuse_import(l(:error_reporter_template_import_no_file)) unless file.respond_to?(:read)
 
-      @template = Template.new(importable_attributes(Reporting::Exchange.parse(file.read)))
+      # `Bundle.parse`, NOT `Exchange.parse`, AND THE DIFFERENCE WAS A SILENT DROP.
+      #
+      # `Exchange.parse` answers the FIRST template in a document. T-29 made
+      # `rake exchange:export` write multi-template bundles and left this action on the
+      # single-template reader — so uploading a bundle of twelve templates imported one and
+      # answered "created", which is the failure mode `Bundle.parse`'s own comment names:
+      # *"it would look exactly like a successful import of a smaller file."* Found by an
+      # independent review.
+      #
+      # A MULTI-TEMPLATE BUNDLE IS REFUSED HERE RATHER THAN IMPORTED. This form creates one
+      # template and redirects to its editor; importing twelve needs a conflict policy and a
+      # per-template report, which is what `exchange:plan` / `exchange:apply` are. The
+      # refusal NAMES THE COUNT and points at the tasks, which is the shape T-15's cap
+      # refusal established — a refusal that says what you asked for and what to do instead.
+      # BOUNDED BEFORE IT IS PARSED, and before `#read` pulls the whole upload into this
+      # process. `Bundle::MAX_BYTES` bounds the parser, which is one `read` too late on a
+      # path where the size is knowable in advance — an uploaded file answers `#size`.
+      # T-29 introduced that bound and applied it only to the rake path; this is the same
+      # bound on the path an anonymous-ish request can reach.
+      if file.respond_to?(:size) && file.size.to_i > Reporting::Bundle::MAX_BYTES
+        return refuse_import(l(:error_reporter_template_import_too_large,
+                               limit: Reporting::Bundle::MAX_BYTES))
+      end
+
+      parsed = Reporting::Bundle.parse(file.read)
+      if parsed.entries.length > 1
+        return refuse_import(l(:error_reporter_template_import_many,
+                               count: parsed.entries.length))
+      end
+
+      @template = Template.new(importable_attributes(parsed.entries.first))
       @template.project_id = @project.id
       @template.author_id = User.current.id
       # AN IMPORTED TEMPLATE IS PRIVATE TO ITS IMPORTER whatever the file said. A bundle is
@@ -205,7 +235,7 @@ module ReporterDashboards
       else
         refuse_import(@template.errors.full_messages.join(', '))
       end
-    rescue Reporting::Exchange::InvalidBundle => e
+    rescue Reporting::Bundle::InvalidBundle => e
       # NOT `rescue Exception`, and not a bare rescue either: the only thing caught here is
       # "this file is not a template bundle", which is a message for the person who chose
       # the file. Anything else is a defect and must reach the log as one.

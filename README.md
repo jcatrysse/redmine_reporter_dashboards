@@ -594,10 +594,12 @@ when a template failed, and `2` when the arguments were wrong (no file, no such 
   issue* templates: asking for more is refused before anything is rendered, with a message
   naming both the number you asked for and the limit.
 * **A *one document per issue* template covering more than one issue downloads as a zip.**
-  One PDF per issue, named after it. The archive is streamed rather than assembled in
-  memory, so it has no `Content-Length` and a browser will show the download growing
-  rather than a percentage. The 50-document cap above still applies, and is still checked
-  before anything is rendered.
+  One PDF per issue, named after it. The archive is written out piece by piece rather than
+  assembled in memory, so the response has no `Content-Length` and your browser will show
+  the download growing rather than a percentage. Expect a pause before it starts: every
+  document is rendered first, deliberately, so that a failure is still a proper error page
+  instead of a half-finished archive. The 50-document cap above still applies and is still
+  checked before anything is rendered.
 * **A `source: time_entries` report has no time series.** Hours by activity, by user, by
   project, by issue and by four issue attributes all work (see *Reporting on spent time*
   below), but `{% sql_aggregate %}` with no `group_by` is refused there and says so on the

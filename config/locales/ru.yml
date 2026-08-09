@@ -153,6 +153,8 @@ ru:
   text_reporter_failure_document_notice: "Этот документ не является отчётом. Он фиксирует, что отчёт не удалось сформировать. Укажите приведённый выше идентификатор корреляции, обращаясь к администратору с просьбой посмотреть журнал."
   text_reporter_failure_document_value_unavailable: "Это значение невозможно показать в данном документе."
   error_reporter_template_import_no_file: "Выберите файл для импорта."
+  error_reporter_template_import_many: "В этом файле %{count} шаблонов отчётов, а эта форма импортирует один. Чтобы импортировать весь набор, используйте rake-задачи reporter_dashboards:exchange:plan и :apply."
+  error_reporter_template_import_too_large: "Этот файл слишком велик для импорта. Предел — %{limit} байт."
   warning_reporter_template_import_fields_dropped: "В схеме этой установки нет столбца %{fields}, поэтому шаблон импортирован без него."
   label_reporter_schedule: "Запланированный отчёт"
   mail_subject_reporter_schedule_report: "%{name} - %{date}"

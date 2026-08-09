@@ -761,6 +761,43 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_match(/failure_document/, flash[:warning].to_s)
   end
 
+  # A MULTI-TEMPLATE BUNDLE IS REFUSED, NOT SILENTLY REDUCED TO ITS FIRST TEMPLATE.
+  # `#import` used `Exchange.parse`, which answers the FIRST template of a document — while
+  # the same release taught `rake exchange:export` to write bundles of many. Uploading one
+  # imported a single template and said "created". Found by an independent review.
+  def test_uploading_a_multi_template_bundle_is_refused_naming_the_count
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates,
+          :edit_reporter_dashboards_templates)
+    json = { 'format_version' => 1,
+             'templates' => [{ 'name' => 'Alpha', 'content' => '<p>a</p>' },
+                             { 'name' => 'Beta', 'content' => '<p>b</p>' },
+                             { 'name' => 'Gamma', 'content' => '<p>c</p>' }] }.to_json
+
+    assert_no_difference 'RedmineReporterDashboards::Template.count' do
+      post :import, params: { project_id: @project.identifier, file: uploaded_bundle(json) }
+    end
+
+    assert_response :unprocessable_entity
+    assert_include '3', flash[:error].to_s
+  end
+
+  # AND A ONE-TEMPLATE BUNDLE — the shape the Export button now writes — still imports.
+  # Without this the refusal above could be refusing everything.
+  def test_uploading_a_single_template_bundle_still_imports_it
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates,
+          :edit_reporter_dashboards_templates)
+    json = { 'format_version' => 1, 'exported_at' => '2025-12-29T10:30:20Z',
+             'plugin_version' => '0.5.0',
+             'templates' => [{ 'name' => 'Only one', 'content' => '<p>a</p>' }] }.to_json
+
+    assert_difference 'RedmineReporterDashboards::Template.count', 1 do
+      post :import, params: { project_id: @project.identifier, file: uploaded_bundle(json) }
+    end
+
+    assert_response :redirect
+    assert_equal 'Only one', RedmineReporterDashboards::Template.order(:id).last.name
+  end
+
   def test_export_sanitises_a_filename_that_would_be_a_path
     template = create_template(name: '../../etc/passwd')
     grant(:view_reporter_dashboards_reports, :edit_own_reporter_dashboards_templates)
@@ -1209,9 +1246,12 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   # The property it protected is NOT lost, and that was checked rather than assumed before
   # deleting it: `test_a_batch_over_the_cap_answers_with_a_failure_document_at_422` and
   # `test_an_empty_report_answers_with_a_failure_document_whose_name_is_still_usable` each
-  # assert the same thing on a refusal that still exists — a 422, a PDF, and a
-  # `report-FAILED-` filename. Rewriting this one to drive one of those would have been a
-  # third copy of an assertion two tests already make.
+  # assert the same thing on a refusal that still exists: both assert a 422 and a PDF, and
+  # the second also asserts the `report-FAILED-<uuid>` filename. (An earlier version of
+  # this note claimed both assert the filename; the cap test does not. Corrected rather
+  # than left, because an overstated citation is what the next reader checks INSTEAD of
+  # the test.) Rewriting this one would have been a third copy of an assertion two tests
+  # already make.
 
   # THE SAFETY CLAUSE, AGAINST A REAL RENDER RATHER THAN A CONSTRUCTED DIAGNOSTIC. The
   # DB-less spec proves `FailureDocument` cannot carry `detail`; this proves the thing an

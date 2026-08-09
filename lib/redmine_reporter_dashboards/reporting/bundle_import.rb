@@ -105,9 +105,10 @@ module RedmineReporterDashboards
       def plan(content)
         parsed = Bundle.parse(content)
         notes = []
+        state = initial_state
 
         outcomes = parsed.entries.map do |entry|
-          decision = decide(entry, notes)
+          decision = decide(entry, notes, state)
           lint = lint_counts(entry)
 
           Outcome.new(name: entry['name'], applied_name: decision[:applied_name],
@@ -130,7 +131,8 @@ module RedmineReporterDashboards
         parsed = Bundle.parse(content)
         notes = []
 
-        outcomes = parsed.entries.map { |entry| apply_entry(entry, notes) }
+        state = initial_state
+        outcomes = parsed.entries.map { |entry| apply_entry(entry, notes, state) }
 
         Report.new(outcomes: outcomes, notes: notes, planned: false, bundle: parsed)
       end
@@ -139,8 +141,8 @@ module RedmineReporterDashboards
 
       attr_reader :logger
 
-      def apply_entry(entry, notes)
-        decision = decide(entry, notes)
+      def apply_entry(entry, notes, state)
+        decision = decide(entry, notes, state)
         lint = lint_counts(entry)
 
         outcome =
@@ -187,19 +189,62 @@ module RedmineReporterDashboards
         end
       end
 
-      # THE DECISION, MADE ONCE AND USED TWICE. See the class comment.
-      def decide(entry, notes)
-        name = entry['name'].to_s
-        existing = find_conflict(name)
+      # A CONFLICT IS A TEMPLATE THAT WAS HERE BEFORE THIS RUN STARTED, and the snapshot is
+      # what makes that sentence true. Read ONCE, before the first entry.
+      #
+      # --- THE TWO DEFECTS THIS FIXES, both found by an independent review ---
+      #
+      # `decide` used to ask the DATABASE per entry. Two consequences, and both are the
+      # kind that look like nothing in a green suite:
+      #
+      # 1. **A bundle carrying two templates with the SAME NAME lost one.** `Template` has
+      #    no uniqueness validation on `name` (it copies core's `Query`, which has none), so
+      #    two templates in one project may legitimately share a name and an export
+      #    faithfully contains both. On import the second one collided with the FIRST ONE
+      #    THIS RUN HAD JUST CREATED, took the `skip` branch, and was dropped — with the
+      #    reason *"a template called X is already in this project"*, which was not what
+      #    happened. FR-57's byte-identity fails on exactly that bundle. Measured:
+      #    2 templates in, `{create: 1, skip: 1}`, 1 landed.
+      #
+      # 2. **`plan` did not predict `apply`** on the same bundle — the thing this class's
+      #    own comment calls "worse than no plan at all". `plan` writes nothing, so its
+      #    second entry saw no conflict and said `create`; `apply`'s second entry saw the
+      #    row the first had just written and said `skip`. Measured: plan `{create: 2}`,
+      #    apply `{create: 1, skip: 1}`.
+      #
+      # Snapshotting closes both at once, and it closes them the same way for both entry
+      # points, which is why they cannot drift apart again. A within-bundle duplicate is
+      # NOT a conflict: the source had two templates with that name, so the destination
+      # gets two. `claimed` exists only so that RENAME cannot hand two entries the same new
+      # name — it is about the names this run has spoken for, not about conflicts.
+      def initial_state
+        preexisting = template_class.where(project_id: project&.id)
+                                    .order(:id)
+                                    .each_with_object({}) do |template, map|
+          map[template.name.to_s] ||= template
+        end
 
-        return { action: :create, applied_name: name } if existing.nil?
+        { preexisting: preexisting, claimed: {} }
+      end
+
+      # THE DECISION, MADE ONCE AND USED TWICE. See the class comment.
+      def decide(entry, notes, state)
+        name = entry['name'].to_s
+        existing = state[:preexisting][name]
+
+        if existing.nil?
+          state[:claimed][name] = true
+          return { action: :create, applied_name: name }
+        end
 
         case on_conflict
         when CONFLICT_SKIP
           { action: :skip, existing: existing, applied_name: name,
-            reason: "a template called #{name.inspect} is already in this project" }
+            reason: "a template called #{name.inspect} was already in this project " \
+                    'before this import started' }
         when CONFLICT_RENAME
-          renamed = free_name(name)
+          renamed = free_name(name, state)
+          state[:claimed][renamed] = true if renamed
           if renamed.nil?
             { action: :skip, existing: existing, applied_name: name,
               reason: "no free name was found after #{MAX_RENAME_ATTEMPTS} attempts" }
@@ -222,6 +267,11 @@ module RedmineReporterDashboards
       # authored the template rather than on the project alone. A refusal is a SKIP with a
       # reason rather than a failure: the operator asked to import a bundle, and one
       # template they may not touch is not a broken bundle.
+      # UNSCOPED BY VISIBILITY, on purpose — `initial_state` reads every template in the
+      # project rather than `Template.visible(actor)`. A private template somebody else
+      # authored is still a name that is taken; answering "no conflict" for it would create
+      # a second template with the same name whose duplicate its owner cannot see. A
+      # conflict is a fact about the project, not about the actor.
       def decide_overwrite(existing, name, notes)
         unless existing.editable_by?(actor)
           return { action: :skip, existing: existing, applied_name: name,
@@ -238,7 +288,29 @@ module RedmineReporterDashboards
         { action: :update, existing: existing, applied_name: name }
       end
 
+      # CREATING NEEDS A PERMISSION TOO, and until an independent review asked, only
+      # OVERWRITING had one. The asymmetry was defensible-by-accident — the only shipped
+      # caller is a rake task whose `resolve_actor` requires an active administrator — but
+      # "no caller can reach it today" is not a guard, and this class is exactly the kind of
+      # thing a later controller action picks up. Measured before the fix: a non-member
+      # holding only `view_issues` created a template in a project they are not in.
+      #
+      # A project-less template is administrator-only by construction, because Redmine has
+      # no role grant outside a project (technical-spec.md §4.1) — the same rule
+      # `Template#editable_by?` applies.
+      def creatable?
+        return true if actor.admin?
+        return false if project.nil?
+
+        actor.allowed_to?(:add_reporter_dashboards_templates, project)
+      end
+
       def create(entry, name, action:, reason: nil)
+        unless creatable?
+          return Outcome.new(name: entry['name'], applied_name: name, action: :skip,
+                             reason: 'you may not add report templates to this project')
+        end
+
         template = template_class.new(assignable(entry))
         template.name = name
         # NEVER FROM THE FILE, ANY OF THE THREE. `project_id` decides which project's
@@ -300,16 +372,7 @@ module RedmineReporterDashboards
         kept
       end
 
-      # THE CONFLICT IS A NAME IN THIS PROJECT, and it is looked up unscoped by visibility
-      # on purpose. `Template.visible(actor)` would answer "no conflict" for a private
-      # template somebody else authored — and the create would then fail on nothing, or
-      # succeed and leave two templates with one name, one of which its owner cannot see
-      # the duplicate of. A conflict is a fact about the project, not about the actor.
-      def find_conflict(name)
-        template_class.where(project_id: project&.id, name: name).order(:id).first
-      end
-
-      def free_name(name)
+      def free_name(name, state)
         2.upto(MAX_RENAME_ATTEMPTS + 1) do |suffix|
           candidate = "#{name} (#{suffix})"
           # THE LENGTH BOUND IS THE MODEL'S. A name at the 255-character limit plus " (2)"
@@ -318,7 +381,12 @@ module RedmineReporterDashboards
           # truncate-then-decorate order `download_filename` uses, for the same reason.
           candidate = "#{name[0, template_class::MAX_STRING - suffix.to_s.length - 3]} (#{suffix})" \
             if candidate.length > template_class::MAX_STRING
-          return candidate unless find_conflict(candidate)
+          # BOTH SETS: what was here before, and what this run has already spoken for.
+          # Without the second, two identically-named entries in one bundle would both be
+          # renamed to `Name (2)` — and `plan` and `apply` would disagree about it, which
+          # is the defect the snapshot exists to remove.
+          taken = state[:preexisting].key?(candidate) || state[:claimed].key?(candidate)
+          return candidate unless taken
         end
 
         nil

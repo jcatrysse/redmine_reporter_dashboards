@@ -82,10 +82,15 @@ module RedmineReporterDashboards
 
       # Bit 11 of the general-purpose flags, the "language encoding flag" (EFS) added by
       # APPNOTE 6.3.0. WITHOUT IT A NON-ASCII NAME IS UNDEFINED: the historical encoding
-      # of a zip member name is IBM Code Page 437, so a template called `Bericht Übersicht`
-      # unpacks as mojibake on any reader that believes the header. Redmine runs in nine
-      # locales and issue subjects are arbitrary text, so this is the ordinary case here
-      # rather than an exotic one. Set only when the name actually needs it, because an
+      # of a zip member name is IBM Code Page 437, so a member called `Bericht Übersicht`
+      # unpacks as mojibake on any reader that believes the header.
+      #
+      # NOT REACHED BY THE ONLY CALLER TODAY, and the comment used to imply it was. An
+      # independent review measured every member of a non-ASCII archive coming back
+      # `flag=0x0000`, because `TemplatesController#archive_entry_name` builds
+      # `<stem>-<record id>.pdf` through a closed `[^0-9A-Za-z._-] -> _` filter. This is
+      # defence for the next caller, not a description of the current one. Set only when
+      # the name actually needs it, because an
       # ASCII name is identical under both interpretations and flagging it would be a
       # claim the archive does not need to make.
       FLAG_UTF8_NAMES = 0x0800
@@ -272,9 +277,18 @@ module RedmineReporterDashboards
         (@mtime.hour << 11) | (@mtime.min << 5) | (@mtime.sec / 2)
       end
 
+      # CLAMPED AT BOTH ENDS. The 7-bit year field spans 1980-2107; below it the value
+      # would wrap into a plausible future year and above it `pack('v')` would truncate —
+      # the one place this file's own "refuse rather than truncate" rule was applied in
+      # only one direction. Unreachable from the shipped caller (`mtime` is the clock) and
+      # clamped rather than refused because a timestamp is metadata: refusing to write an
+      # archive over a bad clock would be a worse answer than writing it with a bad date.
+      DOS_MAX_YEAR = DOS_EPOCH_YEAR + 127
+
       def dos_date
         year = @mtime.year
         return (1 << 5) | 1 if year < DOS_EPOCH_YEAR
+        return (127 << 9) | (12 << 5) | 31 if year > DOS_MAX_YEAR
 
         ((year - DOS_EPOCH_YEAR) << 9) | (@mtime.month << 5) | @mtime.day
       end

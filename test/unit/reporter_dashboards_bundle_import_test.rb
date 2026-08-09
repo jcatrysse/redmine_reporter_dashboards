@@ -56,6 +56,13 @@ class ReporterDashboardsBundleImportTest < ActiveSupport::TestCase
 
   def setup
     @project = Project.find(1)
+    # ENABLED, AND ITS ABSENCE MADE THE OVERWRITE PERMISSION TEST VACUOUS. `editable_by?`
+    # goes through `user.allowed_to?(…, project)`, which is FALSE for every non-admin when
+    # the project does not have the module — so the one test pinning the `edit_own_…` case
+    # passed with the actor as the author, and would have passed if the arm had been
+    # refusing unconditionally. Found by an independent review; HANDOVER §1's "assert the
+    # fixture discriminates", unlearned.
+    @project.enable_module!(:reporter_dashboards_reports)
     @admin = User.find(1)
     assert @admin.admin?, 'user 1 must be an administrator'
     @jsmith = User.find_by!(login: 'jsmith')
@@ -277,6 +284,43 @@ class ReporterDashboardsBundleImportTest < ActiveSupport::TestCase
     assert_equal '<p>dloppers</p>', existing.reload.content
   end
 
+  # THE POSITIVE HALF, which nothing asserted: overwrite SUCCEEDS for a template the actor
+  # authored when they hold `edit_own_…`. Without this the whole arm could be refusing
+  # every request and the suite would stay green.
+  def test_overwrite_succeeds_for_a_template_the_actor_authored
+    existing = create_template(name: 'Imported', author: @jsmith, content: '<p>local</p>')
+    grant(:edit_own_reporter_dashboards_templates)
+
+    report = importer(actor: @jsmith, on_conflict: 'overwrite').apply(bundle(entry))
+
+    assert_equal [:update], report.outcomes.map(&:action)
+    assert_equal '<h1>{{ project.name }}</h1>', existing.reload.content
+  end
+
+  # CREATING NEEDS A PERMISSION, and until an independent review asked, only overwriting
+  # had one. The shipped rake task only ever hands this class an administrator, so the hole
+  # was unreachable — but "no caller reaches it today" is not a guard.
+  def test_creating_is_refused_for_an_actor_who_may_not_add_templates_here
+    grant(:view_issues)
+
+    report = nil
+    assert_no_difference 'RedmineReporterDashboards::Template.count' do
+      report = importer(actor: @jsmith).apply(bundle(entry))
+    end
+
+    assert_equal [:skip], report.outcomes.map(&:action)
+    assert_match(/may not add/, report.outcomes.first.reason)
+  end
+
+  # AND THE POSITIVE HALF, so the guard cannot be refusing everything.
+  def test_creating_succeeds_for_an_actor_who_holds_the_add_permission
+    grant(:add_reporter_dashboards_templates)
+
+    assert_difference 'RedmineReporterDashboards::Template.count', 1 do
+      importer(actor: @jsmith).apply(bundle(entry))
+    end
+  end
+
   def test_an_unknown_conflict_policy_is_refused_at_construction
     error = assert_raises(ArgumentError) { importer(on_conflict: 'clobber') }
 
@@ -393,6 +437,55 @@ class ReporterDashboardsBundleImportTest < ActiveSupport::TestCase
                  'the template was left half-overwritten'
   end
 
+  # ------------------------------------------------------------------ two templates, one name
+
+  # `Template` HAS NO UNIQUENESS VALIDATION ON `name` — it copies core's `Query`, which has
+  # none — so a project may legitimately hold two templates called the same thing and an
+  # export faithfully contains both. The importer used to ask the DATABASE per entry, so the
+  # second one collided with the first one THIS RUN had just written and was dropped under
+  # the default policy, with a reason that was not what happened.
+  def test_a_bundle_carrying_two_templates_with_one_name_imports_both
+    content = bundle(entry('name' => 'Same', 'content' => '<p>FIRST</p>'),
+                     entry('name' => 'Same', 'content' => '<p>SECOND</p>'))
+
+    report = nil
+    assert_difference 'RedmineReporterDashboards::Template.count', 2 do
+      report = importer(on_conflict: 'skip').apply(content)
+    end
+
+    assert_equal %i[create create], report.outcomes.map(&:action)
+    contents = Template.where(project_id: @project.id, name: 'Same').order(:id).pluck(:content)
+    assert_equal ['<p>FIRST</p>', '<p>SECOND</p>'], contents,
+                 'one of the two templates was silently dropped'
+  end
+
+  # AND THE PLAN PREDICTS IT. This is the case the class comment calls "worse than no plan
+  # at all": the operator is told two will be imported and presses apply. Before the
+  # snapshot, plan said {create, create} and apply did {create, skip}.
+  def test_the_plan_predicts_the_apply_for_two_templates_sharing_a_name
+    content = bundle(entry('name' => 'Twin'), entry('name' => 'Twin'))
+
+    planned = importer.plan(content)
+    applied = importer.apply(content)
+
+    assert_equal planned.outcomes.map(&:action), applied.outcomes.map(&:action)
+    assert_equal %i[create create], applied.outcomes.map(&:action)
+    assert_equal 2, Template.where(project_id: @project.id, name: 'Twin').count
+  end
+
+  # RENAME MUST NOT HAND BOTH ENTRIES THE SAME NEW NAME either, and plan must agree with
+  # apply about which names it chose.
+  def test_rename_gives_two_colliding_entries_distinct_names_and_the_plan_says_so
+    create_template(name: 'Same')
+    content = bundle(entry('name' => 'Same'), entry('name' => 'Same'))
+
+    planned = importer(on_conflict: 'rename').plan(content)
+    applied = importer(on_conflict: 'rename').apply(content)
+
+    assert_equal ['Same (2)', 'Same (3)'], applied.outcomes.map(&:applied_name)
+    assert_equal planned.outcomes.map(&:applied_name), applied.outcomes.map(&:applied_name)
+  end
+
   # ------------------------------------------------------------------ FR-57, end to end
 
   # THE ROUND TRIP THROUGH THE REAL MODEL, not through the DB-less fake. `bundle_spec.rb`
@@ -418,6 +511,25 @@ class ReporterDashboardsBundleImportTest < ActiveSupport::TestCase
                          exported_at: at, plugin_version: '0.5.0')
 
     assert_equal first, second, 'FR-57: export -> import -> export must be byte-identical'
+  end
+
+  # FR-57 ON THE BUNDLE THAT USED TO BREAK IT. The DB-less round trip cannot fail this way:
+  # its "receiving installation" is a stub that rebuilds every entry unconditionally, so it
+  # never applies a conflict policy and never drops anything. Only the real importer can.
+  def test_export_import_export_is_byte_identical_for_two_templates_sharing_a_name
+    create_template(name: 'Same', content: '<p>a</p>')
+    create_template(name: 'Same', content: '<p>b</p>', page_size: 'A3')
+    at = '2025-12-29T10:30:20Z'
+
+    first = Bundle.dump(Template.where(project_id: @project.id).order(:name, :id),
+                        exported_at: at, plugin_version: '0.5.0')
+    receiving = Project.generate!
+    receiving.enable_module!(:reporter_dashboards_reports)
+    BundleImport.new(project: receiving, actor: @admin, on_conflict: 'skip').apply(first)
+    second = Bundle.dump(Template.where(project_id: receiving.id).order(:name, :id),
+                         exported_at: at, plugin_version: '0.5.0')
+
+    assert_equal first, second
   end
 
   # ------------------------------------------------------------------ §7 rule 5
