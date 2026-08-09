@@ -125,6 +125,7 @@ de:
   label_reporter_preview_degradations: "Teile dieses Berichts konnten nicht wie angefordert erstellt werden"
   label_reporter_report_failed_template: "Diese Vorlage konnte nicht gerendert werden"
   label_reporter_report_failed_engine: "Die Render-Engine konnte dieses Dokument nicht erzeugen"
+  label_reporter_report_failed_assets: "Eine von diesem Bericht referenzierte Datei konnte nicht eingebunden werden"
   label_reporter_report_refused: "Dieser Export wurde abgelehnt"
   label_reporter_report_frame: "Berichtsausgabe"
   label_reporter_report_diagnostic_code: "Code"

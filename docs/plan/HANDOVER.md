@@ -18,6 +18,57 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**A COLLECTION THAT HOLDS TWO CLASSES IS A DUCK-TYPING BUG WAITING FOR THE SECOND ONE TO
+ARRIVE, AND `Outcome#degradations` HOLDS TWO.** `Liquid::Diagnostics::Degradation` answers
+`code`/`detail`/`data`/`count`; `Render::Degradation` answers `capability`/`detail` and
+**nothing else**. They are separate deliberately (`liquid/diagnostics.rb` argues it), and
+`ReportRun` concatenates them into one list that one ERB loop renders.
+`reporter_degradation_text` read `#code` off both for a whole generation, so **every
+`wkhtmltopdf` render 500'd the preview and show pages** — that adapter stamps
+`Degradation(:legacy_engine)` into every `Success` by design, and the partial's own comment
+says so. §Findings **E-25**. Two rules. When you concatenate, ask what the OTHER element type
+answers — `respond_to?` in a console beats reading two class definitions. And a rescue list
+(`I18n::MissingInterpolationArgument, ArgumentError`) is not a safety net: the exception that
+actually happened was `NoMethodError` and it went straight past.
+
+**A PERMISSION GRANT IS NOT A VISIBILITY SETTING, AND FIXTURE ROLE 1 IS `issues_visibility:
+all`.** Cost F-16 one round. The `grant` pattern (`role.permissions = [...]`) is the readable
+way to say "holds ONE permission" — and it leaves `issues_visibility` alone. Role 1 is
+Manager and ships `all`, so jsmith sees every private issue in every project he is a member
+of, and two tests whose entire subject was *an attachment the actor may NOT see* were
+vacuous. They were caught only because each asserted its precondition
+(`assert_not attachment.visible?(@actor)`) rather than trusting the fixture — which is the
+habit, not the luck. Pin `role.issues_visibility` whenever the test is about who can see
+what.
+
+**`I18n.backend.store_translations` DOES NOT OVERRIDE A KEY THIS PLUGIN ALREADY SHIPS.**
+Planting `text_reporter_degradation_aggregation_dimension_unknown` to test interpolation gave
+back the shipped Dutch-neutral sentence, not the plant, and the example failed against a
+string nobody in the test had written. A plant that competes with a real translation is
+testing the backend's precedence rules. **Plant an invented key** (`…_rrd_probe`) and assert
+the shipped ones separately.
+
+**A GUARD WHOSE ONLY EFFECT IS "DO NOT CONSTRUCT THIS OBJECT" HAS NO BEHAVIOURAL SIGNATURE,
+so mutating it always survives.** F-16's factory skips building `Assets::Fetcher` unless the
+policy could use one. Mutating that to "always build it" was GREEN — and it is a genuinely
+equivalent mutant, proved by CONSTRUCTING the difference rather than reading for it: the same
+document carrying all five reference classifications resolved byte-identically
+(`Resolution#to_h` equal) with a fetcher and without one, because `Resolver#fetched` consults
+`policy.fetch_allowed?` before it ever looks at `@fetcher`. The guard is still worth having
+(INV-8: the thing that holds the network should not exist under the default policy), so it
+was made testable the way the `update_columns` entry below says to — **the claim is about the
+CONSTRUCTOR, so assert on the constructor**: `Assets::Fetcher.expects(:new).never`, plus the
+positive half, or `never` also passes against a factory that builds one nowhere.
+
+**AN OBJECT INSTANTIATED AS AN ARGUMENT CANNOT BE INTERROGATED, AND THE CODE READS AS THOUGH
+IT IS ALREADY ORDERED.** F-16's stated difficulty was "the asset binding needs the resolved
+engine's CAPABILITIES, and the engine is chosen downstream". It was not downstream:
+`with_pdf` already called `resolve_engine`. What it did was
+`Renderer.new(engine: adapter.new, …)` — so the instance existed for exactly the length of
+that expression and no variable held it. One local (`engine = adapter.new`) was the entire
+"ordering change". Before planning work around a dependency that looks structural, check
+whether it is only a missing binding.
+
 **REDMINE SETS `include_all_helpers = false`, so a controller sees its OWN helper and nothing
 else.** `config/application.rb:73`. Every core controller lists what it needs (`helper :journals`,
 `helper :projects`, …) and this plugin's own `ReporterPreflightController` does too — which reads
@@ -1022,6 +1073,8 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-31 (increment 1): every guard, mutation-tested one at a time** | **yes, locally (2026-08-08)** | **25 mutations, 25 red.** The `source` annotation and all three `RenderContext` derivations carrying it; the tag's refusal, its degradation and the legacy path still being issues; the controller's two-arm dispatch, the visibility filter, the project filter and `source` being permitted; `ReportRun`'s closed-set refusal, the context being told the source, and the drops following it; and all five of `TimeEntryVisibility`'s branches. **Three were GREEN and all three examples were rewritten** — a `case`'s `else` that turned out to be a second mechanism (DELETED rather than kept, following T-25's precedent), an administrator short-circuit that the built-in Non-member role made unobservable, and a visibility count the fixture could not discriminate |
 | **T-29: the exchange bundle and the streamed archive — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-09)** | `rake redmine:plugins:test` — **697 runs, 3126 assertions, 0 failures, 0 errors, 4 skips** (was 665/4 — **the skip count did not move**). 32 net new: 21 for the importer against a real database, 9 for the rake wiring, 4 for the archive, less two the archive superseded. DB-less rspec **2392 examples, 0 failures, 103 pending** (was 2340); `spec_liquid` **301, 0 failures**; adapter PostgreSQL 16 **254, 0 failures, 9 pending**; pinned corpus **217, 0 failures**; `spec/golden` from the PLUGIN checkout **166, 0 failures, 0 pending** and `git diff -- spec/golden` empty. Nine gates green with `LAYER_PURITY_MODE=strict` including the new `archive` arm, `migrate_updown.sh` green on both arms, locale parity **247 keys x 9 files** with identical placeholders. **The Ruby 2.7 floor gate earned its keep again**: it caught `Hash#except`, which is Ruby 3.0 core and which ActiveSupport would have supplied at runtime — invisible without the gate |
 | **T-29: two baseline deviations, both ENVIRONMENTAL and both resolved before anything was believed** | **yes, locally (2026-08-09)** | The first control run reported **8 skips against a documented 4**. Not a regression: the four extra were `poppler-utils is not installed`, and `apt-get install -y poppler-utils` restored 665/0/4 exactly — and made four previously-skipped assertions actually run. The DB-less suite reported **3 failures on an unmodified tree**, all `invalid byte sequence in US-ASCII` from a spec that READS a source file; `LANG=C.UTF-8` is the fix (§3's `spec_liquid` entry, now true of the main suite too since T-31 added a source-reading spec). Its example count is **2340 rather than the 2298 last recorded**, the difference being exactly the 42 `spec/adapter` examples that go pending without `RRD_ADAPTER_URL` — worth knowing before treating a count as a regression |
+| **F-16: the asset layer wired into the render path — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-09)** | `rake redmine:plugins:test` — **878 runs, 3835 assertions, 0 failures, 0 errors, 4 skips** (was 845/4 — **the skip count did not move**). 33 new: 21 for the wiring against a real `Attachment`, a real `visible?` and a real `Setting.host_name`, and 12 for the degradation helper (§Findings E-25). DB-less rspec **2377 examples, 0 failures, 61 pending** (was 2362/61 — **pending unchanged**); `spec_liquid` **301, 0 failures**; `spec/golden` from the PLUGIN checkout **166, 0 failures, 0 pending** and `git diff -- spec/golden` empty. Nine gates green with `LAYER_PURITY_MODE=strict`, `migrate_updown.sh` green on both arms, locale parity with the new `label_reporter_report_failed_assets` × 9. **`migrate_updown` FAILED first and it was the §3 dirty-database symptom, not the migration** — the repair snippet, plus dropping T-24's stand-in `report_templates`, and it passed on the next run |
+| **F-16: every guard mutation-tested, one at a time** | **yes, locally (2026-08-09)** | **21 mutations, 21 red**, control GREEN on all three targets first. **Two SURVIVED the first round and both were closed with new tests rather than argued away.** *"the factory ignores the mode the operator configured"* is the one to remember: an install set to `:external` would have had `:bundled` behaviour silently, and every other example in the file passed because `:bundled` is what they assert — the fix is an assertion on `policy.effective_mode` and on which of the two refusal WORDINGS comes back. The other, *"build a fetcher even when the policy forbids one"*, is an **equivalent mutant proved by construction** and is written up in §1 |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |
@@ -1667,7 +1720,18 @@ an ISSUE scope — already frozen in T-01's corpus, so that comparison is alread
    falls back to a `data:` URI, which keeps the element intact. Adding a name to that set is a
    claim about what the attribute does.
 
-   **NOTHING CONSUMES `DocumentRequest#assets` YET.** Neither shipped adapter declares
+   **THE LAYER IS NOW CALLED — F-16 CLOSED 2026-08-09.** `Reporting::ReportRun` resolves the
+   engine first, asks it for `#capabilities`, runs each rendered body through
+   `Assets::Resolver` and binds the result with `Render::AssetBinding`. Two things a later
+   session should know. `RedmineReporterDashboards.asset_resolver` is the production factory
+   and it lives in the **composition root, not in `reporting/`** — `Assets::Fetcher` is the
+   plugin's only egress and `layer_purity`'s `reporting` arm exists to stop that layer
+   becoming a second place that knows about HTTP; building one there would pass the gate's
+   literal patterns and defeat its sentence. And `Reporting::AttachmentMapper` is the
+   `mappers` port this class documents and nothing implemented — it is gated on
+   `Attachment#visible?(**the run's actor**)`, which is where INV-1 lives on this path.
+
+   **NOTHING CONSUMES `DocumentRequest#assets` YET, and that half is unchanged.** Neither shipped adapter declares
    `:asset_upload`, so the resolver always chooses `:inline` for both — correct and fully
    exercised — and the upload branch is proven at the resolver against a capability set that
    declares it. Declaring the capability without building the CDP `Fetch.enable` interceptor

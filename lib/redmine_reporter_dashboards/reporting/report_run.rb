@@ -3,11 +3,13 @@
 require 'securerandom'
 
 require_relative 'diagnostic'
+require_relative 'attachment_mapper'
 require_relative '../liquid/render_context'
 require_relative '../liquid/template_renderer'
 require_relative '../liquid/execution_policy'
 require_relative '../liquid/drops'
 require_relative '../render/batch_guard'
+require_relative '../render/asset_binding'
 require_relative '../render/document_request'
 require_relative '../render/registry'
 require_relative '../render/renderer'
@@ -138,8 +140,16 @@ module RedmineReporterDashboards
       #         render rather than a render, and a test that has to boot Liquid to reach
       #         them is a test that will not be written for all of them. The full
       #         application suite drives the real renderer end to end.
+      # asset_resolver
+      #         a callable taking `engine_capabilities:` and answering an
+      #         `Assets::Resolver`, or nil for "build the production one" (F-16). A port
+      #         because the production factory reads `Setting.protocol`, `Setting.host_name`
+      #         and the plugin settings, and because the interesting branches — a
+      #         third-party URL refused under `:bundled`, a same-origin one inlined off
+      #         disk — are properties of the RESOLVER's answer rather than of a render.
       def initialize(template:, actor:, scope:, guard:, query: nil, output_class: :report,
-                     limit: nil, engine: nil, logger: nil, template_renderer: nil)
+                     limit: nil, engine: nil, logger: nil, template_renderer: nil,
+                     asset_resolver: nil)
         unless OUTPUT_CLASSES.include?(output_class)
           raise ArgumentError, "#{output_class.inspect} is not a report output class"
         end
@@ -155,6 +165,7 @@ module RedmineReporterDashboards
         @engine = engine
         @logger = logger
         @template_renderer = template_renderer
+        @asset_resolver = asset_resolver
       end
 
       # ONE DIAGNOSTICS COLLECTOR FOR THE WHOLE RUN, and it was one per job — which meant
@@ -371,6 +382,21 @@ module RedmineReporterDashboards
 
       # --- phase B ---------------------------------------------------------------------
 
+      # THE ENGINE IS RESOLVED AND INSTANTIATED BEFORE THE REQUESTS ARE BUILT, and that
+      # ordering is the whole of F-16's difficulty.
+      #
+      # `Assets::Resolver` picks, per reference, the most restrictive asset model THE
+      # ENGINE DECLARES — so it cannot be asked anything until the adapter is known. The
+      # engine used to be chosen here and `document_request` called from inside the same
+      # expression that instantiated it, which read as "already ordered" and was not:
+      # `adapter.new` was an argument to `Renderer.new`, so nothing held the instance and
+      # nothing could ask it for its capabilities. One local variable is the fix, and it is
+      # the reason this method changed at all.
+      #
+      # The instance is built ONCE and shared by the binding and the renderer. Two
+      # instances would be two `ProcessPool`s for `:chromium_cdp` — one of which would
+      # never be used and both of which would be torn down separately — and, worse, a
+      # capability answer that came from a different object than the one that draws.
       def with_pdf(sections, total, started)
         adapter = resolve_engine
         if adapter.nil?
@@ -381,10 +407,19 @@ module RedmineReporterDashboards
                         sections: sections, pdf_attempted: true)
         end
 
-        renderer = ::RedmineReporterDashboards::Render::Renderer.new(engine: adapter.new,
+        engine = adapter.new
+        bound = bind_assets(sections, engine)
+        if bound.failure
+          # NO ENGINE HAS RUN. `from_asset_refusal` and not `from_render_failure` for
+          # exactly that reason — see `Diagnostic::ORIGINS`.
+          return failed(Diagnostic.from_asset_refusal(bound.failure,
+                                                      template_name: template.name),
+                        total, started, sections: sections, pdf_attempted: true)
+        end
+
+        renderer = ::RedmineReporterDashboards::Render::Renderer.new(engine: engine,
                                                                      logger: logger)
-        batch = guard.render_all(sections.map { |section| document_request(section) },
-                                 renderer: renderer)
+        batch = guard.render_all(bound.requests, renderer: renderer)
 
         if batch.refused?
           return refused(batch.refusal, total, started, sections: sections)
@@ -400,21 +435,81 @@ module RedmineReporterDashboards
         Outcome.new(sections: sections, documents: batch.successes, diagnostic: nil,
                     total_count: total, shown_count: shown_issue_count(total),
                     truncated: truncated?(total), duration_ms: elapsed(started),
-                    degradations: diagnostics.degradations +
+                    degradations: diagnostics.degradations + bound.degradations +
                                   batch.successes.flat_map(&:degradations),
                     engine_id: batch.successes.first&.engine,
                     engine_version: batch.successes.first&.engine_version,
                     pdf_attempted: true)
       end
 
-      def document_request(section)
-        ::RedmineReporterDashboards::Render::DocumentRequest.new(
-          body: section.body,
-          correlation_id: section.job.correlation_id,
-          page_size: template.page_size,
-          orientation: template.orientation.to_sym,
-          margins_mm: margins
+      # What one asset pass over every section produced: the requests to draw, the
+      # degradations to report, and the FIRST refusal if there was one. A Struct rather
+      # than three return values because a caller that can ignore the failure is a caller
+      # that will.
+      BoundRequests = Struct.new(:requests, :degradations, :failure, keyword_init: true)
+
+      # ONE RESOLVER FOR THE WHOLE RUN, not one per section: it holds the policy, the
+      # store and (when the policy permits one at all) the fetcher, none of which vary
+      # per document, and `Resolver#call` is deliberately re-entrant — its `State` is a
+      # local, which the class's own comment says exists so "a resolver is exactly the
+      # kind of object somebody will reuse".
+      #
+      # THE FIRST REFUSAL STOPS THE RUN, and the alternative was considered: resolving
+      # every section and reporting all of their refusals together would produce a longer
+      # message about a report nobody can have either way. A refused document is a refused
+      # run — the same reason a template failure aborts a per-record run rather than
+      # producing an export with holes in it.
+      def bind_assets(sections, engine)
+        resolver = asset_resolver_for(engine)
+        requests = []
+        degradations = []
+
+        sections.each do |section|
+          resolution = resolver.call(section.body)
+          bound = ::RedmineReporterDashboards::Render::AssetBinding.apply(
+            resolution: resolution,
+            correlation_id: section.job.correlation_id,
+            engine: engine.id,
+            **request_geometry
+          )
+          if bound.respond_to?(:failure?) && bound.failure?
+            return BoundRequests.new(requests: requests, degradations: degradations,
+                                     failure: bound)
+          end
+
+          requests << bound
+          degradations.concat(
+            ::RedmineReporterDashboards::Render::AssetBinding.degradations(resolution)
+          )
+        end
+
+        BoundRequests.new(requests: requests, degradations: degradations, failure: nil)
+      end
+
+      # A PORT, for the same reason `template_renderer` is one (mechanism E5). The
+      # production factory reads two Redmine settings and touches the filesystem, so a
+      # test that had to go through it could not drive the refusal branch — which is the
+      # branch F-16's acceptance is mostly about.
+      #
+      # THE MAPPER CARRIES THE ACTOR, and this is the INV-1 line in this file: the
+      # attachment a document may embed is the one THIS run's actor may see, never
+      # `User.current`, which a scheduled render leaves as Anonymous until something else
+      # sets it.
+      def asset_resolver_for(engine)
+        return @asset_resolver.call(engine_capabilities: engine.capabilities) if @asset_resolver
+
+        ::RedmineReporterDashboards.asset_resolver(
+          engine_capabilities: engine.capabilities,
+          mappers: [AttachmentMapper.new(actor: actor, logger: logger)],
+          logger: logger
         )
+      end
+
+      # The three geometry arguments, spelled once. `AssetBinding.apply` passes whatever
+      # it is given straight through to `DocumentRequest`, adding `body` and `assets`.
+      def request_geometry
+        { page_size: 'A4',
+          orientation: :portrait }
       end
 
       # `margins` is "top,right,bottom,left" in millimetres, validated by the model's

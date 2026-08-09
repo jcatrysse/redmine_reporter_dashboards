@@ -125,6 +125,7 @@ ru:
   label_reporter_preview_degradations: "Некоторые части этого отчёта не удалось построить так, как было запрошено"
   label_reporter_report_failed_template: "Не удалось обработать этот шаблон"
   label_reporter_report_failed_engine: "Механизм отрисовки не смог создать этот документ"
+  label_reporter_report_failed_assets: "Не удалось встроить файл, на который ссылается этот отчёт"
   label_reporter_report_refused: "Этот экспорт отклонён"
   label_reporter_report_frame: "Вывод отчёта"
   label_reporter_report_diagnostic_code: "Код"

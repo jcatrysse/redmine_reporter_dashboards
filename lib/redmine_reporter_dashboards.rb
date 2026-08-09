@@ -161,6 +161,54 @@ module RedmineReporterDashboards
     Assets::LocalStore.new(roots: Assets::BundledAssets.roots, mappers: mappers)
   end
 
+  # THE PRODUCTION RESOLVER (F-16). Four collaborators, three of which are the two reads
+  # above plus the plugin's own asset root — and the fourth is the one object in this
+  # plugin that holds the network.
+  #
+  # --- WHY IT IS ASSEMBLED HERE AND NOT IN `reporting/` ---
+  #
+  # `Assets::Fetcher` is the plugin's only egress. `script/gates/layer_purity.sh`'s
+  # `reporting` arm exists to stop the composition root becoming "a second place that
+  # knows about HTTP", and while constructing a fetcher would pass the gate's literal
+  # patterns, it would defeat the sentence the gate was written to enforce. So the one
+  # place that already owns the Redmine-facing half of the asset layer owns this too, and
+  # `ReportRun` names a factory rather than a transport.
+  #
+  # --- THE FETCHER IS NOT BUILT UNLESS THE POLICY COULD USE ONE ---
+  #
+  # Not an optimisation, and not belt-and-braces either — it is the fail-closed direction
+  # made structural. Under the default `:bundled` mode no classification may fetch, so the
+  # object that opens sockets is never CONSTRUCTED, and `Resolver#fetched` then refuses
+  # with "would need a fetch and no fetcher was supplied" if anything ever reached it.
+  # Two independent reasons for the same refusal, which is what INV-8 is worth.
+  #
+  # The question is asked through `Policy#may_fetch?` over the two classifications that
+  # can reach the network at all, rather than through `bundled?`: they agree today, and
+  # `may_fetch?` is the policy's own vocabulary, so a fourth mode added later cannot
+  # silently acquire a fetcher by not being `:bundled`. Note it reads `effective_mode`,
+  # so an `:external` policy whose allowlist is empty — the collapse T-33 calls the
+  # fail-closed clause most likely to be got wrong — gets no fetcher either.
+  def asset_resolver(engine_capabilities:, mappers: [], logger: nil)
+    log = logger || safe_logger
+    policy = asset_policy(logger: log)
+
+    Assets::Resolver.new(
+      policy: policy,
+      local_store: asset_store(mappers: mappers),
+      engine_capabilities: engine_capabilities,
+      fetcher: (Assets::Fetcher.new(policy: policy, logger: log) if asset_fetch_possible?(policy)),
+      origin: asset_origin,
+      logger: log
+    )
+  end
+
+  # PUBLIC because it is the predicate the settings page will want to state, and because a
+  # private method reached with `send` from a spec is the "resolve a name past its
+  # visibility" shape §3.6 deletes `call_method` for.
+  def asset_fetch_possible?(policy)
+    policy.may_fetch?(:same_origin) || policy.may_fetch?(:third_party)
+  end
+
   def plugin_settings
     ::Setting.send(:"plugin_#{PLUGIN_ID}") || {}
   rescue StandardError

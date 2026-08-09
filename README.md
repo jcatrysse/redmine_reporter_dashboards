@@ -356,6 +356,29 @@ rendered**. You get a failure that names the URL, a correlation id, and the reas
 deliberate: a PDF with an empty rectangle where a chart used to be is indistinguishable from a
 PDF that never had one, and if the report is an audit record that difference matters.
 
+### Which URLs on this Redmine are mapped back to a file
+
+"Mapped back to the file on disk" is exact, and two shapes are recognised:
+
+- **`/plugin_assets/redmine_reporter_dashboards/…`** — anything this plugin ships.
+- **`/attachments/download/<id>`** and **`/attachments/download/<id>/<filename>`** — a Redmine
+  attachment. **The person the report is rendered as must be allowed to see it.** An
+  attachment on an issue they cannot open is refused and named, exactly as a third-party URL
+  is; a report is never a way to read a file you could not have downloaded. The same URL in
+  the same template can therefore succeed for one recipient and refuse for another, which is
+  the correct answer rather than an inconsistency.
+
+Both work as absolute URLs too (`https://your-redmine/…`), matched against **Administration →
+Settings → Host name**. If that setting is wrong, an absolute URL on your own server looks
+like somebody else's and is refused.
+
+Two attachment URL shapes are deliberately **not** mapped, and are refused with their reason:
+
+- **`/attachments/<id>/<filename>`** is the *page* about an attachment, not the file.
+- **`/attachments/thumbnail/<id>`** is a *resized copy*. Embedding the full-size original
+  instead would put something other than what you asked for into the document without saying
+  so. Reference the download URL and size it with CSS.
+
 ### Three properties that are not preferences
 
 - **An empty host allowlist makes every value behave exactly as Bundled.** If you select

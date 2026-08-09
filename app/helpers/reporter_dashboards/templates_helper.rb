@@ -106,12 +106,18 @@ module ReporterDashboards
     # on purpose. So the sentence a reader sees FIRST is a locale key chosen by `origin`,
     # and the precise message sits under it as the technical line — the same shape as the
     # preflight page, where the check titles are keys and the details are not.
+    # A `case` WITH AN `else` IS NOT A CLOSED SET, and this one used to be: three `when`
+    # arms and an `else` meaning "engine", so F-16's `:assets` origin — where no engine is
+    # ever started — would have been headlined *"the PDF engine failed"*, sending the
+    # reader to check a binary that had nothing to do with it. The same shape T-25's review
+    # found reporting success while mailing the wrong person's data.
+    #
+    # `fetch` against `Diagnostic`'s own map, which is the set the constructor validates
+    # against, so an origin that reaches here always has a label and an origin that does
+    # not cannot be constructed.
     def reporter_diagnostic_headline(diagnostic)
-      case diagnostic.origin
-      when :template then l(:label_reporter_report_failed_template)
-      when :batch then l(:label_reporter_report_refused)
-      else l(:label_reporter_report_failed_engine)
-      end
+      l(::RedmineReporterDashboards::Reporting::Diagnostic::ORIGIN_LABEL_KEYS
+          .fetch(diagnostic.origin))
     end
 
     # ONE DEGRADATION, AS A SENTENCE A READER CAN ACT ON — and, where a key exists, in their
@@ -136,19 +142,70 @@ module ReporterDashboards
     # plugin — or a typo in a key — must still print something the reader can quote into a
     # bug report rather than nothing at all. `default: ''` and `rescue` are what guarantee
     # that; a missing interpolation argument is the realistic failure and it is caught.
+    # TWO VOCABULARIES REACH THIS LIST, AND ONLY ONE OF THEM ANSWERED `#code`.
+    #
+    # `Outcome#degradations` is `diagnostics.degradations + batch.successes.flat_map(...)`
+    # — a `Liquid::Diagnostics::Degradation` (`code`/`detail`/`data`/`count`) next to a
+    # `Render::Degradation` (`capability`/`detail`), and the two classes are deliberately
+    # separate: `diagnostics.rb` argues at length that "the collection was truncated" and
+    # "the browser could not fetch a font" are fixed by different people.
+    #
+    # This method read `#code`, `#data` and `#count` off both. `Render::Degradation` has
+    # none of the three, and `reporter_degradation_sentence`'s rescue lists
+    # `MissingInterpolationArgument` and `ArgumentError`, so the `NoMethodError` escaped:
+    # **every wkhtmltopdf render 500'd this page**, because that adapter stamps
+    # `Degradation(:legacy_engine)` into every `Success` by design — which the partial's
+    # own comment says it renders. Measured, not read: `Render::Degradation.new(...)
+    # .respond_to?(:code)` is `false`. §Findings **E-25**.
+    #
+    # The fix is here rather than on `Render::Degradation`, because giving the render type
+    # a `code`, a `data` and a `count` it has no use for would merge the two vocabularies
+    # the gate and the design keep apart. The view is the one place that must speak both,
+    # so it is the one place that normalises them — and F-16's asset degradations, which
+    # travel as `Render::Degradation`s, are what made the latent defect reachable a second
+    # way.
     def reporter_degradation_text(degradation)
       body = reporter_degradation_sentence(degradation) || degradation.to_s
-      return body unless degradation.count > 1
+      count = reporter_degradation_count(degradation)
+      return body unless count > 1
 
-      "#{body} (#{degradation.count}x)"
+      "#{body} (#{count}x)"
     end
 
     def reporter_degradation_sentence(degradation)
-      key = :"text_reporter_degradation_#{degradation.code}"
-      sentence = l(key, default: '', **degradation.data.transform_keys(&:to_sym))
+      code = reporter_degradation_code(degradation)
+      return nil if code.nil?
+
+      key = :"text_reporter_degradation_#{code}"
+      sentence = l(key, default: '', **reporter_degradation_data(degradation))
       sentence.to_s.strip.empty? ? nil : sentence
     rescue ::I18n::MissingInterpolationArgument, ::ArgumentError
       nil
+    end
+
+    # `code` on the Liquid side, `capability` on the render side. Both name the same thing
+    # — which degradation this is — so both get a `text_reporter_degradation_<name>` key
+    # and neither needs one: the raw `to_s` fallback is unchanged for both.
+    def reporter_degradation_code(degradation)
+      return degradation.code if degradation.respond_to?(:code)
+      return degradation.capability if degradation.respond_to?(:capability)
+
+      nil
+    end
+
+    # A `Render::Degradation` carries no interpolation data and is not deduplicated, so it
+    # is one occurrence with no arguments. Answering that here keeps the two shapes out of
+    # `reporter_degradation_text`, where a `respond_to?` per field would read as a puzzle.
+    def reporter_degradation_data(degradation)
+      return {} unless degradation.respond_to?(:data)
+
+      degradation.data.transform_keys(&:to_sym)
+    end
+
+    def reporter_degradation_count(degradation)
+      return 1 unless degradation.respond_to?(:count)
+
+      degradation.count
     end
 
     # THE OPAQUE-ORIGIN SANDBOX — `technical-spec.md` §4, and INV-9's third mechanism.

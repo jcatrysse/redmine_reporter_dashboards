@@ -125,6 +125,7 @@ es:
   label_reporter_preview_degradations: "Algunas partes de este informe no se han podido generar como se pedía"
   label_reporter_report_failed_template: "No se ha podido representar esta plantilla"
   label_reporter_report_failed_engine: "El motor de representación no ha podido producir este documento"
+  label_reporter_report_failed_assets: "No se ha podido incluir un archivo al que hace referencia este informe"
   label_reporter_report_refused: "Esta exportación ha sido rechazada"
   label_reporter_report_frame: "Salida del informe"
   label_reporter_report_diagnostic_code: "Código"

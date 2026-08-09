@@ -125,6 +125,7 @@ zh:
   label_reporter_preview_degradations: "本报告的部分内容未能按要求生成"
   label_reporter_report_failed_template: "无法渲染此模板"
   label_reporter_report_failed_engine: "渲染引擎无法生成此文档"
+  label_reporter_report_failed_assets: "无法嵌入此报告引用的文件"
   label_reporter_report_refused: "此导出已被拒绝"
   label_reporter_report_frame: "报表输出"
   label_reporter_report_diagnostic_code: "代码"

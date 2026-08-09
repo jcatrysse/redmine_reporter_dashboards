@@ -1,0 +1,402 @@
+# frozen_string_literal: true
+
+require File.expand_path('../test_helper', __dir__)
+
+# F-16 — THE HALF THAT ONLY A BOOTED REDMINE CAN ANSWER.
+#
+# `spec/reporting/report_run_spec.rb` drives the wiring with the resolver INJECTED through
+# `ReportRun`'s port, because the production factory reads `Setting.protocol`,
+# `Setting.host_name` and the plugin settings, and because the boot file that defines it
+# cannot be loaded in a DB-less process (it needs ActiveSupport). So exactly three things
+# are left over, and all three are the kind this project has shipped broken before:
+#
+#   * `RedmineReporterDashboards.asset_resolver` — the factory itself. A port that is never
+#     defaulted is a port whose default is untested, which is how `Assets::Resolver` came to
+#     exist for three tasks with NO CALL SITE AT ALL (§Findings S-28).
+#   * `AttachmentMapper` — it needs a real `Attachment`, a real container and a real
+#     `visible?`. HANDOVER: *"a double cannot fail an index"*, and it cannot fail a
+#     visibility rule either.
+#   * the whole path, end to end, against a real `Template` and a real `Issue` scope.
+#
+# --- MINITEST TRAP (HANDOVER §1) ---
+#
+# Test methods after a `private` section are silently not run, and the file reports fewer
+# runs than it defines while nothing fails. The `private` section here is at the BOTTOM and
+# there is nothing below it. If you add a test, add it above.
+class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
+  fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules,
+           :issues, :issue_statuses, :trackers, :enumerations, :projects_trackers,
+           :attachments
+
+  Assets = RedmineReporterDashboards::Assets
+  Template = RedmineReporterDashboards::Template
+  ReportRun = RedmineReporterDashboards::Reporting::ReportRun
+  AttachmentMapper = RedmineReporterDashboards::Reporting::AttachmentMapper
+
+  # Over `Renderer::MIN_PDF_BYTES` — the wrapper refuses anything at or under it as
+  # `:output_empty`, so a short string would fail every test here for the wrong reason.
+  PDF_BYTES = "%PDF-1.4\n#{'0' * 2_000}\n%%EOF"
+
+  # AN ENGINE THAT DECLARES `:asset_inline`, which is what both shipped adapters declare.
+  # It records the request it was handed, because the request's BODY is the whole question:
+  # before F-16 it carried `src="/attachments/download/16/testfile.png"` verbatim and the
+  # engine — denied a credential by INV-8 — drew nothing there.
+  class RecordingEngine
+    class << self
+      attr_accessor :requests
+    end
+
+    def capabilities
+      %i[asset_inline]
+    end
+
+    def id
+      'recording'
+    end
+
+    def render(request)
+      self.class.requests << request
+      RedmineReporterDashboards::Render::Success.new(
+        bytes: PDF_BYTES, engine: 'recording', engine_version: '1.0'
+      )
+    end
+  end
+
+  def setup
+    # The fixture PNG lives under `test/fixtures/files`, and `Attachment#diskfile` joins
+    # `storage_path` with the row's own directory — so pointing storage at the fixtures
+    # tree is what makes attachment 16 a real file rather than a row about one.
+    set_fixtures_attachments_directory
+    RecordingEngine.requests = []
+
+    @project = Project.find(3)
+    @project.enable_module!(:reporter_dashboards_reports)
+    @actor = User.find_by!(login: 'jsmith')
+    # `visible?` on an Issue attachment is `container.attachments_visible?`, which reads
+    # `:view_issues` — grant it explicitly rather than inheriting whatever the fixture
+    # role happens to carry (T-32's review: a `grant` that replaces the set is what makes
+    # "holds ONE permission" readable, and it also drops the ones a scope depends on).
+    Role.find(1).tap do |role|
+      role.permissions = %w[view_issues view_reporter_dashboards_reports]
+      # `issues_visibility` IS PINNED, and the first version of this file did not pin it.
+      # Fixture role 1 is Manager and ships `issues_visibility: all`, so jsmith could see
+      # every private issue in every project he is a member of — and the two examples whose
+      # whole subject is an attachment the actor may NOT see were measured VACUOUS because
+      # of it (their preconditions failed, which is the only reason it was caught). A
+      # permission grant is not a visibility setting; this is the second half.
+      role.issues_visibility = 'default'
+      role.save!
+    end
+    Member.create!(project: @project, principal: @actor, roles: [Role.find(1)])
+
+    @template = Template.create!(project: @project, author: @actor, name: 'Assets',
+                                 content: '<p>replaced per test</p>', source: 'issues',
+                                 output: 'combined')
+  end
+
+  # --- the factory ---------------------------------------------------------------------
+
+  def test_the_factory_builds_a_resolver_carrying_the_engine_capabilities_it_was_given
+    resolver = RedmineReporterDashboards.asset_resolver(engine_capabilities: %i[asset_inline])
+
+    assert_equal %i[asset_inline], resolver.engine_capabilities
+    assert resolver.inline?, 'an engine declaring :asset_inline must resolve as inlining'
+    assert_not resolver.upload?
+  end
+
+  def test_the_factory_defaults_to_the_bundled_policy_on_an_unconfigured_install
+    resolver = RedmineReporterDashboards.asset_resolver(engine_capabilities: [])
+
+    assert_equal :bundled, resolver.policy.effective_mode
+  end
+
+  # THE FETCHER IS NOT BUILT UNDER `:bundled`, and it is asserted through the OBSERVABLE
+  # rather than by reaching for the ivar: under `:bundled` a third-party URL is refused for
+  # a POLICY reason, and the refusal wording differs from the "no fetcher was supplied" one.
+  # Both are reachable and only one of them is correct here.
+  def test_the_bundled_policy_refuses_a_third_party_url_for_a_policy_reason
+    with_settings plugin_redmine_reporter_dashboards: { 'asset_policy' => 'bundled' } do
+      resolution = resolve('<img src="https://cdn.example.net/a.png">')
+
+      assert resolution.refused?
+      reason = resolution.refusals.first.reason
+      assert_includes reason, 'asset_policy'
+      assert_not_includes reason, 'no fetcher was supplied',
+                          'a fetcher must not be constructed under :bundled, and the ' \
+                          'refusal must name the policy rather than a missing collaborator'
+    end
+  end
+
+  # THE EMPTY-ALLOWLIST COLLAPSE, which T-33 calls the fail-closed clause most likely to be
+  # got wrong — and it decides whether a fetcher is built, so it is asserted HERE and not
+  # only against `Policy`.
+  def test_an_upgraded_mode_with_an_empty_allowlist_still_gets_no_fetcher
+    with_settings plugin_redmine_reporter_dashboards: { 'asset_policy' => 'external',
+                                                        'asset_allowlist' => '' } do
+      resolution = resolve('<img src="https://cdn.example.net/a.png">')
+
+      assert resolution.refused?
+      assert_not_includes resolution.refusals.first.reason, 'no fetcher was supplied'
+      assert_equal :bundled,
+                   RedmineReporterDashboards.asset_resolver(engine_capabilities: [])
+                                            .policy.effective_mode
+    end
+  end
+
+  # THE OTHER DIRECTION, and without it `asset_fetch_possible?` could answer `false`
+  # always and nothing would notice — the report would still be refused, just for a reason
+  # that names a missing collaborator instead of the network.
+  #
+  # `.invalid` is reserved by RFC 6761 and is guaranteed never to resolve, so this makes NO
+  # real network request and cannot become flaky on a host with or without egress: the
+  # fetcher refuses at DNS. What is asserted is which of the two refusal WORDINGS comes
+  # back, which is the only thing that distinguishes "a fetcher was built" from "one was
+  # not" when the fetch is going to fail either way.
+  def test_an_allowlisted_host_gets_a_fetcher_rather_than_a_missing_collaborator
+    with_settings plugin_redmine_reporter_dashboards: {
+      'asset_policy' => 'external', 'asset_allowlist' => 'no-such-host.invalid'
+    } do
+      resolver = RedmineReporterDashboards.asset_resolver(engine_capabilities: %i[asset_inline])
+      resolution = resolver.call('<img src="https://no-such-host.invalid/a.png">')
+
+      # THE MODE THE OPERATOR CONFIGURED REALLY REACHED THE RESOLVER. Asserted directly,
+      # and it is not redundant: without it, a factory that ignored the settings entirely
+      # and always built `Policy.bundled` passed every other example in this file —
+      # measured, as mutation M03, which SURVIVED the first version of this test. An
+      # install configured for external assets would have silently had none.
+      assert_equal :external, resolver.policy.effective_mode
+      assert_equal ['no-such-host.invalid'], resolver.policy.allowlist
+
+      assert resolution.refused?, 'a host that cannot resolve must still be refused'
+      reason = resolution.refusals.first.reason
+      assert_not_includes reason, 'no fetcher was supplied',
+                          'the policy permits this fetch, so a fetcher must have been built'
+      # AND IT WAS REFUSED BY THE NETWORK, NOT BY THE POLICY — the other half of the same
+      # discrimination. Under `:bundled` this URL is refused before any fetcher is
+      # consulted, and the reason says `asset_policy`; here the fetch was attempted and
+      # DNS refused it.
+      assert_not_includes reason, 'asset_policy',
+                          'an allowlisted host under :external must not be refused by policy'
+    end
+  end
+
+  # THE CLAIM IS ABOUT CONSTRUCTION, SO THE ASSERTION HAS TO BE ABOUT CONSTRUCTION.
+  #
+  # Mutation M01 — "build a fetcher even when the policy forbids one" — SURVIVED every
+  # behavioural test, and it was proved equivalent rather than assumed: the same document
+  # carrying all five reference classifications was resolved with a fetcher and without
+  # one under `:bundled`, and `Resolution#to_h` was IDENTICAL, because `Resolver#fetched`
+  # consults `policy.fetch_allowed?` before it ever looks at `@fetcher`.
+  #
+  # So there is no behavioural signature, and the property is still worth holding: INV-8 is
+  # *the renderer is never the thing holding the network*, and under the default policy the
+  # object that opens sockets should not be built at all. HANDOVER's rule for exactly this
+  # shape — "a full-row write and a two-column write leave an identical row behind, so the
+  # claim has to be made about the STATEMENT" — applies one layer over: the claim has to be
+  # made about the CONSTRUCTOR. Without these two, the guard would be a comment.
+  def test_no_fetcher_is_constructed_under_the_default_bundled_policy
+    with_settings plugin_redmine_reporter_dashboards: { 'asset_policy' => 'bundled' } do
+      Assets::Fetcher.expects(:new).never
+
+      RedmineReporterDashboards.asset_resolver(engine_capabilities: %i[asset_inline])
+    end
+  end
+
+  # AND THE POSITIVE HALF, or `expects(:new).never` would also pass against a factory that
+  # never builds one at all — which is mutation M02, and it must not be killed twice by
+  # accident while this one goes untested.
+  def test_a_fetcher_is_constructed_once_the_policy_permits_a_fetch
+    with_settings plugin_redmine_reporter_dashboards: {
+      'asset_policy' => 'external', 'asset_allowlist' => 'assets.example.com'
+    } do
+      Assets::Fetcher.expects(:new).once.returns(nil)
+
+      RedmineReporterDashboards.asset_resolver(engine_capabilities: %i[asset_inline])
+    end
+  end
+
+  # --- the attachment mapper -----------------------------------------------------------
+
+  def test_the_mapper_answers_the_diskfile_for_an_attachment_the_actor_may_see
+    attachment = Attachment.find(16)
+    assert attachment.visible?(@actor), 'precondition: the actor must be able to see it'
+
+    mapped = AttachmentMapper.new(actor: @actor).call('/attachments/download/16/testfile.png')
+
+    assert_equal attachment.diskfile, mapped
+    assert File.file?(mapped), 'the fixture file must really be on disk'
+  end
+
+  def test_the_mapper_accepts_the_download_route_without_a_filename
+    mapped = AttachmentMapper.new(actor: @actor).call('/attachments/download/16')
+
+    assert_equal Attachment.find(16).diskfile, mapped
+  end
+
+  # THE INVISIBLE ROW IS BUILT, NOT BORROWED. HANDOVER §1: the first version of a test like
+  # this took a fixture issue from another project, and fixture project 5 is PUBLIC, so the
+  # negative half was vacuous. The rule that hides this one is a rule this test sets, and
+  # the precondition is asserted anyway.
+  def test_the_mapper_refuses_an_attachment_the_actor_may_not_see
+    hidden = Issue.create!(project: Project.find(1), tracker: Tracker.find(1),
+                           author: User.find_by!(login: 'dlopper'), subject: 'private',
+                           is_private: true, status: IssueStatus.first,
+                           priority: IssuePriority.first)
+    attachment = Attachment.create!(container: hidden, author: User.find_by!(login: 'dlopper'),
+                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    assert_not attachment.visible?(@actor),
+               'precondition: this attachment must really be invisible to the actor'
+
+    assert_nil AttachmentMapper.new(actor: @actor).call("/attachments/download/#{attachment.id}")
+  end
+
+  # THE SAME ATTACHMENT, TWO ACTORS. Without this the example above passes if the mapper
+  # answered nil for everybody — which is exactly what a mapper with a typo in its regexp
+  # does, and it would look like a working security control.
+  def test_the_same_attachment_resolves_for_an_actor_who_may_see_it
+    hidden = Issue.create!(project: Project.find(1), tracker: Tracker.find(1),
+                           author: User.find_by!(login: 'dlopper'), subject: 'private',
+                           is_private: true, status: IssueStatus.first,
+                           priority: IssuePriority.first)
+    attachment = Attachment.create!(container: hidden, author: User.find_by!(login: 'dlopper'),
+                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+
+    assert_nil AttachmentMapper.new(actor: @actor).call("/attachments/download/#{attachment.id}")
+    assert_equal attachment.diskfile,
+                 AttachmentMapper.new(actor: User.find(1)).call(
+                   "/attachments/download/#{attachment.id}"
+                 )
+  end
+
+  def test_the_mapper_answers_nil_for_an_id_that_does_not_exist
+    assert_nil AttachmentMapper.new(actor: @actor).call('/attachments/download/999999')
+  end
+
+  # THE ROUTES THAT ARE NOT THE FILE. `/attachments/:id/:filename` is `attachments#show`, an
+  # HTML page ABOUT the file, and `/attachments/thumbnail/:id` names a DERIVED image.
+  # Answering the original's bytes for either would put something other than what the URL
+  # asked for into the document, silently. They become named refusals instead.
+  def test_the_mapper_declines_the_show_and_thumbnail_routes
+    mapper = AttachmentMapper.new(actor: @actor)
+
+    assert_nil mapper.call('/attachments/16/testfile.png')
+    assert_nil mapper.call('/attachments/thumbnail/16')
+    assert_nil mapper.call('/attachments/thumbnail/16/200')
+  end
+
+  def test_the_mapper_declines_anything_that_is_not_an_attachment_path
+    mapper = AttachmentMapper.new(actor: @actor)
+
+    assert_nil mapper.call('/plugin_assets/redmine_reporter_dashboards/stylesheets/x.css')
+    assert_nil mapper.call('/attachments/download/16/evil/../../../etc/passwd')
+    assert_nil mapper.call('/attachments/download/abc')
+    assert_nil mapper.call('')
+  end
+
+  def test_the_mapper_refuses_to_be_built_without_an_actor
+    error = assert_raises(ArgumentError) { AttachmentMapper.new(actor: nil) }
+
+    assert_includes error.message, 'INV-1'
+  end
+
+  # --- end to end ----------------------------------------------------------------------
+
+  # THE ACCEPTANCE CRITERION, against a real Redmine: an image referenced by a same-origin
+  # URL is IN the document. Both halves are asserted, because either alone passes for the
+  # wrong reason — bytes present would pass if the resolver appended rather than replaced,
+  # and the URL being gone would pass if it had deleted the element.
+  def test_an_attachment_image_reaches_the_engine_as_bytes_rather_than_a_url
+    request = render_body('<p><img src="/attachments/download/16/testfile.png"></p>')
+
+    assert_includes request.body, 'data:image/png;base64,'
+    assert_not_includes request.body, '/attachments/download/16'
+  end
+
+  def test_a_plugin_asset_url_reaches_the_engine_as_bytes_rather_than_a_url
+    path = '/plugin_assets/redmine_reporter_dashboards/stylesheets/' \
+           'redmine_reporter_dashboards.css'
+    request = render_body(%(<p><link rel="stylesheet" href="#{path}"></p>))
+
+    assert_not_includes request.body, path
+    # A stylesheet is inlined STRUCTURALLY — the element is replaced by a `<style>` block —
+    # which is §5.1's own wording and the form every engine accepts.
+    assert_includes request.body, '<style'
+  end
+
+  # THE ABSOLUTE FORM OF THE SAME URL. `Setting.host_name` is what makes it same-origin, and
+  # `Origin` is the only thing that knows — this is the assertion that would fail if the
+  # factory stopped reading it, which it would otherwise do silently by treating every
+  # absolute URL as third-party and refusing the report.
+  def test_an_absolute_same_origin_url_is_recognised_as_this_install
+    with_settings host_name: 'redmine.example', protocol: 'https' do
+      request = render_body(
+        '<p><img src="https://redmine.example/attachments/download/16/testfile.png"></p>'
+      )
+
+      assert_includes request.body, 'data:image/png;base64,'
+    end
+  end
+
+  # A THIRD-PARTY URL UNDER `:bundled` IS A TYPED FAILURE NAMING THE URL, and NOT a blank
+  # image — T-33's words, finally on the path that reaches a reader.
+  def test_a_third_party_url_is_a_named_failure_and_no_document_is_drawn
+    outcome = render('<p><img src="https://cdn.example.net/tracker.png"></p>')
+
+    assert_not outcome.ok?
+    assert_equal :asset_unresolved, outcome.diagnostic.code
+    assert_equal :assets, outcome.diagnostic.origin
+    assert_includes outcome.diagnostic.message, 'https://cdn.example.net/tracker.png'
+    assert_empty RecordingEngine.requests, 'no engine may run for a document that was refused'
+  end
+
+  # AN ATTACHMENT THE VIEWER MAY NOT SEE IS REFUSED, NOT EMBEDDED — the mapper's visibility
+  # decision, observed through the whole pipeline rather than at the mapper. This is the one
+  # that would matter if `visible?` were ever dropped: the bytes would travel into a PDF
+  # that a person without the permission is holding.
+  def test_an_invisible_attachment_is_refused_by_the_whole_pipeline
+    hidden = Issue.create!(project: Project.find(1), tracker: Tracker.find(1),
+                           author: User.find_by!(login: 'dlopper'), subject: 'private',
+                           is_private: true, status: IssueStatus.first,
+                           priority: IssuePriority.first)
+    attachment = Attachment.create!(container: hidden, author: User.find_by!(login: 'dlopper'),
+                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    assert_not attachment.visible?(@actor), 'precondition: really invisible'
+
+    outcome = render(%(<p><img src="/attachments/download/#{attachment.id}"></p>))
+
+    assert_not outcome.ok?
+    assert_equal :asset_unresolved, outcome.diagnostic.code
+  end
+
+  # A REPORT WITH NO ASSETS IS UNCHANGED, which is what stops this being a change to every
+  # report in the installation. The body reaches the engine byte for byte.
+  def test_a_document_with_no_references_reaches_the_engine_untouched
+    request = render_body('<p>nothing to resolve here</p>')
+
+    assert_includes request.body, '<p>nothing to resolve here</p>'
+    assert_empty request.assets
+  end
+
+  private
+
+  def resolve(html)
+    RedmineReporterDashboards.asset_resolver(engine_capabilities: %i[asset_inline]).call(html)
+  end
+
+  def render_body(html)
+    outcome = render(html)
+    assert outcome.ok?, "expected a successful run, got #{outcome.diagnostic&.message.inspect}"
+    RecordingEngine.requests.first
+  end
+
+  def render(html)
+    @template.update!(content: html)
+    RedmineReporterDashboards::Render::Registry.isolated do
+      RedmineReporterDashboards::Render::Registry.register(:recording, RecordingEngine)
+      ReportRun.new(template: @template, actor: @actor,
+                    scope: Issue.visible(@actor).where(project_id: @project.id),
+                    guard: RedmineReporterDashboards::Render::BatchGuard.new(max_documents: 5))
+               .call(pdf: true)
+    end
+  end
+end

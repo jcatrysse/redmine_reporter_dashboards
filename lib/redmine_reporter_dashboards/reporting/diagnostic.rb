@@ -24,7 +24,29 @@ module RedmineReporterDashboards
     # line are the one thing that genuinely differs, and losing it would put the
     # confusion back.
     class Diagnostic
-      ORIGINS = %i[template engine batch].freeze
+      # F-16 added `:assets`, and it is a fourth origin rather than a reuse of `:engine`
+      # for the reason `:batch` is not one either: NO ENGINE RAN. An asset refusal happens
+      # while the request is still being built, so telling the reader "the PDF engine
+      # failed" would send them to check a binary that was never started, and the remedy —
+      # fix the reference, or widen `asset_policy` — is not on that page. Same class,
+      # different origin, and the origin is what the panel's heading reads.
+      ORIGINS = %i[template engine batch assets].freeze
+
+      # ONE MAP, READ BY BOTH THINGS THAT RENDER A DIAGNOSTIC. `FailureDocument` carried
+      # one copy and `TemplatesHelper#reporter_diagnostic_headline` carried another as a
+      # `case` whose `else` branch meant "engine" — so a fourth origin would have been
+      # headlined *"the PDF engine failed"* on the interactive panel and correctly
+      # elsewhere, which is worse than either being wrong on its own. A closed set read
+      # through an `else` is not closed.
+      #
+      # `spec/reporting/diagnostic_spec.rb` asserts these keys are exactly `ORIGINS`, so
+      # adding an origin without a label fails a test rather than printing a wrong sentence.
+      ORIGIN_LABEL_KEYS = {
+        template: :label_reporter_report_failed_template,
+        engine: :label_reporter_report_failed_engine,
+        batch: :label_reporter_report_refused,
+        assets: :label_reporter_report_failed_assets
+      }.freeze
 
       # THE CODE SET IS CLOSED TOO, AND IT WAS NOT. `FailureDocument`'s whole safety
       # argument is that `code` "is a vocabulary rather than text" — but this constructor
@@ -152,6 +174,22 @@ module RedmineReporterDashboards
               message: failure.message,
               template_name: template_name,
               duration_ms: failure.duration_ms,
+              detail: failure.detail,
+              correlation_id: failure.correlation_id)
+        end
+
+        # F-16. `Render::AssetBinding` answers a `Failure(:asset_unresolved)` when a
+        # document references something the policy and the disk between them cannot
+        # supply. No engine has been started at that point, so `engine` and
+        # `engine_version` are deliberately NOT carried even though the binding was told
+        # which adapter was resolved: stamping a version onto a failure that engine had no
+        # part in is the same lie `from_batch_refusal` avoids, and `FailureDocument` prints
+        # both fields.
+        def from_asset_refusal(failure, template_name: nil)
+          new(origin: :assets,
+              code: failure.code,
+              message: failure.message,
+              template_name: template_name,
               detail: failure.detail,
               correlation_id: failure.correlation_id)
         end

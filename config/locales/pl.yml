@@ -125,6 +125,7 @@ pl:
   label_reporter_preview_degradations: "Części tego raportu nie udało się utworzyć zgodnie z żądaniem"
   label_reporter_report_failed_template: "Nie udało się wyrenderować tego szablonu"
   label_reporter_report_failed_engine: "Silnik renderujący nie zdołał utworzyć tego dokumentu"
+  label_reporter_report_failed_assets: "Nie udało się dołączyć pliku, do którego odwołuje się ten raport"
   label_reporter_report_refused: "Ten eksport został odrzucony"
   label_reporter_report_frame: "Wynik raportu"
   label_reporter_report_diagnostic_code: "Kod"

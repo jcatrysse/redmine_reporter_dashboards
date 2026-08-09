@@ -3,6 +3,9 @@
 require_relative '../spec_helper'
 require_relative '../../lib/redmine_reporter_dashboards/reporting/diagnostic'
 require_relative '../../lib/redmine_reporter_dashboards/reporting/report_run'
+# F-16. The label map is asserted to be the SAME object both renderers of a diagnostic
+# read, so the file that holds the second reference has to be loaded to check it.
+require_relative '../../lib/redmine_reporter_dashboards/reporting/failure_document'
 
 # T-23 / FR-58. The one place two failure vocabularies become one panel.
 #
@@ -201,6 +204,58 @@ RSpec.describe RedmineReporterDashboards::Reporting::Diagnostic do
         described_class.new(origin: :something_else, code: :x, message: 'y',
                             correlation_id: 'z')
       end.to raise_error(ArgumentError, /not a diagnostic origin/)
+    end
+
+    # THE LABEL MAP AND THE ORIGIN SET ARE ONE FACT IN TWO PLACES, and before F-16 there
+    # were THREE: `FailureDocument::ORIGIN_KEYS` and a `case`/`else` in
+    # `TemplatesHelper#reporter_diagnostic_headline`, whose `else` meant "engine". So a
+    # fourth origin would have been headlined *"the PDF engine failed"* on the interactive
+    # panel and correctly in the PDF — two descriptions of one event, disagreeing.
+    #
+    # Asserted as SET EQUALITY in both directions: a missing key is a `KeyError` at render
+    # time, and a surplus one is a locale string nine translators maintain for an origin
+    # that cannot occur.
+    it 'has exactly one label key per origin, and no more' do
+      expect(described_class::ORIGIN_LABEL_KEYS.keys.sort).to eq(described_class::ORIGINS.sort)
+    end
+
+    it 'is the SAME object the failure document reads, not a matching copy' do
+      expect(RedmineReporterDashboards::Reporting::FailureDocument::ORIGIN_KEYS)
+        .to equal(described_class::ORIGIN_LABEL_KEYS)
+    end
+
+    # F-16. An asset refusal happens while the request is still being BUILT, so no engine
+    # has started — carrying an engine name or version onto it would send the reader to
+    # check a binary that had nothing to do with the failure, which is the same argument
+    # `from_batch_refusal` already makes.
+    describe '.from_asset_refusal' do
+      let(:failure) do
+        RedmineReporterDashboards::Render::Failure.new(
+          code: :asset_unresolved, message: 'could not resolve https://cdn.example.net/a.png',
+          correlation_id: 'c-1', engine: 'chromium_cdp', engine_version: '141',
+          detail: [{ url: 'https://cdn.example.net/a.png' }]
+        )
+      end
+
+      it 'is an ASSETS diagnostic' do
+        expect(described_class.from_asset_refusal(failure).origin).to eq(:assets)
+      end
+
+      it 'drops the engine and its version even when the failure carries them' do
+        diagnostic = described_class.from_asset_refusal(failure)
+
+        expect(diagnostic.engine).to be_nil
+        expect(diagnostic.engine_version).to be_nil
+      end
+
+      it 'keeps the message and the detail, which are where the URL is named' do
+        diagnostic = described_class.from_asset_refusal(failure, template_name: 'Weekly')
+
+        expect(diagnostic.message).to include('https://cdn.example.net/a.png')
+        expect(diagnostic.detail).to eq([{ url: 'https://cdn.example.net/a.png' }])
+        expect(diagnostic.template_name).to eq('Weekly')
+        expect(diagnostic.correlation_id).to eq('c-1')
+      end
     end
   end
 end

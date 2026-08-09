@@ -30,6 +30,10 @@ module FailureDocumentSpecSupport
   ENGLISH = {
     label_reporter_report_failed_template: 'This template could not be rendered',
     label_reporter_report_failed_engine: 'The render engine could not produce this document',
+    # F-16's fourth origin. It is here because `FailureDocument::ALL_KEYS` iterates
+    # `ORIGIN_KEYS`, so an origin whose label is missing makes `every_key_drawable?` raise
+    # — the closed-list mechanism this file's own comment describes, working.
+    label_reporter_report_failed_assets: 'A file this report refers to could not be included',
     label_reporter_report_refused: 'This export was refused',
     label_reporter_failure_document_title: 'Report could not be generated',
     label_reporter_failure_document_generated_at: 'Generated',

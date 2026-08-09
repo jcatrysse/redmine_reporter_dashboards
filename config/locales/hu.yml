@@ -125,6 +125,7 @@ hu:
   label_reporter_preview_degradations: "A jelentés egyes részei nem a kért módon készültek el"
   label_reporter_report_failed_template: "Ezt a sablont nem sikerült megjeleníteni"
   label_reporter_report_failed_engine: "A megjelenítő motor nem tudta előállítani ezt a dokumentumot"
+  label_reporter_report_failed_assets: "A jelentés által hivatkozott egyik fájlt nem sikerült beágyazni"
   label_reporter_report_refused: "Ezt az exportálást a rendszer elutasította"
   label_reporter_report_frame: "A jelentés kimenete"
   label_reporter_report_diagnostic_code: "Kód"

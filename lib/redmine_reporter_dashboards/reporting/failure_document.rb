@@ -45,16 +45,17 @@ module RedmineReporterDashboards
     class FailureDocument
       FILENAME_PREFIX = 'report-FAILED-'
 
-      # Reused rather than reinvented: these are the three sentences the interactive panel
+      # Reused rather than reinvented: these are the sentences the interactive panel
       # already headlines with (`ReporterDashboards::TemplatesHelper#reporter_diagnostic_headline`),
       # so an operator holding the PDF and an author looking at the editor read the same
-      # words for the same failure. A fourth vocabulary for the same three states is how
-      # two descriptions of one event start disagreeing.
-      ORIGIN_KEYS = {
-        template: :label_reporter_report_failed_template,
-        engine: :label_reporter_report_failed_engine,
-        batch: :label_reporter_report_refused
-      }.freeze
+      # words for the same failure. A second vocabulary for the same states is how two
+      # descriptions of one event start disagreeing.
+      #
+      # IT IS NOW THE SAME OBJECT AND NOT A MATCHING COPY. This was a literal Hash whose
+      # three rows happened to equal the helper's three `when` arms, and "happened to" is
+      # the whole problem — F-16's `:assets` origin was added to `Diagnostic::ORIGINS` and
+      # both copies needed finding. `Diagnostic` owns the set, so it owns the labels.
+      ORIGIN_KEYS = Diagnostic::ORIGIN_LABEL_KEYS
 
       # Every string on the page, in order. A closed list because `build` iterates it: a
       # key added here without a translation is a missing label, and the locale parity

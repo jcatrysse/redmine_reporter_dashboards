@@ -125,6 +125,7 @@ pt-BR:
   label_reporter_preview_degradations: "Partes deste relatório não puderam ser produzidas como solicitado"
   label_reporter_report_failed_template: "Não foi possível renderizar este modelo"
   label_reporter_report_failed_engine: "O motor de renderização não conseguiu produzir este documento"
+  label_reporter_report_failed_assets: "Não foi possível incluir um arquivo referenciado por este relatório"
   label_reporter_report_refused: "Esta exportação foi recusada"
   label_reporter_report_frame: "Saída do relatório"
   label_reporter_report_diagnostic_code: "Código"

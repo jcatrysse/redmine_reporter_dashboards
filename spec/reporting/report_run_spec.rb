@@ -2,6 +2,12 @@
 
 require_relative '../spec_helper'
 require_relative '../../lib/redmine_reporter_dashboards/reporting/report_run'
+# F-16. `report_run.rb` reaches the asset layer through
+# `RedmineReporterDashboards.asset_resolver`, which lives in the boot file and cannot be
+# loaded here (it needs ActiveSupport). The classes themselves are DB-less, so the PORT is
+# injected and what travels through it is the real `Assets::Resolver`.
+require_relative '../../lib/redmine_reporter_dashboards/assets'
+require 'tmpdir'
 
 # T-23 — the decisions a run makes ABOUT a render, driven without one.
 #
@@ -79,16 +85,23 @@ module ReportRunSpecSupport
   class CountingRenderer
     attr_reader :calls
 
-    def initialize(result_for: nil)
+    # `body_for` is F-16's addition: the asset examples need to control the HTML that
+    # reaches the resolver, and `result_for` is the wrong lever for that — it replaces the
+    # whole `Document`, so every caller of it would have to rebuild one just to change a
+    # string. Both are kept because they answer different questions: `result_for` is how a
+    # FAILURE is driven, `body_for` is how a BODY is.
+    def initialize(result_for: nil, body_for: nil)
       @calls = 0
       @result_for = result_for
+      @body_for = body_for
     end
 
     def render(_source, **_kwargs)
       @calls += 1
-      @result_for ? @result_for.call(@calls) : TR::Document.new(body: "<p>#{@calls}</p>",
-                                                                duration_ms: 1,
-                                                                output_class: :report)
+      return @result_for.call(@calls) if @result_for
+
+      body = @body_for ? @body_for.call(@calls) : "<p>#{@calls}</p>"
+      TR::Document.new(body: body, duration_ms: 1, output_class: :report)
     end
   end
 
@@ -111,14 +124,81 @@ module ReportRunSpecSupport
       'fake'
     end
 
+    # `FakeAdapter.behaviour` and NOT `self.class.behaviour`, so `InliningAdapter` below
+    # shares the one lever every example already sets. A class-level accessor is per-class,
+    # so a subclass would silently read its own nil.
     def render(request)
-      self.class.behaviour.call(request)
+      FakeAdapter.behaviour.call(request)
+    end
+  end
+
+  # AN ENGINE THAT DECLARES `:asset_inline`, which is what both shipped adapters declare
+  # and what makes an image embeddable at all.
+  #
+  # `FakeAdapter` declaring nothing is not an oversight, and the two together are what make
+  # F-16's central claim observable: the resolver picks the most restrictive model THE
+  # ENGINE DECLARES, so the SAME document and the SAME resolver produce an inlined image
+  # against this adapter and a named refusal against one that can embed nothing. A single
+  # adapter could not tell those apart from "the resolver always inlines".
+  class InliningAdapter < FakeAdapter
+    def capabilities
+      [:asset_inline]
+    end
+
+    def id
+      'inlining'
     end
   end
 
   # Over `Renderer::MIN_PDF_BYTES`, because the wrapper refuses a document at or under
   # it as `:output_empty`. A "PDF" of forty bytes is what a crashed engine produces.
   PDF_BYTES = "%PDF-1.4\n#{'0' * 2_000}\n%%EOF"
+
+  Assets = RedmineReporterDashboards::Assets
+
+  # A REAL RESOLVER BEHIND THE PORT, NOT A DOUBLE (F-16).
+  #
+  # The production factory reads `Setting.protocol`, `Setting.host_name` and the plugin
+  # settings, so it cannot run in this process — but every class it assembles is DB-less
+  # by design, and `spec/assets/` drives them all directly. So the port is injected and the
+  # thing injected is `Assets::Resolver` itself, configured from the same value objects
+  # production configures it from. A double would prove that `ReportRun` calls something
+  # and nothing at all about what a document comes back looking like, which is the entire
+  # question F-16 asks.
+  #
+  # `engine_capabilities` is passed through from the ENGINE rather than fixed here, because
+  # "the resolver is told what the resolved engine can do" is the ordering claim the whole
+  # fix is about — pinning it would make the one thing under test a constant.
+  def self.resolver(policy: Assets::Policy.bundled, roots: {}, mappers: [],
+                    origin: Assets::Origin.new, fetcher: nil, seen: nil)
+    lambda do |engine_capabilities:|
+      seen&.push(engine_capabilities)
+      Assets::Resolver.new(
+        policy: policy,
+        local_store: Assets::LocalStore.new(roots: roots, mappers: mappers),
+        engine_capabilities: engine_capabilities,
+        origin: origin,
+        fetcher: fetcher
+      )
+    end
+  end
+
+  # An install at `https://redmine.example`, so a URL on that host is `:same_origin` and
+  # anything else is `:third_party`. Without one, `Origin.new` matches nothing and EVERY
+  # absolute URL is third-party — which would make the same-origin examples below pass for
+  # the wrong reason.
+  def self.origin
+    Assets::Origin.parse('https://redmine.example')
+  end
+
+  # A one-pixel PNG, written to disk so the local store has something real to type, size
+  # and read. A fixture on disk rather than a stub because `LocalStore` is `realpath`-based
+  # containment and `File.size`-based capping; neither can be exercised against a double.
+  PNG_BYTES = [
+    '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489',
+    '0000000a49444154789c6360000002000100ffff03000006000557bfabd4',
+    '0000000049454e44ae426082'
+  ].join.scan(/../).map { |pair| pair.to_i(16) }.pack('C*')
 end
 
 RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
@@ -135,7 +215,8 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
   def run(scope:, renderer: ReportRunSpecSupport::CountingRenderer.new, **overrides)
     described_class.new(**{ template: template, actor: actor, scope: scope,
-                            guard: guard, template_renderer: renderer }.merge(overrides))
+                            guard: guard, template_renderer: renderer,
+                            asset_resolver: ReportRunSpecSupport.resolver }.merge(overrides))
   end
 
   describe 'the cap, which is where T-15 owed a refusal' do
@@ -377,6 +458,214 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
       expect(seen.margins_mm)
         .to eq(RedmineReporterDashboards::Render::DocumentRequest::DEFAULT_MARGINS_MM)
+    end
+  end
+
+  # --- F-16: THE ASSET LAYER IS ACTUALLY CALLED -----------------------------------------
+  #
+  # `Assets::Resolver` and `Render::AssetBinding` were complete, correct and tested since
+  # T-33 and NOTHING CALLED THEM: `#document_request` built a `DocumentRequest` straight
+  # off `section.body` and passed no `assets:`, so every URL-referenced image reached the
+  # engine as a live URL — which INV-8 denies a credential, so it drew BLANK. Measured by
+  # the review of T-28 increment 3 against a real render: `PDF contains '/attachments/':
+  # true`.
+  #
+  # What is asserted here is the WIRING and its ORDERING, which is where the difficulty
+  # was. The resolver's own behaviour has 200-odd examples in `spec/assets/`; repeating
+  # them here would be a second oracle for one rule. What those cannot see is that
+  # anybody calls it, that the engine is resolved FIRST so its capabilities can be asked,
+  # and that a refusal becomes a typed Failure rather than a blank image.
+  describe 'the asset layer, which nothing used to call (F-16)' do
+    around do |example|
+      RedmineReporterDashboards::Render::Registry.isolated { example.run }
+    end
+
+    # The body every example below renders. `CountingRenderer` is the Liquid half and
+    # answers a fixed string, so the "template" is this.
+    def body_renderer(html)
+      ReportRunSpecSupport::CountingRenderer.new(body_for: ->(_n) { html })
+    end
+
+    # `engine:` defaults to the adapter that CAN embed, because that is what a real install
+    # has. The examples that want the other case pass `FakeAdapter` explicitly and say why.
+    def drew(scope_size: 1, engine: ReportRunSpecSupport::InliningAdapter, **overrides)
+      seen = []
+      ReportRunSpecSupport::FakeAdapter.behaviour = lambda do |request|
+        seen << request
+        RedmineReporterDashboards::Render::Success.new(
+          bytes: ReportRunSpecSupport::PDF_BYTES, engine: 'fake', engine_version: '1.0'
+        )
+      end
+      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(scope_size),
+                    engine: engine, **overrides).call(pdf: true)
+      [outcome, seen]
+    end
+
+    describe 'a same-origin Redmine URL' do
+      # THE ACCEPTANCE CRITERION, stated as the thing a reader of the PDF would check:
+      # the bytes of the image are IN the document and the URL is GONE. Asserting only
+      # that the URL is absent would pass against a resolver that deleted the tag.
+      it 'is inlined off disk, so the image is IN the document rather than blank' do
+        Dir.mktmpdir do |dir|
+          File.binwrite(File.join(dir, 'logo.png'), ReportRunSpecSupport::PNG_BYTES)
+          html = '<p><img src="https://redmine.example/plugin_assets/x/logo.png"></p>'
+
+          _outcome, seen = drew(
+            renderer: body_renderer(html),
+            asset_resolver: ReportRunSpecSupport.resolver(
+              roots: { '/plugin_assets/x' => dir }, origin: ReportRunSpecSupport.origin
+            )
+          )
+
+          expect(seen.first.body).to include('data:image/png;base64,')
+          expect(seen.first.body).not_to include('redmine.example')
+        end
+      end
+
+      # THE FIXTURE HAS TO DISCRIMINATE. If the resolver silently did nothing, the example
+      # above would still fail — but only because of the `data:` assertion. This one proves
+      # the same document is genuinely unresolvable without the root, so the pass above is
+      # attributable to the root and not to something incidental.
+      it 'is REFUSED when it maps to no file, rather than passed through to the engine' do
+        html = '<p><img src="https://redmine.example/plugin_assets/x/logo.png"></p>'
+
+        outcome, seen = drew(
+          renderer: body_renderer(html),
+          asset_resolver: ReportRunSpecSupport.resolver(origin: ReportRunSpecSupport.origin)
+        )
+
+        expect(seen).to be_empty
+        expect(outcome).not_to be_ok
+        expect(outcome.diagnostic.code).to eq(:asset_unresolved)
+      end
+    end
+
+    describe 'a third-party URL under the default :bundled policy' do
+      let(:html) { '<p><img src="https://cdn.example.net/tracker.png"></p>' }
+
+      it 'is a typed failure and NOT a blank image' do
+        outcome, seen = drew(renderer: body_renderer(html),
+                             asset_resolver: ReportRunSpecSupport.resolver(
+                               origin: ReportRunSpecSupport.origin
+                             ))
+
+        expect(seen).to be_empty
+        expect(outcome).not_to be_ok
+        expect(outcome.diagnostic.code).to eq(:asset_unresolved)
+      end
+
+      # NAMING THE URL IS THE REQUIREMENT, in T-33's own words: "a report with a silently
+      # missing logo is one a reader cannot tell from a report that never had one".
+      it 'NAMES the URL in the user-facing message' do
+        outcome, = drew(renderer: body_renderer(html),
+                        asset_resolver: ReportRunSpecSupport.resolver(
+                          origin: ReportRunSpecSupport.origin
+                        ))
+
+        expect(outcome.diagnostic.message).to include('https://cdn.example.net/tracker.png')
+      end
+
+      # NO ENGINE RAN, so calling this an engine failure would send the reader to check a
+      # binary that was never started. `:assets` is a fourth origin for that reason, and
+      # this is the assertion that stops it being folded back into `:engine`.
+      it 'is an ASSETS diagnostic, and carries no engine or engine version' do
+        outcome, = drew(renderer: body_renderer(html),
+                        asset_resolver: ReportRunSpecSupport.resolver(
+                          origin: ReportRunSpecSupport.origin
+                        ))
+
+        expect(outcome.diagnostic.origin).to eq(:assets)
+        expect(outcome.diagnostic.engine).to be_nil
+        expect(outcome.diagnostic.engine_version).to be_nil
+      end
+    end
+
+    # THE ORDERING CLAIM, WHICH IS THE HARD PART OF F-16. The resolver picks the most
+    # restrictive asset model THE ENGINE DECLARES, so it cannot be built before the engine
+    # is resolved. The old code instantiated the adapter as an ARGUMENT to `Renderer.new`,
+    # so no variable held it and nothing could ask it anything.
+    it 'asks the RESOLVED ENGINE for its capabilities before building any request' do
+      seen_capabilities = []
+      drew(renderer: body_renderer('<p>no assets here</p>'),
+           asset_resolver: ReportRunSpecSupport.resolver(seen: seen_capabilities))
+
+      expect(seen_capabilities).to eq([[:asset_inline]])
+    end
+
+    # THE OTHER HALF OF THE SAME CLAIM, and without it the example above is satisfied by
+    # any constant. Same document, same resolver, same disk — a different ENGINE, and the
+    # answer changes from an embedded image to a named refusal. That is only possible if
+    # the engine's declared capabilities really do reach the resolver.
+    it 'refuses the same document against an engine that declares no asset model' do
+      Dir.mktmpdir do |dir|
+        File.binwrite(File.join(dir, 'logo.png'), ReportRunSpecSupport::PNG_BYTES)
+        html = '<p><img src="/plugin_assets/x/logo.png"></p>'
+        resolver = ReportRunSpecSupport.resolver(roots: { '/plugin_assets/x' => dir },
+                                                 origin: ReportRunSpecSupport.origin)
+
+        inlined, = drew(renderer: body_renderer(html), asset_resolver: resolver)
+        refused, seen = drew(renderer: body_renderer(html), asset_resolver: resolver,
+                             engine: ReportRunSpecSupport::FakeAdapter)
+
+        expect(inlined).to be_ok
+        expect(refused).not_to be_ok
+        expect(refused.diagnostic.code).to eq(:asset_unresolved)
+        expect(seen).to be_empty
+      end
+    end
+
+    # ONE RESOLVER FOR THE RUN, not one per document — it holds the policy, the store and
+    # any fetcher, none of which vary per section, and `Resolver#call` is re-entrant by
+    # design. A per-section resolver would re-read the settings and rebuild the store for
+    # every document in a 200-document per-record export.
+    it 'builds ONE resolver for a multi-document run' do
+      seen_capabilities = []
+      drew(scope_size: 3,
+           template: template(output: 'per_record'),
+           renderer: body_renderer('<p>no assets here</p>'),
+           asset_resolver: ReportRunSpecSupport.resolver(seen: seen_capabilities))
+
+      expect(seen_capabilities.length).to eq(1)
+    end
+
+    # A DEGRADATION IS NOT A FAILURE AND IS NOT SILENT EITHER (INV-4). `srcset` collapses
+    # to its first candidate because a PDF page has one pixel density, and the reader is
+    # told. Before F-16 nothing resolved, so nothing degraded, so this said nothing.
+    it 'carries the resolution`s degradations into the outcome' do
+      Dir.mktmpdir do |dir|
+        File.binwrite(File.join(dir, 'logo.png'), ReportRunSpecSupport::PNG_BYTES)
+        html = '<p><img srcset="/plugin_assets/x/logo.png 1x, /plugin_assets/x/logo.png 2x">' \
+               '</p>'
+
+        outcome, = drew(renderer: body_renderer(html),
+                        asset_resolver: ReportRunSpecSupport.resolver(
+                          roots: { '/plugin_assets/x' => dir },
+                          origin: ReportRunSpecSupport.origin
+                        ))
+
+        expect(outcome).to be_ok
+        expect(outcome.degradations.map(&:capability)).to include(:asset_srcset_collapsed)
+      end
+    end
+
+    # NEITHER SHIPPED ENGINE DECLARES `:asset_upload`, so the resolver always chooses
+    # `:inline` and `assets` stays empty — which is what F-16's own text says is correct
+    # and fully exercised. This pins it, so the day T-34 declares the capability, the
+    # example that changes is the one that should.
+    it 'passes an EMPTY asset map to an engine that declares no upload model' do
+      Dir.mktmpdir do |dir|
+        File.binwrite(File.join(dir, 'logo.png'), ReportRunSpecSupport::PNG_BYTES)
+
+        _outcome, seen = drew(
+          renderer: body_renderer('<p><img src="/plugin_assets/x/logo.png"></p>'),
+          asset_resolver: ReportRunSpecSupport.resolver(
+            roots: { '/plugin_assets/x' => dir }, origin: ReportRunSpecSupport.origin
+          )
+        )
+
+        expect(seen.first.assets).to be_empty
+        expect(seen.first.body).to include('data:image/png;base64,')
+      end
     end
   end
 

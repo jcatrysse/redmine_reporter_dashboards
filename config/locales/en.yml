@@ -125,6 +125,7 @@ en:
   label_reporter_preview_degradations: "Parts of this report could not be produced as asked"
   label_reporter_report_failed_template: "This template could not be rendered"
   label_reporter_report_failed_engine: "The render engine could not produce this document"
+  label_reporter_report_failed_assets: "A file this report refers to could not be included"
   label_reporter_report_refused: "This export was refused"
   label_reporter_report_frame: "Report output"
   label_reporter_report_diagnostic_code: "Code"
