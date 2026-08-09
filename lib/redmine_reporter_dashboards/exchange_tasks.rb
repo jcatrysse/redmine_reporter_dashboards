@@ -5,7 +5,8 @@ require_relative 'reporting/bundle_import'
 require_relative 'reporting/bundle_report'
 
 module RedmineReporterDashboards
-  # T-29 — the argument handling behind `rake reporter_dashboards:exchange:*`.
+  # T-29 — the argument handling behind the bundle rake tasks
+  # (`export:bundle`, `import:plan`, `import:run`).
   #
   # It exists for the reason `Import::Survey` and `Scheduling::RunCommand` exist: a rake
   # file that grew a method is a place tests cannot reach, and every decision below is one

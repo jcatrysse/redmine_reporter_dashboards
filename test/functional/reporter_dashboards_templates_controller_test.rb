@@ -1003,11 +1003,20 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_equal documents, zip_members(response.body).length
   end
 
-  # NO `Content-Length`, WHICH IS THE WHOLE POINT OF E-6's BULLET. A response that
-  # announced its length would have had to be built in memory first, so this assertion is
-  # what separates "streamed" from "buffered and sent" — the two are otherwise identical
-  # from the client's side.
-  def test_the_archive_is_streamed_rather_than_buffered
+  # THE ARCHIVE IS BUFFERED AND SAYS ITS LENGTH — curator decision S-23, 2026-08-09, and
+  # this test replaces one that asserted the exact opposite.
+  #
+  # T-29 first shipped a streamed archive with no `Content-Length`, per §Findings E-6. It
+  # was measured NOT to stream through Redmine's real middleware: `Rack::ETag` gates on
+  # `body.respond_to?(:to_ary)`, which `ActionDispatch::Response::Buffer` answers
+  # unconditionally, so it digested the whole archive before the first byte left and the
+  # body was generated a second time for the wire. The curator chose to buffer once and be
+  # honest about it rather than generate twice and call it streaming.
+  #
+  # So the contract this pins is the NEW one, and it is pinned positively: a length is
+  # present and it is the real length of the bytes that arrived. Asserting only "it
+  # downloads" would pass under either design.
+  def test_the_archive_is_sent_whole_with_its_length
     template = create_template(output: 'per_record')
     grant(:view_reporter_dashboards_reports)
 
@@ -1016,30 +1025,34 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     end
 
     assert_response :success
-    assert_nil response.headers['Content-Length'],
-               'a Content-Length means the whole archive was built before it was sent'
-    # AND NOTHING IN BETWEEN MAY KEEP A COPY. `send_data` sets this for the single-document
-    # download; a streamed response has to say it itself, and an archive of somebody's
-    # visible issues is the last thing that should sit in a shared proxy cache.
-    assert_include 'no-store', response.headers['Cache-Control'].to_s
-    # AND THE BODY IS AN ENUMERABLE RATHER THAN A STRING. `send_data` takes a String, so
-    # this is the assertion that would fail the moment somebody "simplified" the action
-    # back to it — at which point the header above would come back too.
-    # AND THE BODY HANDED TO RACK IS THE LAZY WRITER ITSELF, not a String.
+    assert_equal 'application/zip', response.media_type
+
+    # MATERIALISED, WHICH IS WHAT "BUFFERED" MEANS AND IS WHAT THIS LEVEL CAN SEE.
     #
-    # This is the assertion that would fail the moment somebody "simplified" the action
-    # back to `send_data`, which takes a String and would therefore have to build the whole
-    # archive first — at which point the missing Content-Length above would become a lie
-    # rather than a fact. `ActionController::Metal#response_body=` wraps anything answering
-    # `to_str` in an Array, so a buffered body could not satisfy this either way.
+    # The `Content-Length` HEADER is set by `Rack::ContentLength`, and
+    # `ActionController::TestCase` does not run middleware — asserting it here would be the
+    # very mistake this file already records twice (the streamed-body assertion that tested
+    # the harness, and the Rails 8.1 helper). Measured: the header is empty at this level
+    # under both the streamed and the buffered design, so it discriminates nothing.
     #
-    # MEASURED, NOT ASSUMED: the first version of this test reached into
-    # `@response`'s `@stream` and found a fully concatenated String there, because the
-    # functional-test harness materialises the body for `response.body`. That proved a
-    # property of the harness. `@controller.response_body` is what the controller actually
-    # assigned, which is the thing under test.
-    assert_not_kind_of String, @controller.response_body
-    assert_kind_of RedmineReporterDashboards::Archive::ZipStream, @controller.response_body
+    # What IS observable, and what actually changed, is the body the controller assigns:
+    # `send_data` hands Rack a String, so `response_body` is an Array of one. Under the
+    # streamed design it was a lazy `ZipStream`. This assertion fails if anyone puts that
+    # back, which is the property S-23 decided.
+    body = @controller.response_body
+    assert_kind_of Array, body
+    assert_kind_of String, body.first
+    assert_not_kind_of RedmineReporterDashboards::Archive::ZipStream, body
+    assert_equal archive_bytes(response.body).bytesize, body.first.bytesize
+  end
+
+  # AND THE CAP IS WHAT BOUNDS THE MEMORY, which is the whole reason buffering is
+  # acceptable here. The documents are already in memory when the archive is built — the
+  # zip roughly doubles that, once, for at most `DEFAULT_MAX_DOCUMENTS` of them. A test
+  # that did not tie the two together would leave "how much can this hold" unanswered.
+  def test_the_document_cap_still_bounds_what_the_archive_can_hold
+    assert_equal 50, RedmineReporterDashboards::Render::BatchGuard::DEFAULT_MAX_DOCUMENTS,
+                 'the archive is buffered, so this cap is also its memory bound'
   end
 
   # EVERY DOCUMENT IS IN THERE, UNDER ITS OWN RECORD'S NAME. A per-record export whose

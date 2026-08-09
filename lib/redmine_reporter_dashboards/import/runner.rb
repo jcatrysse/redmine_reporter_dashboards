@@ -7,7 +7,7 @@ require_relative '../reporting/exchange'
 
 module RedmineReporterDashboards
   module Import
-    # T-24 — `rake reporter_dashboards:import:run`, the write half of the migration path.
+    # T-24 — `rake reporter_dashboards:migrate_from_reporter:run`, the write half of the migration path.
     #
     # `import:plan` (T-02) surveys and writes nothing. This copies.
     #

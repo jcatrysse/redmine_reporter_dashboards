@@ -2,7 +2,7 @@
 
 module RedmineReporterDashboards
   module Reporting
-    # T-29 — what `exchange:plan` and `exchange:apply` print.
+    # T-29 — what `import:plan` and `import:run` print.
     #
     # A separate module for the reason `Import::ImportReport` is one, and its comment says
     # it best: "a rake file that grew a method is a place tests cannot reach, and the thing

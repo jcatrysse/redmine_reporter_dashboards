@@ -272,7 +272,7 @@ rather than migrating and hoping.
 ## Surveying your existing Reporter templates
 
 ```bash
-bundle exec rake reporter_dashboards:import:plan RAILS_ENV=production
+bundle exec rake reporter_dashboards:migrate_from_reporter:plan RAILS_ENV=production
 ```
 
 **This task writes nothing.** It reads `redmine_reporter`'s tables and prints what it
@@ -553,15 +553,15 @@ rake tasks, and the middle one is the point of them:
 
 ```bash
 # write every template in a project to a file
-bundle exec rake reporter_dashboards:exchange:export \
+bundle exec rake reporter_dashboards:export:bundle \
   RRD_PROJECT=my-project RRD_OUT=templates.json RAILS_ENV=production
 
 # say what importing it would do — writes NOTHING
-bundle exec rake reporter_dashboards:exchange:plan \
+bundle exec rake reporter_dashboards:import:plan \
   RRD_PROJECT=other-project RRD_FILE=templates.json RAILS_ENV=production
 
 # do it
-bundle exec rake reporter_dashboards:exchange:apply \
+bundle exec rake reporter_dashboards:import:run \
   RRD_PROJECT=other-project RRD_FILE=templates.json RAILS_ENV=production
 ```
 
@@ -584,7 +584,7 @@ owner or its visibility — a bundle cannot make somebody else's private templat
 active administrator does. The tasks exit `0` when everything was decided or applied, `1`
 when a template failed, and `2` when the arguments were wrong (no file, no such project).
 
-> These are **`exchange:`**, not `import:`. `reporter_dashboards:import:*` is the one-way
+> These are **`import:`/`export:`**, not `import:`. `reporter_dashboards:migrate_from_reporter:*` is the one-way
 > migration off `redmine_reporter` described below, which reads that plugin's database
 > tables rather than a file.
 
@@ -594,12 +594,11 @@ when a template failed, and `2` when the arguments were wrong (no file, no such 
   issue* templates: asking for more is refused before anything is rendered, with a message
   naming both the number you asked for and the limit.
 * **A *one document per issue* template covering more than one issue downloads as a zip.**
-  One PDF per issue, named after it. The archive is written out piece by piece rather than
-  assembled in memory, so the response has no `Content-Length` and your browser will show
-  the download growing rather than a percentage. Expect a pause before it starts: every
+  One PDF per issue, named after it. Expect a pause before the download starts: every
   document is rendered first, deliberately, so that a failure is still a proper error page
-  instead of a half-finished archive. The 50-document cap above still applies and is still
-  checked before anything is rendered.
+  rather than a half-finished archive. The 50-document cap above is what bounds both how
+  long that takes and how much memory it needs, and it is still checked before anything is
+  rendered at all.
 * **A `source: time_entries` report has no time series.** Hours by activity, by user, by
   project, by issue and by four issue attributes all work (see *Reporting on spent time*
   below), but `{% sql_aggregate %}` with no `group_by` is refused there and says so on the
@@ -611,9 +610,9 @@ when a template failed, and `2` when the arguments were wrong (no file, no such 
 Three rake tasks, in the order you would run them:
 
 ```
-rake reporter_dashboards:import:plan     # survey the old data. Writes nothing.
-rake reporter_dashboards:import:run      # copy the templates across
-rake reporter_dashboards:import:status   # what has drifted since
+rake reporter_dashboards:migrate_from_reporter:plan     # survey the old data. Writes nothing.
+rake reporter_dashboards:migrate_from_reporter:run      # copy the templates across
+rake reporter_dashboards:migrate_from_reporter:status   # what has drifted since
 ```
 
 **It copies. It never adopts, and it never writes to the old plugin's tables.** That is not
@@ -1702,7 +1701,7 @@ The tag was previously called `{% geo_aggregate %}`. That name still works as an
 > documented below, writes one deprecation line to the log per process, and the
 > template linter reports it as a warning. Everything it provided is now on the version
 > object itself — see [Migrating off `{% geo_version_map %}`](#migrating-off--geo_version_map-)
-> at the end of this section. Run `rake reporter_dashboards:import:plan` to list the
+> at the end of this section. Run `rake reporter_dashboards:migrate_from_reporter:plan` to list the
 > templates that still use it.
 
 Place the tag near the top of your Reporter template. It writes a lookup table into a Liquid variable (`geo_versions` by default), keyed by version name.

@@ -7,7 +7,7 @@
 # `import:plan` writes NOTHING. That is not a comment — spec/adapter/import_survey_spec.rb
 # subscribes to sql.active_record and fails on any statement that is not a SELECT.
 namespace :reporter_dashboards do
-  namespace :import do
+  namespace :migrate_from_reporter do
     desc 'Read-only survey of the redmine_reporter data this plugin would import (writes nothing)'
     task plan: :environment do
       # Absolute paths, the idiom lib/redmine_reporter_dashboards.rb already uses.
@@ -71,26 +71,33 @@ namespace :reporter_dashboards do
 
   # T-29 — the template exchange BUNDLE (FR-55/56/57, `technical-spec.md` §7b.2).
   #
-  # --- WHY THIS IS `exchange:` AND NOT `import:`, WHICH IS WHAT §7b.2 NAMES ---
+  # --- THE NAMES, AND WHO MOVED (curator decision, 2026-08-09, §Findings S-22) ---
   #
-  # §7b.2 calls the two steps `import:plan` and `import:run`. BOTH NAMES ARE ALREADY
-  # TAKEN, by a different feature, and they have been since T-02 and T-24: `import:plan`
-  # surveys the BASE PLUGIN's tables and `import:run` copies rows out of them. That is the
-  # one-way migration off `redmine_reporter`; this is a file format for moving templates
-  # between installations. Two features, one namespace, and `rake -T` would have shown two
-  # tasks with one name.
+  # §7b.2 specifies `import:plan` and `import:run` for the BUNDLE. Both names were taken
+  # by a different feature — T-02/T-24's one-way migration off `redmine_reporter`, which
+  # reads that plugin's TABLES rather than a file. Rake does not report such a collision:
+  # it ENHANCES the task and runs both bodies in order (measured), so `rake -T` would have
+  # listed one task with one description and two behaviours.
   #
-  # Reusing the names would have been the worse of the two errors available: an operator
-  # following the migration guide would run `import:run` and get a bundle importer that
-  # refuses because there is no file, or — if the argument happened to be right — a
-  # different write than the one the guide describes. So the VERBS §7b.2 asks for are kept
-  # (`plan` then apply) and the namespace says which of the two importers it is.
-  # Reported as a finding rather than resolved silently; see `implementation-plan.md`
-  # §Findings S-22.
-  namespace :exchange do
+  # T-29 first shipped the bundle under `import:`/`export:` and reported the clash. **The curator
+  # chose the other resolution: the SPEC keeps its names and the migration importer moved**
+  # to `migrate_from_reporter:{plan,run,status}`, which is longer and unmistakable — the
+  # thing it reads is in its name. So:
+  #
+  #   reporter_dashboards:export:bundle              write a bundle from this install
+  #   reporter_dashboards:migrate_from_reporter:plan                say what reading one would do
+  #   reporter_dashboards:migrate_from_reporter:run                 do it
+  #   reporter_dashboards:migrate_from_reporter:*    the one-way migration off the old plugin
+  #
+  # The export sits under `export:` rather than `import:` because that is what it does, and
+  # because the pair then reads the way the operation actually works: you EXPORT on one
+  # installation and IMPORT on another. `test/unit/exchange_rake_test.rb` pins all of it,
+  # including that `import:*` is the BUNDLE now and `migrate_from_reporter:*` is the
+  # migration, so the two cannot silently swap back.
+  namespace :export do
     desc 'Write a template bundle to stdout, or to RRD_OUT (RRD_PROJECT=id|identifier ' \
          'limits it to one project; writes nothing to the database)'
-    task export: :environment do
+    task bundle: :environment do
       require File.expand_path('../redmine_reporter_dashboards/exchange_tasks', __dir__)
       tasks = RedmineReporterDashboards::ExchangeTasks
 
@@ -125,7 +132,11 @@ namespace :reporter_dashboards do
         $stdout.write(bytes)
       end
     end
+  end
 
+  # THE BUNDLE'S IMPORT HALF, under the names §7b.2 specifies. See the note above the
+  # `export:` namespace for who moved and why.
+  namespace :import do
     desc 'Say what importing RRD_FILE would do, and write NOTHING ' \
          '(RRD_PROJECT=id|identifier, RRD_ON_CONFLICT=skip|rename|overwrite)'
     task plan: :environment do
@@ -149,7 +160,7 @@ namespace :reporter_dashboards do
     desc 'Import the template bundle in RRD_FILE, one transaction per template ' \
          '(RRD_PROJECT=id|identifier, RRD_ON_CONFLICT=skip|rename|overwrite, ' \
          'RRD_ACTOR=login|id; exit 1 if any template failed)'
-    task apply: :environment do
+    task run: :environment do
       require File.expand_path('../redmine_reporter_dashboards/exchange_tasks', __dir__)
 
       begin

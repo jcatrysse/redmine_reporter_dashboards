@@ -38,7 +38,7 @@ module VersionMapping
       '[geo_version_map] this tag is DEPRECATED and will be removed in the next minor ' \
       'version. The owned drop layer answers the same four facts directly — ' \
       'issue.version.id / .effective_date / .status / .project — and adds the roadmap, ' \
-      'issue-list and time-entry URLs. Run `rake reporter_dashboards:import:plan` to ' \
+      'issue-list and time-entry URLs. Run `rake reporter_dashboards:migrate_from_reporter:plan` to ' \
       'list the templates that still use it.'
 
     # ONCE PER PROCESS, and once means once even with two threads in the tag at the

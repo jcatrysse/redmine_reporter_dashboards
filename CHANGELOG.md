@@ -11,9 +11,10 @@ All notable changes to this plugin are documented in this file.
   download button, because serving one of fifty PDFs and calling it the report is worse
   than refusing.
 
-  **The archive is streamed, not assembled.** The response carries no `Content-Length`
-  and the plugin never holds a copy of the whole file — the peak is one document, whatever
-  the size of the export.
+  **Every document is rendered before the download starts**, deliberately: the status code
+  goes out with the first byte, so producing them lazily would mean a failure half way
+  through arriving *after* a `200 OK` — an archive that unpacks cleanly and is quietly
+  missing most of the reports. The 50-document cap bounds both the wait and the memory.
   Each member is one issue's PDF, named after that issue; two issues whose names sanitise
   to the same thing get distinct members rather than one overwriting the other.
 
@@ -24,9 +25,9 @@ All notable changes to this plugin are documented in this file.
   checked before anything is rendered at all.
 
 - **Templates can be moved between installations in bulk, with a dry run first.**
-  `rake reporter_dashboards:exchange:export` writes a project's templates to a JSON
-  bundle, `exchange:plan` says exactly what importing it would do **and writes nothing**,
-  and `exchange:apply` does it. Conflicts are explicit —
+  `rake reporter_dashboards:export:bundle` writes a project's templates to a JSON
+  bundle, `import:plan` says exactly what importing it would do **and writes nothing**,
+  and `import:run` does it. Conflicts are explicit —
   `RRD_ON_CONFLICT=skip|rename|overwrite` — and `overwrite` keeps the content that was
   there in the template's version history, so it can be rolled back to. It never changes a
   template's owner or its visibility, and it only touches templates you may edit.
@@ -35,8 +36,8 @@ All notable changes to this plugin are documented in this file.
   and the rest of the bundle still imports. The plan also runs the template linter and
   prints the findings per template, so you can see what is coming before it lands.
 
-  These live under `exchange:` rather than `import:` because
-  `reporter_dashboards:import:*` already means the one-way migration off
+  These live under `import:`/`export:` rather than `import:` because
+  `reporter_dashboards:migrate_from_reporter:*` already means the one-way migration off
   `redmine_reporter`, which reads that plugin's tables rather than a file.
 
 ### Changed
@@ -51,8 +52,8 @@ All notable changes to this plugin are documented in this file.
   has no column for and says so**, instead of failing with an internal error.
 
 - **Migrating from `redmine_reporter` now copies your templates across.**
-  `rake reporter_dashboards:import:run` reads the old plugin's templates and writes copies
-  into this one's tables; `rake reporter_dashboards:import:status` says what has drifted
+  `rake reporter_dashboards:migrate_from_reporter:run` reads the old plugin's templates and writes copies
+  into this one's tables; `rake reporter_dashboards:migrate_from_reporter:status` says what has drifted
   since. `import:plan` still surveys without writing.
 
   **It copies and never adopts, and it never writes to the old plugin's tables.**
@@ -134,7 +135,7 @@ All notable changes to this plugin are documented in this file.
   `.status`, `.project` and five absolute URLs directly, and it still prints and compares
   as its own name — so `{% if issue.version == "2026.1" %}` keeps working. The README has
   a before/after and a one-row-per-accessor table under *Migrating off
-  `{% geo_version_map %}`*, and `rake reporter_dashboards:import:plan` lists the templates
+  `{% geo_version_map %}`*, and `rake reporter_dashboards:migrate_from_reporter:plan` lists the templates
   that still use it.
 
 ### Removed
@@ -553,7 +554,7 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
-- **`rake reporter_dashboards:import:plan`** — a read-only survey of the
+- **`rake reporter_dashboards:migrate_from_reporter:plan`** — a read-only survey of the
   `redmine_reporter` data this plugin will eventually import. It writes nothing, and
   that is enforced by a test rather than promised: the suite subscribes to
   `sql.active_record` and fails on any statement that is not a `SELECT`.

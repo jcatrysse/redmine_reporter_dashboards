@@ -4,7 +4,8 @@ require File.expand_path('../test_helper', __dir__)
 require 'rake'
 require 'stringio'
 
-# T-29 — the wiring of `reporter_dashboards:exchange:*`, and only the wiring.
+# T-29 — the wiring of the bundle tasks (`export:bundle`, `import:plan`, `import:run`)
+# and of the migration importer they had to be told apart from. Only the wiring.
 #
 # `Bundle`, `BundleImport` and `BundleReport` are covered elsewhere — the format DB-less,
 # the importer against a real database. What none of those can reach is the rake file
@@ -51,7 +52,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
   # RETURNS THE EXIT STATUS RATHER THAN LETTING IT ESCAPE, and that is not tidiness — it
   # is the difference between a test suite that reports and one that vanishes.
   #
-  # `exchange:plan` and `exchange:apply` end in `exit(...)`, and `exit(0)` raises
+  # `import:plan` and `import:run` end in `exit(...)`, and `exit(0)` raises
   # `SystemExit` exactly as `exit(2)` does. A test that merely invoked the task let that
   # escape, and Minitest does not catch SystemExit: the whole run TERMINATED at the first
   # such test, printing no summary line at all. `rake` answered 1 with no failing test
@@ -85,21 +86,43 @@ class ExchangeRakeTest < ActiveSupport::TestCase
 
   # ------------------------------------------------------------------ the tasks exist
 
-  def test_the_three_tasks_are_defined_under_the_exchange_namespace
-    %w[reporter_dashboards:exchange:export reporter_dashboards:exchange:plan
-       reporter_dashboards:exchange:apply].each do |name|
+  def test_the_three_bundle_tasks_are_defined_under_the_names_the_spec_asks_for
+    %w[reporter_dashboards:export:bundle reporter_dashboards:import:plan
+       reporter_dashboards:import:run].each do |name|
       assert Rake::Task.task_defined?(name), "#{name} is not defined"
       assert_not_nil Rake::Task[name].comment, "#{name} has no description for rake -T"
     end
   end
 
-  # THE MIGRATION IMPORTER'S TASKS ARE STILL THERE AND STILL THEIRS. If a later edit moved
-  # the bundle importer under `import:`, one of these two would be redefined and an
-  # operator following the migration guide would get the wrong importer.
-  def test_the_base_plugin_importer_still_owns_the_import_namespace
-    assert Rake::Task.task_defined?('reporter_dashboards:import:plan')
-    assert Rake::Task.task_defined?('reporter_dashboards:import:run')
-    assert_match(/redmine_reporter/, Rake::Task['reporter_dashboards:import:plan'].comment)
+  # THE TWO IMPORTERS ARE DISTINCT AND EACH IS WHERE THE CURATOR PUT IT (S-22, decided
+  # 2026-08-09). `import:*` is the BUNDLE — the spec's names, per §7b.2 — and the one-way
+  # migration off the old plugin lives at `migrate_from_reporter:*`.
+  #
+  # Both halves are asserted because rake will not tell you if they collide: a duplicate
+  # definition ENHANCES the task and runs both bodies in order, so `rake -T` would show one
+  # task with one description and two behaviours. This test is what stops that.
+  def test_the_two_importers_are_distinct_and_each_is_where_the_curator_put_it
+    assert Rake::Task.task_defined?('reporter_dashboards:migrate_from_reporter:plan')
+    assert Rake::Task.task_defined?('reporter_dashboards:migrate_from_reporter:run')
+    assert Rake::Task.task_defined?('reporter_dashboards:migrate_from_reporter:status')
+
+    # The migration importer reads the OLD PLUGIN's tables, and its description says so.
+    assert_match(/redmine_reporter/,
+                 Rake::Task['reporter_dashboards:migrate_from_reporter:plan'].comment)
+    # The bundle importer reads a FILE, and its description names the variable that holds
+    # one. If the two ever swapped back, this is the assertion that fails.
+    assert_match(/RRD_FILE/, Rake::Task['reporter_dashboards:import:plan'].comment)
+  end
+
+  # AND EACH TASK HAS EXACTLY ONE BODY. A collision does not raise; it appends. Asserting
+  # the ACTION COUNT is the only way to see it — measured at 2 for a duplicated task.
+  def test_no_task_has_been_defined_twice
+    %w[reporter_dashboards:import:plan reporter_dashboards:import:run
+       reporter_dashboards:export:bundle reporter_dashboards:migrate_from_reporter:plan
+       reporter_dashboards:migrate_from_reporter:run].each do |name|
+      assert_equal 1, Rake::Task[name].actions.length,
+                   "#{name} has more than one body, so two features share the name"
+    end
   end
 
   # ------------------------------------------------------------------ they run
@@ -110,7 +133,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
 
     output = status = nil
     assert_no_difference 'RedmineReporterDashboards::Template.count' do
-      output, status = invoke('reporter_dashboards:exchange:plan')
+      output, status = invoke('reporter_dashboards:import:plan')
     end
 
     assert_equal 0, status, 'a plan that decided cleanly must exit 0'
@@ -124,7 +147,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
 
     status = nil
     assert_difference 'RedmineReporterDashboards::Template.count', 1 do
-      _output, status = invoke('reporter_dashboards:exchange:apply')
+      _output, status = invoke('reporter_dashboards:import:run')
     end
 
     assert_equal 0, status
@@ -137,7 +160,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
     ENV['RRD_PROJECT'] = @project.identifier
     ENV['RRD_OUT'] = @tmp
 
-    _output, status = invoke('reporter_dashboards:exchange:export')
+    _output, status = invoke('reporter_dashboards:export:bundle')
 
     assert_equal 0, status
     written = JSON.parse(File.binread(@tmp))
@@ -153,7 +176,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
   def test_a_missing_RRD_FILE_is_refused_with_a_sentence_and_exit_2
     ENV['RRD_PROJECT'] = @project.identifier
 
-    _output, status = invoke('reporter_dashboards:exchange:plan')
+    _output, status = invoke('reporter_dashboards:import:plan')
 
     assert_equal 2, status
   end
@@ -162,7 +185,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
     ENV['RRD_FILE'] = File.join(Dir.tmpdir, 'no-such-bundle-rrd.json')
     ENV['RRD_PROJECT'] = @project.identifier
 
-    _output, status = invoke('reporter_dashboards:exchange:plan')
+    _output, status = invoke('reporter_dashboards:import:plan')
 
     assert_equal 2, status
   end
@@ -171,7 +194,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
     ENV['RRD_FILE'] = write_bundle(entry)
     ENV['RRD_PROJECT'] = 'no-such-project-identifier'
 
-    _output, status = invoke('reporter_dashboards:exchange:plan')
+    _output, status = invoke('reporter_dashboards:import:plan')
 
     assert_equal 2, status
   end
@@ -182,7 +205,7 @@ class ExchangeRakeTest < ActiveSupport::TestCase
     ENV['RRD_FILE'] = write_bundle(entry('page_size' => 'A9'))
     ENV['RRD_PROJECT'] = @project.identifier
 
-    _output, status = invoke('reporter_dashboards:exchange:apply')
+    _output, status = invoke('reporter_dashboards:import:run')
 
     assert_equal 1, status
   end

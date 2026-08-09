@@ -201,7 +201,7 @@ module ReporterDashboards
       #
       # A MULTI-TEMPLATE BUNDLE IS REFUSED HERE RATHER THAN IMPORTED. This form creates one
       # template and redirects to its editor; importing twelve needs a conflict policy and a
-      # per-template report, which is what `exchange:plan` / `exchange:apply` are. The
+      # per-template report, which is what `import:plan` / `import:run` are. The
       # refusal NAMES THE COUNT and points at the tasks, which is the shape T-15's cap
       # refusal established — a refusal that says what you asked for and what to do instead.
       # BOUNDED BEFORE IT IS PARSED, and before `#read` pulls the whole upload into this
@@ -492,49 +492,39 @@ module ReporterDashboards
                 disposition: 'attachment'
     end
 
-    # T-29 / §Findings E-6 — the streamed archive, with NO `Content-Length`.
+    # T-29 / §Findings E-6 — the archive. **BUFFERED, by curator decision (S-23,
+    # 2026-08-09), and this comment is the argument for it rather than an apology.**
     #
-    # --- WHY THE DOCUMENTS ARE ALL RENDERED BEFORE THE FIRST BYTE GOES OUT ---
+    # --- WHAT WAS TRIED FIRST, AND WHY IT WAS ABANDONED ---
     #
-    # This is the decision a reader will want to challenge, so it is written down. It
-    # would be possible to render document N while document N-1 is on the wire, and it
-    # would be WRONG: the status line goes out with the first byte. If document 7 of 50
-    # then fails, the response has already promised `200 OK` and the recipient gets a
-    # truncated archive that unpacks cleanly and is missing 44 reports. That is INV-5
-    # exactly — "a recipient gets a green-looking result containing a broken report" —
-    # one layer up from where `Renderer` enforces it.
+    # E-6's bullet asks for a "streamed archive with no `Content-Length`", and T-29 shipped
+    # one: `ZipStream` yields the zip in pieces and this action handed that object to Rack.
+    # Measured through Redmine's REAL middleware stack, that did not do what it says.
+    # `Rack::ContentLength` and `Rack::ETag` both gate on `body.respond_to?(:to_ary)`, and
+    # `ActionDispatch::Response::Buffer#to_ary` is defined UNCONDITIONALLY — so a controller
+    # cannot opt out of either, `Rack::ETag` digested the whole archive before the first
+    # byte could leave, and the body was then re-enumerated for the wire. Two full
+    # generations, measured by counting pulls from the entry source: 0 -> 22 -> 44.
     #
-    # So the order is: ask the cap (before ANY render — `ReportRun` does that off a
-    # `COUNT(*)`, so a refused 40 000-document export still costs one query), render the
-    # batch, decide success or failure while a status code can still be chosen, and only
-    # then start writing. Every failure mode is decided before the archive exists.
+    # So the choice was never "streamed or buffered". It was "buffered once, honestly" or
+    # "generated twice while calling itself streamed". The curator took the first.
     #
-    # --- WHAT "STREAMED" THEREFORE MEANS HERE, EXACTLY ---
+    # --- WHAT THIS COSTS AND WHY IT IS ACCEPTABLE ---
     #
-    # The ARCHIVE is never built in memory: `ZipStream#each` yields the zip in pieces and
-    # this action hands that object straight to Rack, so the worker never holds a
-    # concatenated copy of it. What it does hold is the rendered PDFs, because it just
-    # decided they were all fine — and that set is bounded by `Render::BatchGuard`'s cap.
+    # The archive is held in memory once. `Render::BatchGuard`'s cap bounds it at 50
+    # documents, and those 50 PDFs are ALREADY in memory by the time this method runs —
+    # `ReportRun` rendered them all before any failure decision was made, deliberately, so
+    # that a failure at document 7 of 50 is still a proper error page rather than a
+    # truncated archive behind a `200 OK`. The zip adds roughly the same bytes again, which
+    # is the whole of the regression, and it buys a `Content-Length` — so a browser shows a
+    # percentage instead of a growing file, and a proxy can no longer mistake a half-written
+    # response for a complete one.
     #
-    # Both halves of that are asserted rather than asserted-in-a-comment:
-    # `spec/archive/zip_stream_spec.rb` proves the writer is lazy (a chunk is yielded
-    # before the last entry is pulled), and the functional test proves this response
-    # carries no `Content-Length` and hands Rack a non-Array body. Claiming the whole
-    # pipeline is lazy would be the overclaim; it is not, and the reason is above.
-    #
-    # --- AND ONE MORE THING THAT IS TRUE AND UNCOMFORTABLE: §Findings S-23 ---
-    #
-    # `Rack::ETag` sits in Redmine's stack and gates on `body.respond_to?(:to_ary)`, which
-    # `ActionDispatch::Response::Buffer` answers unconditionally — so it DIGESTS the whole
-    # archive and the body is then re-enumerated for the wire. The archive is therefore
-    # produced TWICE. Measured by counting pulls from the entry source: 0 -> 3 -> 6.
-    #
-    # It does not cost memory (the digest is incremental, and the peak working set is still
-    # one member) and it does not add a `Content-Length`, so both of E-6's requirements
-    # hold. It costs a second pass. The two obvious repairs — a `Last-Modified` header, or
-    # an `ETag` of our own — each make `Rack::ETag` skip and then let `Rack::ContentLength`
-    # measure the body instead, which hands back exactly the header this action exists to
-    # withhold. S-23 has the table. Do not "fix" this without re-running it.
+    # `ZipStream` is unchanged and still lazy. Nothing here depends on it being eager; this
+    # method simply drains it, and `spec/archive/zip_stream_spec.rb` still asserts the
+    # writer yields before its source is exhausted. That is deliberate: if a future task
+    # moves this onto `ActionController::Live`, the writer is already the right shape and
+    # only this method changes.
     def stream_archive(documents)
       sections = @outcome.sections
 
@@ -548,33 +538,24 @@ module ReporterDashboards
               'sections; they are paired by position and must be the same length'
       end
 
-      entries = sections.each_with_index.lazy.map do |section, index|
+      entries = sections.each_with_index.map do |section, index|
         Archive::ZipStream::Entry.new(name: archive_entry_name(section, index),
                                       bytes: documents[index].bytes)
       end
 
-      send_archive(Archive::ZipStream.new(entries: entries, mtime: Time.now.utc),
-                   download_filename(@template, 'zip'))
+      send_data archive_bytes(entries),
+                filename: download_filename(@template, 'zip'),
+                type: 'application/zip',
+                disposition: 'attachment'
     end
 
-    # NO `send_data`, BECAUSE `send_data` BUFFERS. It takes a String, so using it would
-    # mean building the whole archive first — which is the one thing this is for.
-    # Assigning an object that answers `#each` to `response_body` is Rails' own
-    # non-`Live` streaming form, and Rack iterates it.
-    def send_archive(body, filename)
-      response.headers['Content-Type'] = 'application/zip'
-      response.headers['Content-Disposition'] =
-        ActionDispatch::Http::ContentDisposition.format(disposition: 'attachment',
-                                                        filename: filename)
-      # A REPORT IS NOT CACHEABLE BY ANYTHING IN BETWEEN. `send_data` sets this for the
-      # single-document path; a streamed response has to say it itself, and an archive of
-      # somebody's visible issues is the last thing that should sit in a shared proxy.
-      response.headers['Cache-Control'] = 'private, no-store'
-      # NGINX AND FRIENDS BUFFER BY DEFAULT, which would undo the property this action
-      # exists for at the last hop. Ignored by every server that does not know it.
-      response.headers['X-Accel-Buffering'] = 'no'
-
-      self.response_body = body
+    # DRAINED HERE, IN ONE PLACE. `send_data` needs a String; the writer produces chunks.
+    # Joining them is the whole of the buffering decision, and keeping it in its own method
+    # is what makes reverting it a one-line change if S-23 is ever revisited.
+    def archive_bytes(entries)
+      out = +''.b
+      Archive::ZipStream.new(entries: entries, mtime: Time.now.utc).each { |chunk| out << chunk }
+      out
     end
 
     # `<template>-<record id>.pdf`, and the id rather than the label because `Job#label`

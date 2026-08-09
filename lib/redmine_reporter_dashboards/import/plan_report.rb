@@ -2,7 +2,7 @@
 
 module RedmineReporterDashboards
   module Import
-    # Turns a Survey::Result into the lines `rake reporter_dashboards:import:plan`
+    # Turns a Survey::Result into the lines `rake reporter_dashboards:migrate_from_reporter:plan`
     # prints. Separate from the survey for one reason: a formatter that returns an
     # Array of String can be asserted on, and a rake task that puts straight to stdout
     # cannot. The rake file stays four lines long and there is no logic in it.
@@ -39,7 +39,7 @@ module RedmineReporterDashboards
       class << self
         def render(result)
           lines = []
-          lines.concat(heading('reporter_dashboards:import:plan — read-only survey'))
+          lines.concat(heading('reporter_dashboards:migrate_from_reporter:plan — read-only survey'))
           lines << 'Nothing was written. This task only reads.'
           lines.concat(tables_section(result))
           # Section 6 is appended on BOTH paths. An "absent" report that dropped the

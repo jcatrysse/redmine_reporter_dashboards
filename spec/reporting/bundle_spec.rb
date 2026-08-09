@@ -196,7 +196,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::Bundle do
       expect(parsed.entries.map { |e| e['name'] }).to eq(%w[Annual Quarterly])
     end
 
-    it 'keeps the envelope, which is what `exchange:plan` prints' do
+    it 'keeps the envelope, which is what `import:plan` prints' do
       parsed = described_class.parse(dump(templates))
 
       expect(parsed.exported_at).to eq(exported_at)

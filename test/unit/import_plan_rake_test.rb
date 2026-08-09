@@ -16,7 +16,7 @@ require 'stringio'
 # was never installed" path end to end, including the exit-0 promise on T-02's Accept
 # list.
 class ImportPlanRakeTest < ActiveSupport::TestCase
-  TASK = 'reporter_dashboards:import:plan'.freeze
+  TASK = 'reporter_dashboards:migrate_from_reporter:plan'.freeze
   RAKE_FILE = File.expand_path('../../lib/tasks/reporter_dashboards.rake', __dir__).freeze
 
   def setup
@@ -58,7 +58,9 @@ class ImportPlanRakeTest < ActiveSupport::TestCase
   def test_the_task_runs_and_prints_a_report
     output = capture_task
 
-    assert_match(/import:plan/, output)
+    # The heading names the task. It moved to `migrate_from_reporter:plan` when the
+    # curator gave `import:*` to the bundle importer (S-22, 2026-08-09).
+    assert_match(/migrate_from_reporter:plan/, output)
     assert_match(/Nothing was written/, output)
     assert_match(/reporter's tables/, output)
   end

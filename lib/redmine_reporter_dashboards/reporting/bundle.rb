@@ -71,7 +71,7 @@ module RedmineReporterDashboards
       MAX_BYTES = 32 * 1024 * 1024
 
       # What a parsed bundle IS. The envelope is kept rather than discarded because
-      # `exchange:plan` prints it — an operator deciding whether to apply a file wants to
+      # `import:plan` prints it — an operator deciding whether to apply a file wants to
       # know when it was written and by which version, and a reader that threw that away
       # would make them open the file in an editor to find out.
       Parsed = Struct.new(:format_version, :exported_at, :plugin_version, :entries,
@@ -145,7 +145,7 @@ module RedmineReporterDashboards
         # The second half is not generosity: `Exchange.dump` has been writing
         # `{'format_version', 'template'}` since T-23 and the editor's Export button
         # produces one, so an operator who exported a template last month and feeds it to
-        # `exchange:plan` today gets their template rather than a refusal. The base
+        # `import:plan` today gets their template rather than a refusal. The base
         # plugin's two shapes are read for the same reason and by the same code.
         def template_nodes(raw)
           list = raw['templates']

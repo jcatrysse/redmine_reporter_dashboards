@@ -775,7 +775,7 @@ address at all" table rather than by reading. The local part's grammar is the MT
 its *existence* is not.
 
 **A TEST THAT INVOKES A RAKE TASK CALLING `exit` KILLS THE WHOLE MINITEST RUN, AND THERE
-IS NO SUMMARY LINE TO TELL YOU.** T-29, 2026-08-09. `exchange:plan` and `exchange:apply`
+IS NO SUMMARY LINE TO TELL YOU.** T-29, 2026-08-09. `import:plan` and `import:run`
 end in `exit(...)` so they can be deploy steps — and **`exit(0)` raises `SystemExit`
 exactly as `exit(2)` does.** Minitest does not rescue `SystemExit`: the run TERMINATED at
 the first such test, having printed its dots and nothing else. `rake` answered 1 with **no
@@ -1772,7 +1772,7 @@ an ISSUE scope — already frozen in T-01's corpus, so that comparison is alread
    T-11/T-13 can be exercised rather than written blind. A local Chromium is still not a
    CI-verified engine; that is T-12's job, and the `render-smoke` job it added is where
    that becomes true. **Both were exercised, 2026-08-06** — see entry 10.
-4. **T-02 is done.** `rake reporter_dashboards:import:plan` is the repeatable form of the
+4. **T-02 is done.** `rake reporter_dashboards:migrate_from_reporter:plan` is the repeatable form of the
    R-15 measurement, and `RedmineReporterDashboards::TemplateLinter` is the linter FR-71
    later puts behind the editor's lint panel — so extend that one rule table rather than
    writing a second checker. It raised **F-3** (a question about gate G8's 1.0 target)

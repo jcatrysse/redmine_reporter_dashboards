@@ -4,7 +4,7 @@ require_relative '../template_linter'
 
 module RedmineReporterDashboards
   module Import
-    # The read-only survey behind `rake reporter_dashboards:import:plan`.
+    # The read-only survey behind `rake reporter_dashboards:migrate_from_reporter:plan`.
     #
     # `technical-spec.md` §7a: "`import:plan` — **read-only dry run**, reporting counts
     # by type, per-template lint findings, active schedules, and which templates need
