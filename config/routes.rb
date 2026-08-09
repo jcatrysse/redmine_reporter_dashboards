@@ -101,3 +101,22 @@ post 'projects/:project_id/reporter/schedules/:id/test_send', to: 'reporter_dash
 get 'projects/:project_id/reporter/mail', to: 'reporter_dashboards/mail#index', as: 'project_reporter_mail_sends'
 get 'projects/:project_id/reporter/mail/new', to: 'reporter_dashboards/mail#new', as: 'new_project_reporter_mail'
 post 'projects/:project_id/reporter/mail', to: 'reporter_dashboards/mail#create'
+
+# T-28 — THE SHARE LINK, AND IT IS THE ONE ROUTE IN THIS FILE OUTSIDE A PROJECT.
+#
+# `/reporter/s/:token` carries no project id, and that is the requirement rather than a
+# shortening: §7b.6's public link is opened by somebody who has no account, no membership
+# and no reason to know which project a report came from — a project segment would be an
+# identifier disclosed to a stranger for no gain, and `Project#identifier` is exactly the
+# kind of thing an organisation does not necessarily want in a forwarded URL.
+#
+# GET, and only GET. Serving a snapshot reads bytes and writes an audit row; a crawler or a
+# prefetching proxy following the link consumes a `max_uses` slot, which is a real cost, and
+# it is the cost the link's own controls exist to bound. Making it a POST would break the
+# one thing a share link has to be — a URL somebody can open.
+#
+# CONSTRAINED TO THE TOKEN'S OWN ALPHABET. `SecureRandom.urlsafe_base64` produces
+# `[A-Za-z0-9_-]` and nothing else, so anything with a dot, a slash or a percent in it is
+# not a token this plugin ever minted and 404s in the router rather than reaching a digest
+# lookup.
+get 'reporter/s/:token', to: 'reporter_dashboards/shares#show', as: 'reporter_share', constraints: { token: /[A-Za-z0-9_-]+/ }

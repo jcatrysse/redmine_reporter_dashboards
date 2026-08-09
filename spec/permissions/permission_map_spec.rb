@@ -395,9 +395,23 @@ module RedmineReporterDashboards
       it 'sees every controller in the plugin' do
         expect(ControllerSource.all.map(&:name))
           .to eq(%w[reporter_dashboards/mail reporter_dashboards/schedules
-                    reporter_dashboards/templates
+                    reporter_dashboards/shares reporter_dashboards/templates
                     reporter_preflight reporter_project_pages reporter_project_tabs
                     sql_stats])
+      end
+
+      # T-28's share endpoint is the ONLY controller in this plugin that runs neither
+      # `authorize` nor a permission guard of its own, so it is the one this pin exists for:
+      # a controller added without an entry in `NON_PERMISSION_GUARDS` would otherwise
+      # appear here and nowhere else. Its guard, its single action and the reason it has no
+      # permission are all asserted by the coverage examples below; this only fixes the
+      # SHAPE so that adding a second such controller is a deliberate edit.
+      it 'reads the share endpoint T-28 added, with its exact action set' do
+        shares = ControllerSource.new('reporter_dashboards/shares')
+
+        expect(shares.exist?).to be(true)
+        expect(shares.public_actions).to eq(%i[show])
+        expect(shares.before_action_symbols).to include(:find_link)
       end
 
       # T-23's controller is the first one in a subdirectory, which is the case the

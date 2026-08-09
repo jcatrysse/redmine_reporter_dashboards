@@ -31,6 +31,21 @@ module RedmineReporterDashboards
     # whose numbers the document contains.
     belongs_to :rendered_as_user, class_name: 'User', optional: true
 
+    # T-28 — THE BYTES, AND THE LINK IS DELIBERATELY WRITTEN IN BOTH DIRECTIONS.
+    #
+    # `attachment_id` is migration 007's own pointer and §7 rule 6 means it cannot be
+    # replaced by a different column later, so it stays the pointer. What it does NOT do is
+    # keep the row alive: `Attachment.prune` destroys every attachment with no CONTAINER
+    # after a day (`app/models/attachment.rb:375`, run by `rake redmine:attachments:prune`),
+    # and it does not look at who points at it. So the attachment is also contained BY this
+    # document, which is what takes it out of that WHERE clause. See `Reporting::Snapshot`
+    # for the measurement.
+    belongs_to :attachment, class_name: '::Attachment', optional: true
+    # The same row, reached from the container side, so `dependent: :destroy` has somewhere
+    # to hang: destroying a document must take its bytes and its file off the disk with it.
+    has_one :stored_attachment, class_name: '::Attachment', as: :container,
+                                dependent: :destroy, inverse_of: false
+
     # `technical-spec.md:1215`: "Persistence is opt-in with a **mandatory TTL** and a purge
     # task. That converts an unmanaged indefinite store into 'off by default, **bounded when
     # on**'." Presence alone delivers the first half and not the second: `expires_at =
@@ -46,6 +61,15 @@ module RedmineReporterDashboards
     validates :expires_at, presence: true
     validate :expiry_within_the_retention_bound
 
+    # T-28 — WHAT CORE STORES IN `attachments.container_type` FOR A CONTAINED SNAPSHOT, and
+    # it is a measurement rather than a preference: that column is `varchar(30)` and this
+    # class's name is 35 characters. `app/models/rrd_report_snapshot.rb` holds the full
+    # argument and the constant this resolves back to — read it before changing this string,
+    # because every snapshot already on disk is found by it.
+    def self.polymorphic_name
+      'RrdReportSnapshot'
+    end
+
     # Expired but not yet purged. The purge task's scope, named here so the task and any
     # diagnostic agree on the definition rather than each writing their own `where`.
     scope :expired, ->(now = Time.zone.now) { where(purged_at: nil).where(arel_table[:expires_at].lteq(now)) }
@@ -57,6 +81,44 @@ module RedmineReporterDashboards
 
     def purged?
       purged_at.present?
+    end
+
+    # T-28 — CORE'S THREE QUESTIONS ABOUT A CONTAINED ATTACHMENT, AND ALL THREE ANSWER NO.
+    #
+    # `Attachment#visible?` is `container && container.attachments_visible?(user)`
+    # (`app/models/attachment.rb:198`), and `editable?`/`deletable?` are the same shape.
+    # Containing the attachment is what saves it from the prune — it also makes it reachable
+    # at `/attachments/:id/:filename`, which is a URL with no share link in it and therefore
+    # a way round every control in FR-51.
+    #
+    # A snapshot is served by ONE endpoint, which is the share link's, and it authorises the
+    # bytes rather than the reader. So core is told plainly that nobody may see, change or
+    # delete this attachment through core — an undefined method here would have been a 500
+    # from `AttachmentsController` instead, which is a refusal by accident.
+    #
+    # THE ARGUMENT IS NOT `false` PER USER: it is false for every user including an
+    # administrator, because the question core is asking is *"may this person download it at
+    # this URL"* and the answer is that this URL is not how it is downloaded.
+    def attachments_visible?(_user = nil)
+      false
+    end
+
+    def attachments_editable?(_user = nil)
+      false
+    end
+
+    def attachments_deletable?(_user = nil)
+      false
+    end
+
+    # The stored bytes, or nil when there are none — a purged document, or a row from before
+    # anything wrote one. `readable?` is core's own check that the file is actually on disk,
+    # and skipping it turns a missing file into an `Errno::ENOENT` from a controller.
+    def bytes
+      return nil if purged?
+      return nil if attachment.nil? || !attachment.readable?
+
+      ::File.binread(attachment.diskfile)
     end
 
     private

@@ -58,7 +58,14 @@ class ReporterDashboardsShareLinkTest < ActiveSupport::TestCase
       next unless value.is_a?(String)
 
       assert_not_equal token, value
-      assert_not_include value.to_s, token,
+      # ARGUMENT ORDER, AND IT IS NOT A NICETY. Redmine's helper is
+      # `assert_not_include(expected, s)` → `!s.include?(expected)` (core
+      # `test/test_helper.rb:258`), so the NEEDLE COMES FIRST. Written the other way round
+      # — which is how this line shipped in T-28 increment 1 — it asked whether the
+      # 43-character token contains a 64-character digest, which is false for every input,
+      # and the central security claim of this file passed without testing anything.
+      # Found by the same mistake failing loudly in a sibling test one increment later.
+      assert_not_include token, value.to_s,
                          'the plain token appears in a column, so a database dump leaks it'
     end
   end
@@ -287,6 +294,67 @@ class ReporterDashboardsShareLinkTest < ActiveSupport::TestCase
 
     assert_not link.valid?
     assert_includes link.errors.attribute_names, :scope_kind
+  end
+
+  # T-28 INCREMENT 2 — A LINK MUST NOT OUTLIVE THE ARTEFACT IT AUTHORISES. `Document` bounds
+  # how long a stored snapshot may live; a link expiring after that would point at bytes the
+  # purge task is entitled to collect, and would work for months and then answer "no longer
+  # stored" for a reason nobody could reconstruct.
+  #
+  # AT THE BOUND AND ONE PAST IT — CLAUDE.md §3's rule for anything with a limit.
+  def test_a_link_may_not_outlive_the_snapshot_stores_own_retention_bound
+    at_the_bound = ShareLink.new(link_attributes(expires_at: Time.zone.now + ShareLink::MAX_LIFETIME - 1.day))
+    at_the_bound.token_digest = ShareLink.digest_for('a')
+    past_it = ShareLink.new(link_attributes(expires_at: Time.zone.now + ShareLink::MAX_LIFETIME + 1.day))
+    past_it.token_digest = ShareLink.digest_for('b')
+
+    assert at_the_bound.valid?, at_the_bound.errors.full_messages.join(', ')
+    assert_not past_it.valid?
+    assert_includes past_it.errors.attribute_names, :expires_at
+  end
+
+  # AND THE BOUND IS THE DOCUMENT STORE'S, not a second number that happens to agree today.
+  # Two constants drifting apart is how a window opens in which one is right and the other
+  # is nearly right.
+  def test_the_lifetime_bound_is_the_document_stores_own
+    assert_equal RedmineReporterDashboards::Document::MAX_RETENTION, ShareLink::MAX_LIFETIME
+  end
+
+  # ------------------------------------------------------------------ the access log
+
+  def test_an_access_is_recorded_with_its_address_and_agent
+    link, _token = mint
+
+    access = link.record_access!(outcome: 'served', ip_address: '203.0.113.7',
+                                 user_agent: 'Probe/1.0')
+
+    assert_equal 'served', access.outcome
+    assert_equal '203.0.113.7', access.ip_address
+    assert_equal 'Probe/1.0', access.user_agent
+    assert_not_nil access.created_at
+  end
+
+  # THE OUTCOME SET IS CLOSED, because a stored string a reader groups by turns a typo into
+  # its own silent category in somebody's count.
+  def test_an_outcome_outside_the_closed_set_is_refused
+    link, _token = mint
+
+    assert_raises(ActiveRecord::RecordInvalid) do
+      link.record_access!(outcome: 'probably_fine')
+    end
+  end
+
+  # BOTH ATTACKER-SUPPLIED FIELDS ARE BOUNDED, and truncated rather than refused: losing the
+  # tail of a user agent is nothing, losing the audit row is the thing the table exists to
+  # prevent.
+  def test_an_enormous_user_agent_is_truncated_rather_than_losing_the_row
+    link, _token = mint
+
+    access = link.record_access!(outcome: 'served', ip_address: '9' * 4_000,
+                                 user_agent: 'A' * 4_000)
+
+    assert_equal RedmineReporterDashboards::ShareLinkAccess::MAX_STRING, access.user_agent.length
+    assert_equal RedmineReporterDashboards::ShareLinkAccess::MAX_STRING, access.ip_address.length
   end
 
   # FR-52: a snapshot link exists to serve bytes that already exist. One with no document

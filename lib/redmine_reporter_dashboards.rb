@@ -78,6 +78,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/adhoc_d
 # and it lives in reporting/ rather than scheduling/ so that `layer_purity`'s scheduling arm
 # — which forbids that directory from naming Render or Liquid — stays true and enforced.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/scheduled_delivery'
+# T-28 — the snapshot store, which is the write path `reporter_dashboards_documents` has
+# lacked since T-22 created it. Required after `report_run` and `report_scope` because it
+# names both, and before the controllers, which name it.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/snapshot'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards

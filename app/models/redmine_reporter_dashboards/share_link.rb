@@ -58,6 +58,18 @@ module RedmineReporterDashboards
     # MySQL, so an over-long value saves on one engine and raises on the other.
     MAX_STRING = 255
 
+    # T-28 (increment 2) — A LINK MUST NOT OUTLIVE THE ARTEFACT IT AUTHORISES.
+    #
+    # `Document::MAX_RETENTION` bounds how long a stored snapshot may live, for the reason
+    # written there: *"'off by default, bounded when on' is only true if the bound cannot be
+    # omitted"*. A share link whose expiry is beyond it would point at a document the purge
+    # task is entitled to collect — a link that works for eleven months and then answers "not
+    # found" for a reason nobody can reconstruct.
+    #
+    # Taken FROM the document store rather than restated, so the two cannot drift apart into
+    # a window where one is right and the other is nearly right.
+    MAX_LIFETIME = RedmineReporterDashboards::Document::MAX_RETENTION
+
     belongs_to :template,
                class_name: 'RedmineReporterDashboards::Template',
                foreign_key: 'template_id',
@@ -89,6 +101,7 @@ module RedmineReporterDashboards
     validates :max_uses, numericality: { only_integer: true, greater_than: 0 },
                          allow_nil: true
     validate :snapshot_has_a_document
+    validate :expiry_within_the_lifetime_bound
 
     # ------------------------------------------------------------------ minting
 
@@ -171,6 +184,23 @@ module RedmineReporterDashboards
 
     def usable?(now = Time.zone.now)
       refusal(now).nil?
+    end
+
+    def snapshot?
+      scope_kind == SCOPE_SNAPSHOT
+    end
+
+    # FR-53: *"every share-link access is recorded"* — WHATEVER THE ANSWER WAS. A row is
+    # written for a refusal as readily as for a success, which is the point: the question an
+    # administrator has is never "how popular is this link", it is "has somebody been trying
+    # links at us". `ShareLinkAccess`' own comment carries the argument.
+    #
+    # It answers the row rather than a boolean, so a caller that wants the id for a log line
+    # has it, and it is deliberately NOT wrapped in a rescue: a failure to write the audit
+    # row is a failure to serve, and serving unaudited would be the quieter of the two bugs.
+    def record_access!(outcome:, ip_address: nil, user_agent: nil)
+      accesses.create!(outcome: outcome.to_s, ip_address: ip_address,
+                       user_agent: user_agent, created_at: Time.zone.now)
     end
 
     def revoke!(now = Time.zone.now)
@@ -259,6 +289,18 @@ module RedmineReporterDashboards
       return if rendered_document_id.present?
 
       errors.add(:rendered_document_id, :blank)
+    end
+
+    # Measured from `created_at` on a persisted row and from now on a new one — the same
+    # rule `Document#expiry_within_the_retention_bound` uses, and for the same reason:
+    # re-saving an old link must not fail for the link having been made a long time ago.
+    def expiry_within_the_lifetime_bound
+      return if expires_at.blank?
+
+      origin = created_at || Time.zone.now
+      return if expires_at <= origin + MAX_LIFETIME
+
+      errors.add(:expires_at, :less_than_or_equal_to, count: (origin + MAX_LIFETIME).to_date)
     end
   end
 end

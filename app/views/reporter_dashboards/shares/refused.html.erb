@@ -1,0 +1,18 @@
+<%#
+  T-28 — the page a share link answers with when it will not serve.
+
+  --- WHY THIS PAGE IS DELIBERATELY BARE ---
+
+  Its reader is very often NOT a Redmine user: a public link (FR-62) is opened by whoever
+  was sent it, on an instance they have no account on and whose navigation means nothing to
+  them. So there is one sentence, and it is the whole page. No project, no template name, no
+  "who to ask" — every one of those would tell a stranger something about an installation
+  they have no relationship with, and the refusal is not made more useful by any of them.
+
+  It renders inside Redmine's `base` layout rather than a layout of this plugin's, because
+  §9b's rule is native chrome and because a page that looks like the rest of the instance is
+  what tells a reader the link reached the right place and simply is not live any more.
+%>
+<h2><%= l(:label_reporter_share_refused) %></h2>
+
+<p class="nodata"><%= @message %></p>

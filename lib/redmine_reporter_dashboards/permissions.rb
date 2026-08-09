@@ -529,6 +529,19 @@ module RedmineReporterDashboards
              ':view_issues on the project and aggregates over Issue.visible. A plugin ' \
              'permission here would be a second, weaker answer to a question core ' \
              'already answers (INV-1).'
+      },
+      'reporter_dashboards/shares#show' => {
+        guard: :find_link,
+        why: 'T-28. A share link is the one endpoint in this plugin where the question ' \
+             'is not "may this person do this" but "may whoever holds this token have ' \
+             'these bytes" — and there is no person in that question. The bytes were ' \
+             'frozen by a render that ran as a NAMED identity inside that identity\'s own ' \
+             'visible scope (FR-52), so serving them makes no query, resolves no ' \
+             'permission and reads no issue: there is no visibility decision here to get ' \
+             'wrong. A plugin permission would additionally make the capability useless, ' \
+             'since FR-62\'s public link is opened by somebody with no account to hold ' \
+             'one. What guards it is the token itself: `find_link` resolves it by digest ' \
+             'with a constant-time comparison and refuses on its own when nothing matches.'
       }
     }.freeze
 

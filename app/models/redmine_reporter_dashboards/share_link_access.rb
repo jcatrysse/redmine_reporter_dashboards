@@ -23,8 +23,18 @@ module RedmineReporterDashboards
     # `served` plus `ShareLink#refusal`'s three. Closed, because `outcome` is a stored
     # string that a reader will group by — and a typo'd value would silently become its
     # own category in somebody's count.
+    #
+    # `not_found` WAS IN THIS LIST AND IS DELIBERATELY GONE (T-28 increment 2). Two reasons,
+    # and the first alone settles it: `share_link_id` is NOT NULL, so a token matching no
+    # row has nothing to hang a record on — a value a schema cannot store is a lie in a
+    # constant, and the enumeration is what tells a reader which categories exist. The
+    # second is why the column should not be made nullable to accommodate it: the share
+    # endpoint is reachable without an account, so a nullable `share_link_id` would let
+    # anyone on the internet write a row per request into this table by presenting
+    # gibberish. An unmatched token goes to `Rails.logger` instead, where the same fact is
+    # recorded under the log rotation an operator already has.
     OUTCOME_SERVED = 'served'
-    OUTCOMES = [OUTCOME_SERVED, 'revoked', 'expired', 'exhausted', 'not_found'].freeze
+    OUTCOMES = [OUTCOME_SERVED, 'revoked', 'expired', 'exhausted'].freeze
 
     MAX_STRING = 255
 
