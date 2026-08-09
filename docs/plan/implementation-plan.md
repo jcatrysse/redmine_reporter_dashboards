@@ -254,6 +254,28 @@ worth knowing rather than discovering:
 **What the curator owes:** nothing, unless they want it in the README's security notes. It is
 recorded here so the next person to notice it finds the reasoning rather than filing it again.
 
+**~~S-26~~ · CLOSED by curator decision, 2026-08-09: RATIFIED. A public link serves on a
+`login_required` instance, and the behaviour stands.** The curator's words: *"public is
+public… so when public links are enabled we make potentially private information public. I
+know. it's a choice."*
+
+That is the right framing and it is worth keeping verbatim, because it names the thing the
+control actually protects. `login_required` is not what stops a report reaching the internet
+— **`publish_reporter_dashboards_reports` is**, and it is off by default, granted per role,
+and then exercised per link. Making the setting win would have moved the decision away from
+the person who takes it deliberately and onto a global switch set for an unrelated reason,
+and the capability would have been dead on those installations with nothing saying why.
+
+**Nothing to change.** The behaviour, its test
+(`test_a_public_link_still_serves_on_an_instance_that_requires_login`), the mutation that
+kills it, and the controller's argument all stay as they are. **Do not "fix" this later** —
+it is not an oversight, and this entry is here so the next reviewer finds a closed question
+rather than an open one. What the README owes it is plain language, which it now has:
+*"If that is not what you want for your installation, do not grant anybody the ability to
+publish."*
+
+The original finding follows, kept because the argument is what the decision rests on.
+
 **S-26 · A PUBLIC SHARE LINK SERVES ON A `login_required` INSTANCE, AND THAT IS A DECISION
 SOMEBODY HAS TO OWN.** T-28 increment 2, `ReporterDashboards::SharesController` runs
 `skip_before_action :check_if_login_required`, so an instance closed to anonymous browsing
