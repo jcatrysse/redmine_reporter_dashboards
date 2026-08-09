@@ -125,8 +125,25 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   # wrote would compare a value with itself. This walks the central directory the way an
   # unpacker does, which is also what proves the response really is an archive and not a
   # PDF with a `.zip` name on it.
+  # RAILS 8.1 DOES NOT MATERIALISE A STREAMING BODY INTO `response.body`, and Rails 7.2
+  # does. Found by CI on Redmine 7.0-stable — the only branch in this matrix on Rails 8.1,
+  # and therefore the only place this could be found (INV-7, and the reason that job
+  # exists). 7.2 hands back a String; 8.1 hands back the body OBJECT, so `.b` was a
+  # `NoMethodError` on the two archive tests there while both passed locally.
+  #
+  # Reading it through `#each` works on both, and it is also the honest way to read a
+  # streamed response: it is a sequence of chunks, and only one of the two Rails versions
+  # was pretending otherwise.
+  def archive_bytes(body)
+    return body.b if body.is_a?(String)
+
+    out = +''.b
+    body.each { |chunk| out << chunk }
+    out
+  end
+
   def zip_members(body)
-    bytes = body.b
+    bytes = archive_bytes(body)
     eocd = bytes.rindex("PK\x05\x06".b)
     assert_not_nil eocd, 'the response carries no end-of-central-directory record'
     count, _size, offset = bytes[eocd + 10, 10].unpack('vVV')
