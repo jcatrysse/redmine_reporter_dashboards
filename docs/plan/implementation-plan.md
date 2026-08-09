@@ -338,6 +338,44 @@ next time §7 gains a paragraph.
 I recommend (1). The evidence is that six of seven sampled citations were already wrong and no
 run, review or gate had noticed.
 
+**~~S-27~~ · CLOSED by curator decision, 2026-08-09: THE TOKEN STAYS IN THE PATH.** Four
+shapes were measured on Redmine 6.1 and put to the curator; the answer was *"we stay with
+a"* — `/reporter/s/<token>`, unchanged.
+
+**What was measured**, because the decision rests on it and the numbers are not obvious:
+
+| shape | what Rails' `production.log` records |
+|---|---|
+| `/reporter/s/<token>` (chosen) | `/reporter/s/SECRETTOKEN123` |
+| `/reporter/s?t=<token>` | `/reporter/s?t=SECRETTOKEN123` |
+| `/reporter/s?t=<token>` **+ the param registered in `filter_parameters`** | `/reporter/s?t=[FILTERED]` |
+
+The mechanism is `ActionDispatch::Http::FilterParameters#filtered_path` —
+`query_string.empty? ? path : "#{path}?#{filtered_query_string}"` — so **the path is never
+filtered and the query string is**. A plugin *can* register the filter late: appending to
+`config.filter_parameters` from `init.rb` is picked up by `env_config`
+(`LATE_APPEND_PICKED_UP=true`), so the option was live rather than theoretical.
+
+**Why it was still declined, and this is the part worth keeping.** The query form fixes ONE
+log of two: nginx and Apache write the full request line *including the query string*, so
+the proxy access log — the one more likely to be shipped to a central service — is
+unchanged. It also leaves the address bar and browser history untouched. Against that it
+costs a plugin mutating a **global** Rails config that affects core and every other plugin,
+and a worse URL for the one artefact that has to be pasteable. Half a fix, with a
+whole-application side effect.
+
+The complete fix was option **D**, a fragment (`/reporter/s#<token>`), which is never sent
+to the server at all — and it trades away the property that makes a share link a share
+link: it needs JavaScript to re-issue the request, so the browser can no longer just render
+the PDF. Rejected for that reason, not for effort.
+
+**What actually bounds the exposure is the mandatory expiry**, which is why that control
+must never become optional: a token in a log that expired weeks ago is a dead string rather
+than a credential. **If the default expiry is ever raised, this finding is the argument
+against it.**
+
+The original finding follows, kept because the argument is what the decision rests on.
+
 **S-27 · A SHARE TOKEN IS A BEARER CREDENTIAL IN A URL PATH, SO IT IS IN `production.log`
 OF EVERY INSTALLATION. Recorded, not fixed, because §7b.1 specifies the shape.** Found while
 building T-28 increment 2. Rails' request logger writes the full path of every request, so
