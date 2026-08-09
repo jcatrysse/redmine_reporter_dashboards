@@ -251,8 +251,18 @@ module ReporterDashboards
     #                             deleting.
     #   the `<meta>` CSP          every other directive, which `<meta http-equiv>` does
     #                             honour: no network of any kind, images only from
-    #                             `data:` (T-33 has already inlined them), inline styles
-    #                             and inline scripts.
+    #                             `data:`, inline styles and inline scripts.
+    #
+    # **`img-src data:` IS ONLY SURVIVABLE BECAUSE SOMETHING INLINES THE IMAGES, and for a
+    # long time nothing did.** This comment used to say "(T-33 has already inlined them)".
+    # T-33 built the resolver and no producer called it (§Findings ~~F-16~~), so every
+    # URL-referenced image in this iframe was blocked by this very directive and drew
+    # blank — a cited control with no call site, which is the defect class this project has
+    # shipped four times. F-16's first version then wired the PDF path and left this one,
+    # so the claim stayed false on the surface an author looks at first. It is true now:
+    # `ReportRun#html_only` resolves every section through `Assets::Resolver` with
+    # `HTML_CAPABILITIES` — `[:asset_inline]`, chosen to match this line — before the body
+    # reaches the view. If you narrow this directive, that is the code to change with it.
     #
     # **This is a deviation from §4's wording and is reported rather than absorbed**
     # (CLAUDE.md §11.3): the security property is the one §4 asks for, the delivery

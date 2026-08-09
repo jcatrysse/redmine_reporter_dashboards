@@ -412,6 +412,38 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     assert_equal :asset_unresolved, outcome.diagnostic.code
   end
 
+  # THE HTML PATH — the surface an author looks at FIRST, and the one F-16's first version
+  # left showing blank images. `#show` runs `call(pdf: false)`, and the body goes into an
+  # `srcdoc` iframe whose CSP is `img-src data:`, so a URL of any kind is blocked by the
+  # sandbox and draws nothing. Both halves asserted: the bytes are there AND the URL is
+  # gone, because either alone passes for the wrong reason.
+  def test_the_html_path_inlines_images_too_because_the_sandbox_blocks_every_url
+    outcome = render_html('<p><img src="/attachments/download/16/testfile.png"></p>')
+
+    assert outcome.ok?, "expected a rendered report, got #{outcome.diagnostic&.message.inspect}"
+    assert_includes outcome.sections.first.body, 'data:image/png;base64,'
+    assert_not_includes outcome.sections.first.body, '/attachments/download/16'
+  end
+
+  # AND THE HTML PATH REFUSES WHAT THE PDF PATH REFUSES. One surface silently dropping an
+  # image while the other refuses the report would be two answers to one question.
+  def test_the_html_path_refuses_a_third_party_url_as_the_pdf_path_does
+    outcome = render_html('<p><img src="https://cdn.example.net/tracker.png"></p>')
+
+    assert_not outcome.ok?
+    assert_equal :asset_unresolved, outcome.diagnostic.code
+    assert_equal :assets, outcome.diagnostic.origin
+  end
+
+  # AN HTML RUN STILL DRAWS NO PDF. Resolving on this path must not have quietly started an
+  # engine — `pdf_attempted?` is what the diagnostics panel reads to decide what to say.
+  def test_the_html_path_starts_no_engine
+    outcome = render_html('<p><img src="/attachments/download/16/testfile.png"></p>')
+
+    assert_not outcome.pdf_attempted?
+    assert_empty RecordingEngine.requests
+  end
+
   # A REPORT WITH NO ASSETS IS UNCHANGED, which is what stops this being a change to every
   # report in the installation. The body reaches the engine byte for byte.
   def test_a_document_with_no_references_reaches_the_engine_untouched
@@ -507,6 +539,17 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     outcome = render(html, engine: engine)
     assert outcome.ok?, "expected a successful run, got #{outcome.diagnostic&.message.inspect}"
     RecordingEngine.requests.first
+  end
+
+  # `pdf: false` — what `TemplatesController#show` calls. No engine is registered at all,
+  # deliberately: this path must not need one, and if it ever starts one the run would fail
+  # here rather than quietly acquiring a dependency.
+  def render_html(html)
+    @template.update!(content: html)
+    ReportRun.new(template: @template, actor: @actor,
+                  scope: Issue.visible(@actor).where(project_id: @project.id),
+                  guard: RedmineReporterDashboards::Render::BatchGuard.new(max_documents: 5))
+             .call(pdf: false)
   end
 
   def render(html, engine: RecordingEngine)

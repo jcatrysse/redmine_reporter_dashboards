@@ -86,9 +86,18 @@ class ReporterDashboardsDegradationHelperTest < ActionView::TestCase
   # THE NAME IS READ FROM `capability`, so a render degradation gets a localised sentence
   # by the same mechanism the Liquid ones do the day somebody writes the key. Proven by
   # planting the key rather than by reading the method.
+  # AN UNSHIPPED CAPABILITY, for the reason recorded in HANDOVER §1: a planted key that
+  # competes with a real translation tests the backend's precedence rules rather than the
+  # helper. This example planted over `legacy_engine` and passed — until `legacy_engine`
+  # gained a real key in the same round, at which point the shipped value won and the
+  # example failed against a sentence nobody in this file wrote. Second time; the rule now
+  # has two instances behind it.
   def test_a_render_degradation_uses_its_capability_as_the_locale_key
-    with_locale_key('text_reporter_degradation_legacy_engine' => 'Drawn by an older engine') do
-      text = reporter_degradation_text(Render::Degradation.new(capability: :legacy_engine))
+    with_locale_key('text_reporter_degradation_rrd_probe_capability' =>
+                      'Drawn by an older engine') do
+      text = reporter_degradation_text(
+        Render::Degradation.new(capability: :rrd_probe_capability)
+      )
 
       assert_equal 'Drawn by an older engine', text
     end

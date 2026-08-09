@@ -270,7 +270,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
     let(:preview_guard) { ReportRunSpecSupport::Guard.new(max_documents: 500) }
 
     def preview(size, output: 'combined')
-      described_class.preview(template: template(output: output), actor: actor,
+      described_class.preview(asset_resolver: ReportRunSpecSupport.resolver, template: template(output: output), actor: actor,
                               scope: ReportRunSpecSupport::FakeScope.new(size), guard: preview_guard,
                               template_renderer: ReportRunSpecSupport::CountingRenderer.new).call
     end
@@ -304,7 +304,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
     it 'renders one template for a per-record preview, not fifty' do
       renderer = ReportRunSpecSupport::CountingRenderer.new
-      described_class.preview(template: template(output: 'per_record'), actor: actor,
+      described_class.preview(asset_resolver: ReportRunSpecSupport.resolver, template: template(output: 'per_record'), actor: actor,
                               scope: ReportRunSpecSupport::FakeScope.new(1_284),
                               guard: preview_guard,
                               template_renderer: renderer).call
@@ -316,7 +316,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
     # the thing being bounded is what the collection drop sees, which is §9b.2's number.
     it 'still reads up to fifty issues for a combined preview' do
       renderer = ReportRunSpecSupport::CountingRenderer.new
-      outcome = described_class.preview(template: template, actor: actor,
+      outcome = described_class.preview(asset_resolver: ReportRunSpecSupport.resolver, template: template, actor: actor,
                                         scope: ReportRunSpecSupport::FakeScope.new(1_284),
                                         guard: preview_guard,
                                         template_renderer: renderer).call
@@ -330,7 +330,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       # should feel a runaway template at the keyboard rather than at 06:00. If this
       # class asked for `:report` the limit would be eight times looser than the one the
       # scheduled run will apply.
-      built = described_class.preview(template: template, actor: actor,
+      built = described_class.preview(asset_resolver: ReportRunSpecSupport.resolver, template: template, actor: actor,
                                       scope: ReportRunSpecSupport::FakeScope.new(1), guard: preview_guard)
 
       expect(built.output_class).to eq(:preview)

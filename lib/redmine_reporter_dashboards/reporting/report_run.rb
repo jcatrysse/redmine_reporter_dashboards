@@ -83,6 +83,15 @@ module RedmineReporterDashboards
       # THE TEMPLATE works, and the second document tells them nothing the first did not.
       PREVIEW_MAX_DOCUMENTS = 1
 
+      # WHAT THE HTML PATH'S "ENGINE" CAN DO, and it is decided by a CSP rather than by a
+      # binary. The report body is rendered into an `srcdoc` iframe under
+      # `TemplatesHelper::CONTENT_SECURITY_POLICY`, which is `default-src 'none'; img-src
+      # data:` — so `:asset_inline` is not merely the most restrictive model available
+      # there, it is the ONLY one that produces a visible image. A URL of any kind is
+      # blocked by the sandbox and draws blank, which is exactly the defect F-16 exists to
+      # remove and which the first version of F-16 left in place on this path.
+      HTML_CAPABILITIES = %i[asset_inline].freeze
+
       # One document to produce. `record` is nil for a combined report and the one row for
       # a per-record one — an Issue or a TimeEntry, which is why T-31 renamed it from
       # `issue`: a field whose name says issue while holding a time entry is how the next
@@ -187,11 +196,16 @@ module RedmineReporterDashboards
       end
 
       # The preview: bounded, both bindings, and honest about the second one.
+      # `asset_resolver:` IS FORWARDED, and it was not — an independent review flagged the
+      # omission as untestable-preview before the HTML path needed a resolver, and once it
+      # did the preview specs failed outright. A constructor port that one of the two
+      # entry points drops is a port that only half the callers have.
       def self.preview(template:, actor:, scope:, guard:, query: nil, engine: nil,
-                       logger: nil, template_renderer: nil)
+                       logger: nil, template_renderer: nil, asset_resolver: nil)
         new(template: template, actor: actor, scope: scope, guard: guard, query: query,
             output_class: :preview, limit: PREVIEW_MAX_ISSUES, engine: engine,
-            logger: logger, template_renderer: template_renderer)
+            logger: logger, template_renderer: template_renderer,
+            asset_resolver: asset_resolver)
       end
 
       # `pdf: false` renders HTML only — the report view, and the fast half of a preview.
@@ -460,7 +474,7 @@ module RedmineReporterDashboards
       # run — the same reason a template failure aborts a per-record run rather than
       # producing an export with holes in it.
       def bind_assets(sections, engine)
-        resolver = asset_resolver_for(engine)
+        resolver = asset_resolver_for(engine_capabilities(engine))
         requests = []
         degradations = []
 
@@ -495,8 +509,9 @@ module RedmineReporterDashboards
       # attachment a document may embed is the one THIS run's actor may see, never
       # `User.current`, which a scheduled render leaves as Anonymous until something else
       # sets it.
-      def asset_resolver_for(engine)
-        capabilities = engine_capabilities(engine)
+      # TAKES CAPABILITIES, NOT AN ENGINE, because the HTML path has no engine and still has
+      # a capability set — the one its sandbox CSP permits. See `HTML_CAPABILITIES`.
+      def asset_resolver_for(capabilities)
         return @asset_resolver.call(engine_capabilities: capabilities) if @asset_resolver
 
         ::RedmineReporterDashboards.asset_resolver(
@@ -630,11 +645,67 @@ module RedmineReporterDashboards
                     degradations: diagnostics.degradations, pdf_attempted: pdf_attempted)
       end
 
+      # THE HTML PATH RESOLVES ASSETS TOO, and leaving it out was half a fix.
+      #
+      # F-16's first version wired only the PDF path, on the reasoning that a browser can
+      # fetch a URL for itself. It cannot, HERE: the report body goes into an `srcdoc`
+      # iframe whose CSP is `default-src 'none'; img-src data:` (T-23's opaque-origin
+      # sandbox, `TemplatesHelper::CONTENT_SECURITY_POLICY`). A `/attachments/download/…`
+      # reference is blocked by that policy and draws BLANK — so the surface an author
+      # looks at FIRST was the one still showing the defect the change is named after.
+      # Measured by an independent review: `show -> HTTP 200; raw attachment URL present:
+      # true; data:image present: false`.
+      #
+      # Worse, the CSP's own comment justified `img-src data:` with "(T-33 has already
+      # inlined them)" — a cited control with no call site on this path, in a file this
+      # change edited. That is the defect class §Findings S-28 records shipping four times,
+      # and it would have been five.
+      #
+      # `[:asset_inline]` is not a guess about a browser's capabilities: it is the only
+      # model the CSP permits, and it is what makes the sentence above true.
       def html_only(sections, total, started)
-        Outcome.new(sections: sections, documents: [], diagnostic: nil,
+        bound = bind_html_assets(sections)
+        if bound.failure
+          return failed(Diagnostic.from_asset_refusal(bound.failure,
+                                                      template_name: template.name),
+                        total, started, sections: sections)
+        end
+
+        Outcome.new(sections: bound.requests, documents: [], diagnostic: nil,
                     total_count: total, shown_count: shown_issue_count(total),
                     truncated: truncated?(total), duration_ms: elapsed(started),
-                    degradations: diagnostics.degradations, pdf_attempted: false)
+                    degradations: diagnostics.degradations + bound.degradations,
+                    pdf_attempted: false)
+      end
+
+      # Same walk as `bind_assets`, answering SECTIONS rather than `DocumentRequest`s —
+      # there is no engine here and no page geometry to carry, only a body whose references
+      # have been replaced. Kept separate rather than parameterised because the two differ
+      # in what they build and agree only in the loop, and a shared method taking a "make a
+      # request or a section" flag would be harder to read than both.
+      def bind_html_assets(sections)
+        resolver = asset_resolver_for(HTML_CAPABILITIES)
+        resolved = []
+        degradations = []
+
+        sections.each do |section|
+          resolution = resolver.call(section.body)
+          if resolution.refused?
+            failure = ::RedmineReporterDashboards::Render::AssetBinding.apply(
+              resolution: resolution, correlation_id: section.job.correlation_id
+            )
+            return BoundRequests.new(requests: resolved, degradations: degradations,
+                                     failure: failure)
+          end
+
+          resolved << Section.new(job: section.job, body: resolution.body,
+                                  duration_ms: section.duration_ms)
+          degradations.concat(
+            ::RedmineReporterDashboards::Render::AssetBinding.degradations(resolution)
+          )
+        end
+
+        BoundRequests.new(requests: resolved, degradations: degradations, failure: nil)
       end
 
       # §9b.2's "never silently truncated". True whenever the reader is seeing fewer
