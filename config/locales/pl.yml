@@ -61,7 +61,7 @@ pl:
   label_reporter_asset_inline_max_bytes: "Osadzaj zasoby do (bajt\u00F3w)"
   text_reporter_asset_inline_max_bytes_info: "Powy\u017Cej tego rozmiaru zas\u00F3b jest przesy\u0142any obok dokumentu, a nie osadzany w nim \u2014 na silnikach, kt\u00F3re to obs\u0142uguj\u0105. To ustawienie kosztu, a nie limit."
   label_reporter_asset_max_bytes: "Odrzucaj zasoby powy\u017Cej (bajt\u00F3w)"
-  text_reporter_asset_max_bytes_info: "Twardy limit. Wi\u0119kszy zas\u00F3b zostaje odrzucony i raport go nazywa, zamiast zosta\u0107 wygenerowany z luk\u0105."
+  text_reporter_asset_max_bytes_info: "Twardy limit. Większy zasób zostaje odrzucony: raport nie jest tworzony, a komunikat o błędzie nazywa zasób."
   text_reporter_asset_policy_collapsed: "Lista dozwolonych host\u00F3w jest pusta, wi\u0119c %{mode} zachowuje si\u0119 obecnie dok\u0142adnie jak \u201EWbudowane\u201D i nic nie jest pobierane z sieci. Dodaj co najmniej jedn\u0105 nazw\u0119 hosta, aby ustawienie zadzia\u0142a\u0142o."
   text_reporter_asset_settings_dropped: "Niekt\u00F3rych zapisanych warto\u015Bci nie uda\u0142o si\u0119 u\u017Cy\u0107; obowi\u0105zuj\u0105 warto\u015Bci domy\u015Blne:"
 
@@ -125,7 +125,7 @@ pl:
   label_reporter_preview_degradations: "Części tego raportu nie udało się utworzyć zgodnie z żądaniem"
   label_reporter_report_failed_template: "Nie udało się wyrenderować tego szablonu"
   label_reporter_report_failed_engine: "Silnik renderujący nie zdołał utworzyć tego dokumentu"
-  label_reporter_report_failed_assets: "Nie udało się dołączyć pliku, do którego odwołuje się ten raport"
+  label_reporter_report_failed_assets: "Ten raport nie został utworzony: nie udało się osadzić pliku, do którego się odwołuje"
   label_reporter_report_refused: "Ten eksport został odrzucony"
   label_reporter_report_frame: "Wynik raportu"
   label_reporter_report_diagnostic_code: "Kod"
@@ -240,6 +240,12 @@ pl:
   text_reporter_degradation_aggregation_axis_truncated: "%{group_by} ma zbyt wiele wartości, aby je pokazać: wymieniono %{kept}, a %{folded} zostało połączonych."
   text_reporter_degradation_aggregation_params_unsupported: "%{params} nie może być użyte w raporcie o spędzonym czasie. Pozostała część agregacji została obliczona."
   text_reporter_degradation_aggregation_source_unsupported: "Źródło danych tego raportu (%{source}) nie może być podsumowane przez %{tag}."
+  text_reporter_degradation_legacy_engine: "Narysowane przez wkhtmltopdf, silnik zgodności przeznaczony do usunięcia; nowoczesny CSS nie jest obsługiwany."
+  text_reporter_degradation_asset_structural_fallback: "Plik osadzono w formie alternatywnej, ponieważ bezpośrednie osadzenie zmieniłoby znaczenie dokumentu."
+  text_reporter_degradation_asset_srcset_collapsed: "Spośród kilku rozmiarów obrazu użyto tylko pierwszego: drukowana strona ma jedną rozdzielczość."
+  text_reporter_degradation_asset_nested_depth: "Arkusz stylów zaimportował kolejne głębiej, niż jest to dozwolone; najgłębszy import nie został osadzony."
+  text_reporter_degradation_asset_inline_oversize: "Plik przekraczający próg osadzania został mimo to osadzony, ponieważ ten silnik renderujący nie potrafi przesyłać plików obok dokumentu."
+  text_reporter_degradation_asset_document_cap: "Ten raport odwołuje się do większej liczby plików, niż można osadzić w jednym dokumencie; pozostałe pominięto."
 
   # --- T-32: ad-hoc report mail (FR-61) ---
   label_reporter_adhoc_mail: "Wyślij raport e-mailem"

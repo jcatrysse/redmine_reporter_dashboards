@@ -61,7 +61,7 @@ pt-BR:
   label_reporter_asset_inline_max_bytes: "Incorporar recursos de at\u00E9 (bytes)"
   text_reporter_asset_inline_max_bytes_info: "Acima desse tamanho o recurso viaja junto com o documento em vez de ser incorporado nele, nos mecanismos que aceitam isso. \u00C9 uma configura\u00E7\u00E3o de custo, n\u00E3o um limite."
   label_reporter_asset_max_bytes: "Recusar recursos acima de (bytes)"
-  text_reporter_asset_max_bytes_info: "Um limite r\u00EDgido. Um recurso maior \u00E9 recusado e o relat\u00F3rio o nomeia, em vez de ser gerado com uma lacuna."
+  text_reporter_asset_max_bytes_info: "Um limite rígido. Um recurso maior é recusado: o relatório não é produzido e a falha nomeia o recurso."
   text_reporter_asset_policy_collapsed: "A lista de hosts permitidos est\u00E1 vazia, portanto %{mode} atualmente se comporta exatamente como \u00ABEmpacotados\u00BB e nada \u00E9 baixado pela rede. Adicione pelo menos um nome de host para que tenha efeito."
   text_reporter_asset_settings_dropped: "Alguns valores salvos n\u00E3o puderam ser usados; os padr\u00F5es est\u00E3o em vigor:"
 
@@ -125,7 +125,7 @@ pt-BR:
   label_reporter_preview_degradations: "Partes deste relatório não puderam ser produzidas como solicitado"
   label_reporter_report_failed_template: "Não foi possível renderizar este modelo"
   label_reporter_report_failed_engine: "O motor de renderização não conseguiu produzir este documento"
-  label_reporter_report_failed_assets: "Não foi possível incluir um arquivo referenciado por este relatório"
+  label_reporter_report_failed_assets: "Este relatório não foi produzido: não foi possível incluir um arquivo ao qual ele faz referência"
   label_reporter_report_refused: "Esta exportação foi recusada"
   label_reporter_report_frame: "Saída do relatório"
   label_reporter_report_diagnostic_code: "Código"
@@ -240,6 +240,12 @@ pt-BR:
   text_reporter_degradation_aggregation_axis_truncated: "%{group_by} tem valores demais para exibir: %{kept} estão listados e %{folded} foram agrupados."
   text_reporter_degradation_aggregation_params_unsupported: "%{params} não pode ser usado em um relatório de tempo gasto. O restante da agregação foi calculado."
   text_reporter_degradation_aggregation_source_unsupported: "A fonte de dados deste relatório (%{source}) não pode ser resumida por %{tag}."
+  text_reporter_degradation_legacy_engine: "Gerado pelo wkhtmltopdf, um motor de compatibilidade previsto para remoção; CSS moderno não é suportado."
+  text_reporter_degradation_asset_structural_fallback: "Um arquivo foi incorporado de forma alternativa, porque incorporá-lo diretamente teria alterado o significado do documento."
+  text_reporter_degradation_asset_srcset_collapsed: "De vários tamanhos de imagem, apenas o primeiro foi usado: uma página impressa tem uma única resolução."
+  text_reporter_degradation_asset_nested_depth: "Uma folha de estilos importou outras a uma profundidade maior do que a permitida; a importação mais profunda não foi incorporada."
+  text_reporter_degradation_asset_inline_oversize: "Um arquivo acima do limite de incorporação foi incorporado mesmo assim, porque este motor de renderização não consegue transportar arquivos ao lado do documento."
+  text_reporter_degradation_asset_document_cap: "Este relatório faz referência a mais arquivos do que é possível incorporar em um documento; os demais foram omitidos."
 
   # --- T-32: ad-hoc report mail (FR-61) ---
   label_reporter_adhoc_mail: "Enviar relatório por e-mail"

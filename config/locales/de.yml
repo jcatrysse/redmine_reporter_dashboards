@@ -61,7 +61,7 @@ de:
   label_reporter_asset_inline_max_bytes: "Assets einbetten bis (Bytes)"
   text_reporter_asset_inline_max_bytes_info: "Oberhalb dieser Gr\u00F6\u00DFe wird ein Asset neben dem Dokument \u00FCbertragen, statt darin eingebettet zu werden \u2014 sofern die Engine das unterst\u00FCtzt. Dies ist eine Kosteneinstellung, keine Begrenzung."
   label_reporter_asset_max_bytes: "Assets ablehnen \u00FCber (Bytes)"
-  text_reporter_asset_max_bytes_info: "Eine harte Grenze. Ein gr\u00F6\u00DFeres Asset wird abgelehnt und im Bericht benannt, anstatt den Bericht mit einer L\u00FCcke zu erzeugen."
+  text_reporter_asset_max_bytes_info: "Eine harte Grenze. Ein größeres Asset wird abgelehnt: der Bericht wird nicht erzeugt, und die Fehlermeldung benennt das Asset."
   text_reporter_asset_policy_collapsed: "Die Positivliste f\u00FCr Asset-Hosts ist leer, daher verh\u00E4lt sich %{mode} derzeit genau wie \u201EGeb\u00FCndelt\u201C und es wird nichts \u00FCber das Netzwerk geladen. F\u00FCgen Sie mindestens einen Hostnamen hinzu, damit die Einstellung wirksam wird."
   text_reporter_asset_settings_dropped: "Einige gespeicherte Werte konnten nicht verwendet werden; stattdessen gelten die Standardwerte:"
 
@@ -125,7 +125,7 @@ de:
   label_reporter_preview_degradations: "Teile dieses Berichts konnten nicht wie angefordert erstellt werden"
   label_reporter_report_failed_template: "Diese Vorlage konnte nicht gerendert werden"
   label_reporter_report_failed_engine: "Die Render-Engine konnte dieses Dokument nicht erzeugen"
-  label_reporter_report_failed_assets: "Eine von diesem Bericht referenzierte Datei konnte nicht eingebunden werden"
+  label_reporter_report_failed_assets: "Dieser Bericht wurde nicht erzeugt: eine Datei, auf die er verweist, konnte nicht eingebunden werden"
   label_reporter_report_refused: "Dieser Export wurde abgelehnt"
   label_reporter_report_frame: "Berichtsausgabe"
   label_reporter_report_diagnostic_code: "Code"
@@ -240,6 +240,12 @@ de:
   text_reporter_degradation_aggregation_axis_truncated: "%{group_by} hat zu viele Werte, um sie alle anzuzeigen: %{kept} werden aufgeführt, %{folded} wurden zusammengefasst."
   text_reporter_degradation_aggregation_params_unsupported: "%{params} kann in einem Bericht über aufgewendete Zeit nicht verwendet werden. Der übrige Teil der Aggregation wurde berechnet."
   text_reporter_degradation_aggregation_source_unsupported: "Die Datenquelle dieses Berichts (%{source}) kann von %{tag} nicht zusammengefasst werden."
+  text_reporter_degradation_legacy_engine: "Mit wkhtmltopdf gezeichnet, einer Kompatibilitäts-Engine, die entfernt werden soll; modernes CSS wird nicht unterstützt."
+  text_reporter_degradation_asset_structural_fallback: "Eine Datei wurde in alternativer Form eingebettet, weil eine direkte Einbettung die Bedeutung des Dokuments verändert hätte."
+  text_reporter_degradation_asset_srcset_collapsed: "Von mehreren Bildgrößen wurde nur die erste verwendet: eine gedruckte Seite hat eine einzige Auflösung."
+  text_reporter_degradation_asset_nested_depth: "Ein Stylesheet hat weitere Stylesheets tiefer als zulässig importiert; der tiefste Import wurde nicht eingebettet."
+  text_reporter_degradation_asset_inline_oversize: "Eine Datei oberhalb der Einbettungsgrenze wurde dennoch eingebettet, weil diese Render-Engine keine Dateien neben dem Dokument übertragen kann."
+  text_reporter_degradation_asset_document_cap: "Dieser Bericht verweist auf mehr Dateien, als in ein Dokument eingebettet werden können; die übrigen wurden ausgelassen."
 
   # --- T-32: ad-hoc report mail (FR-61) ---
   label_reporter_adhoc_mail: "Bericht per E-Mail senden"

@@ -61,7 +61,7 @@ hu:
   label_reporter_asset_inline_max_bytes: "Er\u0151forr\u00E1sok be\u00E1gyaz\u00E1sa eddig (b\u00E1jt)"
   text_reporter_asset_inline_max_bytes_info: "E m\u00E9ret felett az er\u0151forr\u00E1s a dokumentum mellett utazik, nem pedig be\u00E1gyazva \u2014 azokon a motorokon, amelyek ezt t\u00E1mogatj\u00E1k. Ez k\u00F6lts\u00E9gbe\u00E1ll\u00EDt\u00E1s, nem korl\u00E1t."
   label_reporter_asset_max_bytes: "Er\u0151forr\u00E1sok elutas\u00EDt\u00E1sa e felett (b\u00E1jt)"
-  text_reporter_asset_max_bytes_info: "Szigor\u00FA korl\u00E1t. Az enn\u00E9l nagyobb er\u0151forr\u00E1st a rendszer elutas\u00EDtja, \u00E9s a jelent\u00E9s megnevezi, ahelyett hogy hi\u00E1nnyal k\u00E9sz\u00FClne el."
+  text_reporter_asset_max_bytes_info: "Szigorú korlát. Az ennél nagyobb erőforrást a rendszer elutasítja: a jelentés nem készül el, és a hibaüzenet megnevezi az erőforrást."
   text_reporter_asset_policy_collapsed: "Az enged\u00E9lyezett g\u00E9pek list\u00E1ja \u00FCres, ez\u00E9rt a %{mode} jelenleg pontosan \u00FAgy m\u0171k\u00F6dik, mint a \u201EBe\u00E9p\u00EDtett\u201D, \u00E9s semmi sem t\u00F6lt\u0151dik le a h\u00E1l\u00F3zatr\u00F3l. Adjon meg legal\u00E1bb egy g\u00E9pnevet, hogy \u00E9rv\u00E9nybe l\u00E9pjen."
   text_reporter_asset_settings_dropped: "N\u00E9h\u00E1ny mentett \u00E9rt\u00E9k nem haszn\u00E1lhat\u00F3; helyett\u00FCk az alap\u00E9rtelmez\u00E9sek vannak \u00E9rv\u00E9nyben:"
 
@@ -125,7 +125,7 @@ hu:
   label_reporter_preview_degradations: "A jelentés egyes részei nem a kért módon készültek el"
   label_reporter_report_failed_template: "Ezt a sablont nem sikerült megjeleníteni"
   label_reporter_report_failed_engine: "A megjelenítő motor nem tudta előállítani ezt a dokumentumot"
-  label_reporter_report_failed_assets: "A jelentés által hivatkozott egyik fájlt nem sikerült beágyazni"
+  label_reporter_report_failed_assets: "Ez a jelentés nem készült el: egy hivatkozott fájlját nem sikerült beilleszteni"
   label_reporter_report_refused: "Ezt az exportálást a rendszer elutasította"
   label_reporter_report_frame: "A jelentés kimenete"
   label_reporter_report_diagnostic_code: "Kód"
@@ -240,6 +240,12 @@ hu:
   text_reporter_degradation_aggregation_axis_truncated: "A %{group_by} túl sok értéket tartalmaz: %{kept} látható, %{folded} pedig össze lett vonva."
   text_reporter_degradation_aggregation_params_unsupported: "A %{params} nem használható ráfordított időről szóló jelentésben. Az aggregáció többi része elkészült."
   text_reporter_degradation_aggregation_source_unsupported: "Ennek a jelentésnek az adatforrása (%{source}) nem összegezhető a %{tag} taggal."
+  text_reporter_degradation_legacy_engine: "A wkhtmltopdf rajzolta, egy eltávolításra szánt kompatibilitási motor; a modern CSS nem támogatott."
+  text_reporter_degradation_asset_structural_fallback: "Egy fájl alternatív formában lett beágyazva, mert a közvetlen beágyazás megváltoztatta volna a dokumentum jelentését."
+  text_reporter_degradation_asset_srcset_collapsed: "A több képméret közül csak az első lett felhasználva: egy nyomtatott oldalnak egyetlen felbontása van."
+  text_reporter_degradation_asset_nested_depth: "Egy stíluslap a megengedettnél mélyebben importált továbbiakat; a legmélyebb import nem lett beágyazva."
+  text_reporter_degradation_asset_inline_oversize: "A beágyazási küszöb feletti fájl mégis beágyazásra került, mert ez a megjelenítő motor nem tud fájlokat a dokumentum mellett szállítani."
+  text_reporter_degradation_asset_document_cap: "A jelentés több fájlra hivatkozik, mint amennyi egy dokumentumba beágyazható; a többi kimaradt."
 
   # --- T-32: ad-hoc report mail (FR-61) ---
   label_reporter_adhoc_mail: "Jelentés küldése e-mailben"

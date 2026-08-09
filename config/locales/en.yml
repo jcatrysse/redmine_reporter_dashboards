@@ -61,7 +61,7 @@ en:
   label_reporter_asset_inline_max_bytes: "Embed assets up to (bytes)"
   text_reporter_asset_inline_max_bytes_info: "Above this size an asset travels alongside the document instead of being embedded in it, on engines that support that. This is a cost setting, not a limit."
   label_reporter_asset_max_bytes: "Refuse assets above (bytes)"
-  text_reporter_asset_max_bytes_info: "A hard limit. An asset larger than this is refused and the report names it, rather than being rendered with a gap in it."
+  text_reporter_asset_max_bytes_info: "A hard limit. An asset larger than this is refused: the report is not produced, and the failure names the asset."
   text_reporter_asset_policy_collapsed: "The asset host allowlist is empty, so %{mode} currently behaves exactly as Bundled and nothing is fetched over the network. Add at least one host name for it to take effect."
   text_reporter_asset_settings_dropped: "Some saved values could not be used, and the defaults are in force instead:"
 
@@ -125,7 +125,7 @@ en:
   label_reporter_preview_degradations: "Parts of this report could not be produced as asked"
   label_reporter_report_failed_template: "This template could not be rendered"
   label_reporter_report_failed_engine: "The render engine could not produce this document"
-  label_reporter_report_failed_assets: "A file this report refers to could not be included"
+  label_reporter_report_failed_assets: "This report was not produced: a file it refers to could not be included"
   label_reporter_report_refused: "This export was refused"
   label_reporter_report_frame: "Report output"
   label_reporter_report_diagnostic_code: "Code"
@@ -240,6 +240,12 @@ en:
   text_reporter_degradation_aggregation_axis_truncated: "%{group_by} has too many values to show: %{kept} are listed and %{folded} were folded together."
   text_reporter_degradation_aggregation_params_unsupported: "%{params} cannot be used in a spent-time report. The rest of the aggregation was computed."
   text_reporter_degradation_aggregation_source_unsupported: "The data source of this report (%{source}) cannot be summarised by %{tag}."
+  text_reporter_degradation_legacy_engine: "Drawn by wkhtmltopdf, a compatibility engine scheduled for removal; modern CSS is not supported."
+  text_reporter_degradation_asset_structural_fallback: "A file was embedded in an alternative form, because embedding it directly would have changed what the document means."
+  text_reporter_degradation_asset_srcset_collapsed: "Only the first of several image sizes was used: a printed page has a single resolution."
+  text_reporter_degradation_asset_nested_depth: "A stylesheet imported others more deeply than is allowed; the deepest import was not embedded."
+  text_reporter_degradation_asset_inline_oversize: "A file above the embedding threshold was embedded anyway, because this render engine cannot carry files alongside the document."
+  text_reporter_degradation_asset_document_cap: "This report refers to more files than can be embedded in one document; the rest were left out."
 
   # --- T-32: ad-hoc report mail (FR-61) ---
   label_reporter_adhoc_mail: "Send report by e-mail"
