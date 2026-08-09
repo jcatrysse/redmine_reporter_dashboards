@@ -83,6 +83,7 @@ fact that CI has not yet run on this work at all.
 | T-24 | **done — `import:run` and `import:status`; `import:verify` is DROPPED with evidence (§Findings S-21), because the corpus discipline needs a frozen fixture AND a pinned date and production has neither.** `import/{runner,import_report}.rb` plus two rake tasks. **COPY, FORWARD-ONLY, NEVER ADOPT** — §7's *Adopt vs copy*: the base plugin's own documented uninstall drops `report_templates`, so adopting those rows would lose them, and *"nothing inside the new plugin can prevent that"*. The no-write claim is asserted on the **statements** rather than on the rows, because a row that still looks right proves the importer did not happen to change it and not that it could not. **Idempotence has FOUR outcomes, not two** — `created`, `unchanged`, `updated` (a safe fast-forward when the source moved and the copy did not) and **`diverged`**, which is the one the `Accept:` line is about: a copy edited here is never overwritten, because an importer that clobbered it would destroy somebody's post-migration work once, quietly, on a re-run triggered for an unrelated reason. Divergence is reported and does NOT make the task exit non-zero — it is the expected state after a migration, not a failure. The type map is `Reporting::Exchange::TYPE_MAP` reused rather than copied, so `constantize` on a database column is refused for the same reason FR-55 refuses it on a file. `import:status` reads OUR templates rather than the source's, so it still answers after the base plugin has been uninstalled — which is exactly when somebody asks what state their migration is in. **Its independent review REJECTED the first attempt with two blockers**: the statement-level "never writes to reporter's tables" assertion was anchored at `\A` and one leading `/* rails */` comment defeated it — a real planted `UPDATE report_templates` survived — and the comment cited `spec/import/runner_spec.rb`, which has never existed, repeating T-32's own rejected defect one task later. The pattern now matches verb+table and its NEGATIVE TEST is committed rather than performed by hand. Four majors besides, all fixed. **`RRD_REWRITE=1` is the `--rewrite` §7a named** and it is not a plain overwrite: the local content is written into the append-only version history FIRST, so taking the source's version loses nothing and the order is asserted by driving the snapshot to fail. A template whose project does not exist here is SKIPPED rather than imported invisibly (every surface is project-scoped, so the row was unreachable). 24 full-app runs against real reporter-shaped tables, **11 mutations, 11 red** across two rounds |
 | T-29 | **done** — the exchange bundle AND the streamed archive, which arrived together because §Findings ~~S-12~~ gave the second to T-29 alone. `reporting/{bundle,bundle_import,bundle_report}.rb`, `archive/zip_stream.rb`, `exchange_tasks.rb`, three rake tasks, a ninth `layer_purity` arm, 2 keys x 9 locales and one key deleted. **The bundle WRAPS `Exchange` rather than restating it**: one closed TYPE_MAP, one field list, one version rule, one safe-YAML reader — a second field list is the failure mode that lost `failure_document` once already, and it is silent because a field absent from BOTH ends still round-trips byte-identically. **FR-57 is four decisions, not a hope** — order (by name, then id, so the receiving installation's ids cannot move anything), key order, encoding (raw UTF-8, so `Übersicht` is bytes rather than `\u00dc`) and `exported_at` being an ARGUMENT; the test asserts the payload halves match INDEPENDENTLY of the envelope, because pinning the whole file would also pass if the payload were empty on both sides. **The archive is a dependency-free STORED zip** validated by `unzip -t` and Python's `zipfile` as well as by an independent in-spec reader, and the controller streams it with no `Content-Length` — `@controller.response_body` is asserted to BE the lazy writer, which is the assertion that fails the moment somebody puts `send_data` back. **The documents are rendered before the first byte, on purpose** (E-6). Raised **S-22** (§7b.2's two rake names are already taken by the migration importer, and rake would have run both bodies) |
 | T-29 review | **REJECTED on the first pass, and every defect was at a boundary the tests did not cross.** A fresh subagent found 3 BLOCKERs, 3 MAJORs, 5 MINORs, 3 NITs, each with a probe. The blockers: (1) the archive is drained by `Rack::ETag` before the first byte — the middleware, which `ActionController::TestCase` never runs; (2) **a bundle carrying two templates with the same name lost one** under the default policy, because `Template` has no uniqueness validation on `name` and the importer asked the DATABASE per entry, so the second entry collided with the row the first had just written — FR-57 fails on exactly that bundle; (3) **`plan` did not predict `apply`** on the same input, the case the class comment calls "worse than no plan at all". (2) and (3) are one fix: the conflict set is SNAPSHOTTED before the first entry, so a within-bundle duplicate is not a conflict and both entry points decide identically. The majors: a logger raising inside a rescue aborting the bundle (already fixed); the ONE test pinning the overwrite permission was **vacuous** — the fixture project never had the reports module, so `editable_by?` was false for every non-admin and the test would have passed against an arm that refused everything; and the web Import button still read `Exchange.parse`, silently importing the FIRST template of the multi-template bundles the same release taught `export:bundle` to write. All fixed; two of the reviewer's 18 mutations survived and both were the pre-declared redundant guards |
+| T-28 | **IN PROGRESS — two of three increments landed, and the third is named rather than implied.** **Increment 1** (`d9943ca`): migration 010's two tables, `ShareLink`, `ShareLinkAccess`. Only the digest is stored; lookup is by digest with a fixed-length constant-time compare; expiry is NOT NULL in the *schema*; `use!` is one conditional UPDATE whose WHERE clause carries the whole rule, proved by a two-connection test that a read-then-write implementation fails. Revocation is **ownership, not a permission** — a third party holding every grantable permission still cannot revoke somebody else's link. **Increment 2** (`d36ad97`): `Reporting::Snapshot` — the write path `reporter_dashboards_documents` has lacked since T-22 created it — plus `ReporterDashboards::SharesController` at `GET /reporter/s/:token`, outside any project. It is the only controller here with no permission check, because *"may whoever holds this token have these bytes"* has no person in it; the reason is in `NON_PERMISSION_GUARDS` and checked against the file. **Two core measurements changed the design and both are findings**: `Attachment.prune` would have deleted every snapshot after a day (**S-24**), and `attachments.container_type` is `varchar(30)` while every model name here is longer (**S-25**). Raised **S-26** (a public link serves on a `login_required` instance — needs ratification) and **S-27** (the token is in the URL path, so it is in every access log). Found and fixed **E-22**, a security assertion in increment 1 that tested nothing, proved wrong in both directions. 21 mutations, 19 killed first pass, 2 survivors closed with tests and then killed. **Still owed by increment 3:** the owner/admin UI with revoke and revoke-all, the promotion of `share_reporter_dashboards_reports` and `publish_reporter_dashboards_reports`, and FR-54's attachment scoping |
 | T-26 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -102,6 +103,173 @@ A workflow cannot fork itself without reintroducing the very credential G1 remov
 a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
+
+**F-17 · THE `file:line` CITATIONS INTO `technical-spec.md` HAVE DRIFTED BY ROUGHLY SEVEN
+LINES, ACROSS AT LEAST SEVEN FILES, AND NOTHING CHECKS THEM.** Found in T-28 increment 2 while
+verifying my own comments. `Document`'s header cited `technical-spec.md:1213-1217` for
+*"Persistence is opt-in with a mandatory TTL and a purge task"*; those lines now hold §7b.4's
+catch-up paragraph and say nothing about persistence. The real text is at `:1220-1223`.
+
+Spot-checked and drifted the same way (measured 2026-08-09):
+
+| citation | what the line actually says now |
+|---|---|
+| `007:7` → `technical-spec.md:1203` | `reporter_project_tabs` — the row **above** the intended one |
+| `007:60` → `:1215` | §7b.4's `max_catchup_days` sentence |
+| `004:7` and `004:48` → `:1200` | **blank** |
+| `004:55` → `:1210` | the `reporter_dashboards_documents` row |
+| `006:7` → `:1202` | a table separator (`\|---\|---\|`) |
+| `002:95` → `:1275` | an export-then-reimport sentence |
+
+**This is the exact class of defect the project has already rejected twice** — T-32 and T-24
+each shipped a comment citing a spec file as mechanical evidence, and CLAUDE.md's lesson from
+those is that *a cited control that does not exist is worse than no comment*. A citation that
+resolves to the wrong paragraph is the same defect with a slower fuse: it reads as verified
+and is not.
+
+**Fixed here: only `document.rb`'s three**, because that is the file this task touched and
+CLAUDE.md §5's rule is about the file you are in. The rest are named above rather than swept,
+because a mass rewrite across seven files is R-02 scope growth and would be stale again the
+next time §7 gains a paragraph.
+
+**What the curator owes: a choice between two mechanical answers, not a re-run of the sweep.**
+
+1. **Drop line numbers, quote anchors instead.** Every one of these comments already quotes
+   the sentence it cites; the number adds nothing a `rg` cannot do and is the only part that
+   can rot. `technical-spec.md` §7's table" beats `technical-spec.md:1203`.
+2. **Or add a lint** that resolves each `<spec>.md:<n>` and fails when the quoted string is not
+   within a few lines of it. That is a real gate and about thirty lines, but it pins the
+   spec's line numbering, which makes editing the spec more expensive.
+
+I recommend (1). The evidence is that six of seven sampled citations were already wrong and no
+run, review or gate had noticed.
+
+**S-27 · A SHARE TOKEN IS A BEARER CREDENTIAL IN A URL PATH, SO IT IS IN `production.log`
+OF EVERY INSTALLATION. Recorded, not fixed, because §7b.1 specifies the shape.** Found while
+building T-28 increment 2. Rails' request logger writes the full path of every request, so
+`GET /reporter/s/<token>` puts a working link into the application log, and any reverse
+proxy in front of Redmine writes it into an access log as well. `config.filter_parameters`
+does **not** apply — it filters params, not path segments — so there is no Rails-side
+mitigation at all.
+
+This is inherent to "a link somebody can open", which is what a share link IS: the token
+cannot move into a header, because a recipient pastes a URL into a browser. Two consequences
+worth knowing rather than discovering:
+
+* the sign-in redirect for a non-public link carries the same token in `back_url`, which adds
+  **nothing** — the path it came from was already logged one line earlier. So the redirect is
+  not the leak and removing it would not close one;
+* what actually bounds the exposure is what T-28 already builds: mandatory expiry, individual
+  revocation and optional `max_uses`. A token in a log that expired three weeks ago is not a
+  credential. **This is the argument for keeping the default expiry short** when §7b.1's
+  proposed 30-day default becomes a setting.
+
+**What the curator owes:** nothing, unless they want it in the README's security notes. It is
+recorded here so the next person to notice it finds the reasoning rather than filing it again.
+
+**S-26 · A PUBLIC SHARE LINK SERVES ON A `login_required` INSTANCE, AND THAT IS A DECISION
+SOMEBODY HAS TO OWN.** T-28 increment 2, `ReporterDashboards::SharesController` runs
+`skip_before_action :check_if_login_required`, so an instance closed to anonymous browsing
+still answers a public link. Asserted by
+`test_a_public_link_still_serves_on_an_instance_that_requires_login`, and killed by a
+mutation that removes the skip.
+
+The argument for it: `login_required` closes the instance to anonymous BROWSING, and a public
+report link is an administrator having granted one role `publish_reporter_dashboards_reports`
+— a per-link decision on top of a per-role grant, taken deliberately, over ONE frozen
+document. If the setting silently won instead, the capability would be **dead** on those
+installations with nothing anywhere saying why, which is the failure mode §7b.6 exists to
+avoid ("so 'public link' stops meaning 'visibility check skipped'" — it still does not: the
+bytes were frozen by a named identity inside their own visible scope).
+
+The argument against it: an administrator who set `login_required` may reasonably read it as
+"nothing in this instance answers an anonymous request", and this is the one endpoint that
+does.
+
+**What the curator owes:** a ratification or a reversal. The reversal is one line
+(`return refuse(:not_found) if Setting.login_required?`) plus its test; do not take it
+silently, because the two grants T-28 asks for stop differing at all if a public link cannot
+reach the public.
+
+**S-25 · `attachments.container_type` IS `varchar(30)` AND EVERY MODEL NAME IN THIS PLUGIN IS
+LONGER, SO THE SNAPSHOT STORE NEEDED A SHORT ALIAS.** Measured 2026-08-09 in T-28 increment
+2, against core `db/migrate/001_setup.rb:28` and the running schema on Redmine 6.1:
+
+    t.column "container_type", :string, :limit => 30
+
+`RedmineReporterDashboards::Document` is **35 characters**, so the first snapshot ever
+captured answered `PG::StringDataRightTruncation` — and on MySQL the same write TRUNCATES
+silently, leaving a `container_type` of `RedmineReporterDashboards::Doc` that resolves to
+nothing and an attachment whose container can never be found again. **The engine that fails
+loudly is the lucky one.**
+
+Answered with Rails' `polymorphic_name` (6.0+) plus one top-level constant,
+`RrdReportSnapshot` (`app/models/rrd_report_snapshot.rb`) — one class, one table, reachable
+under a name short enough for a column core froze in 2012. **The string is written into every
+stored snapshot's row, so renaming it orphans every attachment already on disk.**
+
+Generalisable, and the reason this is a finding rather than a comment: **any future task that
+contains a Redmine `Attachment` in a plugin object hits this**, and the namespaced name is
+always too long. T-30's failure documents are the next candidate.
+
+**S-24 · THE PROJECT'S OWN `Attachment` STORAGE WOULD HAVE DELETED EVERY SNAPSHOT AFTER ONE
+DAY, AND NO TEST IN THIS REPOSITORY COULD HAVE SEEN IT.** Measured 2026-08-09, T-28 increment
+2. Migration 007 chose Redmine's `Attachment` for the bytes because *"its storage, permissions
+and cleanup are already solved"*. True — and the obvious way to write one,
+`Attachment.create(file:, author:, filename:)` with no container, is a snapshot with a
+one-day fuse. Core `app/models/attachment.rb:375`:
+
+    Attachment.where("created_on < ? AND (container_type IS NULL OR container_type = '')",
+                     Time.now - age).destroy_all
+
+run by `rake redmine:attachments:prune` (`lib/tasks/redmine.rake:22`) — a task Redmine's own
+installation documentation tells administrators to cron. Every share link with a 30-day
+expiry would have answered "no longer stored" from day two, **on correctly-administered
+instances only**, which is the worst possible distribution of a bug.
+
+Fixed by containing the attachment in its `Document`, which takes it out of that WHERE clause
+entirely — and the test calls the real `Attachment.prune` rather than asserting the column,
+with a **control** asserting an uncontained attachment IS collected, so it cannot pass by the
+prune doing nothing. Containing it also makes it reachable at `/attachments/:id`, so
+`Document` answers core's three `attachments_*?` questions `false` for everybody: the share
+link is the only door.
+
+**Worth generalising:** the plugin's suite never runs core's rake tasks, so *any* assumption
+about core housekeeping — prune, `User.prune`, `Watcher.prune`, session cleanup — is unproved
+unless a test calls the task itself. This is the first one that mattered.
+
+**E-22 · A SECURITY ASSERTION IN T-28 INCREMENT 1 HAD ITS ARGUMENTS THE WRONG WAY ROUND AND
+TESTED NOTHING.** Found in increment 2, by the same mistake failing loudly in a sibling test.
+Redmine's helper is `assert_not_include(expected, s)` → `!s.include?(expected)`
+(core `test/test_helper.rb:258`), so the **needle comes first**. Written the other way round,
+`test_the_token_itself_is_nowhere_in_the_row` asked whether the 43-character token contains a
+64-character digest — false for every possible input.
+
+**Measured in both directions**, which is what makes this a finding rather than a tidy-up.
+With the plain token planted in a column as `"share:#{token}"` (so the neighbouring
+`assert_not_equal` cannot catch it):
+
+| assertion | result |
+|---|---|
+| corrected (`assert_not_include token, value.to_s`) | `1 runs, 8 assertions, **1 failures**` |
+| as shipped (`assert_not_include value.to_s, token`) | `1 runs, 8 assertions, **0 failures**` |
+
+The first attempt at this negative control was **wrong in the other direction** and is worth
+recording too: planting the token as the whole column value made the test fail under BOTH
+orders, because the `assert_not_equal` on the line above caught it. A negative control that
+fires for the wrong reason proves nothing, and it looked like proof.
+
+**The generalisable rule:** Redmine's `assert_include` takes the argument order OPPOSITE to
+Minitest's own `assert_includes(collection, obj)`, and this repository uses both helpers.
+Both spellings compile and both usually pass; only one of them tests anything.
+
+**The rest of the suite was audited rather than assumed.** Every `assert_include` /
+`assert_not_include` / `assert_includes` / `assert_not_includes` call under `test/` was read:
+the `assert_includes` family is used collection-first throughout (correct for Minitest's
+helper) and the only other `assert_not_include` in the tree —
+`test/functional/reporter_dashboards_templates_controller_test.rb:839`,
+`assert_not_include template, assigns(:templates)` — is needle-first and correct. **This was
+the only one.**
 
 **~~S-23~~ · CLOSED by curator decision, 2026-08-09: THE ARCHIVE IS BUFFERED, and E-6's
 third bullet is amended rather than met.** The choice was never streamed-or-buffered — it

@@ -3,10 +3,18 @@
 module RedmineReporterDashboards
   # A rendered report, kept.
   #
-  # T-22 creates the table and this class; **nothing in T-22 writes a row**. Persistence is
-  # opt-in (`technical-spec.md:1213-1217`) and the write path belongs to T-28 (share-link
-  # snapshots) and T-30 (failure reports). What is enforced here is the one policy the spec
-  # does state: a **mandatory** expiry.
+  # T-22 created the table and this class and **wrote no row**. Persistence is opt-in
+  # (`technical-spec.md:1220-1223`), and the write path is **T-28's, and it now exists**:
+  # `Reporting::Snapshot` renders a report once as a named identity and freezes it here, so
+  # that a share link serves bytes rather than making a visibility decision at request time
+  # (FR-52). T-30's failure documents are still not persisted through this class.
+  #
+  # Read `Reporting::Snapshot` before changing anything about `attachment` below: TWO
+  # measurements against core shape it, and neither is guessable from this file.
+  #
+  # Line numbers in this comment were REPOINTED in T-28 — the T-22 originals
+  # (`:1203`, `:1213-1217`, `:1215`) had drifted onto §7b.4's scheduling paragraphs and
+  # cited text that says nothing about persistence.
   #
   # `expires_at` is NOT NULL in the schema and validated here as well. The pair is
   # deliberate — the column stops a console session or a future migration creating an
@@ -46,7 +54,7 @@ module RedmineReporterDashboards
     has_one :stored_attachment, class_name: '::Attachment', as: :container,
                                 dependent: :destroy, inverse_of: false
 
-    # `technical-spec.md:1215`: "Persistence is opt-in with a **mandatory TTL** and a purge
+    # `technical-spec.md:1222-1223`: "Persistence is opt-in with a **mandatory TTL** and a purge
     # task. That converts an unmanaged indefinite store into 'off by default, **bounded when
     # on**'." Presence alone delivers the first half and not the second: `expires_at =
     # 9999-12-31` satisfies a presence check, reports `expired?` false for ever, and the

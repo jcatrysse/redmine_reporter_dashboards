@@ -180,9 +180,11 @@ module ReporterDashboards
                            ip_address: request.remote_ip,
                            user_agent: request.user_agent)
 
-      # `inline`, NOT `attachment`. A shared report is something somebody was sent a link to
-      # and wants to look at; forcing a download for a document they cannot edit or resubmit
-      # is friction with nothing on the other side of it.
+      # `inline`, NOT `attachment`, AND IT IS CORE'S OWN RULE RATHER THAN A PREFERENCE:
+      # `AttachmentsController#disposition` is `attachment.is_pdf? ? 'inline' : 'attachment'`
+      # (`app/controllers/attachments_controller.rb:307-313`). A shared report is something
+      # somebody was sent a link to and wants to look at, and a Redmine user who downloads a
+      # PDF from an issue already gets it in the viewer.
       send_data bytes,
                 filename: filename,
                 type: Snapshot::CONTENT_TYPE,

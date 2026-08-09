@@ -776,6 +776,85 @@ Schedules have no UI in this version and no permissions of their own — they ar
 edited in the console. `RRD_SCHEDULE=<id>` runs a single schedule by hand, which still
 respects the enabled flag.
 
+## Sharing a report by link
+
+A **share link** is a URL that serves one report to whoever holds it. It is not a shortcut
+past Redmine's permissions: what it serves is a **snapshot** — a PDF that was rendered once,
+as a named person, inside exactly what that person was allowed to see, and then frozen. When
+somebody opens the link, nothing is queried and no permission is resolved. There is no
+visibility decision at request time because there is nothing left to decide.
+
+That is the whole design, and it is what makes the rest of it safe to offer.
+
+Every link carries:
+
+| | |
+|---|---|
+| **A mandatory expiry** | there is no such thing as a link that never expires. The column is `NOT NULL`, so neither a form nor a console session can create one |
+| **Revocation** | one click's worth of work, and it takes effect on the next request. Deleting the template revokes every link to it |
+| **An optional use limit** | "this link works three times". Two people opening a single-use link at the same moment get one download and one refusal, never two downloads |
+| **An access log** | one row per attempt, with the time, the address and the browser — *including refusals*, because "somebody is trying expired links at us" is the question the log exists to answer |
+
+**The token is never stored.** Only a SHA-256 digest of it is, so a copy of your database
+yields no working links, and there is nowhere for anyone — including an administrator with a
+console — to read an existing link's URL back out. It exists once, at the moment it is
+created. If it is lost, make a new one.
+
+### Public links
+
+A link is private by default: the holder still has to be signed in to Redmine, so forwarding
+the mail one more time does not turn it into a public URL. A **public** link is a second,
+separate decision — it is reachable by anyone at all, with no account.
+
+A public link still serves a snapshot, never a live query, so "public" never comes to mean
+"visibility check skipped".
+
+Note that a public link is served **even on an installation configured with
+`login_required`**. That setting closes the instance to anonymous browsing; publishing one
+frozen document is a deliberate act on top of it. If that is not what you want for your
+installation, do not grant anybody the ability to publish.
+
+### What is not built yet
+
+**There is no interface for creating or revoking links in this version, and no permissions of
+their own yet** — both arrive with the rest of T-28. Links are created in the console today:
+
+```ruby
+template = RedmineReporterDashboards::Template.find(<id>)
+author   = User.find_by_login('jsmith')      # the report is rendered as this person
+
+result = RedmineReporterDashboards::Reporting::Snapshot.capture(
+  template:   template,
+  render_as:  author,
+  project:    template.project,
+  created_by: User.current,
+  expires_at: 30.days.from_now)
+
+raise result.message unless result.ok?
+
+link, token = RedmineReporterDashboards::ShareLink.create_with_token!(
+  template:             template,
+  project:              template.project,
+  created_by:           User.current,
+  scope_kind:           RedmineReporterDashboards::ShareLink::SCOPE_SNAPSHOT,
+  rendered_document_id: result.document.id,
+  render_as_user_id:    author.id,
+  public_link:          false,      # true = reachable without a Redmine account
+  max_uses:             nil,        # or a number
+  expires_at:           30.days.from_now)
+
+puts "/reporter/s/#{token}"          # the only time this URL exists
+link.revoke!                         # ...and this is how you take it back
+```
+
+Two more things are honest to know before you use it:
+
+* **The token is in the URL path, so it is written to your `production.log` and to any
+  reverse proxy's access log**, exactly as any link-based sharing is. That is inherent to
+  handing somebody a URL. What bounds it is the expiry — prefer a short one.
+* Snapshots are kept as Redmine attachments and expire with their link. A link may not
+  outlive the snapshot store's own retention bound of one year.
+
 ## Using the `{% sql_aggregate %}` tag
 
 Place the tag at the top of your Reporter template. It writes the result into a Liquid variable (`stats` by default) that you can then use freely.

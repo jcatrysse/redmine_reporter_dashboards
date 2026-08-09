@@ -55,6 +55,15 @@ class ReporterDashboardRoutingTest < Redmine::RoutingTest
     should_route 'POST /admin/reporter_dashboards/preflight' => 'reporter_preflight#run'
   end
 
+  # T-28 — THE ONLY ROUTE IN THIS PLUGIN OUTSIDE A PROJECT, and the only one an anonymous
+  # visitor reaches. The token alphabet is `SecureRandom.urlsafe_base64`'s, so the
+  # constraint has to accept `-` and `_` — a constraint that quietly rejected them would
+  # 404 roughly half of all minted links, at random, with nothing in any log to say why.
+  def test_share_link_route
+    should_route 'GET /reporter/s/abcDEF123_-x' =>
+                 'reporter_dashboards/shares#show', token: 'abcDEF123_-x'
+  end
+
   # The negative half: each of these paths must be reachable by ONE verb. Read off the
   # route set rather than by issuing a request, so a catch-all route elsewhere in
   # Redmine cannot make the assertion pass for the wrong reason.
@@ -64,6 +73,12 @@ class ReporterDashboardRoutingTest < Redmine::RoutingTest
     assert_equal ['PATCH'],  verbs_for('/projects/:project_id/reporter/move_block')
     assert_equal %w[GET PATCH].sort, verbs_for('/projects/:project_id/reporter').sort
     assert_equal %w[GET POST].sort, verbs_for('/admin/reporter_dashboards/preflight').sort
+    # GET AND NOTHING ELSE. A share link has to be a URL somebody can open, so it cannot be
+    # a POST — and the cost of that is real rather than theoretical: a crawler or a
+    # prefetching proxy following the link consumes a `max_uses` slot. That is the cost the
+    # link's own controls exist to bound, and it is a deliberate trade rather than an
+    # oversight, so the verb is pinned here.
+    assert_equal ['GET'], verbs_for('/reporter/s/:token')
   end
 
   private

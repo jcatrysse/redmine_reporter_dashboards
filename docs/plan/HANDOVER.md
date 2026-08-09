@@ -868,6 +868,17 @@ plugin or the vendor gem, each listed with its reason in
 
 - **`rsync` may be absent.** `redmine_clone.sh` fails with exit 127 at the mirror step.
   `sudo apt-get install -y rsync`.
+- **`./.codex/redmine_clone.sh` WITH NO ARGUMENT DEFAULTS TO `5.1-stable` AND SWITCHES THE
+  EXISTING CLONE'S BRANCH** (`redmine_clone.sh:4`, `REDMINE_VERSION="${1:-5.1-stable}"`).
+  Re-mirroring "just to pick up an edit" therefore moves a 6.1 clone to 5.1, and the gems in
+  `redmine/vendor/bundle` were installed for whichever branch was there before — so the next
+  run fails somewhere unrelated. **Always pass the branch**: `./.codex/redmine_clone.sh
+  6.1-stable`. Confirm with `cd redmine && git rev-parse --abbrev-ref HEAD`.
+- **A recycled container keeps `redmine/` and loses the running services.** `pg_isready`
+  answers "no response", `bundle install` from the PLUGIN root fails with *"Could not find gem
+  'liquid'"* — the gems live in `redmine/vendor/bundle`, not in a system gem path, so every
+  ruby/rspec/rake invocation runs from `redmine/`. `service postgresql start` brings the
+  database back with its data intact.
 - **RUNNING THE DB-LESS `rspec spec` SUITE WRECKS THE PLUGIN TABLES IN `redmine_test`, AND THE
   NEXT MINITEST RUN LOOKS LIKE A BROKEN MIGRATION.** Same cause as the bullet below —
   `spec/adapter`'s `load_schema!` uses `force: true` — but the symptom is one step further
@@ -876,14 +887,20 @@ plugin or the vendor gem, each listed with its reason in
   `rake redmine:plugins:migrate` does NOT repair it: the `schema_migrations` rows survived,
   so the migration is a no-op. Both halves have to go:
 
-      cd redmine && RAILS_ENV=test bundle exec rails runner \
-        'c=ActiveRecord::Base.connection; %w[reporter_dashboards_documents \
-         reporter_dashboards_schedule_recipients reporter_dashboards_schedule_runs \
-         reporter_dashboards_schedules reporter_dashboards_template_versions \
-         reporter_dashboards_templates_roles reporter_dashboards_templates].each { |t| \
-         c.drop_table(t, if_exists: true) }; \
-         c.delete("DELETE FROM schema_migrations WHERE version LIKE %s" % \
-                  c.quote("%-redmine_reporter_dashboards"))'
+  **The table list used to be spelled out here and had gone stale — it named seven tables
+  and the schema had eleven, so following it left four behind and the migration still
+  failed on the first one it met.** It is now derived from the connection, which cannot go
+  stale and does not need editing when a migration adds a table. `force: :cascade` because
+  the foreign keys between them make the drop order matter otherwise.
+  `reporter_project_tabs` is deliberately NOT matched: FR-69 requires it to survive a
+  rollback, and migration 001 recreates it only if it is absent.
+
+      cd redmine && LANG=C.UTF-8 RAILS_ENV=test bundle exec rails runner '
+        c = ActiveRecord::Base.connection
+        c.tables.grep(/\Areporter_dashboards_/).each { |t|
+          c.drop_table(t, if_exists: true, force: :cascade) }
+        c.delete("DELETE FROM schema_migrations WHERE version LIKE " +
+                 c.quote("%-redmine_reporter_dashboards"))'
       cd redmine && RAILS_ENV=test bundle exec rake redmine:plugins:migrate
 
   **Run Minitest BEFORE rspec, or repair in between.** Combined with the gates-before-suite
