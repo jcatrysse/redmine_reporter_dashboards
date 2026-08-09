@@ -104,6 +104,55 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
+**E-26 · F-16's THREE REVIEWS: what was fixed, and the ELEVEN THINGS THAT WERE NOT.**
+2026-08-09, three fresh subagents (reviewer, adversarial QA, UX). Two of them independently
+found the same two blockers, which is the reason to believe them. **Everything below was
+REPRODUCED with a probe or a mutation, not read.** The fixed items are in the commits; this
+entry exists for the eleven that are recorded rather than closed, because a curator has to
+decide several of them and because an unrecorded measurement is a measurement nobody will
+take again.
+
+**Fixed here** (see commits `0202f23`, `84f9a69`): an asset refusal answering **HTTP 500**
+because `outcome_status` read a closed set through an `else`; `policy_refusal?` blaming the
+asset policy for **five of seven** refusal causes, so an administrator was told to enable
+egress for a missing file — with the spec that "covered" it hand-writing a reason string the
+resolver cannot emit; **`MAX_REFERENCES` never applied inside a stylesheet** (3 200 nested
+references → 3 201 inlines in 11 s, linear, one `find_by` *and* one `binread` each); a
+raising `engine#capabilities` **escaping as a 500** from an asset-free report; the **HTML
+panel still showing blank images** while its CSP comment claimed otherwise; and four tests
+that could not fail.
+
+**NOT FIXED — the curator's, or a later task's. Each with what was measured.**
+
+| # | What | Measured | Recommendation |
+|---|---|---|---|
+| 1 | **A mapper-sourced path gets no containment check.** `LocalStore#real_path` returns immediately for `source == :mapper`, so a symlink inside `Attachment.storage_path` pointing outside it is read and inlined | `symlink outside root => ok=true, OUTSIDE BYTES INLINED = true`. `/etc/passwd` was stopped only by `ContentTypes.for_path` on the realpath — i.e. by "must have a typeable extension", not by containment | Deliberate and documented ("the mapper IS the decision"), and it needs write access inside the attachment store, so it is defence-in-depth rather than a primitive. But `local_store.rb` calls the symlink case "the one nobody remembers" and this is the branch that skips it. **Recommend** containment against `Attachment.storage_path` for mapper results, which costs one `realpath` |
+| 2 | **A LOCKED user's identity still resolves attachments.** `Attachment#visible?` → `attachments_visible?` → `allowed_to?` never consults `User#active?` | `LOCKED dlopper on his own private issue attachment => RESOLVED` | `AttachmentsController#download` is unreachable for a locked account because authentication rejects it first; the report path has no such gate. `ScheduledDelivery` guards `owner&.active?`, but `AdhocDelivery`, `Snapshot` and the controller do not. **Recommend** the liveness check where the actor is chosen, not in the mapper — it is the same shape as T-24's `User.active` finding |
+| 3 | **Peak memory is per document, not per run.** `bind_assets` builds every `DocumentRequest`, each with its fully inlined body, before `render_all` is called; `Resolver::State` — and so `MAX_TOTAL_BYTES = 32 MiB` — is per `call` | all requests built before the first render: `true`. Worst case at defaults: 50 × 32 MiB = **1.6 GiB resident**, plus the base64 memo, and one logo referenced by 50 per-record documents is encoded 50 times | **Recommend** a per-RUN byte budget in `bind_assets`, and a shared encode memo across sections. G6 currently has no evidence for this path |
+| 4 | **`asset_document_cap` is unreachable through `ReportRun`.** Over-cap references are `refuse`d, which makes the resolution `refused?`, which hard-fails the run — so the degradation is never rendered | 600 same-origin refs → `ok=false code=:asset_unresolved` | Either the cap should degrade rather than refuse, or the degradation should be deleted as dead. **A curator decision**, because it is the difference between "your report is too big" and "your report is refused" |
+| 5 | **`file:` URLs pass through untouched.** `Reference::IGNORED_SCHEMES` includes `file`, so `<img src="file:///etc/passwd">` stays in the body verbatim and local-file resolution is the engine's business | `file scheme ok=true` | Pre-existing T-33 classification; F-16 is what gives it a call site. wkhtmltopdf's `--enable-local-file-access` behaviour is version-dependent. **Recommend** a conformance fixture rather than a code change |
+| 6 | **The user-facing asset message is English in all nine locales.** `AssetBinding#message_for` builds prose in `lib/`, and the failure MAIL prints no headline at all — only `code` and `message` | — | CLAUDE.md §10's letter is kept and its purpose missed. This is the first message whose *content is the remedy*. **Recommend**: `AssetBinding` returns `(key, args)`; minimum, add `reporter_diagnostic_headline` to `scheduled_report_failure.{text,html}.erb` |
+| 7 | **The message points somewhere that does not show what it promises.** It says "the reason for each is in the render diagnostics for this correlation id"; `_diagnostics.html.erb`'s own comment says `Diagnostic#detail` is deliberately NOT printed | `from_asset_refusal` puts the per-refusal reasons in `detail`; nothing renders it | **Recommend** rendering `Resolution::Refusal#to_h` in the panel — url/usage/classification/reason are all safe by construction — or changing the sentence. As it stands it is the only route by which an author could learn WHICH of five causes they hit |
+| 8 | **Neither screen says a refused asset kills the report.** The settings page describes how assets are *obtained* and never what happens when they cannot be; the template editor has an `em.info` for every field except this | — | The README covers it well and is linked from neither. **Recommend** one sentence on `text_reporter_asset_policy_info` and one `em.info` in `_form.html.erb`, nine locales each |
+| 9 | **Asset degradations are dropped on the failure path.** `failed(...)` passes `degradations: diagnostics.degradations`, so a run where section 1 collapsed an `srcset` and section 2 hit a CDN loses the first fact — and the panel renders on the failure page too | read, not probed | One-line fix (`failed` gains a `degradations:` keyword). Left because it touches every `failed` call site and this change has already grown twice |
+| 10 | **E-25's fix is proven at the helper only.** The 500 was a VIEW failure through `_degradations.html.erb`; the regression test is an `ActionView::TestCase` calling the helper directly | 12 examples green | HANDOVER §1's own `include_all_helpers` lesson: *"the integration test found it"*. **Recommend** a controller test that renders `#show` for an outcome carrying a `Render::Degradation` |
+| 11 | **The wiring test leaks attachment blobs into the Redmine checkout.** Four tests call `Attachment.create!` after `set_fixtures_attachments_directory`; transactional fixtures roll back the ROWS and the bytes stay | `redmine/test/fixtures/files/2026/08` held **227 blobs** | **Recommend** `set_tmp_attachments_directory` for the tests that create attachments, keeping the fixtures directory only for the ones that READ attachment 16 |
+
+**AND ONE PROCESS FAILURE, recorded because it reached the remote.** `d57a744` committed a
+reviewer's mutation — `request_geometry` hardcoded to A4/portrait with `margins_mm` dropped —
+because a stop hook prompted a commit while three review subagents were mutating the tree and
+`git add -A` cannot tell a mutation from an edit. The mutation was already covered; the
+verification of the COMMIT was seven greps in two files, reported as "the committed source is
+unmutated", which was broader than the evidence. Reverted in `bfc55b9`. **Never stage while a
+subagent is live**; if a commit cannot wait, stage explicit paths the agents do not touch, as
+`a44c769` did. In HANDOVER §1.
+
+**S-17's INVENTORY IS NOW SHORT BY THE WHOLE RENDER LAYER.** Its "what is left" list names
+ten Liquid-side codes. Before E-25 a `Render::Degradation` never reached the lookup — it
+raised — so the render vocabulary was never in scope. It is now, and F-16 shipped keys for
+`legacy_engine` and the five `asset_*` codes; what remains unlisted is `readiness_timeout`,
+`asset_unresolved` as a *degradation*, and the `Capabilities.negotiate` misses.
+
 **E-25 · THE DEGRADATION LIST TOOK TWO VOCABULARIES AND UNDERSTOOD ONE, SO EVERY
 `wkhtmltopdf` RENDER 500'd THE PAGE.** Found while wiring F-16, 2026-08-09 — pre-existing,
 latent since T-31 added the localisation, and **fixed here** because F-16 puts a second
