@@ -533,24 +533,71 @@ correlation id and no attachment, and its recipients get nothing.
 
 ### Import and export
 
-**Export** writes a JSON file containing the template only — no ids, no project, no
-author, no version history. **Import** reads that JSON, and also reads the YAML a
-`redmine_reporter` export produces, mapping its three template types onto this plugin's
-`source` and `output` fields through a fixed table. A file naming a Ruby class, or using a
-YAML alias, is refused with a message rather than loaded. Importing requires **both**
-`add_…` and `edit_…`: import is authoring, and a weaker permission of its own would be a
-way around the authoring one. An imported template is always private to whoever imported
-it, whatever the file asks for.
+**Export** writes a JSON *bundle* — `format_version`, `exported_at`, `plugin_version` and
+a list of templates. Each template carries its own fields only: no ids, no project, no
+author, no version history. **Import** reads that bundle, the single-template JSON earlier
+versions of this plugin wrote, and the YAML a `redmine_reporter` export produces — mapping
+its three template types onto this plugin's `source` and `output` fields through a fixed
+table. A file naming a Ruby class, or using a YAML alias, is refused with a message rather
+than loaded. Importing requires **both** `add_…` and `edit_…`: import is authoring, and a
+weaker permission of its own would be a way around the authoring one. An imported template
+is always private to whoever imported it, whatever the file asks for.
 
-### Two limits, and two things this version does not do yet
+Exporting and importing a template returns the same bytes it started with, so a bundle can
+be kept in version control and a difference in it is a real difference.
+
+#### Moving several templates between installations
+
+The buttons in the editor move one template at a time. For a whole project there are three
+rake tasks, and the middle one is the point of them:
+
+```bash
+# write every template in a project to a file
+bundle exec rake reporter_dashboards:exchange:export \
+  RRD_PROJECT=my-project RRD_OUT=templates.json RAILS_ENV=production
+
+# say what importing it would do — writes NOTHING
+bundle exec rake reporter_dashboards:exchange:plan \
+  RRD_PROJECT=other-project RRD_FILE=templates.json RAILS_ENV=production
+
+# do it
+bundle exec rake reporter_dashboards:exchange:apply \
+  RRD_PROJECT=other-project RRD_FILE=templates.json RAILS_ENV=production
+```
+
+`plan` reports, per template, whether it is new, would be skipped, renamed or overwritten,
+plus any template-linter findings — and it writes nothing at all, so it is safe to run
+against production. `apply` then does it **one transaction per template**, so one bad
+template is reported with its reason and the rest of the bundle still imports.
+
+`RRD_ON_CONFLICT` decides what happens when a template of that name is already there:
+
+| | |
+|---|---|
+| `skip` (the default) | leave the existing template alone and say so |
+| `rename` | import as *Name (2)* and keep both |
+| `overwrite` | replace the content, keeping the previous version in the template's history so it can be rolled back to |
+
+`overwrite` only touches templates the actor may edit, and never changes a template's
+owner or its visibility — a bundle cannot make somebody else's private template public.
+`RRD_ACTOR=login` chooses which administrator owns what is created; without it the first
+active administrator does. The tasks exit `0` when everything was decided or applied, `1`
+when a template failed, and `2` when the arguments were wrong (no file, no such project).
+
+> These are **`exchange:`**, not `import:`. `reporter_dashboards:import:*` is the one-way
+> migration off `redmine_reporter` described below, which reads that plugin's database
+> tables rather than a file.
+
+### Two limits, and one thing this version does not do yet
 
 * **A PDF export is capped at 50 documents.** It matters only for *one document per
   issue* templates: asking for more is refused before anything is rendered, with a message
   naming both the number you asked for and the limit.
-* **A *one document per issue* template cannot be downloaded as a PDF when it covers more
-  than one issue.** That needs a zip archive, which this version does not build; the page
-  renders all the documents as HTML and the download button is not offered. Combined
-  templates — one document for the whole set — download normally.
+* **A *one document per issue* template covering more than one issue downloads as a zip.**
+  One PDF per issue, named after it. The archive is streamed rather than assembled in
+  memory, so it has no `Content-Length` and a browser will show the download growing
+  rather than a percentage. The 50-document cap above still applies, and is still checked
+  before anything is rendered.
 * **A `source: time_entries` report has no time series.** Hours by activity, by user, by
   project, by issue and by four issue attributes all work (see *Reporting on spent time*
   below), but `{% sql_aggregate %}` with no `group_by` is refused there and says so on the

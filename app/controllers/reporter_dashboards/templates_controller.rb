@@ -40,6 +40,7 @@ module ReporterDashboards
     # same pattern as `ReporterPreflightController`.
     Reporting = RedmineReporterDashboards::Reporting
     Render = RedmineReporterDashboards::Render
+    Archive = RedmineReporterDashboards::Archive
     Template = RedmineReporterDashboards::Template
 
     # DECLARED, because Redmine sets `include_all_helpers = false`
@@ -163,8 +164,22 @@ module ReporterDashboards
 
     # ------------------------------------------------------------------ exchange
 
+    # T-29 — THE EXPORT IS NOW A BUNDLE, which is the format FR-55 names.
+    #
+    # It used to be `Exchange.dump`'s `{format_version, template}`, a T-23 stopgap whose
+    # own comment said T-29 would wrap it. One template is exported as a bundle CARRYING
+    # ONE TEMPLATE rather than as a second file format: two shapes for one thing is
+    # CLAUDE.md §6's "second way of doing something that already has a way", and the one
+    # that drifts is always the one without a caller.
+    #
+    # Nothing stops reading the old shape — `Bundle.parse` accepts `{'template' => …}`,
+    # the base plugin's two spellings, and a bare attribute Hash — so a file exported by
+    # this button last month still imports today. That asymmetry is the same one §7b.2
+    # takes about YAML: read what exists, write one thing.
     def export
-      send_data Reporting::Exchange.dump(@template),
+      send_data Reporting::Bundle.dump([@template],
+                                       exported_at: Time.now.utc.iso8601,
+                                       plugin_version: reporter_plugin_version),
                 filename: download_filename(@template, 'json'),
                 type: 'application/json',
                 disposition: 'attachment'
@@ -175,7 +190,7 @@ module ReporterDashboards
       return refuse_import(l(:error_reporter_template_import_no_file)) if file.blank?
       return refuse_import(l(:error_reporter_template_import_no_file)) unless file.respond_to?(:read)
 
-      @template = Template.new(Reporting::Exchange.parse(file.read))
+      @template = Template.new(importable_attributes(Reporting::Exchange.parse(file.read)))
       @template.project_id = @project.id
       @template.author_id = User.current.id
       # AN IMPORTED TEMPLATE IS PRIVATE TO ITS IMPORTER whatever the file said. A bundle is
@@ -435,34 +450,128 @@ module ReporterDashboards
         return respond_to_failure(:unprocessable_entity)
       end
 
-      # ONE document is served as itself. More than one would be an archive, and building
-      # one is explicitly still owed — finding E-6's third bullet, *"streamed archives with
-      # no Content-Length"*. Until that exists a multi-document export is REFUSED rather
-      # than silently serving the first one, which is the shape of answer this project
-      # keeps deleting. The view does not offer the button in that case either; this is
-      # what answers a hand-written URL.
-      if documents.length > 1
-        @diagnostic = Reporting::Diagnostic.new(
-          origin: :batch,
-          code: :archive_not_available,
-          template_name: @template.name,
-          message: l(:error_reporter_template_archive_not_available, count: documents.length),
-          # THE SECTION'S id, not the document's: `Render::Success` carries bytes, an
-          # engine and a version and has NO `correlation_id` — the id is minted per JOB in
-          # `ReportRun`. Reading it off the wrong object was a NoMethodError on the one
-          # branch nothing had reached, and the strengthened archive test found it the
-          # moment it stopped being shadowed by "no engine registered".
-          correlation_id: @outcome.sections.first&.job&.correlation_id.presence ||
-                          SecureRandom.uuid
-        )
-        return respond_to_failure(:not_implemented)
-      end
+      # T-29 — MORE THAN ONE DOCUMENT IS AN ARCHIVE, and the 501 that used to be here is
+      # gone. §Findings E-6's third bullet and ~~S-12~~ (curator, 2026-08-08) made this
+      # T-29's alone.
+      return stream_archive(documents) if documents.length > 1
 
       document = documents.first
       send_data document.bytes,
                 filename: download_filename(@template, 'pdf'),
                 type: 'application/pdf',
                 disposition: 'attachment'
+    end
+
+    # T-29 / §Findings E-6 — the streamed archive, with NO `Content-Length`.
+    #
+    # --- WHY THE DOCUMENTS ARE ALL RENDERED BEFORE THE FIRST BYTE GOES OUT ---
+    #
+    # This is the decision a reader will want to challenge, so it is written down. It
+    # would be possible to render document N while document N-1 is on the wire, and it
+    # would be WRONG: the status line goes out with the first byte. If document 7 of 50
+    # then fails, the response has already promised `200 OK` and the recipient gets a
+    # truncated archive that unpacks cleanly and is missing 44 reports. That is INV-5
+    # exactly — "a recipient gets a green-looking result containing a broken report" —
+    # one layer up from where `Renderer` enforces it.
+    #
+    # So the order is: ask the cap (before ANY render — `ReportRun` does that off a
+    # `COUNT(*)`, so a refused 40 000-document export still costs one query), render the
+    # batch, decide success or failure while a status code can still be chosen, and only
+    # then start writing. Every failure mode is decided before the archive exists.
+    #
+    # --- WHAT "STREAMED" THEREFORE MEANS HERE, EXACTLY ---
+    #
+    # The ARCHIVE is never built in memory: `ZipStream#each` yields the zip in pieces and
+    # this action hands that object straight to Rack, so the worker never holds a
+    # concatenated copy of it. What it does hold is the rendered PDFs, because it just
+    # decided they were all fine — and that set is bounded by `Render::BatchGuard`'s cap.
+    #
+    # Both halves of that are asserted rather than asserted-in-a-comment:
+    # `spec/archive/zip_stream_spec.rb` proves the writer is lazy (a chunk is yielded
+    # before the last entry is pulled), and the functional test proves this response
+    # carries no `Content-Length` and hands Rack a non-Array body. Claiming the whole
+    # pipeline is lazy would be the overclaim; it is not, and the reason is above.
+    def stream_archive(documents)
+      sections = @outcome.sections
+
+      # THE TWO LISTS ARE PAIRED BY POSITION, so a length mismatch would mean silently
+      # labelling one issue's report with another issue's number — a wrong answer that
+      # looks like a right one. It cannot happen today (a batch with any failure never
+      # reaches here), which is exactly why it is checked rather than assumed: the
+      # invariant is somebody else's to maintain.
+      if sections.length != documents.length
+        raise "the archive has #{documents.length} documents for #{sections.length} " \
+              'sections; they are paired by position and must be the same length'
+      end
+
+      entries = sections.each_with_index.lazy.map do |section, index|
+        Archive::ZipStream::Entry.new(name: archive_entry_name(section, index),
+                                      bytes: documents[index].bytes)
+      end
+
+      send_archive(Archive::ZipStream.new(entries: entries, mtime: Time.now.utc),
+                   download_filename(@template, 'zip'))
+    end
+
+    # NO `send_data`, BECAUSE `send_data` BUFFERS. It takes a String, so using it would
+    # mean building the whole archive first — which is the one thing this is for.
+    # Assigning an object that answers `#each` to `response_body` is Rails' own
+    # non-`Live` streaming form, and Rack iterates it.
+    def send_archive(body, filename)
+      response.headers['Content-Type'] = 'application/zip'
+      response.headers['Content-Disposition'] =
+        ActionDispatch::Http::ContentDisposition.format(disposition: 'attachment',
+                                                        filename: filename)
+      # A REPORT IS NOT CACHEABLE BY ANYTHING IN BETWEEN. `send_data` sets this for the
+      # single-document path; a streamed response has to say it itself, and an archive of
+      # somebody's visible issues is the last thing that should sit in a shared proxy.
+      response.headers['Cache-Control'] = 'private, no-store'
+      # NGINX AND FRIENDS BUFFER BY DEFAULT, which would undo the property this action
+      # exists for at the last hop. Ignored by every server that does not know it.
+      response.headers['X-Accel-Buffering'] = 'no'
+
+      self.response_body = body
+    end
+
+    # `<template>-<record id>.pdf`, and the id rather than the label because `Job#label`
+    # is `"#123"` — a `#` in a zip member name is legal and awful, and the name is also a
+    # FILENAME the moment somebody unpacks it. `download_filename`'s closed character set
+    # is reused for the stem for exactly the reasons its own comment gives, and
+    # `ZipStream` resolves any collision that survives, so two records whose sanitised
+    # names agree cannot silently become one member.
+    def archive_entry_name(section, index)
+      record_id = section.job.record&.id || (index + 1)
+      stem = download_filename(@template, 'pdf').sub(/\.pdf\z/, '')
+
+      "#{stem}-#{record_id}.pdf"
+    end
+
+    # The version an export stamps itself with, and `nil` rather than a raise when the
+    # plugin is not registered — which is every controller spec that does not boot the
+    # registry. A bundle whose provenance is unknown is still a bundle.
+    def reporter_plugin_version
+      Redmine::Plugin.find(:redmine_reporter_dashboards)&.version
+    rescue Redmine::PluginNotFound
+      nil
+    end
+
+    # §7 rule 5 on the import side — see `Reporting::Exchange.assignable`. Without it a
+    # bundle written by a current install and uploaded to one whose schema is a minor
+    # behind raised `ActiveModel::UnknownAttributeError` from `Template.new`.
+    def importable_attributes(attributes)
+      kept, dropped = Reporting::Exchange.assignable(attributes, Template.column_names)
+
+      unless dropped.empty?
+        # VISIBLE, NOT SILENT (INV-4). The template that arrived is not the template that
+        # was sent, and the person who chose the file is standing right here.
+        Rails.logger.warn("[exchange] this installation's schema has no " \
+                          "#{dropped.join(', ')} column, so the uploaded template was " \
+                          'imported without it')
+        flash[:warning] = l(:warning_reporter_template_import_fields_dropped,
+                            fields: dropped.join(', '))
+      end
+
+      kept
     end
 
     # T-30 / FR-59 — the failure document, and the ONE place that decides whether there

@@ -69,6 +69,103 @@ namespace :reporter_dashboards do
     end
   end
 
+  # T-29 — the template exchange BUNDLE (FR-55/56/57, `technical-spec.md` §7b.2).
+  #
+  # --- WHY THIS IS `exchange:` AND NOT `import:`, WHICH IS WHAT §7b.2 NAMES ---
+  #
+  # §7b.2 calls the two steps `import:plan` and `import:run`. BOTH NAMES ARE ALREADY
+  # TAKEN, by a different feature, and they have been since T-02 and T-24: `import:plan`
+  # surveys the BASE PLUGIN's tables and `import:run` copies rows out of them. That is the
+  # one-way migration off `redmine_reporter`; this is a file format for moving templates
+  # between installations. Two features, one namespace, and `rake -T` would have shown two
+  # tasks with one name.
+  #
+  # Reusing the names would have been the worse of the two errors available: an operator
+  # following the migration guide would run `import:run` and get a bundle importer that
+  # refuses because there is no file, or — if the argument happened to be right — a
+  # different write than the one the guide describes. So the VERBS §7b.2 asks for are kept
+  # (`plan` then apply) and the namespace says which of the two importers it is.
+  # Reported as a finding rather than resolved silently; see `implementation-plan.md`
+  # §Findings S-22.
+  namespace :exchange do
+    desc 'Write a template bundle to stdout, or to RRD_OUT (RRD_PROJECT=id|identifier ' \
+         'limits it to one project; writes nothing to the database)'
+    task export: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/exchange_tasks', __dir__)
+      tasks = RedmineReporterDashboards::ExchangeTasks
+
+      begin
+        project = tasks.find_project(ENV['RRD_PROJECT'])
+        templates = RedmineReporterDashboards::Template.where(project_id: project&.id)
+                                                       .order(:name, :id)
+        bytes = RedmineReporterDashboards::Reporting::Bundle.dump(
+          templates,
+          # THE CLOCK IS READ HERE AND NOWHERE ELSE ON THIS PATH. `Bundle.dump` takes the
+          # timestamp as a required argument precisely so the only unpinned value in the
+          # format is introduced at the edge, where no test runs.
+          exported_at: Time.now.utc.iso8601,
+          plugin_version: tasks.plugin_version
+        )
+      rescue RedmineReporterDashboards::ExchangeTasks::Refused => e
+        # EXIT 2, NOT 1. "Your arguments were wrong" and "a template failed to import" are
+        # different outcomes and a script has to be able to tell them apart; 1 is reserved
+        # for the second below. Anything not typed `Refused` is a defect and keeps its
+        # backtrace.
+        warn e.message
+        exit 2
+      end
+
+      if ENV['RRD_OUT'].present?
+        File.binwrite(ENV['RRD_OUT'], bytes)
+        warn "wrote #{bytes.bytesize} bytes to #{ENV['RRD_OUT']}"
+      else
+        # `$stdout.write`, not `puts`: the bundle already ends in exactly one newline, and
+        # this is used as `rake … > bundle.json`, where a second one would change the bytes
+        # FR-57 is a claim about.
+        $stdout.write(bytes)
+      end
+    end
+
+    desc 'Say what importing RRD_FILE would do, and write NOTHING ' \
+         '(RRD_PROJECT=id|identifier, RRD_ON_CONFLICT=skip|rename|overwrite)'
+    task plan: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/exchange_tasks', __dir__)
+
+      begin
+        report = RedmineReporterDashboards::ExchangeTasks.call(plan: true)
+      rescue RedmineReporterDashboards::ExchangeTasks::Refused => e
+        warn e.message
+        exit 2
+      end
+
+      puts RedmineReporterDashboards::Reporting::BundleReport.render(
+        report, heading: 'Template bundle — plan'
+      )
+      # A PLAN DOES NOT EXIT NON-ZERO FOR A SKIP, and does for a failure. Deciding that a
+      # template will not be imported is the plan's JOB; being unable to decide is not.
+      exit(report.failed? ? 1 : 0)
+    end
+
+    desc 'Import the template bundle in RRD_FILE, one transaction per template ' \
+         '(RRD_PROJECT=id|identifier, RRD_ON_CONFLICT=skip|rename|overwrite, ' \
+         'RRD_ACTOR=login|id; exit 1 if any template failed)'
+    task apply: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/exchange_tasks', __dir__)
+
+      begin
+        report = RedmineReporterDashboards::ExchangeTasks.call(plan: false)
+      rescue RedmineReporterDashboards::ExchangeTasks::Refused => e
+        warn e.message
+        exit 2
+      end
+
+      puts RedmineReporterDashboards::Reporting::BundleReport.render(
+        report, heading: 'Template bundle — apply'
+      )
+      exit(report.failed? ? 1 : 0)
+    end
+  end
+
   # T-25. FR-44's first half is that this contract is DOCUMENTED: the scheduler does not
   # run itself. Nothing inside Redmine wakes it — there is no daemon, no background worker
   # this plugin ships and no `after_initialize` timer — so a report is delivered exactly as

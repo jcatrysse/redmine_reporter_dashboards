@@ -117,15 +117,26 @@ module RedmineReporterDashboards
         # caller — the controller writes JSON, T-29's bundle writer nests it, and a test
         # compares it field by field without parsing anything.
         def export(template)
-          attributes = EXPORTED_FIELDS.each_with_object({}) do |field, hash|
+          {
+            'format_version' => FORMAT_VERSION,
+            'template' => attributes(template)
+          }
+        end
+
+        # ONE TEMPLATE AS DATA, WITHOUT THE ENVELOPE — and it is public because T-29's
+        # `Bundle` is the second caller.
+        #
+        # The alternative was for `Bundle` to build its own field list, and that is the
+        # defect this method exists to prevent: two lists drift, and the way they drift is
+        # silent. `failure_document` was already missing from `EXPORTED_FIELDS` once (see
+        # `DEGRADING_READERS` above) and no gate saw it, because a field that is absent
+        # from BOTH the export and the re-export still round-trips byte-identically. A
+        # second list would have made that failure mode permanent rather than a one-off.
+        def attributes(template)
+          EXPORTED_FIELDS.each_with_object({}) do |field, hash|
             reader = DEGRADING_READERS.fetch(field, field)
             hash[field] = template.respond_to?(reader) ? template.public_send(reader) : nil
           end
-
-          {
-            'format_version' => FORMAT_VERSION,
-            'template' => attributes
-          }
         end
 
         # Canonical bytes for the download. `JSON.pretty_generate` and a trailing newline
@@ -157,6 +168,78 @@ module RedmineReporterDashboards
           attributes_from(template_node(raw))
         end
 
+        # §7 RULE 5 ON THE IMPORT SIDE, and it was missing on both callers until T-29.
+        #
+        # The EXPORT side has read its two rule-5 columns through the model's degrading
+        # readers since T-23 (`DEGRADING_READERS` above), so an install one minor behind
+        # exports `nil`/`false` instead of raising. The import side had no counterpart:
+        # a bundle written by a current install and read by an older one reached
+        # `Template.new('failure_document' => false)` and raised
+        # `ActiveModel::UnknownAttributeError` — a stack trace where rule 5 asks for a
+        # degraded feature, on exactly the install the rule exists for.
+        #
+        # `columns` is passed IN rather than read off the model, so this file stays free of
+        # ActiveRecord and keeps being covered by the DB-less suite — which is where the
+        # whole exchange format is tested. It answers both halves because DROPPING A FIELD
+        # HAS TO BE VISIBLE (INV-4): the template that arrives is genuinely not the
+        # template that was sent, and both callers log the difference.
+        def assignable(attributes, columns)
+          kept = attributes.select { |field, _| columns.include?(field) }
+          [kept, attributes.keys - kept.keys]
+        end
+
+        # Bytes -> parsed document, with the JSON-then-YAML rule and the typed refusal.
+        # Public for T-29's `Bundle`, which needs the WHOLE document rather than one
+        # template out of it — and must not open a second decoding path to get it, since
+        # the safe-YAML rules (two permitted classes, no aliases) are the entire security
+        # content of this file.
+        def decode!(content)
+          text = String(content).dup.force_encoding(Encoding::UTF_8)
+          raise InvalidBundle, 'the file is not valid UTF-8 text' unless text.valid_encoding?
+
+          decode(text)
+        end
+
+        # The three readers below are public for the same single reason: `Bundle` composes
+        # them in a different order (every template, not the first one) and must reuse the
+        # closed type map, the field list and the version rule rather than restate them.
+        #
+        # `attributes_from` and `check_format_version!` were private until T-29 and their
+        # behaviour is unchanged — only their visibility. `spec/reporting/exchange_spec.rb`
+        # already covers both through `.parse`, and `spec/reporting/bundle_spec.rb` covers
+        # them again through the bundle.
+        def check_format_version!(raw)
+          version = raw['format_version']
+          # ABSENT IS ACCEPTED AND UNKNOWN IS NOT, which looks inconsistent and is not: a
+          # bundle exported by the BASE plugin has no `format_version` at all, and that is
+          # precisely the file this import exists to read. A version we do not recognise
+          # is a file written by a NEWER version of this plugin, and reading it
+          # optimistically is how a field gets silently dropped.
+          return if version.nil?
+          return if version.to_i == FORMAT_VERSION
+
+          raise InvalidBundle,
+                "this file says format_version #{version.inspect}, and this version of " \
+                "the plugin reads #{FORMAT_VERSION}"
+        end
+
+        def attributes_from(node)
+          attributes = node.slice(*EXPORTED_FIELDS)
+          attributes.merge!(resolved_type(node))
+
+          if attributes['name'].to_s.strip.empty?
+            raise InvalidBundle, 'the template in this file has no name'
+          end
+
+          # `enabled` arrives as a string from YAML written by hand. Coerced here rather
+          # than left to ActiveRecord, whose boolean cast reads "false" as TRUE when the
+          # value arrives as a bare string — which would silently enable a template
+          # somebody disabled.
+          attributes['enabled'] = truthy?(attributes['enabled']) if attributes.key?('enabled')
+
+          attributes
+        end
+
         private
 
         # JSON first, YAML second, and the ORDER is not an optimisation. Every JSON
@@ -179,21 +262,6 @@ module RedmineReporterDashboards
           raise InvalidBundle, "the file could not be read as JSON or YAML: #{e.message}"
         end
 
-        def check_format_version!(raw)
-          version = raw['format_version']
-          # ABSENT IS ACCEPTED AND UNKNOWN IS NOT, which looks inconsistent and is not: a
-          # bundle exported by the BASE plugin has no `format_version` at all, and that is
-          # precisely the file this import exists to read. A version we do not recognise
-          # is a file written by a NEWER version of this plugin, and reading it
-          # optimistically is how a field gets silently dropped.
-          return if version.nil?
-          return if version.to_i == FORMAT_VERSION
-
-          raise InvalidBundle,
-                "this file says format_version #{version.inspect}, and this version of " \
-                "the plugin reads #{FORMAT_VERSION}"
-        end
-
         # Four shapes, one reader: our own `{'template' => {...}}`, T-29's
         # `{'templates' => [{...}]}`, the base plugin's bare attribute Hash, and its
         # `{'report_template' => {...}}` wrapper.
@@ -206,23 +274,6 @@ module RedmineReporterDashboards
           raise InvalidBundle, 'the file does not contain a report template' unless node.is_a?(Hash)
 
           node
-        end
-
-        def attributes_from(node)
-          attributes = node.slice(*EXPORTED_FIELDS)
-          attributes.merge!(resolved_type(node))
-
-          if attributes['name'].to_s.strip.empty?
-            raise InvalidBundle, 'the template in this file has no name'
-          end
-
-          # `enabled` arrives as a string from YAML written by hand. Coerced here rather
-          # than left to ActiveRecord, whose boolean cast reads "false" as TRUE when the
-          # value arrives as a bare string — which would silently enable a template
-          # somebody disabled.
-          attributes['enabled'] = truthy?(attributes['enabled']) if attributes.key?('enabled')
-
-          attributes
         end
 
         # Rails' own `FALSE_VALUES`, written out rather than required.

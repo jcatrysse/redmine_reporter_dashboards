@@ -119,6 +119,28 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
                                  original_filename: 'bundle.json')
   end
 
+  # T-29 — read the member names out of a streamed archive.
+  #
+  # Deliberately a reader rather than a call into `ZipStream`: asking the writer what it
+  # wrote would compare a value with itself. This walks the central directory the way an
+  # unpacker does, which is also what proves the response really is an archive and not a
+  # PDF with a `.zip` name on it.
+  def zip_members(body)
+    bytes = body.b
+    eocd = bytes.rindex("PK\x05\x06".b)
+    assert_not_nil eocd, 'the response carries no end-of-central-directory record'
+    count, _size, offset = bytes[eocd + 10, 10].unpack('vVV')
+
+    cursor = offset
+    Array.new(count) do
+      assert_equal "PK\x01\x02".b, bytes[cursor, 4], 'not a central directory header'
+      name_len, extra_len, comment_len = bytes[cursor + 28, 6].unpack('vvv')
+      name = bytes[cursor + 46, name_len]
+      cursor += 46 + name_len + extra_len + comment_len
+      name.force_encoding(Encoding::UTF_8)
+    end
+  end
+
   # 51 issues, so a per-record export is one past `BatchGuard::DEFAULT_MAX_DOCUMENTS`.
   # Built rather than stubbed: the number under test IS the shipped default, and a test
   # that lowers the cap to two proves the mechanism while saying nothing about the cap an
@@ -698,7 +720,45 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_response :success
     assert_equal 'application/json', response.media_type
     assert_include 'Quarterly_report.json', response.headers['Content-Disposition']
-    assert_equal 'Quarterly report', JSON.parse(response.body)['template']['name']
+    # T-29: THE EXPORT IS A BUNDLE NOW (FR-55), so one template comes out as a bundle
+    # carrying one template rather than as a second file format.
+    parsed = JSON.parse(response.body)
+    assert_equal %w[format_version exported_at plugin_version templates], parsed.keys
+    assert_equal 'Quarterly report', parsed['templates'].first['name']
+  end
+
+  # T-29 / §7 RULE 5 ON THE UPLOAD PATH. A bundle written by a current install, uploaded to
+  # one whose schema is a minor version behind, used to reach `Template.new` with a column
+  # this database does not have and raise `ActiveModel::UnknownAttributeError` — a 500 where
+  # rule 5 asks for a degraded feature.
+  #
+  # THE COLUMN IS TAKEN AWAY RATHER THAN AN UNKNOWN FIELD ADDED, and that distinction is
+  # the test: an unknown field never arrives, because `Exchange.attributes_from` slices the
+  # node to `EXPORTED_FIELDS` first. Mutation testing found the first version of this
+  # assertion exercising nothing for exactly that reason. Stubbing `column_names` expresses
+  # an older schema without running DDL inside a test, which PostgreSQL rolls back and
+  # MySQL COMMITS (HANDOVER §1).
+  def test_an_upload_naming_a_column_this_schema_lacks_is_imported_without_it
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates,
+          :edit_reporter_dashboards_templates)
+    # THE VALUE IS COMPUTED BEFORE THE STUB IS INSTALLED. Written the other way round,
+    # `Template.stubs(:column_names).returns(Template.column_names - [...])` replaces the
+    # method before Ruby evaluates the argument, so the argument reads the stub and answers
+    # nil — `undefined method '-' for nil`, from a line that looks obviously correct.
+    older_schema = Template.column_names - ['failure_document']
+    Template.stubs(:column_names).returns(older_schema)
+    json = { 'format_version' => 1,
+             'templates' => [{ 'name' => 'From the future', 'content' => '<p>f</p>',
+                               'failure_document' => true }] }.to_json
+
+    assert_difference 'RedmineReporterDashboards::Template.count', 1 do
+      post :import, params: { project_id: @project.identifier, file: uploaded_bundle(json) }
+    end
+
+    assert_response :redirect
+    # AND THE OPERATOR IS TOLD (INV-4). The template that arrived is not the template that
+    # was sent, and the person who chose the file is standing right here.
+    assert_match(/failure_document/, flash[:warning].to_s)
   end
 
   def test_export_sanitises_a_filename_that_would_be_a_path
@@ -865,23 +925,103 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_not_include '%PDF-', response.body
   end
 
-  # The archive gap is E-6's third owed bullet and is REFUSED rather than half-served.
-  # WITH AN ENGINE, AND `:not_implemented` EXACTLY. Without the engine this test reached
-  # the "no engine registered" branch and asserted 500 — it passed for a reason that had
-  # nothing to do with archives, and `send_document`'s refusal was never executed. Found
-  # by the independent review of T-23.
-  def test_a_multi_document_export_is_refused_rather_than_serving_the_first_document
+  # T-29 — THE ARCHIVE. This test asserted a 501 until T-29 built it (§Findings E-6's
+  # third bullet, ~~S-12~~); the refusal it used to pin is gone, so the test now pins the
+  # feature that replaced it.
+  #
+  # WITH AN ENGINE, AND THE REASON IS THE ONE THE INDEPENDENT REVIEW OF T-23 FOUND: without
+  # it this request reaches the "no engine registered" branch and answers 500, so an
+  # assertion about archives would pass for a reason that has nothing to do with archives
+  # and `send_document`'s archive arm would never execute.
+  def test_a_multi_document_export_streams_a_zip_archive
     template = create_template(output: 'per_record')
     grant(:view_reporter_dashboards_reports)
-    assert Issue.visible(@jsmith).where(project_id: @project.id).count > 1
+    documents = Issue.visible(@jsmith).where(project_id: @project.id).count
+    assert documents > 1, 'the fixture must produce more than one document to be an archive'
 
     with_engine do
       get :document, params: { project_id: @project.identifier, id: template.id }
     end
 
-    assert_response :not_implemented
-    assert_not_equal 'application/pdf', response.media_type
-    assert_not_include '%PDF-', response.body
+    assert_response :success
+    assert_equal 'application/zip', response.media_type
+    assert_include '.zip', response.headers['Content-Disposition']
+    assert_equal documents, zip_members(response.body).length
+  end
+
+  # NO `Content-Length`, WHICH IS THE WHOLE POINT OF E-6's BULLET. A response that
+  # announced its length would have had to be built in memory first, so this assertion is
+  # what separates "streamed" from "buffered and sent" — the two are otherwise identical
+  # from the client's side.
+  def test_the_archive_is_streamed_rather_than_buffered
+    template = create_template(output: 'per_record')
+    grant(:view_reporter_dashboards_reports)
+
+    with_engine do
+      get :document, params: { project_id: @project.identifier, id: template.id }
+    end
+
+    assert_response :success
+    assert_nil response.headers['Content-Length'],
+               'a Content-Length means the whole archive was built before it was sent'
+    # AND NOTHING IN BETWEEN MAY KEEP A COPY. `send_data` sets this for the single-document
+    # download; a streamed response has to say it itself, and an archive of somebody's
+    # visible issues is the last thing that should sit in a shared proxy cache.
+    assert_include 'no-store', response.headers['Cache-Control'].to_s
+    # AND THE BODY IS AN ENUMERABLE RATHER THAN A STRING. `send_data` takes a String, so
+    # this is the assertion that would fail the moment somebody "simplified" the action
+    # back to it — at which point the header above would come back too.
+    # AND THE BODY HANDED TO RACK IS THE LAZY WRITER ITSELF, not a String.
+    #
+    # This is the assertion that would fail the moment somebody "simplified" the action
+    # back to `send_data`, which takes a String and would therefore have to build the whole
+    # archive first — at which point the missing Content-Length above would become a lie
+    # rather than a fact. `ActionController::Metal#response_body=` wraps anything answering
+    # `to_str` in an Array, so a buffered body could not satisfy this either way.
+    #
+    # MEASURED, NOT ASSUMED: the first version of this test reached into
+    # `@response`'s `@stream` and found a fully concatenated String there, because the
+    # functional-test harness materialises the body for `response.body`. That proved a
+    # property of the harness. `@controller.response_body` is what the controller actually
+    # assigned, which is the thing under test.
+    assert_not_kind_of String, @controller.response_body
+    assert_kind_of RedmineReporterDashboards::Archive::ZipStream, @controller.response_body
+  end
+
+  # EVERY DOCUMENT IS IN THERE, UNDER ITS OWN RECORD'S NAME. A per-record export whose
+  # members were all called the same thing, or which quietly held one member, is the
+  # "serving the first document" behaviour the old 501 existed to avoid — reached by a
+  # different route.
+  def test_each_record_gets_its_own_member_named_after_it
+    template = create_template(name: 'Per issue', output: 'per_record')
+    grant(:view_reporter_dashboards_reports)
+    ids = Issue.visible(@jsmith).where(project_id: @project.id).order(:id).pluck(:id)
+
+    with_engine do
+      get :document, params: { project_id: @project.identifier, id: template.id }
+    end
+
+    names = zip_members(response.body)
+    assert_equal names.uniq.length, names.length, 'two members share a name'
+    ids.each { |id| assert_include "Per_issue-#{id}.pdf", names }
+  end
+
+  # THE CAP IS STILL ASKED BEFORE ANYTHING IS RENDERED, and building the archive must not
+  # have moved that. T-29's `Accept:` says so in as many words: "the cap (BatchGuard) is
+  # still asked BEFORE anything is rendered, so a refused 40 000-document export still
+  # costs one COUNT(*)". Asserted the way T-23 asserted it — the renderer is never called.
+  def test_an_export_over_the_cap_is_refused_before_any_document_is_rendered
+    template = create_template(output: 'per_record')
+    grant(:view_reporter_dashboards_reports)
+    create_issues_past_the_cap
+    RedmineReporterDashboards::Liquid::TemplateRenderer.any_instance.expects(:render).never
+
+    with_engine do
+      get :document, params: { project_id: @project.identifier, id: template.id }
+    end
+
+    assert_response :unprocessable_entity
+    assert_not_equal 'application/zip', response.media_type
   end
 
   # ------------------------------------------------------------------ a document that works
@@ -1059,21 +1199,19 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_response :internal_server_error
   end
 
-  # A REFUSAL IS NOT A CRASH, and the status has to keep saying so even when the answer is
-  # a document. This is the archive path — E-6's third owed bullet — which answers 501.
-  def test_a_refusal_answers_with_a_failure_document_at_the_refusals_own_status
-    template = create_template(output: 'per_record', failure_document: true)
-    grant(:view_reporter_dashboards_reports)
-    assert Issue.visible(@jsmith).where(project_id: @project.id).count > 1
-
-    with_engine do
-      get :document, params: { project_id: @project.identifier, id: template.id }
-    end
-
-    assert_response :not_implemented
-    assert_equal 'application/pdf', response.media_type
-    assert_include 'report-FAILED-', response.headers['Content-Disposition']
-  end
+  # T-29 REMOVED A TEST HERE, and the removal is recorded rather than silent.
+  #
+  # `test_a_refusal_answers_with_a_failure_document_at_the_refusals_own_status` drove the
+  # multi-document 501 and asserted that a refusal answers with a failure document at its
+  # OWN status rather than at 200. T-29 built the archive, so that request now succeeds
+  # and there is no 501 anywhere in the controller to drive.
+  #
+  # The property it protected is NOT lost, and that was checked rather than assumed before
+  # deleting it: `test_a_batch_over_the_cap_answers_with_a_failure_document_at_422` and
+  # `test_an_empty_report_answers_with_a_failure_document_whose_name_is_still_usable` each
+  # assert the same thing on a refusal that still exists — a 422, a PDF, and a
+  # `report-FAILED-` filename. Rewriting this one to drive one of those would have been a
+  # third copy of an assertion two tests already make.
 
   # THE SAFETY CLAUSE, AGAINST A REAL RENDER RATHER THAN A CONSTRUCTED DIAGNOSTIC. The
   # DB-less spec proves `FailureDocument` cannot carry `detail`; this proves the thing an
@@ -1242,7 +1380,7 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     get :export, params: { project_id: @project.identifier, id: template.id }
     assert_response :success
     bundle = response.body
-    assert_equal true, JSON.parse(bundle)['template']['failure_document']
+    assert_equal true, JSON.parse(bundle)['templates'].first['failure_document']
 
     file = Rack::Test::UploadedFile.new(StringIO.new(bundle), 'application/json',
                                         original_filename: 'round-trip.json')

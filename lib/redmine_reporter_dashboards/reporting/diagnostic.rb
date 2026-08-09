@@ -44,8 +44,16 @@ module RedmineReporterDashboards
       # `ArgumentError`; `spec/reporting/diagnostic_spec.rb` therefore GREPS the tree for
       # every `code:` literal handed to a Diagnostic and fails if one is not here, rather
       # than trusting the next author to remember.
+      # `archive_not_available` WAS HERE AND IS GONE, deliberately rather than by tidying.
+      # It was the 501 a multi-document export answered with; T-29 built the archive
+      # (§Findings E-6's third bullet, ~~S-12~~), so no code path can mint it and its nine
+      # locale strings said "not available in this version", which stopped being true in
+      # the same commit. A refusal code nothing can emit is dead vocabulary; one whose
+      # SENTENCE is false is worse, because the first person to see it will believe it.
+      # The inventory check in `spec/reporting/diagnostic_spec.rb` reads the tree for
+      # `code:` literals and is one-directional, so it would not have caught either.
       APPLICATION_CODES = %i[
-        unsupported_source no_documents archive_not_available
+        unsupported_source no_documents
         partial_delivery attachments_too_large no_recipients
         schedule_unusable scope_unavailable template_missing
         diagnostics_truncated

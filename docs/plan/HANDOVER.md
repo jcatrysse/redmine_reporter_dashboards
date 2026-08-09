@@ -754,6 +754,42 @@ no local part, as being in an allowlisted domain. Found by the spec's "text that
 address at all" table rather than by reading. The local part's grammar is the MTA's business;
 its *existence* is not.
 
+**A TEST THAT INVOKES A RAKE TASK CALLING `exit` KILLS THE WHOLE MINITEST RUN, AND THERE
+IS NO SUMMARY LINE TO TELL YOU.** T-29, 2026-08-09. `exchange:plan` and `exchange:apply`
+end in `exit(...)` so they can be deploy steps — and **`exit(0)` raises `SystemExit`
+exactly as `exit(2)` does.** Minitest does not rescue `SystemExit`: the run TERMINATED at
+the first such test, having printed its dots and nothing else. `rake` answered 1 with **no
+failing test named and no `N runs, N failures` line at all**, which reads as a broken
+environment rather than a broken test — and the same run had passed minutes earlier, which
+makes it read as flakiness. Two consequences. A rake-task test must convert the exit into a
+value (`rescue SystemExit => e; status = e.status`) rather than let it escape, which is
+also how the exit CODE becomes assertable — and `ImportPlanRakeTest` avoided this only by
+never invoking a task that exits. And more generally: **a run with no summary line is
+UNMEASURED, never green** — the same rule the mutation harness follows, met from the other
+direction.
+
+**AN INDEPENDENT READER WRITTEN TO CHECK YOUR OWN WRITER CAN BE THE THING THAT IS WRONG,
+AND IT FAILS EXACTLY LIKE A BROKEN WRITER.** Same afternoon. `spec/archive/zip_stream_spec.rb`
+parses the zip it produces rather than comparing it with a fixture — the right call, and
+T-30's PDF is why. Its first version misread the end-of-central-directory record by two
+bytes (`unpack('vVV')` from offset 8 straddles the total-entries field into the size field)
+and reported *"central directory runs past the file"* on **13 of 21 examples**, against an
+archive that `unzip -t` called *"No errors detected"* and Python's `zipfile.testzip`
+accepted. Half an hour was available to spend debugging the writer. The rule that saved it:
+**run the artefact through a real reader BEFORE trusting your own** — two of them, on
+stderr as well as stdout. An independent oracle doubles the number of places a bug can be,
+which is the price of it being independent.
+
+**IN A FUNCTIONAL TEST, `@response`'s STREAM IS ALREADY MATERIALISED, SO IT CANNOT TELL YOU
+WHETHER A RESPONSE WAS STREAMED.** T-29 again. `ActionController::TestCase` reads the body
+to populate `response.body`, so reaching into `@response.instance_variable_get(:@stream)`
+finds a fully concatenated String whatever the controller did — an assertion about the
+harness wearing the words of an assertion about the code. What the controller actually
+assigned survives on the CONTROLLER: `@controller.response_body` is the object handed to
+Rack, and `ActionController::Metal#response_body=` wraps anything answering `to_str` in an
+Array, so a buffered body cannot impersonate a lazy one. Measured by probing both before
+writing the assertion.
+
 ---
 
 ## 1b. Working agreement — verification, decided by the curator
@@ -947,6 +983,8 @@ final line uses to publish the global — so "transpile the `||=`" is not a rout
 | **T-30: every guard, mutation-tested one at a time — TWICE, before and after an independent review** | **yes, locally (2026-08-08)** | **33 mutations, 33 red.** The first 21: the `endobj` delimiter, the PDF string escaping, `encodable?` answering honestly, the message and the detail each planted onto the page, the filename character filter and its empty fallback, `ORIGIN_KEYS.fetch` being a `fetch`, an undrawable VALUE degrading rather than raising, `to_h` carrying the template, the opt-in being consulted at all, the failure keeping the failure's own status, `#show` staying a page, rule 5's column guard, a nil in the column reading as off, the diagnostic naming the template, and the failure notice really having no attachment. One more was observed red during development rather than planted: deleting `add_column` from `schema_recorder.rb` makes G11 report UNKNOWN. A fresh-subagent review then found **four MAJORs**, and the twelve mutations covering their fixes are the rest: the font's own advance widths, a non-ASCII glyph charged the widest, the truncation marker fitted into the column rather than appended past it, a dropped row saying so, the language decided once for the whole document, an undrawable value getting a sentence rather than `?????`, the closed code set, the code inventory that READS THE TREE, the export carrying the flag, the engine and batch origins naming the template, and the two refusals minting a correlation id. **Two of the twelve were GREEN under mutation and both examples were rewritten** — a truncation example whose last kept line was short enough that appending the marker fitted anyway, and a filename example that `report-FAILED--.pdf` satisfied |
 | **T-31 (increment 1): the `source` field end to end — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-08)** | `rake redmine:plugins:test` — **547 runs, 2540 assertions, 0 failures, 0 errors, 4 skips** (was 521/4 — **skip count unchanged**). DB-less **2208 examples, 0 failures, 102 pending** (was 2192). `spec_liquid` **301 examples, 0 failures** with `LANG=C.UTF-8` — see §3, because without a locale three of them fail and look like escaping defects. Nine gates green with `LAYER_PURITY_MODE=strict`; locale parity **190 keys x 9 files**. **The Ruby 2.7 floor gate earned its keep**: it caught an endless method definition in a new test |
 | **T-31 (increment 1): every guard, mutation-tested one at a time** | **yes, locally (2026-08-08)** | **25 mutations, 25 red.** The `source` annotation and all three `RenderContext` derivations carrying it; the tag's refusal, its degradation and the legacy path still being issues; the controller's two-arm dispatch, the visibility filter, the project filter and `source` being permitted; `ReportRun`'s closed-set refusal, the context being told the source, and the drops following it; and all five of `TimeEntryVisibility`'s branches. **Three were GREEN and all three examples were rewritten** — a `case`'s `else` that turned out to be a second mechanism (DELETED rather than kept, following T-25's precedent), an administrator short-circuit that the built-in Non-member role made unobservable, and a visibility count the fixture could not discriminate |
+| **T-29: the exchange bundle and the streamed archive — THE FULL-APPLICATION SUITE** | **yes, locally (2026-08-09)** | `rake redmine:plugins:test` — **697 runs, 3126 assertions, 0 failures, 0 errors, 4 skips** (was 665/4 — **the skip count did not move**). 32 net new: 21 for the importer against a real database, 9 for the rake wiring, 4 for the archive, less two the archive superseded. DB-less rspec **2392 examples, 0 failures, 103 pending** (was 2340); `spec_liquid` **301, 0 failures**; adapter PostgreSQL 16 **254, 0 failures, 9 pending**; pinned corpus **217, 0 failures**; `spec/golden` from the PLUGIN checkout **166, 0 failures, 0 pending** and `git diff -- spec/golden` empty. Nine gates green with `LAYER_PURITY_MODE=strict` including the new `archive` arm, `migrate_updown.sh` green on both arms, locale parity **247 keys x 9 files** with identical placeholders. **The Ruby 2.7 floor gate earned its keep again**: it caught `Hash#except`, which is Ruby 3.0 core and which ActiveSupport would have supplied at runtime — invisible without the gate |
+| **T-29: two baseline deviations, both ENVIRONMENTAL and both resolved before anything was believed** | **yes, locally (2026-08-09)** | The first control run reported **8 skips against a documented 4**. Not a regression: the four extra were `poppler-utils is not installed`, and `apt-get install -y poppler-utils` restored 665/0/4 exactly — and made four previously-skipped assertions actually run. The DB-less suite reported **3 failures on an unmodified tree**, all `invalid byte sequence in US-ASCII` from a spec that READS a source file; `LANG=C.UTF-8` is the fix (§3's `spec_liquid` entry, now true of the main suite too since T-31 added a source-reading spec). Its example count is **2340 rather than the 2298 last recorded**, the difference being exactly the 42 `spec/adapter` examples that go pending without `RRD_ADAPTER_URL` — worth knowing before treating a count as a regression |
 | Redmine 7.0-stable, standalone, PostgreSQL | yes, before T-01 | 906 rspec + 86 adapter + 114 minitest, 0 failures, 4 skips |
 | Redmine 6.1-stable, with reporter, PostgreSQL | yes, before T-01 | 906 + 86 + 114, 0 failures, 0 skips |
 | Redmine 5.1-stable / 6.0-stable | **no, and cannot be** | 5.1's Gemfile refuses Ruby 3.3+; CI only |

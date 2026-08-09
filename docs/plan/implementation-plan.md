@@ -81,6 +81,7 @@ fact that CI has not yet run on this work at all.
 | T-31 | **DONE — and its second review REJECTED the second attempt too, harder than the first.** Increment 2 built the owned `Aggregation::TimeEntryAggregator` (clauses 4-7): eleven dimensions, `SUM(hours)`, positional grouped reads, an independent Ruby oracle on PostgreSQL 16 and MariaDB 10.11, and **D-1 reproduced live** where the plan had recorded the engine as uninstallable here — `DIVERGES (keys [nil], 0.3 against a real 10.55)` against `agrees` on PostgreSQL. Then a fresh-subagent review found **two BLOCKERS and eight MAJORS while every figure still agreed**, which is the finding worth carrying forward: value agreement proves arithmetic and nothing else. The blockers were a DISCLOSURE — `group_by: issue` printed the subject of an issue the actor may not see, because `time_entries.issue_id` survives the visibility condition core puts in `left_join_issue` — and an UNBOUNDED axis: `limit: 0` meant no cap, so 50 000 buckets came back with `truncated: false`. The majors: ties ordered by engine row order (and past a cap that changes *which* buckets exist), `sort: label` sorting by raw id with a spec whose own name admitted it, the cap folding `(none)` into `(other)`, a project-overridden activity as two identically-labelled buckets, six of eleven drill-through filters naming a filter `TimeEntryQuery` has not got (`author_id` resolving to a plausible WRONG row set), `drill:`/`split_by:`/`period:` dropped in silence against a README that promised them, and **thirteen surviving mutations in the guards the first commit said it had killed**. The dimension set is now core's eight from `time_report.rb`; the corrected version is **34 mutations, 34 red**, with a control run first — because the first harness ran `spec/adapter` and the DB-less specs in one process, where the baseline is already 7 failures, and reported 19 meaningless kills. Recorded rather than absorbed: **S-16** (`SUM` over a duplicating join), **S-18** (no custom-field dimension); **S-17** partially fixed (eight aggregation degradation codes localised in nine languages, mechanism settled for the rest) |
 | T-32 | **DONE — and its independent review REJECTED the first attempt, with two blockers that value agreement could never have seen.** Both were the same shape: a *silent fallback to a WIDER scope than the requester asked for*. An unresolvable `query_id` took `ReportScope.build`'s `:ignore` default, so the saved query was dropped, the report was rendered over the whole project, mailed, and audited as `success` **under the query id it had ignored** — §Findings S-15 one caller later, with the `:raise` mode it needed already written and unused. And `filter_map { … if id.match?(/\A\d+\z/) }` discarded every non-numeric issue id *before* the "refused, not silently included" rule ran, under a 12-line comment explaining why dropping is a defect; at the boundary (`issue_ids=abc`) the parsed list came out empty, took the "no set was named" branch, and mailed a report over the requester's **entire visible scope** while the flash said "sent to 1 recipient". Five majors besides: seven of eight refusal codes rendered a **blank form** with no message at all (the reason was computed, written to the audit, and withheld from the person standing in front of it); a dead `||` guard over a locale key that did not exist, hiding an unused key that *was* translated nine times; **two spec files cited as mechanical evidence that had never been written**, one of them load-bearing for S-19's `address` argument; the recipient bound is every active account in the instance (**pinned by a test and recorded as S-20**, not narrowed — §4.1's `require: :loggedin` and FR-61 disagree about what the bound should be); and five surviving mutations. All fixed, `spec/reporting/adhoc_delivery_spec.rb` written, **8 round-2 mutations, 8 red** after one survivor (an unreachable branch) got the delivery-level test it was missing. The review also found a defect in **my own harness**: `tail -3` cut rspec's summary line off and the green check read absent output as a pass, so four mutations were reported as surviving when nothing had been measured — it now fails closed, and two of those four report "1 failure" singular. Original entry: **done** — `app/controllers/reporter_dashboards/mail_controller.rb` (3 actions), `reporting/{mail_policy,adhoc_delivery}.rb`, two mailer actions with a shared body partial, migration 009's two audit tables, two models, two views, four settings, 37 keys × 9 locales, and **T-40's promotion of `mail_reporter_dashboards_reports`** — the first permission promoted with `require: :loggedin` rather than `:member`. **Each clause of §7b.5's indictment is closed by construction rather than by validation**: the issues resolve through `Reporting::ReportScope` (so `Issue.visible(actor)`), the recipients through `MailPolicy` (admin setting + domain allowlist, `false` and empty by default), and the sender through there being **no parameter a sender could travel in** — asserted against the mailer's own parameter list, because Redmine's `Mailer#mail` merges `From` with `reverse_merge!` and a caller-supplied one would win. **An issue the requester cannot see REFUSES the whole send**, which is T-32's `Accept:` word: silently including it is the base plugin's defect and silently dropping it is the plausible-looking fix, so the count is named and nothing is sent. The rate limit **counts attempts off the audit table** rather than a counter column — one source of truth, and the expensive half of a send is the render — while a refusal that happens before any work consumes nothing, because a quota a refused request consumes is one nobody can recover from. §7's table list names neither table: they are derived from FR-61 and recorded as **S-19**, with the `address` guard **tightened** rather than loosened. **Its own tests found four defects**: an address with no local part (`@example.com`) passed the allowlist; `Template` had no `dependent: :nullify` so an audit row lost its subject's name with it; a visibility fixture proved nothing because the role held no `:view_issues`; and a "a failed send counts against the limit" test passed for the wrong reason until the before/after-claim split was made explicit |
 | T-24 | **done — `import:run` and `import:status`; `import:verify` is DROPPED with evidence (§Findings S-21), because the corpus discipline needs a frozen fixture AND a pinned date and production has neither.** `import/{runner,import_report}.rb` plus two rake tasks. **COPY, FORWARD-ONLY, NEVER ADOPT** — §7's *Adopt vs copy*: the base plugin's own documented uninstall drops `report_templates`, so adopting those rows would lose them, and *"nothing inside the new plugin can prevent that"*. The no-write claim is asserted on the **statements** rather than on the rows, because a row that still looks right proves the importer did not happen to change it and not that it could not. **Idempotence has FOUR outcomes, not two** — `created`, `unchanged`, `updated` (a safe fast-forward when the source moved and the copy did not) and **`diverged`**, which is the one the `Accept:` line is about: a copy edited here is never overwritten, because an importer that clobbered it would destroy somebody's post-migration work once, quietly, on a re-run triggered for an unrelated reason. Divergence is reported and does NOT make the task exit non-zero — it is the expected state after a migration, not a failure. The type map is `Reporting::Exchange::TYPE_MAP` reused rather than copied, so `constantize` on a database column is refused for the same reason FR-55 refuses it on a file. `import:status` reads OUR templates rather than the source's, so it still answers after the base plugin has been uninstalled — which is exactly when somebody asks what state their migration is in. **Its independent review REJECTED the first attempt with two blockers**: the statement-level "never writes to reporter's tables" assertion was anchored at `\A` and one leading `/* rails */` comment defeated it — a real planted `UPDATE report_templates` survived — and the comment cited `spec/import/runner_spec.rb`, which has never existed, repeating T-32's own rejected defect one task later. The pattern now matches verb+table and its NEGATIVE TEST is committed rather than performed by hand. Four majors besides, all fixed. **`RRD_REWRITE=1` is the `--rewrite` §7a named** and it is not a plain overwrite: the local content is written into the append-only version history FIRST, so taking the source's version loses nothing and the order is asserted by driving the snapshot to fail. A template whose project does not exist here is SKIPPED rather than imported invisibly (every surface is project-scoped, so the row was unreachable). 24 full-app runs against real reporter-shaped tables, **11 mutations, 11 red** across two rounds |
+| T-29 | **done** — the exchange bundle AND the streamed archive, which arrived together because §Findings ~~S-12~~ gave the second to T-29 alone. `reporting/{bundle,bundle_import,bundle_report}.rb`, `archive/zip_stream.rb`, `exchange_tasks.rb`, three rake tasks, a ninth `layer_purity` arm, 2 keys x 9 locales and one key deleted. **The bundle WRAPS `Exchange` rather than restating it**: one closed TYPE_MAP, one field list, one version rule, one safe-YAML reader — a second field list is the failure mode that lost `failure_document` once already, and it is silent because a field absent from BOTH ends still round-trips byte-identically. **FR-57 is four decisions, not a hope** — order (by name, then id, so the receiving installation's ids cannot move anything), key order, encoding (raw UTF-8, so `Übersicht` is bytes rather than `\u00dc`) and `exported_at` being an ARGUMENT; the test asserts the payload halves match INDEPENDENTLY of the envelope, because pinning the whole file would also pass if the payload were empty on both sides. **The archive is a dependency-free STORED zip** validated by `unzip -t` and Python's `zipfile` as well as by an independent in-spec reader, and the controller streams it with no `Content-Length` — `@controller.response_body` is asserted to BE the lazy writer, which is the assertion that fails the moment somebody puts `send_data` back. **The documents are rendered before the first byte, on purpose** (E-6). Raised **S-22** (§7b.2's two rake names are already taken by the migration importer, and rake would have run both bodies) |
 | T-26 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -100,6 +101,40 @@ A workflow cannot fork itself without reintroducing the very credential G1 remov
 a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
+
+**S-22 · `technical-spec.md` §7b.2 NAMES TWO RAKE TASKS THAT ALREADY EXIST AND BELONG TO A
+DIFFERENT FEATURE. Reported rather than resolved silently (CLAUDE.md §11.3); T-29 shipped
+under `exchange:` and the collision is the curator's to ratify or rename.** §7b.2 specifies
+the bundle import as *"`import:plan` … then `import:run`"*. Both names have been taken since
+T-02 and T-24:
+
+    reporter_dashboards:import:plan     surveys the BASE PLUGIN's tables (T-02, read-only)
+    reporter_dashboards:import:run      copies rows out of them (T-24, COPY/FORWARD-ONLY)
+    reporter_dashboards:import:status   reports drift of those copies (T-24)
+
+Those three are the one-way migration off `redmine_reporter`. T-29's two steps read a FILE
+and are a different feature with a different input, a different failure mode and a different
+audience. Defining `import:plan` twice in one rake file is not an error rake reports — the
+second definition ENHANCES the first, so BOTH bodies run, in definition order. **Measured**
+(two tasks of the same name in one Rake application):
+
+    FIRST body (the migration survey)
+    SECOND body (the bundle planner)
+    actions=2
+
+So the collision would not have been caught by a name clash or a warning; it would have
+been caught by an operator. `exchange:plan` exits 2 without `RRD_FILE`
+(`test/unit/exchange_rake_test.rb`), so the combined task would have run the migration
+survey and then failed the whole command for a reason that has nothing to do with the
+migration — while `rake -T` listed one task and showed one description.
+
+T-29 therefore ships `reporter_dashboards:exchange:{export,plan,apply}`: §7b.2's VERBS are
+kept and the namespace says which of the two importers it is. `test/unit/exchange_rake_test.rb`
+pins both halves — that the three `exchange:` tasks exist, and that `import:plan`/`import:run`
+still belong to the migration importer — so a later "fix" back to the spec's literal names
+fails a test rather than shadowing a documented command. **What the curator owes:** either a
+one-line edit to §7b.2 adopting `exchange:`, or a decision to rename the migration importer
+instead.
 
 **S-21 · `import:verify` is DROPPED, with evidence, not deferred. Curator decision,
 2026-08-08.** The clause was *"`import:verify` diffs **aggregation result hashes**, not HTML
@@ -500,8 +535,9 @@ indexes, and this is neither), so it can be added later if T-28 gives it a desti
 **What the curator owes:** either a one-line edit to §7b.3 narrowing it to the template, or
 a decision that the schedule half is T-28's to finish. Nothing was silently rewritten.
 
-**~~S-12~~ · CLOSED by curator decision, 2026-08-08: the streamed archive is T-29's, and
-T-30 is released from it.** E-6's third bullet named "T-29 or T-30"; it is now T-29 alone,
+**~~S-12~~ · CLOSED by curator decision, 2026-08-08, and DELIVERED by T-29 on 2026-08-09 —
+`TemplatesController#send_document` streams a zip and the 501 is gone. See E-6 below for
+what was built and for the one thing the word "streamed" does NOT claim.** E-6's third bullet named "T-29 or T-30"; it is now T-29 alone,
 which is also where the packaging machinery will already exist. T-29's `Accept:` carries it
 and the 501 refusal in `TemplatesController#send_document` is what T-29 deletes. The
 argument follows.
@@ -2122,10 +2158,24 @@ caller is a cap nobody has seen refuse anything.
   this path writes either row today, so these are REGRESSION GUARDS rather than discoveries.**
   That is what they were asked for — the base plugin's failure path called `create_attachment` on
   the exception message — and it is what they will catch.
-* **Streamed archives — STILL OWED, and now visible.** A per-record export of more than one
-  document is refused with a **501** naming the count, and the download button is not drawn for
-  it. So the gap has a caller, a status code and a sentence rather than being a paragraph in a
-  finding; what it does not have is a zip. Whoever builds it (T-29 or T-30) deletes the refusal.
+* **Streamed archives — PAID by T-29, 2026-08-09. E-6 is now closed in all three bullets.**
+  A per-record export of more than one document streams a zip with **no `Content-Length`**;
+  the 501, its diagnostic code (`archive_not_available`) and its nine locale strings are all
+  deleted, and the download button is drawn for the archive with its own label and the count
+  in it. `Archive::ZipStream` is a sibling of `render/` naming neither layer — E-6's own
+  sentence says a zip inside `render/` is the violation `layer_purity.sh` exists to catch —
+  and the gate grew an `archive` arm, negative-tested in three directions.
+
+  **What "streamed" means here is stated exactly rather than implied**, because the
+  overclaim was available and would have passed every test: the ARCHIVE is never
+  materialised (`ZipStream#each` yields, and `spec/archive/zip_stream_spec.rb` asserts a
+  chunk is emitted before the last entry is pulled from its source), while the rendered PDFs
+  ARE all in memory before the first byte goes out. That is deliberate and is the
+  correctness argument, not a limitation: the status line is sent with the first byte, so
+  rendering lazily would mean a failure at document 7 of 50 arriving after `200 OK` — INV-5
+  one layer up, a truncated archive that unpacks cleanly and is missing 44 reports. The
+  set held in memory is bounded by `BatchGuard`'s cap, which is still asked off a
+  `COUNT(*)` before anything is rendered (asserted: the renderer is never called).
 
 **~~E-5~~ · CLOSED 2026-08-06. `:wkhtmltopdf` is PROMOTED to `verification: corpus`, and the matrix
 carries its cells.** The promotion condition this finding set — *every failure accounted for* — was

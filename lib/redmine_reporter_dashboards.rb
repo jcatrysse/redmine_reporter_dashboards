@@ -54,6 +54,17 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/occurr
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/scheduling/runner'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/diagnostic'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/exchange'
+# T-29 — the exchange BUNDLE and the streamed archive. `bundle` is required at boot
+# because `TemplatesController#export` writes one on an ordinary request; `bundle_import`
+# and `bundle_report` deliberately are NOT, because only the rake tasks use them and they
+# reach the autoloaded Template model (see the note in `bundle_import.rb`).
+#
+# `archive/zip_stream` names NEITHER the Liquid layer nor the render layer, which is why
+# it is a sibling of `render/` rather than inside it — §Findings E-6 says a zip built in
+# `render/` is the layer violation `layer_purity.sh` exists to catch, and the gate has an
+# arm for this directory saying the same thing mechanically.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/archive/zip_stream'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/bundle'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_scope'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/time_entry_visibility'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'

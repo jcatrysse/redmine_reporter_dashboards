@@ -6,6 +6,49 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **A *one document per issue* report covering several issues now downloads as a zip.**
+  Until now it was refused: the page rendered every document as HTML and offered no
+  download button, because serving one of fifty PDFs and calling it the report is worse
+  than refusing.
+
+  **The archive is streamed, not assembled.** It goes out as it is written, so the
+  response has no `Content-Length` and the plugin never holds a copy of the whole file.
+  Each member is one issue's PDF, named after that issue; two issues whose names sanitise
+  to the same thing get distinct members rather than one overwriting the other.
+
+  **Every document is still rendered before the download starts, deliberately.** The
+  status code is sent with the first byte, so producing them lazily would mean a failure
+  half way through arriving *after* a `200 OK` — an archive that unpacks cleanly and is
+  quietly missing most of the reports. The 50-document cap is unchanged and is still
+  checked before anything is rendered at all.
+
+- **Templates can be moved between installations in bulk, with a dry run first.**
+  `rake reporter_dashboards:exchange:export` writes a project's templates to a JSON
+  bundle, `exchange:plan` says exactly what importing it would do **and writes nothing**,
+  and `exchange:apply` does it. Conflicts are explicit —
+  `RRD_ON_CONFLICT=skip|rename|overwrite` — and `overwrite` keeps the content that was
+  there in the template's version history, so it can be rolled back to. It never changes a
+  template's owner or its visibility, and it only touches templates you may edit.
+
+  **One transaction per template**, so a single bad template is reported with its reason
+  and the rest of the bundle still imports. The plan also runs the template linter and
+  prints the findings per template, so you can see what is coming before it lands.
+
+  These live under `exchange:` rather than `import:` because
+  `reporter_dashboards:import:*` already means the one-way migration off
+  `redmine_reporter`, which reads that plugin's tables rather than a file.
+
+### Changed
+
+- **Export now writes a versioned bundle** — `format_version`, `exported_at`,
+  `plugin_version` and a list of templates — instead of a bare single-template document.
+  Files written by earlier versions still import, as do `redmine_reporter`'s YAML exports.
+  Exporting, importing and exporting again produces the same bytes, so a bundle can live
+  in version control and a difference in it is a real difference.
+
+- An import into an installation whose schema is older than the file **drops the fields it
+  has no column for and says so**, instead of failing with an internal error.
+
 - **Migrating from `redmine_reporter` now copies your templates across.**
   `rake reporter_dashboards:import:run` reads the old plugin's templates and writes copies
   into this one's tables; `rake reporter_dashboards:import:status` says what has drifted
