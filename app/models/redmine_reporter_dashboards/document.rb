@@ -119,14 +119,54 @@ module RedmineReporterDashboards
       false
     end
 
-    # The stored bytes, or nil when there are none — a purged document, or a row from before
-    # anything wrote one. `readable?` is core's own check that the file is actually on disk,
-    # and skipping it turns a missing file into an `Errno::ENOENT` from a controller.
-    def bytes
-      return nil if purged?
-      return nil if attachment.nil? || !attachment.readable?
+    # SERVABLE IS NOT THE SAME QUESTION AS "IS THERE A FILE", and separating them is a fix
+    # rather than a tidy-up. An independent review measured a share link outliving its
+    # snapshot by 300 days and serving it with a `200` — `expires_at` was consulted by a
+    # validation and by nothing else, which made the "mandatory, bounded TTL" the spec
+    # insists on decorative in the very commit that first created rows.
+    #
+    # THREE WAYS A DOCUMENT STOPS BEING SERVABLE, and they are deliberately not the same:
+    #
+    #   expired?  its TTL ran out. The bytes may well still be on disk — the purge task
+    #             collects them later, and "later" must not mean "still being served"
+    #   purged?   the purge task has been and gone
+    #   no file   the row survived a restore that the `files/` directory did not
+    #
+    # The endpoint answers all three the same way, and that is correct: to a reader,
+    # "this report is no longer available" is one fact. They are distinct HERE because a
+    # diagnostic, and the purge task itself, need to tell them apart.
+    def servable?(now = Time.zone.now)
+      return false if purged? || expired?(now)
+      return false if attachment.nil? || !attachment.readable?
+
+      true
+    end
+
+    # The stored bytes, or nil when there are none. `readable?` is core's own check that the
+    # file is actually on disk, and skipping it turns a missing file into an `Errno::ENOENT`
+    # from a controller.
+    def bytes(now = Time.zone.now)
+      return nil unless servable?(now)
 
       ::File.binread(attachment.diskfile)
+    end
+
+    # WHAT THE PURGE TASK DOES TO ONE ROW. It lives here rather than in the task so that the
+    # order is fixed in one place: the bytes go first, then the row is stamped. Reversed, a
+    # crash between the two would leave a row saying "purged" over a file still on disk, and
+    # nothing would ever look at it again.
+    #
+    # THE ROW IS KEPT. `purged_at` is the difference between "a document existed here and
+    # was collected on this date" and "no document ever existed", and an audit that cannot
+    # tell those apart is not one.
+    def purge!(now = Time.zone.now)
+      return false if purged?
+
+      transaction do
+        stored_attachment&.destroy
+        update_columns(attachment_id: nil, purged_at: now, updated_at: now)
+      end
+      true
     end
 
     private

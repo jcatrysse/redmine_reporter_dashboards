@@ -70,8 +70,21 @@ module RedmineReporterDashboards
 
       # The reasons a capture can come back empty-handed. Closed, and each is a key in
       # `en.yml` under `error_reporter_snapshot_*`.
-      CODES = %i[scope_unavailable render_failed no_documents many_documents
-                 attachment_failed].freeze
+      CODES = %i[invalid_expiry wrong_project scope_unavailable render_failed no_documents
+                 many_documents attachment_failed].freeze
+
+      # THE FILENAME'S BUDGET, and it is a measured number rather than a round one.
+      # `attachments.filename` is bounded at 255 by every engine this plugin runs on, and
+      # `Template#name` is valid up to 255 too — so `report-<name>-<id>.pdf` was unbounded
+      # while everything it is built from was not. An independent review measured the
+      # boundary: a 240-character template name captured, a 245-character one answered
+      # `attachment_failed: File is too long (maximum is 255 characters)`, which is a
+      # nonsense message for "your report has a long title".
+      #
+      # 255 minus the longest possible fixed part: `report-` (7) + `-` (1) + `.pdf` (4) + a
+      # generous 12 for the document id. Names are truncated rather than refused — a long
+      # title is not a reason to refuse to make somebody's report.
+      MAX_FILENAME_BASE = 255 - 24
 
       module_function
 
@@ -83,6 +96,29 @@ module RedmineReporterDashboards
       def capture(template:, render_as:, expires_at:, project: nil, query_id: nil,
                   created_by: nil, logger: nil)
         logger ||= Rails.logger
+        # REFUSED, NOT RAISED, AND THIS WAS A REVIEW FINDING. The module's own comment
+        # promises that "every refusal answers with a code the caller can turn into a
+        # sentence, never with nil" — and a bad `expires_at` broke that promise loudly:
+        # `nil` and an out-of-bound date both reached `Document.create!` and came back as
+        # `ActiveRecord::RecordInvalid`, past every caller written against `Result`,
+        # including the README's own console recipe.
+        #
+        # A PAST EXPIRY IS REFUSED TOO, and it used to be accepted: it stored a document
+        # that was born collectable and unservable, which is a successful-looking capture
+        # producing a snapshot no link could ever serve.
+        refusal = expiry_refusal(expires_at)
+        return refusal if refusal
+
+        # THE PROJECT MUST BE THE TEMPLATE'S. Measured by an independent review: capturing a
+        # project-1 template while passing `project: Project.find(2)` succeeded and stored
+        # `document.project_id = 2`, so the snapshot was filed under a project whose members
+        # had nothing to do with it — and `project` is also what bounds the render's scope,
+        # so the bytes were a different report from the one the row claims.
+        if project && template.project_id && project.id != template.project_id
+          return refuse(:wrong_project,
+                        "the template belongs to project #{template.project_id}, not #{project.id}")
+        end
+
         outcome = render(template: template, actor: render_as, project: project,
                          query_id: query_id, logger: logger)
         return outcome if outcome.is_a?(Result)
@@ -96,13 +132,35 @@ module RedmineReporterDashboards
 
       # --- rendering -------------------------------------------------------------------
 
-      # THE RENDER RUNS AS `actor`, AND `User.current` IS SET FOR ITS DURATION. The drops
-      # read `RenderContext#actor` (INV-1), but core does not: `Issue.visible` with no
-      # argument, `Setting`, `Attachment#visible?` and every `l()` call read `User.current`
-      # ambiently, and a capture triggered from a request would otherwise run half as the
-      # requester. `ScheduledDelivery#as` exists for exactly this and this is the same
-      # method, restated rather than shared because the two classes have no other reason to
-      # know about each other.
+      # THE RENDER RUNS AS `actor`, AND `User.current` IS SET FOR ITS DURATION.
+      #
+      # --- WHAT EACH HALF OF THAT SENTENCE ACTUALLY CARRIES, MEASURED ---
+      #
+      # An independent review called INV-1 untested here and picked `as(::User.current)` as
+      # the mutation. It SURVIVES, and the reason is worth writing down rather than fixing:
+      # **`as` is not what holds INV-1 on this path.** Every visibility decision the plugin
+      # makes is threaded EXPLICITLY — `ReportScope.build(actor:)` starts from
+      # `Issue.visible(actor)`, and the drops refuse to resolve without a `RenderContext`
+      # rather than reaching for `User.current` (`record_drop.rb:14-17` says so in as many
+      # words). So swapping the ambient user changes nothing the render reads, and a
+      # mutation that only swaps it cannot fail a test that only reads the render's output.
+      #
+      # THE MUTATION THAT DOES DISCRIMINATE is the argument itself — `actor: render_as` →
+      # `actor: created_by` — and it is now killed loudly by
+      # `test_the_bytes_are_rendered_as_the_named_identity_and_not_the_ambient_user`, which
+      # drives a capture whose two candidate identities see a different number of issues:
+      # `"COUNT=[7]" not found in … COUNT=[6]`. That is INV-1's real guard and it has a test.
+      #
+      # `as` STAYS, as defence in depth for the code this module does NOT own: core reads
+      # `User.current` ambiently all over (`Issue#visible_custom_field_values(user = nil)`,
+      # `Attachment#visible?`, `Setting`), and a capture triggered from a request would
+      # otherwise run any such call as the requester. It is belt to the explicit threading's
+      # braces — and the honest claim for it is "no observable difference today", not "INV-1
+      # depends on it".
+      #
+      # `ScheduledDelivery#as` exists for exactly this and this is the same method, restated
+      # rather than shared because the two classes have no other reason to know about each
+      # other.
       def render(template:, actor:, project:, query_id:, logger:)
         as(actor) do
           # `on_missing_query: :raise`, and the reasoning is `AdhocDelivery`'s rather than
@@ -223,10 +281,39 @@ module RedmineReporterDashboards
 
       # `report-<template>-<id>.pdf`. The id is the DOCUMENT's, not the template's, so two
       # snapshots of one template are distinguishable in a downloads folder — which is the
-      # only place this name is ever seen.
+      # only place this name is ever seen. BOUNDED: see `MAX_FILENAME_BASE`.
+      #
+      # `parameterize` COLLAPSES A NON-LATIN NAME TO NOTHING, which is why the fallback is
+      # not decoration: `Отчёт`, `季度报告` and a name of only spaces all parameterize to the
+      # empty string, so eight of this plugin's nine locales can produce a template whose
+      # snapshot is called `report-report-<id>.pdf`. That is ugly and it is deliberate — the
+      # alternative is a non-ASCII filename in a `Content-Disposition` header, which is
+      # exactly the interoperability problem `parameterize` is here to avoid, and the
+      # document id still makes every name unique.
       def filename_for(template, document)
         base = template.name.to_s.parameterize.presence || 'report'
-        "report-#{base}-#{document.id}.pdf"
+        "report-#{base[0, MAX_FILENAME_BASE]}-#{document.id}.pdf"
+      end
+
+      # `expires_at` IS THE ONE ARGUMENT THIS MODULE CANNOT DEFAULT (the document's TTL is
+      # the share link's, and a default here would be a second place deciding how long shared
+      # data lives), so it is also the one it has to check.
+      def expiry_refusal(expires_at)
+        return refuse(:invalid_expiry, 'a snapshot needs an expiry') if expires_at.blank?
+        # `in_time_zone` AND NOT `to_time`: it accepts a Time, a DateTime, a Date and a
+        # String alike, and `to_time` on a `TimeWithZone` emits Rails 8.0's
+        # `to_time_preserves_timezone` deprecation — a warning in every capture, which is how
+        # a suite learns to ignore its own output.
+        return refuse(:invalid_expiry, 'expires_at must be a time') unless expires_at.respond_to?(:in_time_zone)
+
+        at = expires_at.in_time_zone
+        now = Time.zone.now
+        return refuse(:invalid_expiry, "#{at} is in the past") if at <= now
+
+        bound = now + ::RedmineReporterDashboards::Document::MAX_RETENTION
+        return refuse(:invalid_expiry, "#{at} is beyond the retention bound of #{bound}") if at > bound
+
+        nil
       end
 
       # FR-58's id, taken from the section that produced the document rather than minted

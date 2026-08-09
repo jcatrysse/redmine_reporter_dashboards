@@ -102,6 +102,7 @@ module RedmineReporterDashboards
                          allow_nil: true
     validate :snapshot_has_a_document
     validate :expiry_within_the_lifetime_bound
+    validate :expiry_within_the_snapshots_own
 
     # ------------------------------------------------------------------ minting
 
@@ -203,6 +204,46 @@ module RedmineReporterDashboards
                        user_agent: user_agent, created_at: Time.zone.now)
     end
 
+    # HOW LONG A REFUSAL SUPPRESSES THE NEXT IDENTICAL ONE. See `record_refusal!`.
+    REFUSAL_COOLDOWN = 60
+
+    # A DEAD LINK IS STILL AN UNAUTHENTICATED WRITE ENDPOINT, and an independent review
+    # measured what that costs: twenty requests on a REVOKED link wrote twenty rows, each
+    # carrying up to 255 attacker-chosen bytes of `User-Agent`. Revocation stopped the bytes
+    # and not the writes, for ever.
+    #
+    # The care taken over `share_link_id` being NOT NULL — *"a nullable column would let
+    # anyone on the internet grow that table with gibberish"* — is undone by one leaked or
+    # public token doing exactly that.
+    #
+    # SO REFUSALS ARE COLLAPSED AND SUCCESSES ARE NOT, and the asymmetry is the whole design:
+    #
+    #   a SERVED row is a fact about a person receiving data. Every one matters, they are
+    #   bounded by `max_uses` where a bound was asked for, and FR-53's *"every access is
+    #   recorded"* is about these
+    #
+    #   a REFUSAL row is a fact about somebody trying. The FIRST one is the interesting
+    #   one — it is what tells an administrator "somebody is still using the link you
+    #   revoked" — and the two-hundredth from the same link in the same minute adds nothing
+    #   except rows. So an identical refusal within `REFUSAL_COOLDOWN` seconds is dropped,
+    #   and the signal survives while the growth does not
+    #
+    # A CHANGE OF REASON ALWAYS WRITES, whatever the cooldown: `expired` following `revoked`
+    # is a different fact and losing it would be losing the log's meaning rather than its
+    # volume. Answers the row, or nil when it was collapsed.
+    def record_refusal!(outcome:, ip_address: nil, user_agent: nil, now: Time.zone.now)
+      recent = accesses.where(outcome: outcome.to_s)
+                       .where(arel_table_for_accesses[:created_at].gt(now - REFUSAL_COOLDOWN))
+                       .exists?
+      return nil if recent
+
+      record_access!(outcome: outcome, ip_address: ip_address, user_agent: user_agent)
+    end
+
+    def arel_table_for_accesses
+      RedmineReporterDashboards::ShareLinkAccess.arel_table
+    end
+
     def revoke!(now = Time.zone.now)
       # ALREADY-REVOKED IS NOT RE-REVOKED. Overwriting `revoked_at` would move the moment
       # it happened, which is the one fact the column exists to carry.
@@ -301,6 +342,25 @@ module RedmineReporterDashboards
       return if expires_at <= origin + MAX_LIFETIME
 
       errors.add(:expires_at, :less_than_or_equal_to, count: (origin + MAX_LIFETIME).to_date)
+    end
+
+    # A LINK MUST NOT OUTLIVE THE SNAPSHOT IT POINTS AT — the actual document, not the class
+    # constant. FOUND BY AN INDEPENDENT REVIEW, which measured a link outliving its document
+    # by 300 days and serving it with a `200`: `MAX_LIFETIME` above bounds the link against a
+    # CONSTANT, which says nothing about the row it authorises, and the commit message
+    # claimed the opposite of what the code did.
+    #
+    # Checked here AND at serving time (`Document#servable?`), which is not belt-and-braces:
+    # this one stops the bad link being created, and that one stops a link created before
+    # this validation existed — or one whose document was later re-dated — from serving stale
+    # bytes. Neither alone covers both.
+    def expiry_within_the_snapshots_own
+      return if expires_at.blank? || rendered_document_id.blank?
+
+      document_expiry = rendered_document&.expires_at
+      return if document_expiry.blank? || expires_at <= document_expiry
+
+      errors.add(:expires_at, :less_than_or_equal_to, count: document_expiry.to_date)
     end
   end
 end

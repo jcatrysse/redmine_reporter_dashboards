@@ -143,6 +143,39 @@ class ReporterDashboardsShareLinkTest < ActiveSupport::TestCase
     end
   end
 
+  # THE CONSTANT-TIME COMPARE, WHICH IS UNREACHABLE ON THIS ENGINE AND TESTED ANYWAY.
+  #
+  # An independent review found that deleting `fixed_length_secure_compare` from
+  # `find_by_token` breaks nothing — correctly, because on PostgreSQL a row found BY digest
+  # necessarily HAS that digest, so the comparison can only ever agree. Its purpose is stated
+  # in the model and is entirely about futures: a prefix index, a `LIKE`, or MySQL's
+  # case-insensitive default collation (which this schema runs on in CI) would each turn the
+  # exact match into a near match, silently.
+  #
+  # "Untestable because the lookup is exact today" is how a control gets deleted by somebody
+  # tidying up. So the fuzzy lookup is SIMULATED: a subclass whose `find_by` answers a record
+  # that does NOT carry the requested digest, which is exactly what those three futures
+  # produce. With the compare in place the answer is nil; without it, the wrong link is
+  # returned and this fails.
+  class FuzzyLookupLink < RedmineReporterDashboards::ShareLink
+    # `find_by` is what `find_by_token` calls. This one ignores the condition entirely,
+    # standing in for a collation or an index that matched more than it should.
+    def self.find_by(*)
+      order(:id).first
+    end
+  end
+
+  def test_a_lookup_that_matched_too_much_is_still_refused_by_the_digest_comparison
+    link, _token = mint
+
+    # The control: the subclass really does answer a row for a token that is not its own.
+    assert_equal link.id, FuzzyLookupLink.find_by(token_digest: 'nonsense')&.id,
+                 'the stand-in did not match loosely, so this test asserts nothing'
+
+    assert_nil FuzzyLookupLink.find_by_token(ShareLink.generate_token),
+               'a loose match was accepted, so the constant-time comparison is not guarding'
+  end
+
   # ------------------------------------------------------------------ the three refusals
 
   def test_an_expired_link_is_refused_and_says_so
@@ -183,29 +216,25 @@ class ReporterDashboardsShareLinkTest < ActiveSupport::TestCase
   end
 
   # ------------------------------------------------------------------ concurrency
-
-  # `max_uses` IS A PROMISE A SECOND CONNECTION MUST NOT BE ABLE TO BREAK, and read-then-
-  # write cannot keep it: two requests both read 0, both decide they are under a limit of
-  # 1, and the link serves twice. This drives the two claims through SEPARATE CONNECTIONS,
-  # because on one connection the second `update_all` simply sees the first one's write and
-  # the test would pass against the broken implementation too.
-  def test_two_simultaneous_uses_of_a_single_use_link_serve_exactly_once
-    link, _token = mint(max_uses: 1)
-    results = []
-    threads = 2.times.map do
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          results << ShareLink.find(link.id).use!
-        end
-      end
-    end
-    threads.each(&:join)
-
-    assert_equal 1, results.count(&:nil?), "expected exactly one success, got #{results.inspect}"
-    assert_equal 1, results.count { |r| r == :exhausted }
-    assert_equal 1, link.reload.use_count
-  end
-
+  #
+  # MOVED OUT OF THIS FILE, AND THAT IS THE FINDING RATHER THAN A TIDY-UP. The test that was
+  # here spawned two threads through `connection_pool.with_connection` and asserted that a
+  # single-use link serves once. Its own comment said it needed SEPARATE CONNECTIONS to mean
+  # anything. Measured, in this file's configuration:
+  #
+  #     use_transactional_tests=true
+  #     distinct_connection_objects=1  backend_pids=[3693]
+  #
+  # `use_transactional_tests` PINS the pool to the fixture connection, so both threads shared
+  # one PostgreSQL backend and the "race" was serialised by being the same session. An
+  # independent review then proved the consequence: swapping `use!` for the exact lost-update
+  # implementation it exists to prevent left the suite green.
+  #
+  # The property is real and is now tested in
+  # `test/unit/reporter_dashboards_share_link_concurrency_test.rb`, which turns transactional
+  # fixtures OFF — the only way to get two connections — and therefore has to be its own
+  # class, because `use_transactional_tests` is per class.
+  #
   # ------------------------------------------------------------------ using
 
   def test_using_a_link_records_when_it_was_last_used

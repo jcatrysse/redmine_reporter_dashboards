@@ -64,6 +64,25 @@ class ReporterDashboardRoutingTest < Redmine::RoutingTest
                  'reporter_dashboards/shares#show', token: 'abcDEF123_-x'
   end
 
+  # THE NEGATIVE HALF OF THE CONSTRAINT, and without it the constraint can be deleted with
+  # nothing going red — an independent review measured exactly that. A test that only pins
+  # what is ACCEPTED passes just as happily with no constraint at all.
+  #
+  # Read off the route set rather than by issuing a request, because a catch-all elsewhere
+  # in Redmine could answer these and make the assertion pass for the wrong reason.
+  def test_the_share_route_refuses_anything_outside_the_tokens_own_alphabet
+    %w[a+b a%20b a/b a$b a!b].each do |candidate|
+      assert_not recognises?("/reporter/s/#{candidate}"),
+                 "#{candidate.inspect} was accepted as a token"
+    end
+  end
+
+  def test_the_share_route_accepts_every_character_a_token_can_contain
+    # `SecureRandom.urlsafe_base64`'s alphabet, all four classes of it. A constraint that
+    # quietly rejected `-` or `_` would 404 roughly half of all minted links, at random.
+    assert recognises?('/reporter/s/abcXYZ019_-')
+  end
+
   # The negative half: each of these paths must be reachable by ONE verb. Read off the
   # route set rather than by issuing a request, so a catch-all route elsewhere in
   # Redmine cannot make the assertion pass for the wrong reason.
@@ -82,6 +101,15 @@ class ReporterDashboardRoutingTest < Redmine::RoutingTest
   end
 
   private
+
+  # Does the route set recognise this path as a GET at all? `recognize_path` raises
+  # `RoutingError` when nothing matches, which is the answer rather than an error here.
+  def recognises?(path)
+    Rails.application.routes.recognize_path(path, method: :get)
+    true
+  rescue ActionController::RoutingError
+    false
+  end
 
   def verbs_for(spec)
     Rails.application.routes.routes

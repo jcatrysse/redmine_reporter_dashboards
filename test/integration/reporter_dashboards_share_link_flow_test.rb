@@ -79,8 +79,12 @@ class ReporterDashboardsShareLinkFlowTest < Redmine::IntegrationTest
   def build_snapshot
     result = RedmineReporterDashboards::Render::Registry.isolated do
       RedmineReporterDashboards::Render::Registry.register(:fake, FakeEngine)
+      # THE SNAPSHOT OUTLIVES THE LINKS ON PURPOSE. A link may not expire after its
+      # document (T-28 increment 3), and two separate `30.days.from_now` calls differ by
+      # microseconds in the wrong direction — so the fixture states the relationship the
+      # feature actually has: the artefact is kept a while, the grant over it is shorter.
       Snapshot.capture(template: @template, render_as: @jsmith, project: @project,
-                       created_by: @jsmith, expires_at: 30.days.from_now)
+                       created_by: @jsmith, expires_at: 90.days.from_now)
     end
     raise "the fixture snapshot could not be built: #{result.code} #{result.message}" unless result.ok?
 
@@ -113,6 +117,11 @@ class ReporterDashboardsShareLinkFlowTest < Redmine::IntegrationTest
     assert_response :success
     assert_equal PDF_BYTES, response.body
     assert_equal 'application/pdf', response.media_type
+    # `inline`, WHICH IS CORE'S OWN RULE FOR A PDF (`AttachmentsController#disposition`).
+    # Pinned because a review found it could be flipped to `attachment` with nothing going
+    # red — and the difference is whether a recipient who was sent a link sees their report
+    # or gets a download prompt for a file they cannot do anything else with.
+    assert_include 'inline', response.headers['Content-Disposition'].to_s
     # THE SESSION, NOT `User.current`. The first version asserted `User.current.id.nil?`
     # and failed against a request that WAS anonymous: `User.anonymous` is a real row with
     # a real id (6 in the fixtures), so that check could never have passed and would have
@@ -298,6 +307,63 @@ class ReporterDashboardsShareLinkFlowTest < Redmine::IntegrationTest
     assert_equal 0, link.reload.use_count
   end
 
+  # ------------------------------------------------------------------ an expired snapshot
+
+  # A LINK MUST NOT SERVE A SNAPSHOT THAT HAS EXPIRED, and before this it did. An
+  # independent review measured a link outliving its document by 300 days and receiving
+  # `status=200` with the bytes — `expires_at` on a document was consulted by a validation
+  # and by nothing else, so the mandatory TTL was decorative on the only path that reads it.
+  def test_a_snapshot_past_its_own_ttl_is_refused_even_while_the_file_is_there
+    link, token = mint(max_uses: 1)
+    @document.update_columns(expires_at: 1.hour.ago)
+
+    open_link(token)
+
+    assert_response :gone
+    assert_include l(:text_reporter_share_unavailable), response.body
+    assert ::Attachment.exists?(@document.attachment_id),
+           'the file was gone anyway, so this asserts nothing about the TTL'
+    assert_equal 0, link.reload.use_count, 'a use was spent on a request that served nothing'
+  end
+
+  # AND THE VALIDATION AT THE OTHER END: a link cannot be CREATED outliving its snapshot.
+  # The two together are the fix — this one stops the bad link existing, the one above stops
+  # a link made before the validation existed from serving stale bytes.
+  def test_a_link_may_not_be_minted_outliving_its_snapshot
+    @document.update_columns(expires_at: 2.days.from_now)
+
+    link = ShareLink.new(template: @template, project: @project, created_by: @jsmith,
+                         scope_kind: ShareLink::SCOPE_SNAPSHOT,
+                         rendered_document_id: @document.id,
+                         expires_at: 30.days.from_now)
+    link.token_digest = ShareLink.digest_for('x')
+
+    assert_not link.valid?
+    assert_includes link.errors.attribute_names, :expires_at
+  end
+
+  # ------------------------------------------------------------------ HEAD
+
+  # A `HEAD` MUST NOT SPEND SOMEBODY'S LINK. Rails routes `HEAD` to the `GET` action and Rack
+  # discards the body, so a mail scanner, a chat unfurler or a link-preview fetcher consumed
+  # a `max_uses` slot and received nothing — measured by an independent review as
+  # `head_status=200 body_bytesize=0 use_count=1`, after which the human's own click got 410.
+  def test_a_head_request_does_not_spend_a_use_and_the_next_get_still_works
+    link, token = mint(max_uses: 1)
+
+    assert_no_difference 'RedmineReporterDashboards::ShareLinkAccess.count' do
+      head "/reporter/s/#{token}"
+    end
+    assert_response :success
+    assert_equal 0, link.reload.use_count
+
+    open_link(token)
+
+    assert_response :success
+    assert_equal PDF_BYTES, response.body
+    assert_equal 1, link.reload.use_count
+  end
+
   # ------------------------------------------------------------------ the audit log
 
   # FR-53: *"every share-link access is recorded (timestamp, address, agent)"*. Asserted on
@@ -337,6 +403,48 @@ class ReporterDashboardsShareLinkFlowTest < Redmine::IntegrationTest
     assert_raises(ActiveRecord::ReadOnlyRecord) { access.update!(outcome: 'revoked') }
   end
 
+  # A REVOKED LINK IS STILL AN UNAUTHENTICATED WRITE ENDPOINT, and revocation does not close
+  # it. An independent review measured twenty requests on a revoked link writing twenty rows,
+  # each carrying up to 255 attacker-chosen bytes of `User-Agent` — which undoes the care
+  # taken to keep `share_link_id` NOT NULL for exactly that reason.
+  #
+  # The FIRST refusal is kept, because "somebody is still using the link you revoked" is the
+  # signal this table exists for. The repeats are what is dropped.
+  def test_a_flood_of_requests_on_a_revoked_link_does_not_flood_the_audit_table
+    link, token = mint
+    link.revoke!
+
+    assert_difference 'RedmineReporterDashboards::ShareLinkAccess.count', 1 do
+      20.times { open_link(token) }
+    end
+    assert_response :gone
+    assert_equal 'revoked', link.accesses.reload.first.outcome
+  end
+
+  # ...AND THE COLLAPSE IS BY REASON, NOT BLANKET. A different refusal is a different fact,
+  # and losing it would be losing the log's meaning rather than its volume.
+  def test_a_change_of_refusal_reason_always_writes_a_row
+    link, token = mint
+
+    link.update_columns(expires_at: 1.hour.ago)
+    open_link(token)
+    link.revoke!
+    open_link(token)
+
+    assert_equal %w[expired revoked], link.accesses.reload.map(&:outcome).sort
+  end
+
+  # A SUCCESS IS NEVER COLLAPSED. `served` rows are facts about a person receiving data,
+  # they are what `max_uses` bounds, and FR-53's "every access is recorded" is about these.
+  def test_repeated_successful_opens_are_each_recorded
+    link, token = mint(max_uses: nil)
+
+    assert_difference 'RedmineReporterDashboards::ShareLinkAccess.count', 3 do
+      3.times { open_link(token) }
+    end
+    assert_equal %w[served served served], link.accesses.reload.map(&:outcome)
+  end
+
   # ------------------------------------------------------------------ the token itself
 
   # THE TOKEN IS A CREDENTIAL AND MUST NOT COME BACK IN THE PAGE. A refusal page echoing it
@@ -351,5 +459,32 @@ class ReporterDashboardsShareLinkFlowTest < Redmine::IntegrationTest
     link.revoke!
     open_link(token)
     assert_not_include token, response.body
+  end
+
+  # THE ONE PLACE THE TOKEN *DOES* TRAVEL ONWARD, PINNED RATHER THAN LEFT AS A SURPRISE.
+  #
+  # An independent review pointed out that the test above claims more than it tests: the
+  # sign-in redirect for a non-public link puts the token in a `Location` header and into the
+  # login page's HTML, because core's `require_login` uses `request.original_url` as
+  # `back_url` (`application_controller.rb:290`).
+  #
+  # It is kept, and §Findings **S-27** carries the argument: the token is a bearer credential
+  # IN A PATH, so it is already in `production.log` and in every proxy access log one line
+  # earlier — and it was already in this browser's address bar and history, since the visitor
+  # just followed the link. The redirect therefore opens no surface that the design does not
+  # already have, and it buys the legitimate holder the thing that makes a private link
+  # usable: they sign in and land on the report.
+  #
+  # Pinned here so that "the token appears in the 302" is a recorded decision with a reason
+  # beside it, rather than something the next reviewer finds and files again.
+  def test_the_sign_in_redirect_carries_the_token_by_design_and_this_is_where_that_is_recorded
+    _link, token = mint(public_link: false)
+
+    open_link(token)
+
+    assert_response :redirect
+    assert_include token, response.headers['Location'],
+                   'the redirect no longer carries the token — if that was deliberate, ' \
+                   'S-27 and this test need updating together'
   end
 end

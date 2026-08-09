@@ -220,6 +220,51 @@ namespace :reporter_dashboards do
     end
   end
 
+  # T-28 — THE PURGE TASK THE TTL HAS ALWAYS DEPENDED ON, AND UNTIL NOW DID NOT HAVE.
+  #
+  # `technical-spec.md:1222-1223` is explicit that persistence is *"opt-in with a mandatory
+  # TTL **and a purge task**. That converts an unmanaged indefinite store into 'off by
+  # default, bounded when on'."* T-22 built the TTL and the table; nothing ever wrote a row,
+  # so the missing half cost nothing. T-28's snapshot store is the commit that makes rows
+  # exist, so it is the commit that owes the other half — found by an independent review,
+  # which measured `Document.expired.count=1` with no task in the tree able to collect it.
+  #
+  # Without this, `expires_at` was a column consulted by a validation and by nothing else.
+  # An expired snapshot is now refused at the endpoint as well (`Document#servable?`), so
+  # the two together are what "bounded when on" actually means: expired stops being SERVED
+  # immediately, and stops OCCUPYING DISK when this runs.
+  #
+  # LIKE THE SCHEDULER, IT DOES NOT RUN ITSELF. That is documented rather than assumed —
+  # see `schedules:status` for the same problem and the same answer.
+  namespace :documents do
+    desc 'Delete the stored bytes of every expired report snapshot (RRD_DRY_RUN=1 to see ' \
+         'what would go; the rows are kept, stamped purged_at)'
+    task purge: :environment do
+      dry_run = ENV['RRD_DRY_RUN'].to_s == '1'
+      # ONE CLOCK READ, for the same reason `schedules:run` reads it once: a purge that
+      # straddled a second must not disagree with itself about which rows were expired.
+      now = Time.zone.now
+      expired = RedmineReporterDashboards::Document.expired(now).order(:id)
+
+      count = 0
+      bytes = 0
+      expired.find_each do |document|
+        bytes += document.byte_size.to_i
+        count += 1
+        puts "#{dry_run ? 'would purge' : 'purging'} document #{document.id} " \
+             "(template #{document.template_id}, expired #{document.expires_at})"
+        # `purge!` AND NOT `destroy`: the ROW IS KEPT. `purged_at` is the difference between
+        # "a document existed here and was collected on this date" and "no document ever
+        # existed", and an audit that cannot tell those apart is not one.
+        document.purge!(now) unless dry_run
+      end
+
+      puts "#{dry_run ? 'would purge' : 'purged'} #{count} document(s), " \
+           "#{bytes} byte(s) of stored report"
+      puts 'nothing expired' if count.zero?
+    end
+  end
+
   namespace :render do
     # T-14. Same shape as `import:plan` and for the same reason: the decisions —
     # which engines, what the exit code means, what happens when there are none —

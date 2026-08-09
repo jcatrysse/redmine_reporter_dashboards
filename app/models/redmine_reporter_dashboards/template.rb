@@ -87,11 +87,27 @@ module RedmineReporterDashboards
     # longer exists. Nullifying keeps the document and forgets which template made it, which
     # is what actually happened. Its own `expires_at` still bounds it, so nothing becomes
     # immortal by being orphaned.
+    #
+    # T-28 REVISITS THE SECOND HALF OF THAT ARGUMENT, because it stopped being true the
+    # moment share links existed. *"Destroying it with the template would revoke a link
+    # somebody holds"* — but `has_many :share_links` is `dependent: :destroy` (deleting a
+    # report is the most emphatic revocation there is, and a test asserts it), so by the time
+    # this runs there is no link left to revoke. The bytes are simply unreachable.
+    #
+    # So the ROW is still kept — an audit that can answer "a document existed here" is the
+    # thing `nullify` was protecting — and the BYTES are purged, by `purge_orphaned_snapshots`
+    # below. Before T-28's purge task the closing sentence above ("its own `expires_at` still
+    # bounds it") described a bound nothing enforced; it is true now, and this makes the wait
+    # unnecessary for the one case where nothing could ever read them again.
     has_many :documents,
              class_name: 'RedmineReporterDashboards::Document',
              foreign_key: 'template_id',
              dependent: :nullify,
              inverse_of: :template
+
+    # `prepend: true` so it runs BEFORE the `dependent:` callbacks, while `documents` still
+    # resolves to this template's rows.
+    before_destroy :purge_orphaned_snapshots, prepend: true
 
     # T-28 — share links. `dependent: :destroy` and NOT `:nullify`, which is the opposite
     # of the two associations below it, so the difference is worth stating.
@@ -393,6 +409,20 @@ module RedmineReporterDashboards
     end
 
     private
+
+    # T-28 — DELETING A REPORT TAKES ITS SNAPSHOTS' BYTES OFF THE DISK, and keeps the rows.
+    #
+    # Every share link to this template is destroyed by `dependent: :destroy` on the
+    # association above, so no snapshot of it can be reached by anybody afterwards. Left
+    # alone, the files would sit in `files/` until each document's own TTL expired and the
+    # purge task next ran — bounded, but bytes nobody can read and nobody remembers.
+    #
+    # `purge!` rather than `destroy`: `purged_at` is the difference between "a document
+    # existed here and was collected on this date" and "no document ever existed".
+    def purge_orphaned_snapshots
+      documents.find_each { |document| document.purge! }
+      true
+    end
 
     def roles_present_when_visible_to_roles
       return unless visibility == VISIBILITY_ROLES

@@ -104,6 +104,93 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
+**E-23 · T-28 INCREMENT 2 WAS REJECTED BY ITS INDEPENDENT REVIEW, AND THE TWO BLOCKERS WERE
+BOTH "THE TEST CANNOT FAIL" RATHER THAN "THE CODE IS WRONG".** 2026-08-09, fresh subagent.
+Worth recording in full, because the shape recurs: every defect below sat behind a green
+suite, and three of them were asserted in comments and sold in the README.
+
+**BLOCKER 1 — the `max_uses` concurrency test could not fail.** Its own comment said it
+needed two connections *"because on one connection the second `update_all` simply sees the
+first one's write and the test would pass against the broken implementation too"*. Measured,
+in that file's configuration:
+
+    use_transactional_tests=true
+    distinct_connection_objects=1  backend_pids=[3693]
+
+`use_transactional_tests` PINS the pool to the fixture connection so every thread can see
+uncommitted fixture data, so `with_connection` handed back the same session both times. The
+review then swapped `use!` for the exact lost update the class exists to prevent and the
+suite stayed green.
+
+*Fixed:* `test/unit/reporter_dashboards_share_link_concurrency_test.rb`, a separate class
+with `use_transactional_tests = false` (it is a per-class setting), racing `ROUNDS = 10`
+independent single-use links through a real two-`Queue` barrier, asserting per round that the
+two backends differ. Re-measured against the lost-update implementation: **20 successes where
+10 are possible** — every round collided, so the discriminator is decisive rather than
+timing-dependent.
+
+**BLOCKER 2 — INV-1 was untested, and the review's own mutation could not show it.** The
+review mutated `as(actor)` → `as(::User.current)` and found it survived. **That mutation is
+equivalent, and the reason matters:** `as` is NOT what holds INV-1 here. Every visibility
+decision is threaded explicitly — `ReportScope.build(actor:)` starts from
+`Issue.visible(actor)`, and the drops refuse to resolve without a `RenderContext` rather than
+reading `User.current` (`record_drop.rb:14-17`). Swapping the ambient user changes nothing
+the render reads.
+
+The mutation that DOES discriminate is the argument: `actor: render_as` → `actor:
+created_by`. Under a template emitting `{{ issues.size }}`, with two identities that see a
+different number of issues, it now fails loudly — `"COUNT=[7]" not found in … COUNT=[6]`.
+**The finding was right and the mutation was wrong**, which is worth knowing: a surviving
+mutation is evidence of a coverage gap OR of an equivalent mutant, and the two are told apart
+by constructing the observable difference, not by reading.
+
+**MAJOR 3 — a link outlived and served an expired snapshot**, measured at 300 days with a
+`200`. `expires_at` on a document was read by a validation and by nothing else, which made
+the "mandatory, bounded TTL" the spec insists on **decorative in the very commit that first
+created rows** — and the commit message claimed the opposite. Fixed at both ends:
+`Document#servable?` refuses an expired snapshot at request time, and
+`ShareLink#expiry_within_the_snapshots_own` stops the bad link being created. Both are
+needed: the validation cannot help a link made before it existed.
+
+**MAJOR 4 — there was no purge task**, so the TTL had no runtime effect at all. Now
+`reporter_dashboards:documents:purge`, with `RRD_DRY_RUN`, and tested through rake rather
+than through the model — a purge task's success and its absence look identical from outside,
+which is exactly the failure mode a cron entry has.
+
+**MAJOR 6 — a comment claimed a control that does not exist:** *"THE TOKEN IS NOT LOGGED"*,
+refuted in one measurement (Rails' request logger has already written the path). This is the
+third time this project has shipped a citation stronger than the truth (T-32, T-24, now here),
+and it is why the rule is worth restating: **a cited control that does not exist is worse than
+no comment.** Rewritten to the narrow true claim — do not make it worse — pointing at S-27.
+
+**MAJOR 7 — a `HEAD` request spent a `max_uses` slot and delivered nothing**
+(`head_status=200 body_bytesize=0 use_count=1`), so a mail scanner or a link unfurler burned
+a single-use link before its recipient clicked.
+
+**MAJOR 8 — an unbounded filename**: a legal 245-character template name produced
+`attachment_failed: File is too long`, which is a nonsense message for "your report has a long
+title". **MAJOR 9 — `capture` raised `ActiveRecord::RecordInvalid`** for a bad `expires_at`,
+past every caller written against `Result`, including the README's own recipe; a PAST expiry
+was accepted and stored a snapshot no link could ever serve. **MAJOR 10 — a revoked link was
+still an unauthenticated unbounded write endpoint** (20 requests → 20 rows of attacker-chosen
+`User-Agent`); refusals are now collapsed per reason per minute while successes never are.
+
+**What was NOT accepted, with the measurement:**
+
+* **MAJOR 5, the token in the sign-in redirect.** Real, and it opens no surface the design
+  does not already have: the token is a bearer credential IN A PATH (S-27), so it was in
+  `production.log`, in the browser's address bar and in its history one request earlier. The
+  redirect buys the legitimate holder the thing that makes a private link usable. **Pinned by
+  a test that asserts the token IS in the `Location`**, so the decision is recorded rather
+  than rediscovered.
+* **The 1-in-11 `PG::TRDeadlockDetected` flake.** Not reproduced in 10 further seeds after
+  the thread test moved out of the transactional file, which is consistent with that test
+  having been the cause but is not proof.
+
+**Round-2 mutations: 15, all killed** — including all seven the review found surviving. The
+review's own harness note is worth keeping: it ran three kills alongside seven survivals,
+which is what made the survivals evidence rather than a broken runner.
+
 **F-17 · THE `file:line` CITATIONS INTO `technical-spec.md` HAVE DRIFTED BY ROUGHLY SEVEN
 LINES, ACROSS AT LEAST SEVEN FILES, AND NOTHING CHECKS THEM.** Found in T-28 increment 2 while
 verifying my own comments. `Document`'s header cited `technical-spec.md:1213-1217` for

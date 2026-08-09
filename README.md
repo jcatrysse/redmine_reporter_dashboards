@@ -851,9 +851,32 @@ Two more things are honest to know before you use it:
 
 * **The token is in the URL path, so it is written to your `production.log` and to any
   reverse proxy's access log**, exactly as any link-based sharing is. That is inherent to
-  handing somebody a URL. What bounds it is the expiry — prefer a short one.
-* Snapshots are kept as Redmine attachments and expire with their link. A link may not
-  outlive the snapshot store's own retention bound of one year.
+  handing somebody a URL. What bounds it is the expiry — prefer a short one. The same token
+  also appears in the sign-in redirect for a private link, which adds no exposure the path
+  did not already have.
+* A snapshot is stored as a Redmine attachment with an expiry of its own, and **a link can
+  never be created that outlives its snapshot**. Once a snapshot has expired the link stops
+  serving it immediately, whether or not the file has been collected yet. Nothing may be
+  kept longer than a year.
+* **Deleting a report template destroys every link to it and purges its snapshots**, which
+  is the most complete revocation available.
+
+### Collecting expired snapshots
+
+Expired snapshots stop being served the moment they expire, but their files stay on disk
+until they are collected. Like the scheduler, the purge does not run itself:
+
+```bash
+# see what would go, and change nothing
+RRD_DRY_RUN=1 bundle exec rake reporter_dashboards:documents:purge RAILS_ENV=production
+
+# collect them
+bundle exec rake reporter_dashboards:documents:purge RAILS_ENV=production
+```
+
+Run it from cron alongside `redmine:attachments:prune`. The rows are kept and stamped, so
+you can still answer "a document existed here and was collected on this date" afterwards —
+only the bytes go.
 
 ## Using the `{% sql_aggregate %}` tag
 

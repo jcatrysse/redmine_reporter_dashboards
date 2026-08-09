@@ -78,10 +78,31 @@ module ReporterDashboards
       # request time — so it answers with a sentence instead.
       return refuse(:unsupported) unless @link.snapshot?
 
-      bytes = @link.rendered_document&.bytes
+      document = @link.rendered_document
+      # THE DOCUMENT'S OWN TTL IS CONSULTED HERE, and it was not before. An independent
+      # review measured a link outliving its snapshot by 300 days and serving it with a
+      # `200` — `expires_at` on a document was read by a validation and by nothing else,
+      # which made the mandatory TTL decorative. `servable?` answers expired, purged and
+      # file-missing as one fact, which is what a reader needs; the three stay distinct on
+      # the model for the purge task and for diagnostics.
+      return refuse(:unavailable) unless document&.servable?
+
+      # A `HEAD` MUST NOT SPEND SOMEBODY'S LINK. Rails routes `HEAD` to the `GET` action and
+      # Rack discards the body afterwards, so before this branch a mail scanner, a chat
+      # unfurler or a link-preview fetcher consumed a `max_uses` slot and received nothing —
+      # measured by an independent review: `head_status=200 body_bytesize=0 use_count=1`, and
+      # the human's own click then got `410`.
+      #
+      # This is the SAME argument the `unavailable` branch above makes, one case wider: a use
+      # is spent when bytes reach somebody, and nothing reaches anybody here. It writes no
+      # audit row either — recording `served` for a request that served nothing is the row
+      # that would make the log lie.
+      return head(:ok) if request.head?
+
+      bytes = document.bytes
       # RESOLVED BEFORE THE USE IS CLAIMED, and the order is the whole of the reasoning: a
-      # single-use link whose snapshot has been purged would otherwise burn its one use on a
-      # request that served nothing, and the holder could never try again.
+      # single-use link whose snapshot has gone would otherwise burn its one use on a request
+      # that served nothing, and the holder could never try again.
       return refuse(:unavailable) if bytes.nil?
 
       # THE CLAIM. `use!` is one conditional UPDATE whose WHERE clause carries the whole
@@ -106,8 +127,17 @@ module ReporterDashboards
       # carries the argument. The fact is still recorded, in the place an operator already
       # rotates.
       #
-      # THE TOKEN IS NOT LOGGED. It is a credential; a log line carrying it would put the
-      # working link in the one file most likely to be copied into a ticket.
+      # THIS LINE DOES NOT ADD THE TOKEN TO THE LOG — and the comment that used to stand here
+      # claimed something much stronger and false. It said "THE TOKEN IS NOT LOGGED", which
+      # an independent review refuted in one measurement: Rails' own request logger has
+      # already written `Started GET "/reporter/s/<token>"` before this method runs, and
+      # `config.filter_parameters` cannot reach a path segment. §Findings **S-27** carries the
+      # full argument — the exposure is inherent to handing somebody a URL, and what bounds
+      # it is the mandatory expiry rather than anything a log line here could do.
+      #
+      # So the rule this line follows is the narrow, true one: DO NOT MAKE IT WORSE. The
+      # token is not repeated into a second line, where it would survive a different log
+      # level, a different rotation and a different retention policy from the request line.
       logger.info("[reporter_dashboards] share token not found (#{request.remote_ip})")
       refuse(:not_found, log: false)
     end
@@ -168,8 +198,12 @@ module ReporterDashboards
       return if @link.nil?
 
       if ShareLinkAccess::OUTCOMES.include?(code.to_s)
-        @link.record_access!(outcome: code, ip_address: request.remote_ip,
-                             user_agent: request.user_agent)
+        # `record_refusal!`, NOT `record_access!` — an identical refusal within a minute is
+        # collapsed, because a revoked link is an unauthenticated write endpoint that
+        # revocation does not close. The model carries the argument and the asymmetry: a
+        # SERVED row is never collapsed.
+        @link.record_refusal!(outcome: code, ip_address: request.remote_ip,
+                              user_agent: request.user_agent)
       else
         logger.info("[reporter_dashboards] share link #{@link.id} refused: #{code}")
       end

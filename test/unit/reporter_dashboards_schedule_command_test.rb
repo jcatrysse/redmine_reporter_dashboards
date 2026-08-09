@@ -150,11 +150,40 @@ class ReporterDashboardsScheduleCommandTest < ActiveSupport::TestCase
                       code, "#{File.basename(path)} reads a clock of its own")
     end
 
-    rake = File.read(File.expand_path('../../lib/tasks/reporter_dashboards.rake', __dir__),
-                     encoding: 'UTF-8')
-    assert_equal 2, rake.scan(/Time\.zone\.now/).length,
+    # SCOPED TO THE `schedules:` NAMESPACE, and that is a correction rather than a
+    # loosening. This counted `Time.zone.now` across the WHOLE rake file, so it failed the
+    # moment T-28 added `documents:purge` — a task in a different namespace, reading the
+    # clock once, for exactly the reason this rule exists. Counting the whole file made the
+    # assertion say something wider than its own comment and wider than FR-44, and the next
+    # person to hit it would have been tempted to bump the number, which would have retired
+    # the check for the scheduler too.
+    #
+    # The rule itself is unchanged and still exact: within `namespace :schedules`, TWO reads
+    # — one for the tick, one for the status task.
+    assert_equal 2, clock_reads_in_rake_namespace('schedules'),
                  'one read for the tick and one for the status task; a third means a ' \
                  'decision about what day it is moved out of a testable class'
+    # AND THE SAME DISCIPLINE FOR THE NEW NAMESPACE, so scoping the check above did not
+    # quietly stop checking anything. A purge that read the clock twice could collect a
+    # document its own report said was still live.
+    assert_equal 1, clock_reads_in_rake_namespace('documents'),
+                 'the purge reads the clock once, so its report and its writes agree'
+  end
+
+  # The lines of one `namespace :<name> do` block in the rake file: from its opening line to
+  # the next namespace at the same indentation, or the end of the file. Line-based rather
+  # than a regex over the whole text, because a balanced-block regex is the kind of scanner
+  # that is confidently wrong (§Findings E-14).
+  def clock_reads_in_rake_namespace(name)
+    lines = File.read(File.expand_path('../../lib/tasks/reporter_dashboards.rake', __dir__),
+                      encoding: 'UTF-8').lines
+    start = lines.index { |line| line.start_with?("  namespace :#{name} do") }
+    raise "no `namespace :#{name}` in the rake file" if start.nil?
+
+    rest = lines[(start + 1)..] || []
+    stop = rest.index { |line| line.start_with?('  namespace ') } || rest.length
+
+    rest[0...stop].join.scan(/Time\.zone\.now/).length
   end
 
   def test_a_fresh_installation_with_no_schedules_warns_about_nothing
