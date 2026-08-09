@@ -93,6 +93,20 @@ module RedmineReporterDashboards
              dependent: :nullify,
              inverse_of: :template
 
+    # T-28 — share links. `dependent: :destroy` and NOT `:nullify`, which is the opposite
+    # of the two associations below it, so the difference is worth stating.
+    #
+    # A `Document` and a `MailSend` are records of something that HAPPENED and must outlive
+    # the template. A share link is a live GRANT: it authorises somebody to fetch this
+    # template's output, and a grant whose subject no longer exists must not keep working.
+    # Destroying the template is the most emphatic revocation there is, and leaving links
+    # behind would mean deleting a report quietly failed to un-share it.
+    has_many :share_links,
+             class_name: 'RedmineReporterDashboards::ShareLink',
+             foreign_key: 'template_id',
+             dependent: :destroy,
+             inverse_of: :template
+
     # T-32 — the ad-hoc mail audit, and `:nullify` for exactly the reason above one
     # sentence stronger. A document is a thing; an audit row is a RECORD OF SOMETHING THAT
     # HAPPENED, and deleting a template must not be able to delete the evidence that it

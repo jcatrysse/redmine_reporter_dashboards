@@ -100,8 +100,10 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
   # ---------------------------------------------------------------------------
   describe 'the tables' do
     # The six §7 marks "new", plus the visibility join table 002 creates with them, plus
-    # the one §7 marks "exists". Listed rather than derived: a migration silently not
-    # running should be a failure, not a shorter list.
+    # the one §7 marks "exists", plus the two §7b.5 needs (T-32) and the two §7b.1 names
+    # explicitly (T-28: `reporter_dashboards_share_links` and its access log). Listed
+    # rather than derived: a migration silently not running should be a failure, not a
+    # shorter list.
     def expected_tables
       %w[
         reporter_project_tabs
@@ -114,6 +116,8 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
         reporter_dashboards_documents
         reporter_dashboards_mail_sends
         reporter_dashboards_mail_send_recipients
+        reporter_dashboards_share_links
+        reporter_dashboards_share_link_accesses
       ]
     end
 
