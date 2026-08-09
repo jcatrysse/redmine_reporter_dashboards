@@ -27,7 +27,8 @@ namespace :reporter_dashboards do
     # should run first. It is NOT the same thing as `import:plan`: plan surveys the source,
     # this says what a run would do to THIS side, divergence included.
     desc 'Copy redmine_reporter templates into this plugin (RRD_DRY_RUN=1 to decide ' \
-         'without writing, RRD_PROJECTS=1,2 to limit; exit 1 if any template was skipped)'
+         'without writing, RRD_PROJECTS=1,2 to limit, RRD_REWRITE=1 to take the ' \
+         "source's version over local edits; exit 1 if any template was skipped)"
     task run: :environment do
       require File.expand_path('../redmine_reporter_dashboards/import/runner', __dir__)
       require File.expand_path('../redmine_reporter_dashboards/import/import_report', __dir__)
@@ -45,7 +46,11 @@ namespace :reporter_dashboards do
       result = RedmineReporterDashboards::Import::Runner.call(
         actor: actor,
         dry_run: ENV['RRD_DRY_RUN'].to_s == '1',
-        project_ids: ENV['RRD_PROJECTS']&.split(',')
+        project_ids: ENV['RRD_PROJECTS']&.split(','),
+        # RRD_REWRITE IS NOT A PLAIN OVERWRITE. The local content is written into the
+        # template's version history before the source's is taken, so nothing is lost and
+        # the edit can be rolled back to from the editor.
+        rewrite: ENV['RRD_REWRITE'].to_s == '1'
       )
       puts RedmineReporterDashboards::Import::ImportReport.render(result)
       exit(result.failed? ? 1 : 0)

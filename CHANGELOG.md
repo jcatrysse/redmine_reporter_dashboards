@@ -25,7 +25,14 @@ All notable changes to this plugin are documented in this file.
   **by name** rather than guessed at, and the task exits 1 so a script notices. Imported
   templates are private to the importer.
 
-  `import:verify` is not built yet — see the README.
+  Changed your mind after editing a copy? `RRD_REWRITE=1` takes the original back, and
+  your version is saved into the template's history first — nothing is lost. A template
+  whose project does not exist here is skipped and named rather than imported into a place
+  no page can reach.
+
+  There is deliberately **no** `import:verify`: comparing report *numbers* before and after
+  cannot work when the issues underneath change daily. `import:status` compares the template
+  content, which only moves when somebody edits it.
 
 - **Send a report by e-mail, once, without creating a schedule.** *Send report by e-mail*
   on a report's page mails the document to Redmine users you choose. It replaces the base

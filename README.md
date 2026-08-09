@@ -586,9 +586,19 @@ the first active administrator, and refuses rather than guessing if there is non
 Imported templates are **private to the importer** — the old plugin's visibility settings
 are not translated, and widening one is a deliberate act afterwards.
 
-**Not built yet:** `import:verify`, which is meant to compare aggregation results rather
-than HTML. What it should compare them *against* is an open question — the old plugin is
-usually uninstalled by then — so it is reported rather than half-built.
+If you have edited a copy and decide you want the original after all, re-run with
+`RRD_REWRITE=1`. That is **not** a plain overwrite: your version is written into the
+template's own history first, so it is still there to roll back to from the editor.
+
+A template belonging to a project that does not exist here is **skipped and named** rather
+than imported — every page in this plugin is reached through a project, so such a template
+would be invisible and impossible to delete. Migrate or recreate the project, then re-run.
+
+**There is deliberately no `import:verify`.** It was meant to compare aggregation results
+before and after, and it cannot work: your issues change every day, so the numbers change
+every day, and a check that goes red every morning is one you would rightly switch off.
+`import:status` compares the template *content* instead, which only changes when somebody
+edits it — that is the drift worth watching.
 
 ## Sending a report by e-mail, once
 

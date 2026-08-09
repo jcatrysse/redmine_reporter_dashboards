@@ -246,6 +246,110 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
     assert_not result.failed?, 'divergence is an expected state, not a failed run'
   end
 
+  # ------------------------------------------------- DECISION 2: rewrite, non-destructively
+
+  # `RRD_REWRITE=1` TAKES THE SOURCE'S VERSION AND LOSES NOTHING.
+  #
+  # Before this, the only way to accept the original after editing locally was to DELETE the
+  # copy and re-run — data loss offered as a documented step, where §7a had named a
+  # `--rewrite` flag. The local content goes into the template's own append-only version
+  # history FIRST, so the flag changes which content is CURRENT and never which content
+  # still exists.
+  def test_rewrite_takes_the_source_and_keeps_the_local_edit_in_the_version_history
+    id = seed_source
+    run_import
+    copy = Template.find_by(source_template_id: id)
+    copy.update!(content: '<p>my own edit</p>')
+    connection.update("UPDATE report_templates SET content = #{connection.quote('<p>new</p>')} " \
+                      "WHERE id = #{id}")
+
+    result = run_import(rewrite: true)
+
+    assert_equal 1, result.count(:updated)
+    assert_equal '<p>new</p>', copy.reload.content
+    # THE EDIT IS STILL THERE. This is the assertion that makes the flag safe rather than
+    # merely convenient.
+    assert_includes copy.versions.map(&:content), '<p>my own edit</p>'
+  end
+
+  # THE SNAPSHOT COMES FIRST, so a failure to record it cannot leave the edit destroyed.
+  # Asserted by ORDER of effect: with the version write raising, the content must not move.
+  def test_rewrite_does_not_overwrite_when_the_snapshot_cannot_be_written
+    id = seed_source
+    run_import
+    copy = Template.find_by(source_template_id: id)
+    copy.update!(content: '<p>my own edit</p>')
+    connection.update("UPDATE report_templates SET content = #{connection.quote('<p>new</p>')} " \
+                      "WHERE id = #{id}")
+
+    # A TARGETED, RESTORED PATCH rather than `stub`: the write is
+    # `existing.versions.create!`, which goes through the association, so stubbing the
+    # class's `.new` would not reach it and `Object#stub` needs `minitest/mock` besides.
+    # `create_or_update` is the one method every persistence path funnels through.
+    klass = RedmineReporterDashboards::TemplateVersion
+    original = klass.instance_method(:create_or_update)
+    begin
+      klass.send(:define_method, :create_or_update) { |*| raise 'no snapshot' }
+      assert_raises(RuntimeError) { run_import(rewrite: true) }
+    ensure
+      klass.send(:define_method, :create_or_update, original)
+    end
+
+    assert_equal '<p>my own edit</p>', copy.reload.content,
+                 'the content was overwritten even though the snapshot failed'
+  end
+
+  # WITHOUT THE FLAG IT STILL REFUSES, and the note now names the flag rather than telling
+  # somebody to delete their work.
+  def test_without_rewrite_a_diverged_copy_is_still_left_alone_and_the_note_names_the_flag
+    id = seed_source
+    run_import
+    Template.find_by(source_template_id: id).update!(content: '<p>mine</p>')
+    connection.update("UPDATE report_templates SET content = #{connection.quote('<p>new</p>')} " \
+                      "WHERE id = #{id}")
+
+    result = run_import
+
+    assert_equal 1, result.count(:diverged)
+    assert result.notes.any? { |note| note.include?('RRD_REWRITE') }
+    assert_not result.notes.any? { |note| note.match?(/delete/i) },
+               'the note must not offer data loss as the remedy'
+  end
+
+  # ------------------------------------------------- DECISION 3: a project that is not here
+
+  # A TEMPLATE WHOSE PROJECT WAS NEVER MIGRATED IS SKIPPED, NOT IMPORTED INVISIBLY.
+  #
+  # `belongs_to :project, optional: true` does no existence check, so this used to import
+  # cleanly, report `created`, and produce a row that no surface in this plugin can reach —
+  # every one of them is scoped through a project.
+  def test_a_template_whose_project_does_not_exist_is_skipped_and_names_it
+    assert_not Project.exists?(id: 999_999), 'the fixture must not have this project'
+    connection.insert(
+      "INSERT INTO report_templates (type, name, project_id, content) VALUES (" \
+      "'IssueListReportTemplate', 'Orphan', 999999, '<p>x</p>')"
+    )
+
+    result = run_import
+
+    assert_equal 1, result.count(:skipped)
+    assert_equal 0, Template.where.not(source_template_id: nil).count
+    assert_includes result.outcomes.first.reason, '999999'
+    assert result.failed?
+  end
+
+  # AN ARCHIVED PROJECT IS DELIBERATELY NOT REFUSED. The row is real and the template
+  # becomes reachable again on unarchive; refusing would make a migration depend on the
+  # order somebody happens to unarchive things in.
+  def test_a_template_in_an_archived_project_is_still_imported
+    seed_source(name: 'Archived one')
+    @project.update_columns(status: Project::STATUS_ARCHIVED)
+
+    result = run_import
+
+    assert_equal 1, result.count(:created)
+  end
+
   # ------------------------------------------------------------------ the dry run
 
   def test_a_dry_run_decides_everything_and_writes_nothing

@@ -92,12 +92,23 @@ module RedmineReporterDashboards
         # `project_id` COMES FROM THE SOURCE ROW and is not remapped. A template belongs to
         # the project it was written for; inventing a different one would silently move
         # somebody's report between projects, and the permission that governs it with it.
-        def call(actor:, connection: nil, dry_run: false, project_ids: nil)
+        # `rewrite:` — DECISION 2, and it is the flag `technical-spec.md` §7a already named
+        # (`import:run [--only] [--rewrite]`) and T-24's first version neither built nor
+        # reported. Without it the only way to accept the source's version after editing
+        # locally was to DELETE the copy and re-run, which is data loss offered as a
+        # documented step.
+        #
+        # It is NOT a plain overwrite. The local content is written into the template's own
+        # version history FIRST, so taking the source's version loses nothing and can be
+        # rolled back from the editor — `reporter_dashboards_template_versions` is
+        # append-only and exists for exactly this. The flag therefore changes which content
+        # is CURRENT, never which content still exists.
+        def call(actor:, connection: nil, dry_run: false, project_ids: nil, rewrite: false)
           connection ||= ::ActiveRecord::Base.connection
           notes = []
           rows = read_source(connection, notes, project_ids)
 
-          outcomes = rows.map { |row| import_one(row, actor, dry_run, notes) }
+          outcomes = rows.map { |row| import_one(row, actor, dry_run, notes, rewrite) }
 
           Result.new(outcomes: outcomes, notes: notes, dry_run: dry_run)
         end
@@ -217,7 +228,7 @@ module RedmineReporterDashboards
           rows.map { |row| columns.zip(row).to_h }
         end
 
-        def import_one(row, actor, dry_run, notes)
+        def import_one(row, actor, dry_run, notes, rewrite = false)
           source_id = row['id']
           name = row['name'].presence || "Imported template #{source_id}"
           mapped = Reporting::Exchange::TYPE_MAP[row['type'].to_s]
@@ -242,10 +253,33 @@ module RedmineReporterDashboards
                                reason: 'the source template has no content')
           end
 
+          # DECISION 3 — A TEMPLATE WHOSE PROJECT IS NOT HERE IS SKIPPED, NOT IMPORTED.
+          #
+          # `belongs_to :project, optional: true` does no existence check, so a source row
+          # naming a project that was never migrated (or has since been deleted) imported
+          # cleanly, reported `created`, and produced a template that is INVISIBLE and
+          # UNREACHABLE: every surface in this plugin is scoped through a project, so it
+          # cannot be opened, edited or deleted through the interface. Found by an
+          # independent review.
+          #
+          # Skipping and naming the project id is what this task does with every other
+          # unusable input. Importing it anyway is the "reported success over something
+          # nobody can use" shape the whole `ImportReport` verdict exists to refuse.
+          #
+          # An ARCHIVED project is deliberately NOT refused: the row is real, the template
+          # becomes reachable again when somebody unarchives it, and refusing would make a
+          # migration depend on the order an operator happens to unarchive things in.
+          project_id = row['project_id']
+          if project_id.present? && !::Project.exists?(id: project_id)
+            return Outcome.new(source_id: source_id, name: name, status: :skipped,
+                               reason: "its project (##{project_id}) does not exist here. " \
+                                       'Migrate or recreate the project first, then re-run.')
+          end
+
           existing = Template.find_by(source_template_id: source_id)
           return create_copy(row, name, mapped, content, actor, dry_run, notes) if existing.nil?
 
-          refresh_copy(existing, name, mapped, content, dry_run, notes)
+          refresh_copy(existing, name, mapped, content, dry_run, notes, actor, rewrite)
         end
 
         def create_copy(row, name, mapped, content, actor, dry_run, notes = [])
@@ -282,7 +316,8 @@ module RedmineReporterDashboards
         end
 
         # THE FOUR-WAY DECISION. See the class comment; the case that matters is the last.
-        def refresh_copy(existing, name, mapped, content, dry_run, notes)
+        def refresh_copy(existing, name, mapped, content, dry_run, notes, actor = nil,
+                         rewrite = false)
           source_digest = digest(content)
           local_digest = digest(existing.content)
 
@@ -295,12 +330,24 @@ module RedmineReporterDashboards
           # would throw away somebody's work — so it is reported and left alone, and the
           # note says what an operator can do about it.
           if local_digest != existing.source_digest
-            notes << "template #{existing.id} (#{existing.name}) has been edited since it " \
-                     'was imported, so it was left alone. Delete it and re-run to take the ' \
-                     "source's version, or leave it if the local edits are the ones you want."
-            return Outcome.new(source_id: existing.source_template_id, name: existing.name,
-                               status: :diverged, template_id: existing.id,
-                               reason: 'edited here since import')
+            unless rewrite
+              notes << "template #{existing.id} (#{existing.name}) has been edited since " \
+                       'it was imported, so it was left alone. Re-run with RRD_REWRITE=1 ' \
+                       "to take the source's version — your edit is kept in the template's " \
+                       'version history and can be rolled back to.'
+              return Outcome.new(source_id: existing.source_template_id, name: existing.name,
+                                 status: :diverged, template_id: existing.id,
+                                 reason: 'edited here since import')
+            end
+
+            unless dry_run
+              # THE SNAPSHOT COMES FIRST, and it is what makes `rewrite` non-destructive.
+              # If this raises, nothing is overwritten — the order is the guarantee.
+              existing.versions.create!(content: existing.content, author_id: actor&.id)
+            end
+            notes << "template #{existing.id} (#{existing.name}) was rewritten from its " \
+                     "source. The edit made here is version " \
+                     "#{existing.versions.count} in its history."
           end
 
           return Outcome.new(source_id: existing.source_template_id, name: existing.name,
