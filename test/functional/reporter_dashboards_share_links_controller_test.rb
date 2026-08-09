@@ -22,6 +22,10 @@ require File.expand_path('../test_helper', __dir__)
 # Test methods after a `private` section are silently not run. There is none here; every
 # helper is above the tests.
 class ReporterDashboardsShareLinksControllerTest < Redmine::ControllerTest
+  # §Findings E-21 — a test case calling `l()` needs the module that defines it, or every
+  # assertion about copy errors with `NoMethodError: undefined method 'l'`.
+  include Redmine::I18n
+
   tests ReporterDashboards::ShareLinksController
 
   fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules,
@@ -167,6 +171,38 @@ class ReporterDashboardsShareLinksControllerTest < Redmine::ControllerTest
     get :index, params: { project_id: @project.identifier, template_id: @template.id }
 
     assert_response :not_found
+  end
+
+  # SOMEBODY WHO MAY NOT REACH THIS SURFACE LEARNS NOTHING ABOUT WHAT IS ON IT.
+  #
+  # The permission guard runs BEFORE the template lookup, so the answer is the same whether
+  # the id exists or not. Reversed — which is how this shipped — a member holding only
+  # `publish_…` got 403 for a template that exists and 404 for one that does not, which is
+  # an existence oracle for exactly the person with no right to the surface. Found by an
+  # independent review.
+  #
+  # The assertion is that the TWO ANSWERS ARE THE SAME, not that either is a particular
+  # code: what makes an oracle is the difference, and pinning only one of them would leave
+  # the other free to drift.
+  def test_somebody_without_the_share_permission_cannot_tell_a_real_template_from_a_missing_one
+    grant(:publish_reporter_dashboards_reports)
+    @request.session[:user_id] = @owner.id
+
+    # `#new` AND NOT `#index`, WHICH IS THE WHOLE REASON THIS TEST WORKS. `publish_…` maps
+    # `new`/`create` and nothing else, so on `#index` Redmine's own `authorize` refuses
+    # first and the guard order below is never reached — the first version of this test used
+    # `#index` and the mutation that reverses the order SURVIVED it. The oracle only exists
+    # on an action this permission genuinely maps.
+    get :new, params: { project_id: @project.identifier, template_id: @template.id }
+    existing = response.status
+
+    get :new, params: { project_id: @project.identifier, template_id: 999_999 }
+    missing = response.status
+
+    assert_equal existing, missing,
+                 "existing template answered #{existing} and a missing one #{missing} — " \
+                 'the difference is an existence oracle'
+    assert_equal 403, existing
   end
 
   # ------------------------------------------------------------------ creating
@@ -419,6 +455,235 @@ class ReporterDashboardsShareLinksControllerTest < Redmine::ControllerTest
     assert_not theirs.reload.revoked?, 'somebody else’s link was revoked'
   end
 
+  # ------------------------------------------------------------------ INV-1
+
+  # THE SNAPSHOT IS RENDERED AS THE PERSON PRESSING THE BUTTON, AND NOTHING ELSE.
+  #
+  # FOUND BY AN INDEPENDENT REVIEW, which measured what the absence of this test allowed:
+  # changing `render_as: User.current` to `render_as: @template.author` — a two-token edit —
+  # left all 834 tests green while turning the action into a privilege escalation. The
+  # sharer received the AUTHOR's view of the data, including issues they may not see, and
+  # `render_as_user_id` still recorded the sharer, so the audit column lied about the
+  # identity the bytes were computed under. Every existing test here had the sharer BE the
+  # author, so none of them could tell the two apart.
+  #
+  # The discriminator is an engine that echoes the render, plus two identities that see a
+  # different number of issues.
+  class EchoEngine
+    def capabilities
+      []
+    end
+
+    def id
+      'echo'
+    end
+
+    def render(request)
+      RedmineReporterDashboards::Render::Success.new(
+        bytes: "%PDF-1.4\n#{request.body}\n#{'0' * 2_000}\n%%EOF", engine: 'echo',
+        engine_version: '1.0'
+      )
+    end
+  end
+
+  def visible_count(actor)
+    Issue.visible(actor).where(project_id: @project.id).count
+  end
+
+  # One private issue and two roles that differ about it — built rather than assumed from
+  # the fixtures, because "these two happen to see different things" is exactly the
+  # precondition that quietly stops being true when a fixture changes.
+  def make_the_two_actors_see_different_issues
+    seer = @role
+    # `view_…_reports` IS IN BOTH LISTS. Without it `Template#visible?` answers false and
+    # `find_template` 404s before anything this test is about has run — which is what the
+    # first version of this helper did, and it looked like a routing bug.
+    seer.permissions = %w[view_issues view_private_issues
+                          view_reporter_dashboards_reports
+                          share_reporter_dashboards_reports]
+    seer.save!
+    blind = Role.find(2)
+    blind.permissions = %w[view_issues view_reporter_dashboards_reports
+                           share_reporter_dashboards_reports]
+    blind.save!
+
+    Member.where(project_id: @project.id, user_id: @owner.id).destroy_all
+    Member.where(project_id: @project.id, user_id: @other.id).destroy_all
+    Member.create!(project: @project, principal: @owner, roles: [seer])
+    Member.create!(project: @project, principal: @other, roles: [blind])
+
+    Issue.where(project_id: @project.id).order(:id).first
+         .update_columns(is_private: true, author_id: @owner.id, assigned_to_id: @owner.id)
+  end
+
+  def test_the_snapshot_is_rendered_as_the_sharer_and_never_as_the_templates_author
+    @template.update!(content: 'COUNT=[{{ issues.size }}]',
+                      visibility: Template::VISIBILITY_PUBLIC)
+    make_the_two_actors_see_different_issues
+    @project.reload
+
+    sharer_sees = visible_count(@other)
+    author_sees = visible_count(@owner)
+    assert_not_equal sharer_sees, author_sees,
+                     'the two actors see the same issues, so this cannot discriminate'
+
+    # dlopper shares a report jsmith wrote. The bytes must be dlopper's view.
+    @request.session[:user_id] = @other.id
+    RedmineReporterDashboards::Render::Registry.isolated do
+      RedmineReporterDashboards::Render::Registry.register(:echo, EchoEngine)
+      post :create, params: { project_id: @project.identifier, template_id: @template.id }
+    end
+
+    assert_response :redirect
+    link = ShareLink.order(:id).last
+    assert_equal @other.id, link.render_as_user_id
+    assert_include "COUNT=[#{sharer_sees}]", link.rendered_document.bytes,
+                   'the snapshot holds somebody else’s view of the data'
+    assert_not_include "COUNT=[#{author_sees}]", link.rendered_document.bytes
+  end
+
+  # ------------------------------------------------------------------ scoping
+
+  # THREE SCOPES, ALL DESTRUCTIVE OR DISCLOSING, AND AN INDEPENDENT REVIEW FOUND ALL THREE
+  # UNTESTED. Each is written here against the observable difference the review constructed.
+
+  # `find_template`'s `where(project_id:)`. Without it, an actor holding `share_…` in one
+  # project reaches another project's templates — and their share links, `purpose` included.
+  # THE ACTOR IS A MEMBER OF BOTH PROJECTS AND THE TEMPLATE IS PUBLIC, WHICH IS THE WHOLE
+  # POINT. The first version made neither arrangement, so `Template#visible?` answered false
+  # and the request 404'd for a reason that had nothing to do with the scope — the mutation
+  # that removes `where(project_id:)` SURVIVED it. Measured, then fixed: a test that passes
+  # because a different guard fired is a test of that other guard.
+  def test_a_template_from_another_project_is_not_reachable_through_this_project_s_url
+    grant(:share_reporter_dashboards_reports)
+    other_project = Project.find(2)
+    unless other_project.module_enabled?(:reporter_dashboards_reports)
+      EnabledModule.create!(project: other_project, name: 'reporter_dashboards_reports')
+      other_project.reload
+    end
+    Member.where(project_id: other_project.id, user_id: @owner.id).destroy_all
+    Member.create!(project: other_project, principal: @owner, roles: [@role])
+    other_template = Template.create!(project: other_project, author_id: @owner.id,
+                                      name: 'Elsewhere', content: '<p>x</p>',
+                                      source: 'issues', output: 'combined',
+                                      visibility: Template::VISIBILITY_PUBLIC)
+    # THE PRECONDITION, ASSERTED: without it the test cannot tell "the scope refused" from
+    # "the actor could not see it anyway".
+    assert other_template.visible?(@owner.reload),
+           'the actor cannot see the other project’s template, so the scope is not what is ' \
+           'being tested'
+    @request.session[:user_id] = @owner.id
+
+    get :index, params: { project_id: @project.identifier, template_id: other_template.id }
+
+    assert_response :not_found
+  end
+
+  # `index`'s `for_template`. Without it the list shows links belonging to other templates —
+  # including their `purpose`, which is the field whose own help text promises it is private
+  # to its author.
+  def test_the_list_shows_only_this_template_s_links
+    grant(:share_reporter_dashboards_reports)
+    mine = existing_link
+    other_template = Template.create!(project: @project, author_id: @owner.id, name: 'Other',
+                                      content: '<p>x</p>', source: 'issues',
+                                      output: 'combined')
+    stranger, = ShareLink.create_with_token!(
+      template: other_template, project: @project, created_by: @owner,
+      scope_kind: ShareLink::SCOPE_QUERY, purpose: 'NOT-FOR-THIS-LIST',
+      expires_at: 30.days.from_now
+    )
+    @request.session[:user_id] = @owner.id
+
+    get :index, params: { project_id: @project.identifier, template_id: @template.id }
+
+    assert_response :success
+    assert_equal [mine.id], assigns(:links).map(&:id)
+    assert_not_include stranger.purpose, response.body
+  end
+
+  # `revoke_all`'s `for_template`. Without it, "revoke all for this report" revokes the
+  # actor's links on EVERY template in the installation — a button whose label promises one
+  # report and whose effect is global.
+  def test_revoke_all_touches_only_this_template
+    grant(:share_reporter_dashboards_reports)
+    here = existing_link
+    other_template = Template.create!(project: @project, author_id: @owner.id, name: 'Other',
+                                      content: '<p>x</p>', source: 'issues',
+                                      output: 'combined')
+    elsewhere, = ShareLink.create_with_token!(
+      template: other_template, project: @project, created_by: @owner,
+      scope_kind: ShareLink::SCOPE_QUERY, expires_at: 30.days.from_now
+    )
+    @request.session[:user_id] = @owner.id
+
+    delete :revoke_all, params: { project_id: @project.identifier,
+                                  template_id: @template.id }
+
+    assert_response :redirect
+    assert here.reload.revoked?
+    assert_not elsewhere.reload.revoked?, 'a link on another report was revoked'
+  end
+
+  # AND IT TAKES EXPIRED-BUT-UNREVOKED LINKS TOO, because the index draws a Revoke button
+  # for them. `.live` used to be the scope, so after "revoke all" an expired link kept its
+  # button on the page somebody opens precisely when they think something has gone wrong.
+  def test_revoke_all_includes_an_expired_link_that_still_shows_a_revoke_button
+    grant(:share_reporter_dashboards_reports)
+    expired = existing_link
+    expired.update_columns(expires_at: 1.hour.ago)
+    @request.session[:user_id] = @owner.id
+
+    delete :revoke_all, params: { project_id: @project.identifier,
+                                  template_id: @template.id }
+
+    assert expired.reload.revoked?
+  end
+
+  # ------------------------------------------------------------------ bad input
+
+  # NOTHING EXPENSIVE HAPPENS BEFORE THE FIELDS ARE CHECKED. An independent review measured
+  # a 256-character `purpose` driving a full render, a `Document` row and an `Attachment` on
+  # disk — with no link, so nothing could ever reach the bytes, and `documents:purge`
+  # collects only EXPIRED rows, so they sat for 37 days. Repeatable without bound.
+  def test_an_over_long_purpose_is_refused_before_anything_is_rendered
+    grant(:share_reporter_dashboards_reports)
+    @request.session[:user_id] = @owner.id
+
+    assert_no_difference ['RedmineReporterDashboards::Document.count',
+                          'RedmineReporterDashboards::ShareLink.count',
+                          '::Attachment.count'] do
+      create_link(purpose: 'x' * 256)
+    end
+
+    assert_response :unprocessable_entity
+  end
+
+  # AND A `max_uses` PAST THE COLUMN'S RANGE IS A NUMBER, NOT A 500. `use_count` and
+  # `max_uses` are 4-byte integers, so the review's `99999999999` raised an uncaught
+  # `ActiveModel::RangeError` and orphaned a snapshot on the way out.
+  def test_an_enormous_max_uses_is_clamped_rather_than_raising
+    grant(:share_reporter_dashboards_reports)
+    @request.session[:user_id] = @owner.id
+
+    create_link(max_uses: '99999999999')
+
+    assert_response :redirect
+    assert_equal ReporterDashboards::ShareLinksController::MAX_USES_CAP,
+                 ShareLink.order(:id).last.max_uses
+  end
+
+  # AT THE LIMIT AND ONE PAST IT, for the field that now has one.
+  def test_a_purpose_exactly_at_the_limit_is_accepted
+    grant(:share_reporter_dashboards_reports)
+    @request.session[:user_id] = @owner.id
+
+    create_link(purpose: 'x' * 255)
+
+    assert_response :redirect
+    assert_equal 'x' * 255, ShareLink.order(:id).last.purpose
+  end
+
   # ------------------------------------------------------------------ the list
 
   def test_the_list_shows_revoked_and_expired_links_too
@@ -434,6 +699,47 @@ class ReporterDashboardsShareLinksControllerTest < Redmine::ControllerTest
     ids = assigns(:links).map(&:id)
     assert_includes ids, live.id
     assert_includes ids, revoked.id, 'a revoked link is the one somebody most wants to see'
+  end
+
+  # A BUTTON THAT WOULD ANSWER 403 IS NOT DRAWN. The forged request is refused either way —
+  # that is tested above — but offering somebody a control they cannot use is the
+  # "capability nobody can reach" defect pointed the other way, and it is the sort of thing
+  # that survives forever because nothing fails.
+  #
+  # Found by an independent review, whose mutation drew the button unconditionally and left
+  # the suite green.
+  def test_a_non_owner_is_offered_no_revoke_button_at_all
+    @template.update!(visibility: Template::VISIBILITY_PUBLIC)
+    give_other_the_same_role
+    grant(:share_reporter_dashboards_reports)
+    link = existing_link(created_by: @owner)
+    @request.session[:user_id] = @other.id
+
+    get :index, params: { project_id: @project.identifier, template_id: @template.id }
+
+    assert_response :success
+    assert_includes assigns(:links).map(&:id), link.id,
+                    'the link is not even listed, so this asserts nothing about the button'
+    assert_not_include revoke_path_for(link), response.body
+    assert_not_include l(:button_reporter_share_links_revoke_all), response.body
+  end
+
+  # ...AND THE OWNER IS. The control for the test above: without it, a page that drew no
+  # buttons for anybody would pass it.
+  def test_the_owner_is_offered_the_buttons
+    grant(:share_reporter_dashboards_reports)
+    link = existing_link(created_by: @owner)
+    @request.session[:user_id] = @owner.id
+
+    get :index, params: { project_id: @project.identifier, template_id: @template.id }
+
+    assert_response :success
+    assert_include revoke_path_for(link), response.body
+    assert_include l(:button_reporter_share_links_revoke_all), response.body
+  end
+
+  def revoke_path_for(link)
+    "/projects/#{@project.identifier}/reporter/templates/#{@template.id}/shares/#{link.id}/revoke"
   end
 
   # SHOWN ONCE, AND ONCE MEANS ONCE.

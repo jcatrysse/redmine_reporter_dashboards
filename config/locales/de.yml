@@ -301,7 +301,9 @@ de:
   button_reporter_share_links_revoke_all: "Alle meine Links für diesen Bericht widerrufen"
   notice_reporter_share_link_created: "Der Freigabelink wurde erstellt."
   notice_reporter_share_link_revoked: "Der Freigabelink wurde widerrufen und funktioniert nicht mehr."
-  notice_reporter_share_links_revoked: "%{count} Freigabelink(s) wurden widerrufen."
+  notice_reporter_share_links_revoked:
+    one: "1 Freigabelink wurde widerrufen."
+    other: "%{count} Freigabelinks wurden widerrufen."
   text_reporter_share_url_once: "Kopieren Sie diese Adresse jetzt. Sie wird nur einmal angezeigt und kann später nicht wiederhergestellt werden – gespeichert wird nur ihr Fingerabdruck."
   text_reporter_share_link_what_it_does: "Der Bericht wird jetzt in Ihrem Namen erstellt, mit genau den Daten, die Sie sehen dürfen, und dann eingefroren. Wer den Link öffnet, erhält diese eingefrorene Kopie – sie wird für ihn nie neu erzeugt."
   text_reporter_share_link_purpose_info: "Eine Notiz für Sie selbst, für wen dieser Link gedacht ist. Wird niemandem angezeigt, der ihn öffnet."

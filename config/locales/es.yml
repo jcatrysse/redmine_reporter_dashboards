@@ -301,7 +301,9 @@ es:
   button_reporter_share_links_revoke_all: "Revocar todos mis enlaces de este informe"
   notice_reporter_share_link_created: "Se ha creado el enlace compartido."
   notice_reporter_share_link_revoked: "El enlace compartido se ha revocado y ya no funciona."
-  notice_reporter_share_links_revoked: "Se han revocado %{count} enlace(s) compartido(s)."
+  notice_reporter_share_links_revoked:
+    one: "Se ha revocado 1 enlace compartido."
+    other: "Se han revocado %{count} enlaces compartidos."
   text_reporter_share_url_once: "Copie esta dirección ahora. Solo se muestra una vez y después no se puede recuperar: únicamente se almacena una huella de ella."
   text_reporter_share_link_what_it_does: "El informe se genera ahora, en su nombre, con exactamente lo que usted puede ver, y luego se congela. Quien abra el enlace recibirá esa copia congelada: nunca se vuelve a generar para él."
   text_reporter_share_link_purpose_info: "Una nota para usted sobre para quién es este enlace. Nunca se muestra a quien lo abre."

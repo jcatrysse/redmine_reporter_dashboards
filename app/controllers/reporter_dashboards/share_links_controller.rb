@@ -45,8 +45,14 @@ module ReporterDashboards
     before_action :find_project_by_project_id
     before_action :require_reports_module
     before_action :authorize
-    before_action :find_template
+    # THE PERMISSION GUARD RUNS BEFORE THE LOOKUP, and the order is a disclosure
+    # decision rather than a style. Reversed — which is how this shipped — a member
+    # holding only `publish_…` got 403 for a template that exists and 404 for one that
+    # does not, which is an existence oracle for somebody with no right to reach the
+    # surface at all. It also inverts `find_template`s own reasoning below (404 rather
+    # than 403 precisely because 403 confirms existence). Found by an independent review.
     before_action :require_share_permission
+    before_action :find_template
     before_action :find_link, only: [:revoke]
     before_action :require_revocable, only: [:revoke]
 
@@ -54,9 +60,13 @@ module ReporterDashboards
       @links = ShareLink.for_template(@template).includes(:created_by, :rendered_document)
     end
 
-    def new
-      @link = ShareLink.new(expires_at: default_expiry)
-    end
+    # NO `@link`. The form is `params`-driven — it has to be, because it re-renders the
+    # values somebody just typed after a refusal, and an unsaved `ShareLink` cannot
+    # carry `expires_in_days` (a form field with no column behind it). Three `@link =`
+    # assignments used to sit here and in the two refusal paths, read by nothing at all;
+    # an independent review found them. A model-backed form that is not one is a
+    # standing invitation to write `@link.errors` in the view and get silence.
+    def new; end
 
     # RENDER FIRST, THEN GRANT. The snapshot has to exist before the link that authorises
     # it — that is FR-52's whole shape — so a render that fails produces no link at all
@@ -74,6 +84,30 @@ module ReporterDashboards
         return deny_access
       end
 
+      # EVERY FIELD IS CHECKED BEFORE THE RENDER RUNS, AND THAT ORDER IS THE FIX RATHER THAN
+      # A TIDY-UP. An independent review measured what the other order costs: a `purpose`
+      # of 256 characters — an ordinary value from an ordinary form — passed every check
+      # here, drove a FULL PDF RENDER, wrote a `Document` row and an `Attachment` to disk,
+      # and only then failed `ShareLink`'s own length validation in `mint`:
+      #
+      #     STATUS=422  DOCS delta=1  LINKS delta=0  ATT delta=1
+      #     ORPHAN doc id=679 expires_at=2026-09-15 attachment_id=25
+      #
+      # The link never existed, so nothing could ever reach those bytes — and
+      # `documents:purge` collects only EXPIRED rows, so they sat for 37 days (357 at the
+      # expiry cap), repeatable without bound by any member holding `share_…`. A second
+      # value did worse: `max_uses=99999999999` raised an uncaught `ActiveModel::RangeError`
+      # — a 500 — and orphaned a snapshot on the way out.
+      #
+      # FR-15's rule is that over-limit input is "dropped with a log line rather than
+      # stored"; the expensive half of this action is the render, so the check has to come
+      # first or the bound protects nothing that costs anything.
+      invalid = invalid_fields
+      unless invalid.empty?
+        flash.now[:error] = invalid.join(', ')
+        return render(:new, status: :unprocessable_entity)
+      end
+
       snapshot = Reporting::Snapshot.capture(
         template: @template, render_as: User.current, project: @project,
         query_id: params[:query_id], created_by: User.current,
@@ -83,7 +117,6 @@ module ReporterDashboards
       unless snapshot.ok?
         flash.now[:error] = l(:"error_reporter_snapshot_#{snapshot.code}",
                               default: snapshot.message.to_s)
-        @link = ShareLink.new(expires_at: requested_expiry)
         return render(:new, status: :unprocessable_entity)
       end
 
@@ -107,7 +140,18 @@ module ReporterDashboards
     # links of everybody who ever shared this report would be a permission escalation with a
     # convenient name, so it revokes what THIS actor may revoke and says how many that was.
     def revoke_all
-      revocable = ShareLink.for_template(@template).live.select { |link| link.revocable_by?(User.current) }
+      # NOT `.live`, AND THE DIFFERENCE IS VISIBLE ON THE PAGE. `.live` excludes EXPIRED
+      # links, but the index draws a Revoke button for anything not yet revoked — so after
+      # "revoke all" an expired-but-unrevoked link kept its button and its "Expired" row,
+      # on precisely the page somebody opens when they already think something has gone
+      # wrong. Found by an independent review.
+      #
+      # `revoked_at: nil` is the right set: revoking an expired link is not pointless
+      # bookkeeping — it is the difference between "this stopped working on its own" and
+      # "I stopped it", which is the fact the audit is for.
+      revocable = ShareLink.for_template(@template)
+                           .where(revoked_at: nil)
+                           .select { |link| link.revocable_by?(User.current) }
       revocable.each(&:revoke!)
 
       flash[:notice] = l(:notice_reporter_share_links_revoked, count: revocable.length)
@@ -140,7 +184,6 @@ module ReporterDashboards
       # The link's own validations — an expiry past the snapshot's, a `max_uses` of zero.
       # Caught narrowly: anything else is a defect and must reach the log as one.
       flash.now[:error] = e.record.errors.full_messages.join(', ')
-      @link = ShareLink.new(expires_at: requested_expiry)
       render :new, status: :unprocessable_entity
     end
 
@@ -186,10 +229,38 @@ module ReporterDashboards
     # collide at the top of the range.
     MAX_EXPIRY_DAYS = 350
 
+    # THE LARGEST `max_uses` A FORM MAY ASK FOR. `use_count` and `max_uses` are 4-byte
+    # integers, so anything past `2**31 - 1` is an `ActiveModel::RangeError` rather than a
+    # validation failure — a 500 from a number somebody typed. Bounded well below that: a
+    # link somebody wants opened a million times is a link with no limit, and they can say
+    # so by leaving the field empty.
+    MAX_USES_CAP = 10_000
+
     def requested_max_uses
       uses = params[:max_uses].to_i
 
-      uses.positive? ? uses : nil
+      return nil unless uses.positive?
+
+      uses > MAX_USES_CAP ? MAX_USES_CAP : uses
+    end
+
+    # WHAT IS WRONG WITH THE REQUEST, BEFORE ANYTHING EXPENSIVE HAPPENS. Answers a list of
+    # sentences, empty when the request is fine.
+    #
+    # Deliberately NOT `ShareLink.new(...).valid?`: that would need a `rendered_document_id`
+    # to satisfy the snapshot validation, which is the very thing this check exists to run
+    # before. The two fields a form can get wrong on its own are checked here, and the model
+    # remains the authority for everything that involves a document.
+    def invalid_fields
+      errors = []
+      if params[:purpose].to_s.length > ShareLink::MAX_STRING
+        errors << l(:error_reporter_share_link_purpose_too_long, max: ShareLink::MAX_STRING)
+      end
+      # NEGATIVE AND NONSENSE VALUES ARE NOT AN ERROR — `requested_max_uses` reads them as
+      # "no limit", which is what an empty field means and what a person typing `-1` almost
+      # certainly wants. Only a value that would overflow the column is refused, and it is
+      # clamped rather than refused.
+      errors
     end
 
     def requested_public?

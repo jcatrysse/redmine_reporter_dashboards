@@ -508,8 +508,14 @@ module RedmineReporterDashboards
         requires: :member,
         group: :reports_distribute,
         authoring: false,
+        # "Off by default PER TEMPLATE" is what FR-62 and §7b.6 say, and it is NOT what
+        # this is — there is no per-template flag anywhere. It is off per ROLE (nothing
+        # grants this) and decided per LINK. Found by an independent review; the
+        # discrepancy is §Findings **S-28**s MINOR and is the curators to resolve in one
+        # direction or the other. The line below describes the CODE, because a `covers:`
+        # string is read by an administrator on the roles screen.
         covers: 'Turn a share link into a PUBLIC link, reachable without a Redmine ' \
-                'account. Off by default per template (FR-62)'
+                'account. Granted to no role by default; chosen per link (FR-62)'
       )
     ].freeze
     # REGISTERED and PLANNED are DERIVED from ENTRIES, in ENTRIES' order, so that

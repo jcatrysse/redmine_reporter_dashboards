@@ -301,7 +301,9 @@ en:
   button_reporter_share_links_revoke_all: "Revoke all my links for this report"
   notice_reporter_share_link_created: "The share link was created."
   notice_reporter_share_link_revoked: "The share link was revoked and no longer works."
-  notice_reporter_share_links_revoked: "%{count} share link(s) were revoked."
+  notice_reporter_share_links_revoked:
+    one: "1 share link was revoked."
+    other: "%{count} share links were revoked."
   text_reporter_share_url_once: "Copy this address now. It is shown only once and cannot be recovered afterwards - only a fingerprint of it is stored."
   text_reporter_share_link_what_it_does: "The report is generated now, as you, covering exactly what you can see, and then frozen. Whoever opens the link gets that frozen copy - it is never re-run for them."
   text_reporter_share_link_purpose_info: "A note to yourself about who this link was made for. Never shown to whoever opens it."

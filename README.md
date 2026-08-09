@@ -862,6 +862,19 @@ recover it afterwards. If you lose it, revoke the link and make another.
 * **Deleting a report template destroys every link to it and purges its snapshots**, which
   is the most complete revocation available.
 
+### One limitation, stated plainly
+
+A share link authorises **one document and nothing it points at**. If a report's content
+links to a Redmine attachment, that link travels into the PDF as written — it is not
+rewritten, and it is not given any access of its own. Opening it lands the reader on
+Redmine, which applies its own permission check, so a public-link holder with no account
+gets a sign-in page rather than the file.
+
+That is safe, but it is narrower than being able to *include* an attachment in a shared
+report. Images referenced by URL will not appear in a snapshot at all: the renderer is
+deliberately never given credentials, so it cannot fetch them. If your report needs an
+image, embed it in the template rather than linking to it.
+
 ### Collecting expired snapshots
 
 Expired snapshots stop being served the moment they expire, but their files stay on disk

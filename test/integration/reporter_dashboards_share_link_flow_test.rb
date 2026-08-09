@@ -447,15 +447,20 @@ class ReporterDashboardsShareLinkFlowTest < Redmine::IntegrationTest
 
   # ------------------------------------------------------------------ FR-54 / INV-8
 
-  # FR-54 SAYS *"attachment URLs are scoped to the share link that produced them, and expire
-  # and revoke with it"*. THIS IMPLEMENTATION SATISFIES IT BY ISSUING NO ATTACHMENT URL AT
-  # ALL, which is stronger, and §7b.1 anticipates exactly that: *"`| inline` means most
-  # reports need no external asset URL in the first place."*
+  # FR-54 IS **NOT SATISFIED**, AND THESE TWO TESTS DO NOT CLAIM IT IS — see §Findings
+  # **S-28**. They were written under a claim since REFUTED BY MEASUREMENT: that
+  # `Assets::Policy`s `:bundled` default rewrites a same-origin Redmine URL to disk, so a
+  # snapshot could carry no live reference. `Assets::Resolver` and `Render::AssetBinding`
+  # have **no production call site** — `ReportRun#document_request` passes `body:` straight
+  # through — and a real render puts `/attachments/download/1` into the PDF verbatim. The
+  # policy is real, correct and tested, and nothing calls it; the pre-existing half of that
+  # is §Findings **F-16**.
   #
-  # Read out of the source rather than assumed: `Assets::Policy`'s default mode is
-  # `:bundled`, whose table says a same-origin Redmine URL is *"rewritten to disk, NEVER
-  # fetched"* and a third-party URL is *refused*. So the bytes handed to the engine carry no
-  # live reference, and the PDF a recipient receives is self-contained.
+  # WHAT THESE TWO DO TEST is worth keeping and is a narrower, TRUE claim: a share link
+  # authorises ONE DOCUMENT and grants nothing else. Nothing leaks today — the renderer is
+  # never handed a session credential (INV-8), so a referenced attachment simply fails to
+  # load — but *"the fetch fails"* is not *"attachment URLs are scoped to the link, and
+  # expire and revoke with it"*, which is what FR-54 asks for and what T-28 still owes.
   #
   # The mechanical form of "no scoped URL is needed" is that the endpoint HAS NOTHING ELSE
   # TO GIVE: one route parameter, one document, and no way to ask it for a second thing. A

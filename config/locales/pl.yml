@@ -301,7 +301,10 @@ pl:
   button_reporter_share_links_revoke_all: "Wycofaj wszystkie moje odnośniki do tego raportu"
   notice_reporter_share_link_created: "Odnośnik do udostępniania został utworzony."
   notice_reporter_share_link_revoked: "Odnośnik został wycofany i już nie działa."
-  notice_reporter_share_links_revoked: "Wycofano %{count} odnośnik(ów)."
+  notice_reporter_share_links_revoked:
+    one: "Wycofano 1 odnośnik."
+    few: "Wycofano %{count} odnośniki."
+    other: "Wycofano %{count} odnośników."
   text_reporter_share_url_once: "Skopiuj ten adres teraz. Jest pokazywany tylko raz i nie da się go później odzyskać — przechowywany jest wyłącznie jego odcisk."
   text_reporter_share_link_what_it_does: "Raport zostanie wygenerowany teraz, w Twoim imieniu, dokładnie z tym, co możesz zobaczyć, a następnie zamrożony. Kto otworzy odnośnik, otrzyma tę zamrożoną kopię — nigdy nie jest ona tworzona ponownie."
   text_reporter_share_link_purpose_info: "Notatka dla Ciebie o tym, dla kogo powstał ten odnośnik. Nigdy nie jest pokazywana osobie, która go otwiera."

@@ -301,7 +301,10 @@ ru:
   button_reporter_share_links_revoke_all: "Отозвать все мои ссылки на этот отчёт"
   notice_reporter_share_link_created: "Ссылка для доступа создана."
   notice_reporter_share_link_revoked: "Ссылка отозвана и больше не работает."
-  notice_reporter_share_links_revoked: "Отозвано ссылок: %{count}."
+  notice_reporter_share_links_revoked:
+    one: "Отозвана 1 ссылка."
+    few: "Отозвано %{count} ссылки."
+    other: "Отозвано %{count} ссылок."
   text_reporter_share_url_once: "Скопируйте этот адрес сейчас. Он показывается только один раз и не может быть восстановлен позже — хранится лишь его отпечаток."
   text_reporter_share_link_what_it_does: "Отчёт формируется сейчас, от вашего имени, ровно по тем данным, которые видите вы, и затем фиксируется. Тот, кто откроет ссылку, получит эту зафиксированную копию — для него он никогда не формируется заново."
   text_reporter_share_link_purpose_info: "Заметка для вас о том, для кого эта ссылка. Тому, кто её открывает, она никогда не показывается."

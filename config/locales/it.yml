@@ -301,7 +301,9 @@ it:
   button_reporter_share_links_revoke_all: "Revoca tutti i miei collegamenti per questo report"
   notice_reporter_share_link_created: "Il collegamento di condivisione è stato creato."
   notice_reporter_share_link_revoked: "Il collegamento di condivisione è stato revocato e non funziona più."
-  notice_reporter_share_links_revoked: "Revocati %{count} collegamenti di condivisione."
+  notice_reporter_share_links_revoked:
+    one: "Revocato 1 collegamento di condivisione."
+    other: "Revocati %{count} collegamenti di condivisione."
   text_reporter_share_url_once: "Copiare subito questo indirizzo. Viene mostrato una sola volta e non è più recuperabile: se ne conserva soltanto un’impronta."
   text_reporter_share_link_what_it_does: "Il report viene generato ora, a nome vostro, con esattamente ciò che potete vedere, e poi congelato. Chi apre il collegamento riceve quella copia congelata: per lui non viene mai rigenerato."
   text_reporter_share_link_purpose_info: "Una nota per voi su chi è il destinatario del collegamento. Non viene mai mostrata a chi lo apre."

@@ -301,7 +301,8 @@ zh:
   button_reporter_share_links_revoke_all: "撤销我为此报表创建的所有链接"
   notice_reporter_share_link_created: "分享链接已创建。"
   notice_reporter_share_link_revoked: "分享链接已撤销，不再有效。"
-  notice_reporter_share_links_revoked: "已撤销 %{count} 个分享链接。"
+  notice_reporter_share_links_revoked:
+    other: "已撤销 %{count} 个分享链接。"
   text_reporter_share_url_once: "请立即复制此地址。它只显示一次，之后无法找回——系统只保存它的指纹。"
   text_reporter_share_link_what_it_does: "报表现在就以您的身份生成，内容正是您有权看到的部分，然后被冻结。打开链接的人拿到的是这份冻结副本，绝不会为他重新生成。"
   text_reporter_share_link_purpose_info: "给自己留的备注，说明这个链接是给谁的。打开链接的人永远看不到。"

@@ -301,7 +301,9 @@ hu:
   button_reporter_share_links_revoke_all: "Összes saját hivatkozásom visszavonása ehhez a jelentéshez"
   notice_reporter_share_link_created: "A megosztási hivatkozás elkészült."
   notice_reporter_share_link_revoked: "A megosztási hivatkozást visszavontuk, többé nem működik."
-  notice_reporter_share_links_revoked: "%{count} megosztási hivatkozás visszavonva."
+  notice_reporter_share_links_revoked:
+    one: "1 megosztási hivatkozás visszavonva."
+    other: "%{count} megosztási hivatkozás visszavonva."
   text_reporter_share_url_once: "Másolja ki most ezt a címet. Csak egyszer jelenik meg, és később nem állítható vissza – csak az ujjlenyomatát tároljuk."
   text_reporter_share_link_what_it_does: "A jelentés most készül el, az Ön nevében, pontosan azzal a tartalommal, amit Ön láthat, majd rögzítjük. Aki megnyitja a hivatkozást, ezt a rögzített példányt kapja – számára soha nem készül újra."
   text_reporter_share_link_purpose_info: "Emlékeztető önmagának arról, kinek készült a hivatkozás. Aki megnyitja, soha nem látja."

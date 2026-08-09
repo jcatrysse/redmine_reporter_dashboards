@@ -83,7 +83,7 @@ fact that CI has not yet run on this work at all.
 | T-24 | **done — `import:run` and `import:status`; `import:verify` is DROPPED with evidence (§Findings S-21), because the corpus discipline needs a frozen fixture AND a pinned date and production has neither.** `import/{runner,import_report}.rb` plus two rake tasks. **COPY, FORWARD-ONLY, NEVER ADOPT** — §7's *Adopt vs copy*: the base plugin's own documented uninstall drops `report_templates`, so adopting those rows would lose them, and *"nothing inside the new plugin can prevent that"*. The no-write claim is asserted on the **statements** rather than on the rows, because a row that still looks right proves the importer did not happen to change it and not that it could not. **Idempotence has FOUR outcomes, not two** — `created`, `unchanged`, `updated` (a safe fast-forward when the source moved and the copy did not) and **`diverged`**, which is the one the `Accept:` line is about: a copy edited here is never overwritten, because an importer that clobbered it would destroy somebody's post-migration work once, quietly, on a re-run triggered for an unrelated reason. Divergence is reported and does NOT make the task exit non-zero — it is the expected state after a migration, not a failure. The type map is `Reporting::Exchange::TYPE_MAP` reused rather than copied, so `constantize` on a database column is refused for the same reason FR-55 refuses it on a file. `import:status` reads OUR templates rather than the source's, so it still answers after the base plugin has been uninstalled — which is exactly when somebody asks what state their migration is in. **Its independent review REJECTED the first attempt with two blockers**: the statement-level "never writes to reporter's tables" assertion was anchored at `\A` and one leading `/* rails */` comment defeated it — a real planted `UPDATE report_templates` survived — and the comment cited `spec/import/runner_spec.rb`, which has never existed, repeating T-32's own rejected defect one task later. The pattern now matches verb+table and its NEGATIVE TEST is committed rather than performed by hand. Four majors besides, all fixed. **`RRD_REWRITE=1` is the `--rewrite` §7a named** and it is not a plain overwrite: the local content is written into the append-only version history FIRST, so taking the source's version loses nothing and the order is asserted by driving the snapshot to fail. A template whose project does not exist here is SKIPPED rather than imported invisibly (every surface is project-scoped, so the row was unreachable). 24 full-app runs against real reporter-shaped tables, **11 mutations, 11 red** across two rounds |
 | T-29 | **done** — the exchange bundle AND the streamed archive, which arrived together because §Findings ~~S-12~~ gave the second to T-29 alone. `reporting/{bundle,bundle_import,bundle_report}.rb`, `archive/zip_stream.rb`, `exchange_tasks.rb`, three rake tasks, a ninth `layer_purity` arm, 2 keys x 9 locales and one key deleted. **The bundle WRAPS `Exchange` rather than restating it**: one closed TYPE_MAP, one field list, one version rule, one safe-YAML reader — a second field list is the failure mode that lost `failure_document` once already, and it is silent because a field absent from BOTH ends still round-trips byte-identically. **FR-57 is four decisions, not a hope** — order (by name, then id, so the receiving installation's ids cannot move anything), key order, encoding (raw UTF-8, so `Übersicht` is bytes rather than `\u00dc`) and `exported_at` being an ARGUMENT; the test asserts the payload halves match INDEPENDENTLY of the envelope, because pinning the whole file would also pass if the payload were empty on both sides. **The archive is a dependency-free STORED zip** validated by `unzip -t` and Python's `zipfile` as well as by an independent in-spec reader, and the controller streams it with no `Content-Length` — `@controller.response_body` is asserted to BE the lazy writer, which is the assertion that fails the moment somebody puts `send_data` back. **The documents are rendered before the first byte, on purpose** (E-6). Raised **S-22** (§7b.2's two rake names are already taken by the migration importer, and rake would have run both bodies) |
 | T-29 review | **REJECTED on the first pass, and every defect was at a boundary the tests did not cross.** A fresh subagent found 3 BLOCKERs, 3 MAJORs, 5 MINORs, 3 NITs, each with a probe. The blockers: (1) the archive is drained by `Rack::ETag` before the first byte — the middleware, which `ActionController::TestCase` never runs; (2) **a bundle carrying two templates with the same name lost one** under the default policy, because `Template` has no uniqueness validation on `name` and the importer asked the DATABASE per entry, so the second entry collided with the row the first had just written — FR-57 fails on exactly that bundle; (3) **`plan` did not predict `apply`** on the same input, the case the class comment calls "worse than no plan at all". (2) and (3) are one fix: the conflict set is SNAPSHOTTED before the first entry, so a within-bundle duplicate is not a conflict and both entry points decide identically. The majors: a logger raising inside a rescue aborting the bundle (already fixed); the ONE test pinning the overwrite permission was **vacuous** — the fixture project never had the reports module, so `editable_by?` was false for every non-admin and the test would have passed against an arm that refused everything; and the web Import button still read `Exchange.parse`, silently importing the FIRST template of the multi-template bundles the same release taught `export:bundle` to write. All fixed; two of the reviewer's 18 mutations survived and both were the pre-declared redundant guards |
-| T-28 | **DONE, in three increments, and its increment-2 review REJECTED the change with two blockers that were both "the test cannot fail" rather than "the code is wrong" (§Findings **E-23**).** **Increment 1** (`d9943ca`): migration 010, `ShareLink`, `ShareLinkAccess`. Only the digest is stored; lookup is by digest with a fixed-length constant-time compare; expiry is NOT NULL in the *schema*; `use!` is one conditional UPDATE whose WHERE clause carries the whole rule. **Increment 2** (`d36ad97`): `Reporting::Snapshot` — the write path `reporter_dashboards_documents` had lacked since T-22 created it — plus the public endpoint at `GET /reporter/s/:token`, outside any project, the only controller here with no permission because *"may whoever holds this token have these bytes"* has no person in it. **Two core measurements changed the design and both are findings**: `Attachment.prune` would have deleted every snapshot after a day (**S-24**), and `attachments.container_type` is `varchar(30)` while every model name here is longer (**S-25**). **Increment 3** (`e50bf6b`): the owner's list with revoke and revoke-all, both permissions promoted, and FR-54. **Revocation is OWNERSHIP, not a permission** — a third party holding every grantable permission cannot revoke somebody else's link, and revoke-all checks per link rather than once for the template, or it would be an escalation with a convenient name. **FR-54 is satisfied by issuing NO attachment URL at all**, which is stronger than scoping one and is what §7b.1 anticipates: `Assets::Policy`'s default `:bundled` rewrites a same-origin URL to disk and never fetches it, so the PDF is self-contained and a scoped-URL scheme would only have added a second bearer-token surface. **`PLANNED` is now EMPTY** — every permission §4.1 names is registered — which makes four permission-spec examples vacuous, so an example asserts the emptiness and names them. Curator decisions taken along the way: **~~S-26~~** (a public link serves on a `login_required` instance — *"public is public… it's a choice"*) and **S-27** (the token is in every access log; short expiries are the bound). Found and fixed **E-22**, a security assertion in increment 1 that tested nothing, proved wrong in both directions. Mutations: 21 + 15 + 9, all killed after two rounds of survivors were closed with tests |
+| T-28 | **COMPLETE EXCEPT FR-54, which is UNMET and is the curator's to resolve (§Findings **S-28**) — do not mark this done. Three increments, and its increment-2 review REJECTED the change with two blockers that were both "the test cannot fail" rather than "the code is wrong" (§Findings **E-23**).** **Increment 1** (`d9943ca`): migration 010, `ShareLink`, `ShareLinkAccess`. Only the digest is stored; lookup is by digest with a fixed-length constant-time compare; expiry is NOT NULL in the *schema*; `use!` is one conditional UPDATE whose WHERE clause carries the whole rule. **Increment 2** (`d36ad97`): `Reporting::Snapshot` — the write path `reporter_dashboards_documents` had lacked since T-22 created it — plus the public endpoint at `GET /reporter/s/:token`, outside any project, the only controller here with no permission because *"may whoever holds this token have these bytes"* has no person in it. **Two core measurements changed the design and both are findings**: `Attachment.prune` would have deleted every snapshot after a day (**S-24**), and `attachments.container_type` is `varchar(30)` while every model name here is longer (**S-25**). **Increment 3** (`e50bf6b`): the owner's list with revoke and revoke-all, both permissions promoted, and FR-54. **Revocation is OWNERSHIP, not a permission** — a third party holding every grantable permission cannot revoke somebody else's link, and revoke-all checks per link rather than once for the template, or it would be an escalation with a convenient name. **FR-54 IS NOT MET, and the commit that claimed it was cited a control with no call site** — `Assets::Resolver`/`AssetBinding` are never called, `ReportRun` passes the body straight through, and a real render puts `/attachments/download/1` into the PDF verbatim. Nothing leaks today (INV-8 denies the renderer a credential, so the fetch fails) but that is not what FR-54 asks for. **S-28** puts three options to the curator. **`PLANNED` is now EMPTY** — every permission §4.1 names is registered — which makes four permission-spec examples vacuous, so an example asserts the emptiness and names them. Curator decisions taken along the way: **~~S-26~~** (a public link serves on a `login_required` instance — *"public is public… it's a choice"*) and **S-27** (the token is in every access log; short expiries are the bound). Found and fixed **E-22**, a security assertion in increment 1 that tested nothing, proved wrong in both directions. **Its increment-3 review REJECTED it too (§Findings **E-24**)**: four scoping and identity guards had no test — one mutation made the snapshot render as the TEMPLATE'S AUTHOR while still recording the sharer, a measured escalation — and two ordinary form values wrote a full render, a `Document` row and an `Attachment` to disk on a request that then FAILED, repeatable without bound. All fixed; every field is now checked before the render. Mutations: 21 + 15 + 9 + 10, all killed after three rounds of survivors were closed with tests |
 | T-26 onward | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -190,6 +190,113 @@ still an unauthenticated unbounded write endpoint** (20 requests → 20 rows of 
 **Round-2 mutations: 15, all killed** — including all seven the review found surviving. The
 review's own harness note is worth keeping: it ran three kills alongside seven survivals,
 which is what made the survivals evidence rather than a broken runner.
+
+**S-28 · FR-54 IS **NOT** SATISFIED, THE COMMIT THAT SAID IT WAS CITED A CONTROL WITH NO
+CALL SITE, AND T-28 IS THEREFORE NOT COMPLETE.** Found by the independent review of
+increment 3, 2026-08-09. **This is the retraction of a claim I made twice — in `e50bf6b`'s
+message and to the curator in conversation — so it is written out in full rather than
+softened.**
+
+**The claim:** *"`Assets::Policy`'s default `:bundled` mode rewrites a same-origin Redmine
+URL to disk and NEVER fetches it, so the PDF a recipient receives is self-contained"*, and
+therefore FR-54's scoped attachment URLs are unnecessary because no URL is issued.
+
+**The refutation, measured.** `Assets::Resolver` and `Render::AssetBinding` have **no
+production call site at all** — only their own definitions, comments and specs:
+
+    $ grep -rn "AssetBinding" --include=*.rb app lib
+    lib/…/assets/resolution.rb:9      # a comment
+    lib/…/render/asset_binding.rb:37  # the definition
+    lib/…/assets.rb:49                # a comment
+
+`ReportRun#document_request` (`reporting/report_run.rb:410-418`) builds
+`DocumentRequest.new(body: section.body, …)` directly and passes no `assets:` at all. Through
+a real render on the share-link create path the review measured:
+
+    PDF contains '/attachments/': true
+    sample: ["src=\"/attachments/download/1/error281.txt", "href=\"/attachments/download/1"]
+
+So a live, unrewritten same-origin reference **does** survive into the bytes a share link
+serves. The asset policy is real, correct and tested — and nothing calls it.
+
+**Two separate defects, and only one is new.** The unwired asset layer is PRE-EXISTING and
+already recorded as **F-16** (*"nothing consumes `DocumentRequest#assets` yet"*). What T-28
+added is a **false citation resting on it**, which is the defect class CLAUDE.md names and
+which this project has now shipped **four** times (T-32, T-24, increment 2's *"THE TOKEN IS
+NOT LOGGED"*, and this). The rule earns restating: *a cited control that does not exist is
+worse than no comment* — and the reason it keeps happening is that the control genuinely
+exists as CODE, so a reader checking the citation finds a real file and stops.
+
+**What is actually true today, and it is a much narrower claim.** A referenced attachment
+does not reach the recipient, but not for the reason given: the renderer is never handed a
+session credential (INV-8), so an `<img src="/attachments/…">` simply fails to load, and an
+`<a href>` survives as a relative link annotation that resolves against nothing. **Nothing
+leaks.** But "the exposure is nil today because the fetch fails" is not "attachment URLs are
+scoped to the link, and expire and revoke with it", which is what FR-54 asks for.
+
+**Two tests were written for FR-54 and neither tests it.** One asserts the endpoint ignores
+extra parameters; the other asserts core refuses an anonymous visitor at
+`/attachments/:id`. Both are worth keeping and neither is about FR-54. They are relabelled
+rather than deleted.
+
+**What the curator owes: a decision, because I cannot close this honestly.** Three options,
+and the first is the only one that delivers FR-54 as written:
+
+1. **Wire the asset layer** (F-16's work) and then scope the resulting URLs to the link.
+   Real work, and it lands in T-33's territory rather than T-28's.
+2. **Narrow FR-54** to what the snapshot arm can honestly promise: *a share link authorises
+   one document and grants nothing it points at*, held by INV-8 plus core's own permission
+   check. That is a spec edit, not a code change — and it is a genuine weakening, so it is
+   the curator's to make and not mine.
+3. **Leave FR-54 open** and mark T-28 complete-except-FR-54.
+
+**Until one is taken, T-28's `Accept:` line *"attachment URLs scoped to the link and revoked
+with it"* is UNMET, and the status row says so.**
+
+**E-24 · T-28 INCREMENT 3'S REVIEW REJECTED IT: FOUR SCOPING AND IDENTITY GUARDS HAD NO
+TEST, AND TWO ORDINARY FORM VALUES LEFT DURABLE STATE BEHIND ON A *FAILED* REQUEST.**
+2026-08-09, fresh subagent. Eight mutations, three killed and **five surviving**, each
+demonstrated non-equivalent by constructing the observable difference — which is the
+discipline E-23 asked for and got.
+
+| what was untested | what the mutation did |
+|---|---|
+| `render_as: User.current` (INV-1) | rendered as the TEMPLATE'S AUTHOR while still recording the sharer — measured `COUNT=[7]` where the sharer sees 6, so the sharer received private issues **and** the audit column lied |
+| `find_template`'s project scope | an actor with `share_…` in project A listed project B's links, `purpose` included |
+| `index`'s `for_template` | the list showed another template's links |
+| `revoke_all`'s `for_template` | "revoke all for this report" revoked the actor's links **installation-wide** |
+| the revoke button's `revocable_by?` | drew a button for everybody; the forged POST is still refused, so this is UX rather than a hole |
+
+**And two ordinary values wrote durable state on a request that then failed.** A `purpose`
+of 256 characters — legal on the form, refused by the model — drove a **full PDF render, a
+`Document` row and an `Attachment` on disk** before `mint` rejected it: `DOCS delta=1 LINKS
+delta=0 ATT delta=1`. With no link, nothing could ever reach those bytes, and
+`documents:purge` collects only EXPIRED rows, so they sat for 37 days (357 at the cap),
+repeatable without bound by any member holding `share_…`. `max_uses=99999999999` did worse:
+an uncaught `ActiveModel::RangeError` — a **500** — and an orphan on the way out.
+
+**All fixed**, and the ordering is the fix rather than a validation: every field is checked
+**before** the render, because FR-15's "dropped rather than stored" protects nothing if the
+expensive half has already run.
+
+**Three lessons worth keeping, all of them about tests rather than code:**
+
+* **A test can pass because a DIFFERENT guard fired.** My first test for the project scope
+  never made the template visible to the actor, so it 404'd on visibility and the scope
+  mutation survived it. The precondition is now asserted.
+* **A test can miss because the action does not map the permission.** My existence-oracle
+  test used `#index`, which `publish_…` does not map, so Redmine's `authorize` refused first
+  and the guard order was never reached. Moved to `#new`.
+* **THE MIRROR TRAP CAUGHT ME ONCE MORE, AND IT LOOKED LIKE A REAL FAILURE.** After the last
+  mutation was reverted I ran the full suite without re-mirroring, so it exercised the
+  MUTATED controller and reported one failure. `diff` between the two trees is now part of
+  the run: `845 runs, 3705 assertions, 0 failures` only after the mirror was proved in sync.
+
+**MINOR 6, unfixed and reported:** §7b.6 and FR-62 both say a public link is *"enabled per
+template"*, and `permissions.rb`'s `covers:` line repeats it. **There is no per-template
+flag.** It is off per ROLE and decided per LINK. Either the spec means something this design
+does not do, or the sentence is loose — report-and-ask (CLAUDE.md §11.3), not a silent
+rewrite in either direction.
 
 **F-17 · THE `file:line` CITATIONS INTO `technical-spec.md` HAVE DRIFTED BY ROUGHLY SEVEN
 LINES, ACROSS AT LEAST SEVEN FILES, AND NOTHING CHECKS THEM.** Found in T-28 increment 2 while
