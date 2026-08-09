@@ -814,40 +814,41 @@ Note that a public link is served **even on an installation configured with
 frozen document is a deliberate act on top of it. If that is not what you want for your
 installation, do not grant anybody the ability to publish.
 
-### What is not built yet
+### Who may do it
 
-**There is no interface for creating or revoking links in this version, and no permissions of
-their own yet** — both arrive with the rest of T-28. Links are created in the console today:
+Two role permissions, and they are two rather than one because they are different
+decisions:
 
-```ruby
-template = RedmineReporterDashboards::Template.find(<id>)
-author   = User.find_by_login('jsmith')      # the report is rendered as this person
+| Permission | What it lets somebody do |
+|---|---|
+| **Create report share links** | Make a link to a report they can already open |
+| **Make report share links public** | Additionally tick "public link", so it works with no Redmine account |
 
-result = RedmineReporterDashboards::Reporting::Snapshot.capture(
-  template:   template,
-  render_as:  author,
-  project:    template.project,
-  created_by: User.current,
-  expires_at: 30.days.from_now)
+Neither is granted by default. Someone holding only the second one can do nothing — it
+widens a choice on a form rather than opening a door.
 
-raise result.message unless result.ok?
+**Revoking is not a permission.** A link can be revoked by whoever created it, by the
+report's author, and by administrators. A colleague holding every permission in Redmine
+still cannot revoke a link you made — that is deliberate, and there is a test for it.
 
-link, token = RedmineReporterDashboards::ShareLink.create_with_token!(
-  template:             template,
-  project:              template.project,
-  created_by:           User.current,
-  scope_kind:           RedmineReporterDashboards::ShareLink::SCOPE_SNAPSHOT,
-  rendered_document_id: result.document.id,
-  render_as_user_id:    author.id,
-  public_link:          false,      # true = reachable without a Redmine account
-  max_uses:             nil,        # or a number
-  expires_at:           30.days.from_now)
+### Making one
 
-puts "/reporter/s/#{token}"          # the only time this URL exists
-link.revoke!                         # ...and this is how you take it back
-```
+Open a report and choose **Share links**. That page lists every link for the report —
+including revoked and expired ones, because a revoked link is exactly the thing you want
+to confirm is revoked, and an expired one explains why a recipient is complaining. From
+there, **New share link** asks for four things:
 
-Two more things are honest to know before you use it:
+* a **purpose**, which is a note to yourself and is never shown to whoever opens the link;
+* an **expiry**, defaulting to 30 days. There is no "never expires" option and there is no
+  way to ask for one;
+* an optional **maximum number of opens** — set it to 1 for a one-off send;
+* whether it is **public**, if you hold that second permission.
+
+The URL is shown once, on the page you land on after creating it. Copy it then: only a
+fingerprint of the token is stored, so no page, console session or database query can
+recover it afterwards. If you lose it, revoke the link and make another.
+
+### Three things worth knowing
 
 * **The token is in the URL path, so it is written to your `production.log` and to any
   reverse proxy's access log**, exactly as any link-based sharing is. That is inherent to
