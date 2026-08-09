@@ -102,6 +102,45 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
+**S-23 · `Rack::ETag` WALKS THE STREAMED ARCHIVE TO DIGEST IT, so it is generated TWICE.
+Both of E-6's stated requirements still hold; the redundant generation has no fix inside
+T-29's mechanism, and the two obvious ones are measurably WORSE. Recorded with the
+measurement rather than papered over. Owner: whoever is willing to move a download onto
+`ActionController::Live`.** Found by probing Redmine's real middleware stack, which
+`ActionController::TestCase` never runs — the same blind spot that hid T-23's
+`Rack::MethodOverride` defect (HANDOVER §1).
+
+Redmine's stack has `Rack::ContentLength` outermost and `Rack::ETag` inside it. Both gate
+on `body.respond_to?(:to_ary)`, and `ActionDispatch::Response::Buffer#to_ary` is defined
+**unconditionally** (`actionpack .../http/response.rb:122`) — it answers `@buf.each`, an
+Enumerator, when the wrapped body is not an Array. So the response always answers `to_ary`
+and a controller cannot opt out of either middleware. And `Rack::ETag`'s `skip_caching?`
+in Rack 3.2.6 tests only for `etag` and `last-modified` headers — **not** `no-store`,
+which is what a reader would assume from the name.
+
+Measured, three strategies, same request. `generations` counts full passes over the entry
+source; the column that carries the requirement is `Content-Length`:
+
+| strategy | generations | `Content-Length` | ETag |
+|---|---|---|---|
+| **as shipped** | 2 | **absent** | yes |
+| + `Last-Modified` (which makes ETag skip) | 2 | **"3286"** | no |
+| + an `ETag` header of our own | 2 | **"3286"** | yes |
+
+Both obvious repairs remove the ETag and hand back a `Content-Length`, which is the one
+thing E-6's bullet names. **What ships is the best of the three.** The requirements hold:
+no `Content-Length` on the wire, and the peak working set is ONE member — measured, the
+largest single chunk was 1 000 bytes against a 3 286-byte archive — rather than the whole
+file. What is NOT true, and what no comment or CHANGELOG entry may therefore claim, is
+that the archive is produced once.
+
+**Why it is not fixed here.** A single generation needs a body that never answers
+`to_ary`, which means `ActionController::Live` or a Rack hijack. Live commits the response
+as soon as the first byte is written, which would reintroduce precisely the failure T-29
+designed against — a `200 OK` already on the wire when document 7 of 50 fails — and it
+requires a threaded server. That is a design change with operational consequences rather
+than a fix, and CLAUDE.md §11.5 says to split rather than absorb.
+
 **S-22 · `technical-spec.md` §7b.2 NAMES TWO RAKE TASKS THAT ALREADY EXIST AND BELONG TO A
 DIFFERENT FEATURE. Reported rather than resolved silently (CLAUDE.md §11.3); T-29 shipped
 under `exchange:` and the collision is the curator's to ratify or rename.** §7b.2 specifies
