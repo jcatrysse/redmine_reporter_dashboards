@@ -6,6 +6,32 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **Reports now embed the images and stylesheets they point at, instead of leaving a gap.**
+  A template that referenced an image by URL — a Redmine attachment, or one of the files
+  this plugin ships — produced a PDF with **nothing** where the image should have been, and
+  said nothing about it. The rendering engine is deliberately given no network access and no
+  credentials, so the URL simply never loaded. The plugin now reads those files itself and
+  puts them *inside* the document before the engine sees it.
+
+  Two URL shapes on this Redmine are recognised: `/plugin_assets/…`, and an attachment’s
+  download URL (`/attachments/download/<id>`, with or without the filename). The absolute
+  form of either works too, matched against **Administration → Settings → Host name**.
+
+  **An attachment is embedded only if the person the report is rendered as is allowed to see
+  it.** The same template can therefore succeed for one recipient and be refused for another.
+  That is the correct answer rather than an inconsistency: a report is never a way to read a
+  file you could not have downloaded yourself.
+
+  **A reference that cannot be resolved now fails the report and names the URL**, instead of
+  producing a document with a hole in it. That is a real change in behaviour, and it is
+  deliberate — a PDF with an empty rectangle where a logo used to be cannot be told apart
+  from one that never had a logo, and when the report is an audit record that difference
+  matters. Two attachment URL shapes are deliberately *not* embedded and are refused with
+  their reason: `/attachments/<id>/<filename>`, which is the *page* about a file rather than
+  the file, and `/attachments/thumbnail/<id>`, which names a *resized copy* — quietly
+  substituting the full-size original would put something other than what was asked for into
+  the document.
+
 - **A *one document per issue* report covering several issues now downloads as a zip.**
   Until now it was refused: the page rendered every document as HTML and offered no
   download button, because serving one of fifty PDFs and calling it the report is worse
@@ -121,6 +147,15 @@ All notable changes to this plugin are documented in this file.
   Adds two tables (`reporter_dashboards_mail_sends`,
   `reporter_dashboards_mail_send_recipients`) in migration 009, which reverses like every
   other migration in this plugin.
+
+### Fixed
+
+- **The report and preview pages answered a 500 for any render by the compatibility
+  engine.** `wkhtmltopdf` marks every document it draws with a note saying it was drawn by
+  a legacy engine, and the panel that lists those notes could read only one of the two
+  kinds of note this plugin produces — it crashed on the other. So every report drawn by
+  that engine failed to *display*, while the PDF itself was perfectly good. The list now
+  understands both kinds.
 
 ### Deprecated
 
