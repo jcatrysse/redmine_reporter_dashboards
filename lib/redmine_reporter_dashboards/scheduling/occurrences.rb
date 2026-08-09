@@ -45,7 +45,7 @@ module RedmineReporterDashboards
       YEARLY    = 'yearly'
       REPEATS = [DAILY, WEEKLY, MONTHLY, QUARTERLY, YEARLY].freeze
 
-      # `technical-spec.md:1214`: "a schedule dormant for a year must not emit 365
+      # `technical-spec.md`: "a schedule dormant for a year must not emit 365
       # e-mails". Seven days is a week of missed runs — enough to cover a long weekend of
       # downtime, short enough that nobody's inbox receives a year of history because a
       # cron entry was restored.

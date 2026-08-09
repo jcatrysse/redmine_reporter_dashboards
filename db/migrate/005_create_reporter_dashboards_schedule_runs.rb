@@ -4,7 +4,7 @@
 #
 # --- THE UNIQUE INDEX IS THE SCHEDULER FIX, NOT AN OPTIMISATION ---
 #
-# `technical-spec.md:1205-1211`: "The runner **claims the occurrence first** by inserting
+# `technical-spec.md`: "The runner **claims the occurrence first** by inserting
 # the run row; a duplicate insert is caught and skipped." FR-39 states it as a requirement
 # on the schema rather than on the code: "A schedule occurrence delivers **at most once**,
 # enforced by a **database constraint**, not only by application logic."

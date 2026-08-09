@@ -222,7 +222,7 @@ namespace :reporter_dashboards do
 
   # T-28 — THE PURGE TASK THE TTL HAS ALWAYS DEPENDED ON, AND UNTIL NOW DID NOT HAVE.
   #
-  # `technical-spec.md:1222-1223` is explicit that persistence is *"opt-in with a mandatory
+  # `technical-spec.md` is explicit that persistence is *"opt-in with a mandatory
   # TTL **and a purge task**. That converts an unmanaged indefinite store into 'off by
   # default, bounded when on'."* T-22 built the TTL and the table; nothing ever wrote a row,
   # so the missing half cost nothing. T-28's snapshot store is the commit that makes rows

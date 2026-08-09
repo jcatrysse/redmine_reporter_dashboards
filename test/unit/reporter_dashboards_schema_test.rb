@@ -41,7 +41,7 @@ class ReporterDashboardsSchemaTest < ActiveSupport::TestCase
   end
 
   def test_no_new_table_collides_with_a_base_plugin_table
-    # `technical-spec.md:1266-1270` — simultaneous installation is the whole argument for
+    # `technical-spec.md` — simultaneous installation is the whole argument for
     # copy-not-adopt, and it fails the moment one table name is shared.
     reporter_tables = %w[report_templates report_schedules report_schedules_users]
 

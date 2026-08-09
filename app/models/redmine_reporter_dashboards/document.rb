@@ -4,7 +4,7 @@ module RedmineReporterDashboards
   # A rendered report, kept.
   #
   # T-22 created the table and this class and **wrote no row**. Persistence is opt-in
-  # (`technical-spec.md:1220-1223`), and the write path is **T-28's, and it now exists**:
+  # (`technical-spec.md`), and the write path is **T-28's, and it now exists**:
   # `Reporting::Snapshot` renders a report once as a named identity and freezes it here, so
   # that a share link serves bytes rather than making a visibility decision at request time
   # (FR-52). T-30's failure documents are still not persisted through this class.
@@ -54,7 +54,7 @@ module RedmineReporterDashboards
     has_one :stored_attachment, class_name: '::Attachment', as: :container,
                                 dependent: :destroy, inverse_of: false
 
-    # `technical-spec.md:1222-1223`: "Persistence is opt-in with a **mandatory TTL** and a purge
+    # `technical-spec.md`: "Persistence is opt-in with a **mandatory TTL** and a purge
     # task. That converts an unmanaged indefinite store into 'off by default, **bounded when
     # on**'." Presence alone delivers the first half and not the second: `expires_at =
     # 9999-12-31` satisfies a presence check, reports `expired?` false for ever, and the

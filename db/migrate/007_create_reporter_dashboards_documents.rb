@@ -4,11 +4,11 @@
 #
 # --- READ THIS BEFORE CHANGING A COLUMN: THE SPEC NAMES THIS TABLE AND NO COLUMN OF IT ---
 #
-# `technical-spec.md:1203` marks it "**required** — it is the snapshot store the share
+# `technical-spec.md` marks it "**required** — it is the snapshot store the share
 # links serve from (§7b.1), no longer optional", and `:1213-1217` adds the policy: "do not
 # persist by default … Persistence is opt-in with a mandatory TTL and a purge task."
 # That is the entire specification. No document in `docs/plan/` states a single column,
-# and `functional-spec.md:348` says out loud that "**No retention model has an owner yet**".
+# and `functional-spec.md` says out loud that "**No retention model has an owner yet**".
 #
 # So every column below is DERIVED from a stated requirement, and each names the
 # requirement it comes from. That is the honest form of a table nobody specified — but it
@@ -33,7 +33,7 @@ class CreateReporterDashboardsDocuments < ActiveRecord::Migration[6.1]
       # FR-47: "shared output is **labelled with the identity it was rendered as**", and
       # FR-45: that identity is "explicit, stored and auditable". A snapshot served to a
       # share-link holder makes no visibility decision at request time
-      # (technical-spec.md:1330-1332), so the identity it was rendered as is the only
+      # (technical-spec.md), so the identity it was rendered as is the only
       # record of whose numbers these are.
       t.integer  :rendered_as_user_id
 
@@ -57,7 +57,7 @@ class CreateReporterDashboardsDocuments < ActiveRecord::Migration[6.1]
       t.integer  :attachment_id
 
       # MANDATORY, and NOT NULL is how "mandatory" is said in a schema.
-      # `technical-spec.md:1215`: "Persistence is opt-in with a **mandatory TTL** and a
+      # `technical-spec.md`: "Persistence is opt-in with a **mandatory TTL** and a
       # purge task. That converts an unmanaged indefinite store into 'off by default,
       # bounded when on'." A nullable expiry is exactly the unmanaged indefinite store.
       t.datetime :expires_at, null: false

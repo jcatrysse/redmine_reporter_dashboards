@@ -6,7 +6,7 @@ module RedmineReporterDashboards
   # --- A REDMINE USER, AND NOTHING ELSE ---
   #
   # There is no `to`, `cc`, `bcc` or `from` on this table, and there is no accessor for one
-  # here. `technical-spec.md:1202` calls that "the exfiltration-and-spoofing-relay finding.
+  # here. `technical-spec.md` calls that "the exfiltration-and-spoofing-relay finding.
   # A security-motivated schema decision", and §7b.5 describes what the base plugin's
   # free-text version actually permits: a report over any issue in the instance, mailed
   # anywhere, with a forged sender.

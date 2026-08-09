@@ -153,7 +153,7 @@ RSpec.describe RedmineReporterDashboards::Scheduling::Occurrences do
       expect(dates).not_to include(d('2026-03-09'))
     end
 
-    # `technical-spec.md:1214` in one example: "a schedule dormant for a year must not
+    # `technical-spec.md` in one example: "a schedule dormant for a year must not
     # emit 365 e-mails".
     it 'is bounded by the window, not by how long the schedule slept' do
       dates = described_class.due(repeat: 'daily', start_date: d('2025-01-01'),

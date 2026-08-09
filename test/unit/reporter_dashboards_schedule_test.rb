@@ -94,7 +94,7 @@ class ReporterDashboardsScheduleTest < ActiveSupport::TestCase
   def test_a_refused_claim_leaves_the_surrounding_transaction_usable
     # MEASURED as a real defect before the savepoint was added: on PostgreSQL a failed
     # INSERT poisons the whole transaction, so the runner's per-schedule rescue
-    # (technical-spec.md:1209) could not actually continue — the next statement raised
+    # (technical-spec.md) could not actually continue — the next statement raised
     # PG::InFailedSqlTransaction. Without `requires_new: true` this test dies on the line
     # after the duplicate.
     ScheduleRun.transaction do

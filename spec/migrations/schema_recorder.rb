@@ -58,7 +58,7 @@ module ActiveRecord
 
       columns = recorder.columns
       # Rails adds the implicit primary key unless `id: false`. Recorded, because
-      # `technical-spec.md:1202` makes the PRESENCE of an id on the recipients table a
+      # `technical-spec.md` makes the PRESENCE of an id on the recipients table a
       # requirement and its ABSENCE on the visibility join table a deliberate choice.
       unless options[:id] == false
         columns = [{ 'name' => 'id', 'type' => 'primary_key', 'null' => false, 'default' => nil }] + columns

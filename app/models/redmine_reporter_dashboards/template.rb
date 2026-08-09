@@ -5,7 +5,7 @@ module RedmineReporterDashboards
   #
   # --- WHY THIS CLASS IS NAMESPACED, AND WHY THAT IS THE POINT OF T-22 ---
   #
-  # `technical-spec.md:1266-1270`: "Both plugins define `Report`, `ReportTemplate`,
+  # `technical-spec.md`: "Both plugins define `Report`, `ReportTemplate`,
   # `ReportSchedule` at **top level**, so there is no 'install alongside and compare' path
   # today. Namespaced classes + new tables mean **both plugins can be installed
   # simultaneously**, which turns the riskiest single event in the project from a leap of
@@ -36,7 +36,7 @@ module RedmineReporterDashboards
     self.table_name = 'reporter_dashboards_templates'
 
     # Redmine's own three values and integers, from `app/models/query.rb:259-261`, so an
-    # administrator meets ONE concept rather than two (technical-spec.md:617-618).
+    # administrator meets ONE concept rather than two (technical-spec.md).
     #
     # **Finding S-4, settled by T-23.** The specs called the third value "project"; core
     # calls it PUBLIC and labels it *"to any users"* (`config/locales/en.yml:1076`). The

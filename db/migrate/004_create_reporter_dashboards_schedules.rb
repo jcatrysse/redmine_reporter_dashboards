@@ -4,7 +4,7 @@
 #
 # --- THE DEFECT THIS TABLE FIXES, IN ITS COLUMN TYPES ---
 #
-# `technical-spec.md:1200`: "Reporter stores these dates as `datetime` while every
+# `technical-spec.md`: "Reporter stores these dates as `datetime` while every
 # comparison is date-based — fixed." So `start_date`, `end_date`, `last_run_on` and
 # `next_run_on` are `date`. A `datetime` compared by date is a bug that only shows up
 # either side of midnight in a timezone nobody tested, and the column type is the only
@@ -14,7 +14,7 @@ class CreateReporterDashboardsSchedules < ActiveRecord::Migration[6.1]
     create_table :reporter_dashboards_schedules do |t|
       t.integer :project_id
       t.integer :template_id, null: false
-      # The schedule owner. `technical-spec.md:1378`: "the schedule owner gets a failure
+      # The schedule owner. `technical-spec.md`: "the schedule owner gets a failure
       # notice carrying the correlation id" — there has to be a column saying who that is.
       t.integer :author_id, null: false
 
@@ -45,14 +45,14 @@ class CreateReporterDashboardsSchedules < ActiveRecord::Migration[6.1]
       t.string  :timezone
       t.boolean :enabled, null: false, default: true
 
-      # --- run state (technical-spec.md:1200) ---
+      # --- run state (technical-spec.md) ---
       t.date     :last_run_on
       t.datetime :last_attempted_at
       t.string   :last_status
       t.text     :last_error
       t.integer  :last_duration_ms
       # NOT NULL with a default, because the operator-visible warning
-      # (technical-spec.md:1210) counts on this being a number rather than sometimes NULL.
+      # (technical-spec.md) counts on this being a number rather than sometimes NULL.
       t.integer  :consecutive_failures, null: false, default: 0
       # One of §7 rule 5's three forward-compatibility columns.
       t.date     :next_run_on

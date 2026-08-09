@@ -3,7 +3,7 @@
 module RedmineReporterDashboards
   # One immutable snapshot of a template's content.
   #
-  # `technical-spec.md:1199` calls the table **append-only**, and this class is the second
+  # `technical-spec.md` calls the table **append-only**, and this class is the second
   # half of that: the migration withholds `updated_at`, and `readonly?` withholds `UPDATE`.
   # FR-21's audit trail exists because authoring a template is a code-execution privilege
   # (INV-9), and an audit trail that can be edited answers no question anybody would ask it.

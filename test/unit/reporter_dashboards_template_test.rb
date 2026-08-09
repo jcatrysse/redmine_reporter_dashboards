@@ -65,7 +65,7 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
   end
 
   def test_a_template_with_no_project_is_allowed_because_that_is_the_admin_only_case
-    # technical-spec.md:663 — "Redmine has no role grant outside a project, so
+    # technical-spec.md — "Redmine has no role grant outside a project, so
     # `project_id IS NULL` is admin-only by construction."
     template = Template.create!(author_id: @author.id, name: 'Installation-wide')
 
@@ -135,7 +135,7 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
   end
 
   def test_there_is_no_sti_type_column
-    # implementation-plan.md:1979 — "template types by `source` field (T-31), NOT a subclass
+    # implementation-plan.md — "template types by `source` field (T-31), NOT a subclass
     # tree". A column named `type` would be Rails' STI discriminator whether anybody wanted
     # it or not, so its absence is the mechanism rather than the convention.
     assert_not_includes Template.column_names, 'type'

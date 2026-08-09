@@ -2,7 +2,7 @@
 
 # T-22 — the append-only version trail behind FR-21's audit requirement.
 #
-# `technical-spec.md:1199`: "new, **append-only**: `template_id author_id content
+# `technical-spec.md`: "new, **append-only**: `template_id author_id content
 # content_digest created_at`. INV-9 audit + author rollback."
 #
 # APPEND-ONLY IS EXPRESSED BY THE ABSENCE OF `updated_at`, and that is the point of not

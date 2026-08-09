@@ -5,7 +5,7 @@ module RedmineReporterDashboards
   #
   # --- THE CLAIM, AND WHY IT IS AN INSERT RATHER THAN A CHECK ---
   #
-  # `technical-spec.md:1205-1207`: "The runner **claims the occurrence first** by inserting
+  # `technical-spec.md`: "The runner **claims the occurrence first** by inserting
   # the run row; a duplicate insert is caught and skipped." FR-39 puts the guarantee on the
   # database rather than on the code: "**enforced by a database constraint, not only by
   # application logic**."
@@ -53,7 +53,7 @@ module RedmineReporterDashboards
     #
     # Without the savepoint the smoke run died on the NEXT line after a duplicate claim,
     # which in T-25's runner would mean "a schedule that was already claimed takes the
-    # whole catch-up pass down with it" — a per-schedule rescue (technical-spec.md:1209)
+    # whole catch-up pass down with it" — a per-schedule rescue (technical-spec.md)
     # that cannot actually continue. `requires_new: true` issues a SAVEPOINT when there is
     # already a transaction, so the duplicate rolls back exactly the failed INSERT.
     #

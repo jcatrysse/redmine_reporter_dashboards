@@ -8,7 +8,7 @@ require 'stringio'
 #
 # --- WHY THIS FILE EXISTS ---
 #
-# `technical-spec.md:1222-1223` requires persistence to be *"opt-in with a mandatory TTL
+# `technical-spec.md` requires persistence to be *"opt-in with a mandatory TTL
 # **and a purge task**"*, and until T-28 nothing ever wrote a document row, so the missing
 # half cost nothing. The snapshot store is the change that makes rows exist, so it is the
 # change that owes the other half — found by an independent review, which measured

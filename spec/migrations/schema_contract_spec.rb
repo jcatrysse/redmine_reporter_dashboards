@@ -224,7 +224,7 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
     end
 
     it 'prefixes every new table with reporter_dashboards_, so both plugins can be installed at once' do
-      # `technical-spec.md:1266-1270`: "Namespaced classes + new tables mean both plugins
+      # `technical-spec.md`: "Namespaced classes + new tables mean both plugins
       # can be installed simultaneously … Decisive." The base plugin's tables are
       # `report_templates`, `report_schedules` and `report_schedules_users`
       # (`lib/redmine_reporter_dashboards/import/survey.rb:45-47`); a collision would make
@@ -408,7 +408,7 @@ RSpec.describe 'the migration schema contract (technical-spec.md §7)' do
     end
 
     it 'carries the two axes reporter conflated into one `type`' do
-      # `implementation-plan.md:1979`: "template types by `source` field (T-31), not a
+      # `implementation-plan.md`: "template types by `source` field (T-31), not a
       # subclass tree". A column literally named `type` is Rails' STI discriminator, which
       # is the subclass tree four documents forbid — so there is deliberately not one.
       expect(column('reporter_dashboards_templates', 'source')['type']).to eq('string')

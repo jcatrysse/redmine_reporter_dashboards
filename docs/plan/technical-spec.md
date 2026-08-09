@@ -1348,7 +1348,13 @@ Plus `reporter_dashboards_share_link_accesses` — one row per access: timestamp
 Mechanics: token is 32 random urlsafe bytes; lookup by digest with a **constant-time** comparison;
 `snapshot` mode serves frozen bytes so **no visibility decision is made at request time at all**;
 `query` mode re-renders as `render_as_user_id` and is opt-in per template. Attachment URLs are
-scoped to the share link that produced them, expire with it and are revoked with it — and `| inline`
+**NOT scoped to the share link — narrowed by curator decision, 2026-08-09 (§Findings S-28).** A link
+authorises ONE DOCUMENT and grants nothing it points at: a referenced attachment stays behind
+Redmine's own permission check, so a public-link holder with no account gets a sign-in page rather
+than the file. Scoping them would have meant a SECOND bearer-token surface with its own expiry and
+revocation, which is the complexity the snapshot design removes. The consequence is that such an
+attachment cannot be DISPLAYED in a shared document either — see §Findings F-16, and note that
+`| inline`
 means most reports need no external asset URL in the first place.
 
 UI: the template owner and admins see active links with created-by, expiry, use count, last use, and
@@ -1501,7 +1507,9 @@ can answer questions from.
 
 ### 7b.6 Public report links — the capability, on 7b.1's mechanism
 
-Kept as a feature, built entirely on 7b.1. Off by default, enabled per template, mandatory expiry,
+Kept as a feature, built entirely on 7b.1. Off by default — **as a role permission granted to nobody
+plus a per-link choice, NOT a per-template flag** (curator decision, 2026-08-09; §Findings S-28 —
+a per-template veto was considered and declined) — mandatory expiry,
 revocable, audited, and — the important part — a public link serves a **snapshot** rather than
 running a live query as nobody. So "public link" stops meaning "visibility check skipped".
 

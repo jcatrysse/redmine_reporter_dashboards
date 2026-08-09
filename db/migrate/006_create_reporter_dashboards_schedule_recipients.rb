@@ -4,12 +4,12 @@
 #
 # --- `user_id` ONLY. THIS IS A SECURITY DECISION, NOT A SIMPLIFICATION ---
 #
-# `technical-spec.md:1202`: "replaces `report_schedules_users` … Gains `id`; **`user_id`
+# `technical-spec.md`: "replaces `report_schedules_users` … Gains `id`; **`user_id`
 # only** — no free-text `to`/`cc`/`bcc`/`from`, which is the exfiltration-and-spoofing-relay
 # finding. A security-motivated schema decision."
 #
 # The base plugin's ad-hoc mail path takes free-text `to`/`cc`/`bcc` **and `from`**
-# (`technical-spec.md:1405-1407`), which is a report over any issue in the instance, mailed
+# (`technical-spec.md`), which is a report over any issue in the instance, mailed
 # anywhere, with a forged sender. Removing the columns is what makes that unbuildable
 # rather than merely discouraged: §7b.5's redesign resolves recipients as Redmine users
 # server-side and puts `From` under server control, and there is nowhere in this schema to

@@ -4,7 +4,7 @@
 #
 # --- WHY [6.1] AND NOT SOMETHING NEWER ---
 #
-# `technical-spec.md:1471` says it in as many words: "New migrations target
+# `technical-spec.md` says it in as many words: "New migrations target
 # `ActiveRecord::Migration[6.1]`." It is not a style preference, it is the only value that
 # parses on every Rails in the support span. MEASURED, on this machine:
 #
@@ -27,7 +27,7 @@ class CreateReporterDashboardsTemplates < ActiveRecord::Migration[6.1]
   def change
     create_table :reporter_dashboards_templates do |t|
       # NULL is meaningful and deliberate: a template with no project is
-      # installation-wide, and `technical-spec.md:663` records that Redmine has no role
+      # installation-wide, and `technical-spec.md` records that Redmine has no role
       # grant outside a project, so `project_id IS NULL` is admin-only by construction.
       t.integer :project_id
       # NOT NULL because `edit_own_reporter_dashboards_templates` (technical-spec.md §4.1)
@@ -44,8 +44,8 @@ class CreateReporterDashboardsTemplates < ActiveRecord::Migration[6.1]
       # --- source / output: the two axes reporter's single `type` conflated ---
       #
       # §7's table cell still says "STI `type`". Four other places say the opposite and say
-      # it more recently — `implementation-plan.md:1979` ("template types by `source` field
-      # (T-31), **not a subclass tree**"), `technical-spec.md:1392` ("Do not reproduce the
+      # it more recently — `implementation-plan.md` ("template types by `source` field
+      # (T-31), **not a subclass tree**"), `technical-spec.md` ("Do not reproduce the
       # branch. Make the data source a field"), FR-60, and `[OQ-H]`, which is CLOSED with
       # "as a `source` field, not a branch". A column literally named `type` is Rails' STI
       # discriminator whether or not anyone wants it to be, so writing one would build the
@@ -67,7 +67,7 @@ class CreateReporterDashboardsTemplates < ActiveRecord::Migration[6.1]
       # --- visibility: T-40's column, landing in T-22 as §7 rule 6 requires ---
       #
       # `manage_public_reporter_dashboards_templates` governs nothing without it
-      # (technical-spec.md:613-618), and rule 6 forbids adding it in a later migration than
+      # (technical-spec.md), and rule 6 forbids adding it in a later migration than
       # its table — so it is here rather than in T-23.
       #
       # Integer with Redmine's own values, from `app/models/query.rb:259-261`:
@@ -92,7 +92,7 @@ class CreateReporterDashboardsTemplates < ActiveRecord::Migration[6.1]
       t.string  :engine_hint
       t.boolean :enabled, null: false, default: true
 
-      # T-24's import provenance. `technical-spec.md:1275`: "the importer records
+      # T-24's import provenance. `technical-spec.md`: "the importer records
       # `source_template_id` + `source_digest`, and `rake reporter_dashboards:import_status`
       # reports divergence" — drift becomes visible instead of silent.
       t.integer :source_template_id
@@ -122,7 +122,7 @@ class CreateReporterDashboardsTemplates < ActiveRecord::Migration[6.1]
 
     # UNIQUE, and it is T-24's idempotency made structural rather than hoped for — the
     # same move as the scheduler's `[schedule_id, occurrence_date]`. "import:run …
-    # idempotent, stamping source id and digest" (implementation-plan.md:1993) means a
+    # idempotent, stamping source id and digest" (implementation-plan.md) means a
     # second run must find the existing row rather than make a second one.
     #
     # Multiple NULLs are permitted by every engine this plugin runs on (PostgreSQL's

@@ -5,7 +5,7 @@ module RedmineReporterDashboards
   #
   # T-22 owns the table and the shape; **T-25 owns the runner**, and nothing here decides
   # when a schedule is due. The one thing this class does assert is the type contract the
-  # base plugin got wrong: `technical-spec.md:1200` — "Reporter stores these dates as
+  # base plugin got wrong: `technical-spec.md` — "Reporter stores these dates as
   # `datetime` while every comparison is date-based — fixed."
   class Schedule < RedmineReporterDashboards::Compat.base_record
     self.table_name = 'reporter_dashboards_schedules'
