@@ -937,12 +937,23 @@ jobs:
       # filesystem, the dropped capabilities and the pinned digest are all under test
       # here, and a compose file that stopped working would fail this step.
       #
-      # THE OVERRIDE IS DOCUMENTED OPTION 2, not a hole. The shipped file has
-      # `internal: true` and publishes NOTHING, because the safe topology is Redmine on
-      # the same network. A GitHub runner is the "Redmine is not in Docker" case the file
-      # calls out, and the answer it gives is a LOOPBACK-ONLY publish. Making CI take the
-      # documented adaptation — rather than deleting `internal: true` from the shipped
-      # file — is what keeps the default safe and the example honest.
+      # THE OVERRIDE IS DOCUMENTED OPTION 2, not a hole — and option 2 had to be
+      # CORRECTED before this worked. The shipped file has `internal: true` and publishes
+      # nothing, because the safe topology is Redmine on the same network; a GitHub runner
+      # is the "Redmine is not in Docker" case, and the answer is a loopback-only publish.
+      #
+      # What the compose file used to say — keep `internal: true` and just add `ports:` —
+      # DOES NOT WORK, and docker does not say so: it accepts the configuration, starts a
+      # healthy container and binds no port at all (`.NetworkSettings.Ports` is
+      # `map[3000/tcp:[]]`). This job is what found that, by failing on it. The override
+      # therefore drops `internal` as well, which is a real trade and is why
+      # `--chromium-deny-*-ips` in the shipped command list are not decoration.
+      #
+      # SO CI EXERCISES A SLIGHTLY DIFFERENT TOPOLOGY FROM THE SHIPPED DEFAULT, and that
+      # is worth saying rather than hiding: the non-root user, the read-only root
+      # filesystem, the dropped capabilities, the pinned digest and the credential are all
+      # under test here; the network isolation is not, because a runner cannot reach an
+      # isolated network. Option 1 is what an operator should use.
       #
       # The UNAUTHENTICATED one is deliberately NOT in the compose file, because that file
       # is documentation and documenting an unsafe configuration is how it gets copied. It
@@ -957,16 +968,23 @@ jobs:
           services:
             gotenberg:
               ports: ["127.0.0.1:3000:3000"]
+          networks:
+            reporter-render:
+              internal: false
           YML
-          GOTENBERG_USERNAME=ci-user GOTENBERG_PASSWORD="$(openssl rand -hex 16)" \
-            docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml up -d
-          # The credential is generated per run and read back out of the container, so it
-          # is never a literal in this file — `script/gates/no_secrets.sh` is the rule and
-          # a plausible-looking password in a workflow is how the rule erodes.
-          password="$(docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml \
-                      exec -T gotenberg printenv GOTENBERG_API_BASIC_AUTH_PASSWORD)"
-          echo "::add-mask::$password"
-          echo "password=$password" >> "$GITHUB_OUTPUT"
+          # EXPORTED, NOT PREFIXED ONTO ONE COMMAND. `VAR=x docker compose up -d` sets the
+          # variables for that invocation only, and EVERY later `docker compose` call
+          # re-parses the file — so the container came up and the next call died with
+          # "required variable GOTENBERG_USERNAME is missing a value". That is what made
+          # this job the only red one in an otherwise green CI run.
+          export GOTENBERG_USERNAME=ci-user
+          export GOTENBERG_PASSWORD="$(openssl rand -hex 16)"
+          # Generated per run, so it is never a literal in this file —
+          # `script/gates/no_secrets.sh` is the rule, and a plausible-looking password in a
+          # workflow is how that rule erodes. Masked before it can reach a log.
+          echo "::add-mask::$GOTENBERG_PASSWORD"
+          docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml up -d
+          echo "password=$GOTENBERG_PASSWORD" >> "$GITHUB_OUTPUT"
 
           # THE SAME DIGEST, so the unauthenticated instance is the same software. A
           # different tag here would make the security check's subject a different build

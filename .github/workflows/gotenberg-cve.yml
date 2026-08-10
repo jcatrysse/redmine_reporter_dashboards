@@ -77,22 +77,59 @@ jobs:
             || { echo "::error::the pulled image does not carry $digest"; exit 1; }
           echo "confirmed $digest"
 
+      # TRIVY'S OWN IMAGE, NOT A MARKETPLACE ACTION. The first version pinned
+      # `aquasecurity/trivy-action@0.28.0`, a version tag I could not verify from this
+      # environment and which does not exist — the job failed with "unable to resolve
+      # action". Running the scanner's published image needs no action resolution, uses the
+      # docker that is already here, and is verifiable: `aquasec/trivy:latest --version`
+      # answered 0.73.0 when this was written.
+      #
+      # `latest` IS CORRECT FOR THE SCANNER and pinning is correct for the SCANNED — they
+      # are opposite requirements. A scanner pinned to an old release stops knowing about
+      # new vulnerabilities, which is the one failure this job must not have.
+      #
+      # THE DB DOWNLOAD IS ITS OWN STEP, and that is the point. Trivy exits non-zero both
+      # when it FINDS something and when it CANNOT RUN, so a single invocation cannot tell
+      # "this image has a critical CVE" from "the vulnerability database was unreachable".
+      # This repository has a rule about checks that cannot distinguish those. Splitting
+      # them makes the second step's non-zero exit mean exactly one thing.
+      - name: Fetch the vulnerability database
+        run: |
+          set -euo pipefail
+          if ! docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy \
+                 aquasec/trivy:latest image --download-db-only; then
+            echo "::error::the Trivy vulnerability database could not be downloaded, so"
+            echo "::error::NOTHING WAS SCANNED. This is not a verdict about the image."
+            exit 1
+          fi
+
       - name: Scan for known vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ steps.pin.outputs.ref }}
-          format: table
-          # HIGH AND CRITICAL ONLY, and `exit-code: 1` so this is a gate rather than a
+        id: scan
+        run: |
+          set -euo pipefail
+          # HIGH AND CRITICAL ONLY, and `--exit-code 1` so this is a gate rather than a
           # report. §5.2's premise for accepting an external container at all is that the
           # plugin can refuse an unsafe configuration; a scan that only prints is the
           # advisory-versus-gate confusion CLAUDE.md §7 forbids in the other direction.
-          severity: HIGH,CRITICAL
-          # UNFIXED ONES ARE REPORTED BUT NOT FAILED. A CVE with no fix available cannot
-          # be acted on by bumping the pin, and failing on it would train whoever reads
-          # this into ignoring the job — which is how a real, fixable finding gets missed.
-          ignore-unfixed: true
-          exit-code: '1'
-          vuln-type: os,library
+          #
+          # UNFIXED ONES ARE REPORTED BUT NOT FAILED (`--ignore-unfixed`). A CVE with no
+          # fix available cannot be acted on by bumping the pin, and failing on it would
+          # train whoever reads this into ignoring the job — which is how a real, fixable
+          # finding gets missed.
+          #
+          # `--skip-db-update` because the step above already fetched it AND PROVED IT
+          # COULD, which is the whole reason these are two steps.
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --scanners vuln \
+            --skip-db-update \
+            --exit-code 1 \
+            --format table \
+            "${{ steps.pin.outputs.ref }}"
 
       # A findings-free scan is the ordinary outcome, and it should still say what it
       # checked. A job whose only successful output is a green tick teaches nobody which
