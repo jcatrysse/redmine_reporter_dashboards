@@ -169,8 +169,16 @@ module RedmineReporterDashboards
         # NOTHING that could end a header line. Deliberately narrower than RFC 2045: this
         # is a guard, and every type the asset layer can produce is in
         # `Assets::ContentTypes`' closed allowlist and matches this easily.
-        SAFE_CONTENT_TYPE = %r{\A[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,62}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,62}
-                              (?:;[ ]?[A-Za-z0-9-]{1,32}=[A-Za-z0-9._-]{1,64}){0,4}\z}x.freeze
+        # `\#\$&` AND NOT `#$&`. In a Ruby regexp literal `#$&` is GLOBAL-VARIABLE
+        # INTERPOLATION, so the character class silently compiled to
+        # `[A-Za-z0-9!^_.+-]` — the value of a security guard depending on `$&` in whatever
+        # frame loaded the file. Found by an adversarial QA pass, which also constructed the
+        # danger: with `$&` set to `]|.*` the same literal compiles to a class that closes
+        # early and matches a CRLF payload. It happened to be STRICTER than intended here,
+        # so nothing legitimate was refused and no test could tell.
+        SAFE_CONTENT_TYPE = %r{\A[A-Za-z0-9][A-Za-z0-9!\#\$&^_.+-]{0,62}/
+                               [A-Za-z0-9][A-Za-z0-9!\#\$&^_.+-]{0,62}
+                               (?:;[ ]?[A-Za-z0-9-]{1,32}=[A-Za-z0-9._-]{1,64}){0,4}\z}x.freeze
 
         DEFAULT_CONTENT_TYPE = 'application/octet-stream'
 
@@ -230,8 +238,21 @@ module RedmineReporterDashboards
         FROM_ENV = :from_env
 
         def initialize(endpoint: nil, credential: FROM_ENV, http: nil, logger: nil)
+          # TOTAL, AND THE PREVIOUS VERSION ONLY LOOKED IT. `validate_endpoint!` RAISED, and
+          # the comment above claimed construction stays total precisely because
+          # `ReportRun#with_pdf` does a bare `adapter.new` with no rescue anywhere above it.
+          # Measured by an adversarial QA pass: `RRD_GOTENBERG_URL=gotenberg:3000` — a
+          # missing scheme, which is exactly what an operator types after reading a compose
+          # file — escaped as an uncaught `ArgumentError` and 500'd the preview page. So did
+          # a trailing newline from `--env-file`, a stray space, and surrounding quotes. The
+          # `nil` and `''` cases were total; nothing else was, and only those two were tested.
+          #
+          # This is the identical defect `report_run.rb` already fixed for
+          # `engine.capabilities`: an adapter that raises takes the whole request out as an
+          # untyped exception. The reason is refused into `@endpoint_error` and every entry
+          # point answers a typed Failure carrying it.
           configured = endpoint || ENV['RRD_GOTENBERG_URL']
-          @endpoint = configured.to_s.empty? ? UNCONFIGURED : validate_endpoint!(configured)
+          @endpoint, @endpoint_error = resolve_endpoint(configured)
           @credential =
             normalize_credential(credential == FROM_ENV ? credential_from_env : credential)
           @http = http
@@ -251,6 +272,8 @@ module RedmineReporterDashboards
         # document would double the request count for a fact that cannot change under a
         # pinned digest.
         def version
+          return 'unknown' unless @endpoint
+
           @version || probe_version(timeout_ms: PROBE_TIMEOUT_MS)
         end
 
@@ -724,7 +747,15 @@ module RedmineReporterDashboards
         # GET, it is cheap, and MEASURED it is auth-gated (401) while `/health` is exempt —
         # so both of its plausible answers are informative.
         def check_reachable(started)
-          response = request_get(VERSION_PATH, timeout_ms: PROBE_TIMEOUT_MS)
+          # `credential: nil` — AND THE COMMENT ABOVE ALREADY SAID "unauthenticated" while
+          # the code sent the credential. An adversarial QA pass measured the consequence:
+          # with a WRONG password the service answers 401, this arm read that as "a
+          # Gotenberg enforcing its credential", the credential arm agreed, and the run
+          # reported PASS on both before failing on the version with "this endpoint did not
+          # answer /version with a version". The pre-fix render path said "the render
+          # service refused the configured credential" — the diagnosis got WORSE. A 401 only
+          # means "enforcing" if nothing was presented.
+          response = request_get(VERSION_PATH, timeout_ms: PROBE_TIMEOUT_MS, credential: nil)
 
           if response.equal?(TIMED_OUT)
             return preflight_failure(
@@ -775,6 +806,20 @@ module RedmineReporterDashboards
               'this engine. An unauthenticated PDF service on an internal network renders ' \
               'any HTML anybody can reach it with.',
               detail: "no credential is configured for #{@endpoint}"
+            )
+          end
+
+          # A REFUSED CREDENTIAL IS THIS ARM'S FINDING, and it used to be nobody's: the
+          # authenticated `/version` probe answered 401, every arm read it as health, and
+          # the run failed two checks later on "did not answer /version with a version".
+          authenticated = request_get(VERSION_PATH, timeout_ms: PROBE_TIMEOUT_MS)
+          if authenticated.is_a?(Net::HTTPUnauthorized) || authenticated.is_a?(Net::HTTPForbidden)
+            return preflight_failure(
+              started, 'the render service refused the configured credential',
+              'Check the user and password against GOTENBERG_API_BASIC_AUTH_USERNAME and ' \
+              'GOTENBERG_API_BASIC_AUTH_PASSWORD on the container. They have to be the same ' \
+              'pair on both sides.',
+              detail: "an authenticated GET #{VERSION_PATH} answered #{authenticated.code}"
             )
           end
 
@@ -906,15 +951,22 @@ module RedmineReporterDashboards
         end
 
         def unconfigured_failure(correlation_id)
+          message =
+            if @endpoint_error
+              "the address configured for the Gotenberg render service cannot be used. " \
+                "#{@endpoint_error}"
+            else
+              'no address is configured for the Gotenberg render service. Set ' \
+                "RRD_GOTENBERG_URL in Redmine's environment to the container's address — " \
+                'for example http://gotenberg:3000 — together with RRD_GOTENBERG_USERNAME ' \
+                'and RRD_GOTENBERG_PASSWORD. There is no default: the obvious one would be ' \
+                'this Redmine.'
+            end
+
           Failure.new(
             code: :engine_unavailable, engine: ID, engine_version: 'unknown',
-            correlation_id: correlation_id, duration_ms: 0,
-            message: 'no address is configured for the Gotenberg render service. Set ' \
-                     'RRD_GOTENBERG_URL in Redmine\'s environment to the container\'s ' \
-                     'address — for example http://gotenberg:3000 — together with ' \
-                     'RRD_GOTENBERG_USERNAME and RRD_GOTENBERG_PASSWORD. There is no ' \
-                     'default: the obvious one would be this Redmine.',
-            detail: 'RRD_GOTENBERG_URL is unset and no endpoint was injected'
+            correlation_id: correlation_id, duration_ms: 0, message: message,
+            detail: @endpoint_error || 'RRD_GOTENBERG_URL is unset and no endpoint was injected'
           )
         end
 
@@ -987,8 +1039,9 @@ module RedmineReporterDashboards
           send_request(request, timeout_ms: timeout_ms, credential: credential)
         end
 
-        def request_get(path, timeout_ms:)
-          send_request(Net::HTTP::Get.new(uri_for(path)), timeout_ms: timeout_ms)
+        def request_get(path, timeout_ms:, credential: :default)
+          send_request(Net::HTTP::Get.new(uri_for(path)), timeout_ms: timeout_ms,
+                                                          credential: credential)
         end
 
         def send_request(request, timeout_ms:, credential: :default)
@@ -1056,6 +1109,15 @@ module RedmineReporterDashboards
         # that costs nothing and is missing from every log of a header-injection incident.
         def sanitize_header(value)
           value.to_s.gsub(/[[:space:]]+/, ' ').strip[0, 200]
+        end
+
+        # `[endpoint, error]`. Never raises — see the constructor.
+        def resolve_endpoint(configured)
+          return [UNCONFIGURED, nil] if configured.to_s.strip.empty?
+
+          [validate_endpoint!(configured), nil]
+        rescue ArgumentError => e
+          [UNCONFIGURED, e.message]
         end
 
         def validate_endpoint!(value)

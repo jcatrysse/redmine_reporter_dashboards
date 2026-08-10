@@ -34,7 +34,17 @@ module ReporterPreflightHelper
     inline_asset: :label_reporter_preflight_check_inline_asset,
     javascript: :label_reporter_preflight_check_javascript,
     readiness: :label_reporter_preflight_check_readiness,
-    hosted_asset: :label_reporter_preflight_check_hosted_asset
+    hosted_asset: :label_reporter_preflight_check_hosted_asset,
+    # T-34. An ENGINE'S OWN configuration checks, and the deferral. Seven ids shipped
+    # without keys and the control below still passed, because it hand-wrote the emitted
+    # set — see `Render.emittable_check_ids`, which it now reads instead.
+    engine_not_selected: :label_reporter_preflight_check_engine_not_selected,
+    engine_configuration: :label_reporter_preflight_check_engine_configuration,
+    gotenberg_endpoint: :label_reporter_preflight_check_gotenberg_endpoint,
+    gotenberg_reachable: :label_reporter_preflight_check_gotenberg_reachable,
+    gotenberg_credential: :label_reporter_preflight_check_gotenberg_credential,
+    gotenberg_version: :label_reporter_preflight_check_gotenberg_version,
+    gotenberg_javascript: :label_reporter_preflight_check_gotenberg_javascript
   }.freeze
 
   STATE_LABELS = {

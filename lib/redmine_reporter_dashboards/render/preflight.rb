@@ -87,6 +87,10 @@ module RedmineReporterDashboards
 
       STATES = %i[pass fail skip expected_failure].freeze
 
+      # The ids this class emits that are not in `DOCUMENT_CHECKS`. Published so that
+      # `PreflightSuite.emittable_check_ids` can be derived rather than hand-written.
+      FIXED_CHECK_IDS = %i[engine degradations engine_configuration].freeze
+
       # THE CHECKS THAT NEED TO LOOK INSIDE THE DOCUMENT, and their titles, in one
       # place. The list is a CONTRACT rather than a convenience: the report must have
       # the same shape whether or not poppler is installed, so the skip path and the run
@@ -203,7 +207,21 @@ module RedmineReporterDashboards
         return [] unless engine.respond_to?(:configuration_checks)
 
         Array(engine.configuration_checks).map do |entry|
-          Check.new(id: entry[:id], title: entry[:title], state: entry[:state],
+          # THE STATE IS VALIDATED, because `Registry` is deliberately open and a
+          # third-party adapter publishing `state: nil` gave `failed? == false` — a broken
+          # check reading as a passing one — and then `reporter_preflight_state_class(nil)`
+          # raised `NoMethodError` and took the page out. An unknown state is a FAILED
+          # check naming what was published, which is the safe direction on a diagnostic.
+          state = entry[:state]
+          unless STATES.include?(state)
+            next Check.new(id: entry[:id] || :engine_configuration, state: :fail,
+                           title: entry[:title] || 'the engine published a usable check',
+                           detail: "the adapter published state #{state.inspect}, which is " \
+                                   "not one of #{STATES.inspect}",
+                           duration_ms: entry[:duration_ms])
+          end
+
+          Check.new(id: entry[:id], title: entry[:title], state: state,
                     detail: entry[:detail], duration_ms: entry[:duration_ms])
         end
       rescue StandardError => e

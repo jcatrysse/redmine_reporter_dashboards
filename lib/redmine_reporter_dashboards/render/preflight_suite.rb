@@ -28,6 +28,25 @@ module RedmineReporterDashboards
     # (mechanism E5, and the boundary `layer_purity.sh` enforces). Each caller computes
     # it in application code and passes it in.
     class PreflightSuite
+      DEFERRED_CHECK_ID = :engine_not_selected
+
+      # EVERY CHECK ID THIS LAYER CAN EMIT, derived rather than listed — the document
+      # checks, the fixed ones, this file's deferral, and each registered adapter's own.
+      #
+      # It exists because `test_every_check_id_the_preflight_can_emit_has_a_label`
+      # hand-wrote `DOCUMENT_CHECKS.keys + %i[engine degradations]` under a comment saying
+      # "READ OFF THE RENDER LAYER, not typed out here". T-34 added seven emittable ids and
+      # the control stayed green, so seven checks reached the admin page — one of them on
+      # EVERY install — with no locale key and a silent English fallback.
+      def self.emittable_check_ids
+        adapter_ids = Registry.ids.flat_map do |id|
+          adapter = Registry.fetch(id)
+          adapter.const_defined?(:CHECK_TITLES) ? adapter.const_get(:CHECK_TITLES).keys : []
+        end
+        (Preflight::DOCUMENT_CHECKS.keys + Preflight::FIXED_CHECK_IDS +
+          [DEFERRED_CHECK_ID] + adapter_ids).uniq
+      end
+
       def initialize(engine_ids: nil, redmine_base_url: nil, logger: nil)
         @engine_ids = normalise_ids(engine_ids)
         @redmine_base_url = redmine_base_url
@@ -86,8 +105,14 @@ module RedmineReporterDashboards
           checks: [Preflight::Check.new(
             id: :engine_not_selected, state: :skip,
             title: 'the render engine needs a service, and this install has not chosen it',
-            detail: "#{id} is only used by a template that names it. To check it " \
-                    "deliberately — including its credential — run this with RRD_ENGINE=#{id}.",
+            # `RRD_ENGINE=…` COMES FIRST. The text surface truncates a detail at 90
+            # characters (`preflight.rb`'s `one_line`), and in the first version the only
+            # actionable words started at index 120 — thirty past the cut. The example
+            # that "proved" the remediation asserted on the Check object and never on
+            # rendered output, which is the same shape as the blocker this commit fixes.
+            detail: "run with RRD_ENGINE=#{id} to check it deliberately, including its " \
+                    "credential. #{id} needs a service, so it is used only by a template " \
+                    'that names it.',
             duration_ms: 0
           )]
         )

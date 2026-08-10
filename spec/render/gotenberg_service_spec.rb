@@ -29,28 +29,42 @@ module RedmineReporterDashboards
       #
       # SKIPPED WITH A REASON, never silently. A skip here means "no container", and G12's
       # three-state rule is the same rule one level up: an absent engine is not a pass.
+      # METHODS, NOT CONSTANTS — the sibling spec fixed this and this file was left behind,
+      # which an adversarial QA pass measured: `Render::Engines::CREDENTIAL` was still a
+      # process-global holding the live password, alongside AUTHENTICATED, OPEN_ENDPOINT and
+      # PLATE. A constant assigned inside `RSpec.describe` lands on the enclosing lexical
+      # scope, which here is a PRODUCTION namespace.
       RSpec.describe "#{Gotenberg} against a real container" do
-        AUTHENTICATED = ENV.fetch('RRD_GOTENBERG_URL', nil)
-        OPEN_ENDPOINT = ENV.fetch('RRD_GOTENBERG_OPEN_URL', nil)
-        CREDENTIAL = [ENV.fetch('RRD_GOTENBERG_USERNAME', nil),
-                      ENV.fetch('RRD_GOTENBERG_PASSWORD', nil)].freeze
+        def authenticated_endpoint
+          ENV.fetch('RRD_GOTENBERG_URL', nil)
+        end
+
+        def open_endpoint
+          ENV.fetch('RRD_GOTENBERG_OPEN_URL', nil)
+        end
+
+        def credential
+          [ENV.fetch('RRD_GOTENBERG_USERNAME', nil), ENV.fetch('RRD_GOTENBERG_PASSWORD', nil)]
+        end
 
         # An 8x8 solid #00ff00 plate. Its COLOUR is the assertion, for the reason
         # `Preflight::PROBE_PNG`'s comment gives at length: an engine can accept an image,
         # fail to decode it, draw the broken-image glyph, and produce a document of
         # exactly the same size with nothing failing.
-        PLATE = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR42mNg+M+AHQ0tCQ' \
-                'DpMD/BHYHcAQAAAABJRU5ErkJggg=='
+        def plate_png
+          'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR42mNg+M+AHQ0tCQ' \
+            'DpMD/BHYHcAQAAAABJRU5ErkJggg=='
+        end
 
         def skip_without_authenticated
-          return if AUTHENTICATED && CREDENTIAL.none?(&:nil?)
+          return if authenticated_endpoint && credential.none?(&:nil?)
 
           skip 'set RRD_GOTENBERG_URL, RRD_GOTENBERG_USERNAME and RRD_GOTENBERG_PASSWORD ' \
                'to an authenticated Gotenberg (docker-compose.gotenberg.yml starts one)'
         end
 
         def engine
-          Gotenberg.new(endpoint: AUTHENTICATED, credential: CREDENTIAL)
+          Gotenberg.new(endpoint: authenticated_endpoint, credential: credential)
         end
 
         def request(**overrides)
@@ -68,12 +82,12 @@ module RedmineReporterDashboards
           # THE ONE THE ACCEPT LIST NAMES. Observed failing against a real service that
           # really does answer without a credential — not argued, and not stubbed.
           it 'FAILS, with a named remediation, against an UNAUTHENTICATED instance' do
-            unless OPEN_ENDPOINT
+            unless open_endpoint
               skip 'set RRD_GOTENBERG_OPEN_URL to a Gotenberg started WITHOUT ' \
                    '--api-enable-basic-auth; the check has to be observed failing'
             end
 
-            result = Gotenberg.new(endpoint: OPEN_ENDPOINT, credential: %w[user pass]).preflight
+            result = Gotenberg.new(endpoint: open_endpoint, credential: %w[user pass]).preflight
 
             expect(result).to be_failure
             expect(result.code).to eq(:engine_unavailable)
@@ -114,7 +128,7 @@ module RedmineReporterDashboards
               request(body: '<!DOCTYPE html><html><body style="margin:0">' \
                             '<img src="rrd-asset-plate.png" width="600" height="300">' \
                             '<p>UPLOAD-MARKER</p></body></html>',
-                      assets: { 'rrd-asset-plate.png' => { 'bytes' => PLATE.unpack1('m'),
+                      assets: { 'rrd-asset-plate.png' => { 'bytes' => plate_png.unpack1('m'),
                                                            'content_type' => 'image/png' } },
                       required_capabilities: [:asset_upload],
                       essential_capabilities: [:asset_upload],

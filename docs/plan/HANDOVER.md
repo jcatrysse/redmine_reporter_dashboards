@@ -950,6 +950,40 @@ mutation run that happened to export the variables, not by any example. Two rule
 SENTINEL (`FROM_ENV`) when `nil` is a meaningful value, and when a spec's subject is "no
 credential", make it assert against an environment that HAS one.
 
+**`#$&` IN A REGEXP LITERAL IS GLOBAL-VARIABLE INTERPOLATION, AND IT ATE A SECURITY GUARD.**
+T-34 wrote a media-type allowlist as `%r{…[A-Za-z0-9!#$&^_.+-]…}` and the class COMPILED as
+`[A-Za-z0-9!^_.+-]` — `#$&` is Ruby's shorthand for interpolating `$&`, which was empty. It
+happened to be STRICTER than intended, so nothing legitimate was refused and no test could
+tell; the danger was proved by construction, with `$&` set to `]|.*` the same literal
+compiles to a class that closes early and matches a CRLF payload. **The value of the guard
+depended on `$&` in whatever frame loaded the file.** Escape it (`\#\$&`) — and when a
+regexp IS the guard, assert its compiled behaviour, not the source you meant to write.
+
+**A `raise` IN A CONSTRUCTOR IS A 500 WHEN THE CALLER IS `adapter.new`.** T-34's own comment
+said "construction stays TOTAL — raising here would escape `adapter.new` in
+`ReportRun#with_pdf`", and then `validate_endpoint!` raised. It was total for `nil` and `''`,
+which were the two values tested; `RRD_GOTENBERG_URL=gotenberg:3000` — a missing scheme, i.e.
+what an operator types after reading a compose file — 500'd the preview page, as did a
+trailing newline from `--env-file`, a stray space, and surrounding quotes. **When you write
+"this cannot raise", enumerate the inputs an OPERATOR produces, not the ones a spec does**:
+no scheme, a newline, quotes, whitespace, and the thing you just decided to refuse.
+
+**A PROBE THAT CARRIES A CREDENTIAL CANNOT TELL YOU WHETHER A CREDENTIAL IS REQUIRED.**
+T-34's identity check said "unauthenticated" in its comment and sent `Authorization` anyway.
+So against a service with the WRONG password configured, the 401 read as "a Gotenberg
+enforcing its credential", the credential arm agreed, and the run reported PASS on both
+before failing two checks later with an unrelated message — **a worse diagnosis than the one
+the render path had produced before the preflight existed.** A 401 only means "enforcing" if
+nothing was presented.
+
+**`192.0.2.1` IS NOT A SAFE "NOT LOOPBACK" ADDRESS WHEN `no_proxy` CONTAINS `::1`.** A test
+written to escape the loopback trap (`URI#find_proxy` returns nil for `127.*`) re-entered it:
+URI's `no_proxy` scanner reduces `::1` to the host `1`, the rule is
+`hostname.end_with?(".#{p_host}")`, and `"192.0.2.1".end_with?(".1")` is true. The mutation
+survived the new test exactly as it had survived the old one. Use `.9`, and **assert the
+precondition** — `expect(URI.parse(endpoint).find_proxy).not_to be_nil` — so the example
+cannot go vacuous a third time.
+
 **A SECURITY CHECK CAN BE CORRECT, TESTED, MEASURED — AND HUNG ON A METHOD NOTHING CALLS.**
 T-34's worst defect, found by TWO independent reviews separately and reported first by both.
 `Render::Preflight#run` is what the admin page and `rake …:render:preflight` both go through,

@@ -243,7 +243,12 @@ class ReporterPreflightControllerTest < ActionController::TestCase
   # stops matching the day somebody adds a check, and the symptom is an English title
   # in a Russian UI — which the fallback makes silent by design.
   def test_every_check_id_the_preflight_can_emit_has_a_label
-    emitted = Render::Preflight::DOCUMENT_CHECKS.keys + %i[engine degradations]
+    # DERIVED, and the previous version was not: it hand-wrote
+    # `DOCUMENT_CHECKS.keys + %i[engine degradations]` directly under a comment saying not
+    # to, and T-34's seven new ids went to the admin page unlabelled while this stayed
+    # green. `emittable_check_ids` asks the registry, so an adapter that adds a check adds
+    # it here too.
+    emitted = Render::PreflightSuite.emittable_check_ids
 
     assert_equal [], emitted - ReporterPreflightHelper::CHECK_LABELS.keys,
                  'a check the render layer emits has no locale key'

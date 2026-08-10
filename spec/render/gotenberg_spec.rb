@@ -711,9 +711,18 @@ module RedmineReporterDashboards
 
             result = with_env('http_proxy' => "http://127.0.0.1:#{proxy.addr[1]}",
                               'HTTP_PROXY' => "http://127.0.0.1:#{proxy.addr[1]}") do
-              # TEST-NET-1. Not loopback, so `find_proxy` WOULD hand the socket to the
-              # proxy above; unroutable, so a direct attempt can only fail.
-              described_class.new(endpoint: 'http://192.0.2.1:3000', credential: %w[u p])
+              # THE PRECONDITION, ASSERTED. Without it this example cannot tell "the
+              # adapter refused the proxy" from "Ruby was never going to use one here",
+              # and the second is what it actually measured for its first two versions.
+              expect(URI.parse('http://192.0.2.9:3000').find_proxy).not_to be_nil
+              # TEST-NET-1, and `.9` RATHER THAN `.1`. The first version used 192.0.2.1
+              # and the mutation SURVIVED it: this container's `no_proxy` contains `::1`,
+              # URI's scanner reduces that to the host `1`, and the rule is
+              # `hostname.end_with?(".#{p_host}")` — so `192.0.2.1` matched `.1` and was
+              # never proxied whatever `p_addr` said. The example escaped one vacuity trap
+              # into another; the precondition below is what stops it happening a third
+              # time.
+              described_class.new(endpoint: 'http://192.0.2.9:3000', credential: %w[u p])
                              .render(request(timeout_ms: 1_000))
             end
 
@@ -727,8 +736,18 @@ module RedmineReporterDashboards
           end
 
           it 'refuses an endpoint carrying a credential, rather than leaking it into a message' do
-            expect { described_class.new(endpoint: 'http://user:hunter2@gotenberg.test:3000') }
-              .to raise_error(ArgumentError, /must not carry a user or password/)
+            engine = with_env('RRD_GOTENBERG_URL' => nil) do
+              described_class.new(endpoint: 'http://user:hunter2@gotenberg.test:3000')
+            end
+            result = engine.render(request)
+
+            expect(engine.endpoint).to be_nil
+            expect(result).to be_failure
+            expect(result.message).to include('must not carry a user or password')
+            # AND THE PASSWORD IS NOT IN WHAT THE USER SEES. That is the point: this
+            # message reaches the diagnostics panel and the scheduled-report failure mail.
+            expect(result.message).not_to include('hunter2')
+            expect(result.detail.to_s).not_to include('hunter2')
           end
 
           # The asset NAME was guarded and the content type — the other header value in
@@ -922,6 +941,79 @@ module RedmineReporterDashboards
         end
 
         # ------------------------------------------------------------------
+        # `version_within(deadline)` HAD NO TEST AT ALL — an adversarial QA pass reverted
+        # it wholesale, loosened its boundary, dropped its cap and dropped its memo, and
+        # all four survived the suite. The stamp is probed from the service, so an
+        # un-deadlined probe extends a request that has already stated its bound.
+        describe 'the version stamp, which must not extend a request past its deadline' do
+          it 'gives up on the stamp rather than the deadline' do
+            # A DOUBLE THAT IGNORES ITS BUDGET CANNOT TIME OUT, and the first version of
+            # this example returned a version after sleeping past the deadline — measuring
+            # nothing. `seconds` is what the adapter chose for THIS call.
+            http = nil
+            engine, http = adapter(lambda { |req, _n|
+              next ok if req.is_a?(Net::HTTP::Post)
+
+              seconds = http.calls.last.seconds
+              raise Net::ReadTimeout if seconds < 0.4
+
+              ok('8.35.0')
+            })
+
+            started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            result = engine.render(request(timeout_ms: 120))
+            elapsed_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000
+
+            expect(result).to be_success
+            # `unavailable (timeout)` and not `unknown`: it TRIED, inside what was left,
+            # and said what happened. Either is honest; the one thing it must not be is a
+            # version obtained by spending time the caller did not give it.
+            expect(result.engine_version).to eq('unavailable (timeout)')
+            expect(elapsed_ms).to be < 300
+            # It DID try, within what was left, and gave up on the stamp rather than on
+            # the deadline — which is the distinction the fix is about.
+            expect(http.calls.count { |c| c.request.path.end_with?('/version') }).to eq(1)
+            expect(http.calls.last.seconds).to be < 0.2
+          end
+
+          it 'still stamps a real version when there is budget for one' do
+            engine, = adapter(->(req, _n) { req.is_a?(Net::HTTP::Post) ? ok : ok('8.35.0') })
+            expect(engine.render(request(timeout_ms: 30_000)).engine_version).to eq('8.35.0')
+          end
+
+          it 'probes once per adapter, not once per document' do
+            engine, http = adapter(->(req, _n) { req.is_a?(Net::HTTP::Post) ? ok : ok('8.35.0') })
+            3.times { engine.render(request) }
+
+            expect(http.calls.count { |c| c.request.path.end_with?('/version') }).to eq(1)
+          end
+
+          it 'never lets the stamp probe outlive PROBE_TIMEOUT_MS, however long the request is' do
+            engine, http = adapter(->(req, _n) { req.is_a?(Net::HTTP::Post) ? ok : ok('8.35.0') })
+            engine.render(request(timeout_ms: 600_000))
+
+            probe = http.calls.find { |c| c.request.path.end_with?('/version') }
+            expect(probe.seconds).to be <= described_class::PROBE_TIMEOUT_MS / 1000.0
+          end
+        end
+
+        # ------------------------------------------------------------------
+        # A CONSTANT ASSIGNED INSIDE `RSpec.describe` LANDS ON THE ENCLOSING PRODUCTION
+        # NAMESPACE (HANDOVER §1). Both Gotenberg spec files leaked, one of them a live
+        # password, and the second file was still leaking after the first was fixed —
+        # which is what an assertion is for.
+        describe 'this spec file itself' do
+          # NOT an exact list: which adapters are loaded depends on what else the run
+          # required, and an exact list would be red for a reason that is not this one.
+          # The subject is the names these two spec files own.
+          it 'puts none of its own names on Render::Engines' do
+            expect(Engines.constants).not_to include(:PDF, :RecordingHttp, :FakeGotenberg,
+                                                     :AUTHENTICATED, :OPEN_ENDPOINT,
+                                                     :CREDENTIAL, :PLATE)
+          end
+        end
+
+        # ------------------------------------------------------------------
         describe 'the endpoint' do
           it 'refuses anything that is not an http(s) URL naming a host' do
             # `''` IS NOT IN THIS LIST ANY MORE. An empty endpoint now means "nobody
@@ -930,10 +1022,49 @@ module RedmineReporterDashboards
             # `ReportRun#with_pdf` and the conformance harness both call unguarded.
             ['file:///etc/passwd', 'ftp://host/x', 'not a url', 'http://',
              'gopher://host'].each do |bad|
-              expect { described_class.new(endpoint: bad) }
-                .to raise_error(ArgumentError, /not a usable Gotenberg endpoint/),
-                    "#{bad.inspect} was accepted"
+              expect(described_class.new(endpoint: bad).endpoint).to be_nil,
+                                                                     "#{bad.inspect} was accepted"
             end
+          end
+
+          # CONSTRUCTION IS TOTAL, AND IT ONLY LOOKED IT. `validate_endpoint!` RAISED, and
+          # `ReportRun#with_pdf` does a bare `adapter.new` with no rescue above it — so an
+          # adversarial QA pass 500'd the preview page with `RRD_GOTENBERG_URL=gotenberg:3000`,
+          # a missing scheme, which is exactly what an operator types after reading the
+          # compose file. Only `nil` and `''` had been tested, and only those two were total.
+          [nil, '', '   ', "\t", 'gotenberg:3000', 'localhost:3000',
+           "http://gotenberg:3000\n", ' http://gotenberg:3000 ', '"http://gotenberg:3000"',
+           'http://user:pass@gotenberg:3000'].each do |value|
+            it "builds without raising for #{value.inspect}, and refuses in the RESULT" do
+              engine = nil
+              # THE ENVIRONMENT IS CLEARED. `endpoint: nil` means "I did not say", so with
+              # RRD_GOTENBERG_URL exported — which the render-smoke job does — this example
+              # would silently test a working adapter. Green here, green there, measuring
+              # nothing in both.
+              with_env('RRD_GOTENBERG_URL' => nil) do
+                expect { engine = described_class.new(endpoint: value) }.not_to raise_error
+              end
+
+              result = engine.render(request)
+              expect(result).to be_failure
+              expect(result.code).to eq(:engine_unavailable)
+              expect(result.message).to include('Gotenberg render service')
+              # Every method a caller may reach for, on an adapter that has no endpoint.
+              expect(engine.id).to eq(:gotenberg)
+              expect(engine.capabilities).to eq(described_class::CAPABILITIES)
+              expect(engine.version).to eq('unknown')
+              expect(engine.shutdown).to be(true)
+              expect(engine.preflight).to be_failure
+            end
+          end
+
+          it 'says WHICH way the configured address is wrong, not just that it is' do
+            result = with_env('RRD_GOTENBERG_URL' => nil) do
+              described_class.new(endpoint: 'gotenberg:3000')
+            end.preflight
+
+            expect(result.message).to include('cannot be used')
+            expect(result.message).to include('http/https')
           end
 
           # `URI.join(base, '/version')` discards the base's path, so an endpoint under
@@ -1009,10 +1140,19 @@ module RedmineReporterDashboards
             engine.preflight
 
             paths = http.calls.map { |call| call.request.path }
+            # 1. identity, UNAUTHENTICATED — a 401 only means "enforcing" if nothing was
+            #    presented, which is the whole reason this probe carries no credential.
             expect(paths.first).to end_with('/version')
-            credential_probe = http.calls[1]
-            expect(credential_probe.request['Authorization']).to be_nil
-            expect(credential_probe.request.path).to end_with('/forms/chromium/convert/html')
+            expect(http.calls.first.request['Authorization']).to be_nil
+            # 2. the credential arm: is OUR credential accepted, and is the route closed
+            #    without one? Two questions, two probes.
+            expect(http.calls[1].request['Authorization']).to start_with('Basic ')
+            unauthenticated = http.calls.find do |call|
+              call.request.path.end_with?('/forms/chromium/convert/html') &&
+                call.request['Authorization'].nil?
+            end
+            expect(unauthenticated).not_to be_nil
+            # 3. and the render round trip is last, and authenticated.
             expect(http.calls.last.request['Authorization']).to start_with('Basic ')
           end
 
