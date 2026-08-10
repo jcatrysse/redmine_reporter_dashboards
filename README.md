@@ -334,6 +334,94 @@ Three things worth knowing about the output:
   `RRD_ENGINE=<id>` limits it to one engine; `RRD_FORMAT=json` prints the report as
   JSON for an issue or a log.
 
+## Rendering in a container instead (Gotenberg)
+
+**You do not need this.** The default engine is headless Chromium started by the plugin
+itself, it needs no service, and it is the one every other section here assumes. Gotenberg
+is offered as *one* of the options — it buys a render path that is already isolated at the
+network level, and it costs you a service to run, monitor and patch.
+
+**Not yet verified in CI.** The adapter has been measured locally against
+`gotenberg/gotenberg:8` (Gotenberg 8.35.0) and its column in the support matrix reads *not
+verified* for every fixture, honestly. Chromium is the engine whose cells are measurements.
+Treat Gotenberg as supported-by-design and unproven-by-run until that column changes.
+
+Nothing auto-detects it. An engine that needs a service is never chosen for you: an install
+without a container has not picked Gotenberg, it has simply not picked, and quietly
+selecting it would turn every report into a connection error. A template asks for it by
+name, through its `engine_hint`. **There is no form field for that yet** — the
+engine-selection screen is a later task — so today you set it by exporting the template,
+adding `engine_hint: gotenberg`, and importing it again.
+
+### It is refused unless it is authenticated
+
+Gotenberg ships with **no authentication at all**, and an unauthenticated PDF service on an
+internal network will render any HTML anybody who can reach it sends. So the preflight
+**fails**, with a named remediation, in both of these cases:
+
+- no credential is configured for the endpoint; or
+- a credential is configured and the endpoint answers the conversion route without it.
+
+That is a failure and not a warning, deliberately. If you want Gotenberg, you configure the
+credential on both sides.
+
+### The example compose file
+
+`docker-compose.gotenberg.yml` in this repository is a documented example — the plugin never
+ships or starts a container. It carries the four things that make the option safe: an
+`internal: true` network, a non-root user, a read-only root filesystem, and the image pinned
+**by digest** rather than by tag. That file is the ONE place the digest is written, and a
+nightly CI job reads it from there and scans exactly those bytes.
+
+```bash
+export GOTENBERG_USERNAME=reporter GOTENBERG_PASSWORD="$(openssl rand -hex 24)"
+echo "$GOTENBERG_PASSWORD"    # write this down — Redmine needs the same value below
+docker compose -f docker-compose.gotenberg.yml up -d
+```
+
+Read the comments in that file before adapting it. In particular, `internal: true` means the
+container has no route off its own network — so **Redmine has to be on that network**. If
+Redmine is not in Docker, the file spells out the weaker alternative and what it costs
+rather than leaving you to delete the line.
+
+Then point the plugin at it, in Redmine's environment:
+
+```bash
+RRD_GOTENBERG_URL=http://gotenberg:3000
+RRD_GOTENBERG_USERNAME=reporter
+RRD_GOTENBERG_PASSWORD=…            # the same pair the container was started with
+```
+
+The credential lives in the environment rather than in the plugin settings form on purpose:
+it is a deployment secret, not a preference, and the settings table is neither encrypted nor
+hidden from anyone who can read the administration page.
+
+### Check it before you rely on it
+
+```bash
+RRD_ENGINE=gotenberg bundle exec rake reporter_dashboards:render:preflight RAILS_ENV=production
+```
+
+Two of those checks are worth knowing about, because both of them catch a container that
+looks completely healthy:
+
+- **The credential check asks the conversion route, not `/health`.** Gotenberg exempts its
+  health endpoint from authentication, so a check pointed there answers *200 OK* on a
+  locked-down service and on a wide-open one alike.
+- **JavaScript liveness is checked by provoking an error.** A container started with
+  `--chromium-disable-javascript` renders every report **without its charts** and reports
+  nothing wrong — it also silently ignores the readiness signal, so the plugin does not even
+  wait. The preflight sends a document whose script throws and expects to be told about it;
+  a container that cannot be made to error has no JavaScript.
+
+### What it can and cannot do
+
+Its capabilities are in [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md),
+generated from an actual conformance run rather than written by hand. The one difference
+from the default engine that is worth stating here: Gotenberg's asset model is **upload**,
+so images, stylesheets and fonts travel alongside the document as separate files rather than
+embedded in it. Nothing about how you write a template changes.
+
 ## Where a report's images and stylesheets come from
 
 **Administration → Plugins → Redmine Reporter Dashboards.**

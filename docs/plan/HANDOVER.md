@@ -882,6 +882,140 @@ Rack, and `ActionController::Metal#response_body=` wraps anything answering `to_
 Array, so a buffered body cannot impersonate a lazy one. Measured by probing both before
 writing the assertion.
 
+**GOTENBERG EXEMPTS `/health` FROM BASIC AUTH, so the obvious credential check is one that
+cannot fail.** T-34, measured against 8.35.0 with `--api-enable-basic-auth` and both env
+vars set:
+
+    GET  /health                        unauthenticated -> 200   <-- EXEMPT
+    GET  /version                       unauthenticated -> 401
+    POST /forms/chromium/convert/html   unauthenticated -> 401
+    POST /forms/chromium/convert/html   authenticated   -> 415 (empty form)
+
+A credential probe written against the health endpoint therefore answers 200 on a
+correctly locked-down service AND on a wide-open one — a security check with no failing
+input, which is this repository's most-repeated defect wearing a new costume. The probe
+that works is an **unauthenticated POST to the convert route with no parts**: it is the
+route that actually matters, it costs no render, and 401/403 versus anything else is
+decisive. Note the corollary for the *other* direction — an endpoint that is simply DOWN
+has proved nothing about its authentication, so a transport error must not be reported as
+"it answered without the credential".
+
+**AND GOTENBERG SILENTLY IGNORES `waitForExpression` WHEN JAVASCRIPT IS DISABLED, which
+makes every chart in every report vanish with nothing failing anywhere.** Same afternoon,
+and it is the exact failure `Preflight` exists to catch. Measured:
+
+    JS live,     expression never true  -> 503 after the 30 s api timeout
+    JS disabled, expression never true  -> 200 in 0.17 s
+
+So on a container started with `--chromium-disable-javascript` the readiness contract is
+void, the plugin does not even wait, and the document renders chart-free and healthy. The
+obvious probe — send `waitForExpression` and see what happens — is worthless for detecting
+it, because the healthy and broken cases both answer 200. **The discriminator is a document
+whose script THROWS, sent with `failOnConsoleExceptions=true`: 409 when JavaScript is live,
+200 when it is not**, in half a second either way. A check that succeeds by provoking an
+error reads oddly and is the only cheap one that discriminates.
+
+**GOTENBERG'S `landscape` ROTATES WHATEVER DIMENSIONS YOU GIVE IT, so swapping the page
+AND setting the flag cancels out.** The reference adapter swaps `paperWidth`/`paperHeight`
+itself because Chromium's printToPDF has no orientation flag it uses; copying that habit
+across and *also* sending `landscape=true` produced a PORTRAIT page for every landscape
+report. Measured:
+
+    W=8.2677  H=11.6929  landscape=true  -> 841.92 x 595.92  (landscape)
+    W=11.6929 H=8.2677   landscape=false -> 841.92 x 595.92  (landscape)
+    W=11.6929 H=8.2677   landscape=true  -> 595.92 x 841.92  (PORTRAIT)
+
+Nothing failed: the document rendered, the margins were right, only the page was the wrong
+way round. **Conformance fixture F-03 is what caught it** (`expected 841.89 ± 3, got
+595.92`), which is the argument for "passes T-12's corpus unmodified" being an acceptance
+criterion rather than a formality — no unit assertion about the adapter's own form fields
+could have seen it, because both fields were exactly what the code intended.
+
+**AND `waitForExpression` REFUSES AN EXPRESSION THAT EVALUATES TO `undefined`, WITH A 400,
+IN 0.2 s.** `Readiness::EXPRESSION` is `window.__rd && window.__rd.ready === true`, and
+before the chart shell has run `window.__rd` is undefined — so the whole expression is
+`undefined`, not `false`, and Gotenberg answers *"The expression … returned an exception or
+undefined"* rather than waiting. Every chart-bearing report would have failed. The
+reference adapter has always wrapped it (`page.evaluate("!!(#{EXPRESSION})")`), so the
+coercion belongs to the interface rather than to this engine; wkhtmltopdf's arm reads the
+same constant as a `--window-status` NAME, so it cannot go into the shared constant.
+
+**A KEYWORD ARGUMENT DEFAULTING TO `nil` AND FALLING THROUGH TO `ENV` MAKES "EXPLICITLY
+NONE" UNREPRESENTABLE, AND MAKES ITS OWN TESTS ENVIRONMENT-DEPENDENT.** T-34's adapter had
+`credential: nil` with `credential || credential_from_env`, so `Gotenberg.new(credential:
+nil)` — the exact thing the security examples are ABOUT — silently picked up
+`RRD_GOTENBERG_USERNAME`. Every one of those examples was green on a laptop with no such
+variable and would have been RED in the render-smoke job, which exports it. Caught by a
+mutation run that happened to export the variables, not by any example. Two rules. Use a
+SENTINEL (`FROM_ENV`) when `nil` is a meaningful value, and when a spec's subject is "no
+credential", make it assert against an environment that HAS one.
+
+**A SECURITY CHECK CAN BE CORRECT, TESTED, MEASURED — AND HUNG ON A METHOD NOTHING CALLS.**
+T-34's worst defect, found by TWO independent reviews separately and reported first by both.
+`Render::Preflight#run` is what the admin page and `rake …:render:preflight` both go through,
+and it renders a probe document; it never called `engine.preflight`. So an adapter's own
+credential check — rewritten three times because each earlier version could not fail — was
+exercised only by RSpec and the conformance harness. Against a Gotenberg with NO
+authentication, the exact command the README printed answered **exit 0 with eight PASSes**,
+while three documents said the plugin refuses one. The rule that generalises: **when you
+harden a check, run the command a user runs, in the state the check exists to catch.** A
+green suite proves the method; only the command proves the path. Related and cheap: `grep -rn
+'\.preflight\b' lib/ app/` had no hits outside spec/ and would have said so in one line.
+
+**AND REGISTERING AN OPTIONAL ENGINE AT BOOT TURNED EVERY INSTALL'S PREFLIGHT RED.**
+`PreflightSuite` runs every engine in `Registry.ids`, so adding `:gotenberg` made
+`rake reporter_dashboards:render:preflight` exit **1** on every install without a container
+the documentation calls optional — breaking the "exit 0, so it can be a deploy step"
+contract the README advertises — and put a permanent red row on the admin page that no
+operator could fix by installing anything. The `needs_service` rule had been added to
+`ReportRun#resolve_engine` and to nothing else. **A rule about "an install has not chosen
+this" belongs everywhere an engine is chosen FOR the operator**, and there were two such
+places.
+
+**`Net::HTTP.start(host, port, use_ssl: …)` SENDS YOUR REQUEST TO `$http_proxy`.** Its third
+POSITIONAL argument is `p_addr = :ENV`, so a keyword-only call silently follows the ambient
+proxy. Measured against a listening fake proxy: the whole multipart report AND
+`Authorization: Basic …` arrived there instead of at the configured endpoint. It is
+invisible in tests for a reason worth knowing on its own — **`URI::Generic#find_proxy`
+returns nil for `127.*` and `localhost`**, so any loopback-based test of this is
+unfalsifiable, and the first replacement test was loopback and the mutation survived it.
+Pass `nil` explicitly, assert on the ARGUMENT, and if you want the behavioural half use
+`192.0.2.1` (TEST-NET-1).
+
+**A CREDENTIAL IN A CONFIGURED URL IS A LEAK EVEN WHEN NOTHING READS IT.**
+`http://user:pass@host` was accepted, never used for authentication (the connection is made
+with host and port), and interpolated into six failure messages — which reach the
+diagnostics panel, the scheduled-report failure MAIL sent to every recipient, and a
+persisted `Snapshot` row. **Refuse it rather than redacting it**: redacting fixes the leak
+and keeps the silent non-authentication, and `user:pass@host` is the single most natural way
+an operator writes basic auth for a service URL.
+
+**A DEFAULT ENDPOINT OF `localhost:3000` IS REDMINE'S OWN PORT.** An unconfigured adapter
+POSTed a probe document — and, with the credential vars set, a credential — to Redmine
+itself, got a 404, and reported `:internal`, the code whose own comment says it means "a bug
+here, not an engine fault". Every step locally reasonable; the composite a false accusation
+against the plugin. There is no safe default for a service address. Keep construction TOTAL
+(raising escapes `adapter.new` in `ReportRun#with_pdf` and in the conformance harness) and
+answer a typed `Failure` naming the variable to set.
+
+**IDENTITY BEFORE VERDICT, in any diagnostic with more than one check.** T-34 ordered its
+preflight checks by COST — "each is cheaper than the one after it" — and produced three
+confident wrong remediations: a service that was DOWN, one that was NOT A GOTENBERG (any
+404: an nginx, a Redmine, a load balancer, a Gotenberg behind an unnamed root path) and one
+merely erroring were all told their container was failing to enforce its credential. Cost is
+the wrong axis. Establish WHAT you are talking to, then judge it. Same file, same afternoon:
+a JavaScript-liveness check whose "not the expected 409" branch swallowed 503, 502 and 413
+and blamed `--chromium-disable-javascript` for all of them.
+
+**A SECOND `local` FOR THE SAME NAME IN A BASH FUNCTION RESETS IT, AND THE GATE THEN FAILS
+WHILE PRINTING NOTHING.** `layer_purity.sh`'s new arm opened with `local rc=0`, set `rc=1`
+on two failure paths, then declared `local route_hits='' file stripped rc` further down —
+which re-declares `rc` in the same scope and unsets it. The two failures were wiped, the
+closing `[ "$rc" -eq 0 ]` compared against an empty string, and the function returned
+non-zero having echoed nothing at all. The gate said `layers checked=9` and `exit 1` with
+no reason on any line — the single outcome that file exists to make impossible. Found by
+running it; no amount of reading it found it.
+
 ---
 
 ## 1b. Working agreement — verification, decided by the curator
@@ -957,6 +1091,27 @@ plugin or the vendor gem, each listed with its reason in
   `service postgresql start` restores it with its data intact. Not proven to be causal
   (the container also idles, §3's own entry), but the two have now happened together;
   re-check the database before believing the next red run.
+- **THE GOTENBERG WORK NEEDS TWO CONTAINERS, and the second one is the point.** T-34's
+  credential check has to be OBSERVED failing, so a run needs an authenticated instance
+  AND an unauthenticated one:
+
+      docker run --rm -d --name gt-auth -p 3098:3000 \
+        -e GOTENBERG_API_BASIC_AUTH_USERNAME=rrd -e GOTENBERG_API_BASIC_AUTH_PASSWORD=s3cret \
+        gotenberg/gotenberg:8 gotenberg --api-enable-basic-auth
+      docker run --rm -d --name gt-open -p 3099:3000 gotenberg/gotenberg:8
+
+  Then `RRD_GOTENBERG_URL=http://127.0.0.1:3098 RRD_GOTENBERG_OPEN_URL=http://127.0.0.1:3099
+  RRD_GOTENBERG_USERNAME=rrd RRD_GOTENBERG_PASSWORD=s3cret`. `spec/render/gotenberg_service_spec.rb`
+  SKIPS with a reason without them, and the corpus reports gotenberg as unavailable.
+  A third, `--chromium-disable-javascript` **and** authenticated, is what proves the
+  JavaScript check fires — with no credential it fails at the credential arm first and
+  the JS arm is never reached, which reads as the JS check passing.
+- **DOCKER'S `tmpfs` DEFAULT IS `noexec`, and `noexec=false` is not how you say otherwise.**
+  `docker-compose.gotenberg.yml` mounts `/tmp` as a tmpfs because the root filesystem is
+  read-only, and Chromium is launched from a path Gotenberg maps in there. Written
+  `/tmp:rw,noexec=false,…` the daemon refuses outright — *"invalid tmpfs option"* — which
+  is the useful kind of mistake, because the container does not start rather than starting
+  and failing every render. The spelling is `exec`.
 - **`rsync` may be absent.** `redmine_clone.sh` fails with exit 127 at the mirror step.
   `sudo apt-get install -y rsync`.
 - **`./.codex/redmine_clone.sh` WITH NO ARGUMENT DEFAULTS TO `5.1-stable` AND SWITCHES THE

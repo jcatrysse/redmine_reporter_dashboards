@@ -71,11 +71,15 @@ module ReportRunSpecSupport
 
   FakeIssue = Struct.new(:id)
 
+  # `engine_hint` is a MEMBER rather than a hard-coded nil (T-34): the auto-detection
+  # examples need the other branch, and the reader stays the model's degrading one —
+  # §7 rule 5's "an install one minor behind has no such column" is why `ReportRun` goes
+  # through `engine_hint_or_nil` and never touches the attribute.
   FakeTemplateRecord = Struct.new(:id, :name, :content, :source, :output, :orientation,
-                                  :page_size, :margins, :project,
+                                  :page_size, :margins, :project, :engine_hint,
                                   keyword_init: true) do
     def engine_hint_or_nil
-      nil
+      engine_hint
     end
   end
 
@@ -147,6 +151,21 @@ module ReportRunSpecSupport
 
     def id
       'inlining'
+    end
+  end
+
+  # A stand-in that STAMPS ITS OWN NAME into the Success it returns, so an example can
+  # tell WHICH adapter ran. `FakeAdapter.behaviour` deliberately cannot: it is one shared
+  # lambda, which is exactly what makes it a convenient lever and a useless witness.
+  def self.named_adapter(name)
+    Class.new do
+      define_method(:capabilities) { [] }
+      define_method(:id) { name }
+      define_method(:render) do |_request|
+        RedmineReporterDashboards::Render::Success.new(
+          bytes: PDF_BYTES, engine: name, engine_version: '1.0'
+        )
+      end
     end
   end
 
@@ -378,6 +397,105 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
   describe 'the PDF half' do
     around do |example|
       RedmineReporterDashboards::Render::Registry.isolated { example.run }
+    end
+
+    # ------------------------------------------------------------------
+    # T-34. "Default engine unchanged — a test asserts auto-detect never selects
+    # `:gotenberg`."
+    #
+    # WRITTEN SO THAT IT CAN FAIL. Asking the real registry and checking the answer is
+    # not `:gotenberg` passes against the OLD fallback too, because that fallback was
+    # `Registry.ids.first` — i.e. alphabetical order — and `chromium_cdp` happens to sort
+    # first. These register gotenberg where the accident would have chosen it.
+    describe 'which engine auto-detection lands on' do
+      # BOTH EXAMPLES USE ENGINES THE CATALOGUE CARRIES, deliberately. The rule under
+      # test is "never auto-select one that NEEDS A SERVICE", and driving it with an
+      # unknown id would test the other rule — the one that deliberately does NOT refuse
+      # what the catalogue has not heard of, because a stand-in adapter is how most of
+      # this suite works.
+      it 'refuses to auto-select an engine that needs a service, and reports it' do
+        RedmineReporterDashboards::Render::Registry.register(:gotenberg,
+                                                            ReportRunSpecSupport::FakeAdapter)
+        # The declared default is NOT registered, so the fallback is what answers — and
+        # the only registered engine is one the catalogue says needs a container.
+        expect(RedmineReporterDashboards::Render::Registry.ids).to eq([:gotenberg])
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
+
+        expect(outcome).not_to be_ok
+        expect(outcome.diagnostic.code).to eq(:engine_unavailable)
+      end
+
+      it 'passes over it for one that needs nothing, even though it sorts first' do
+        # `:gotenberg` sorts BEFORE `:wkhtmltopdf`, so the old `Registry.ids.first`
+        # fallback answered gotenberg here. That is the accident this replaces.
+        #
+        # EACH STAND-IN STAMPS ITS OWN NAME INTO THE RESULT, rather than sharing
+        # `FakeAdapter.behaviour`. The first version registered `InliningAdapter` and
+        # asserted `engine_id == 'inlining'` — but `engine_id` comes from the `Success`
+        # the adapter RETURNS, and both classes return the one lambda's, so the example
+        # would have read the same name whichever adapter ran. It could not fail.
+        RedmineReporterDashboards::Render::Registry.register(:gotenberg,
+                                                            ReportRunSpecSupport.named_adapter('picked-gotenberg'))
+        RedmineReporterDashboards::Render::Registry.register(:wkhtmltopdf,
+                                                            ReportRunSpecSupport.named_adapter('picked-wkhtmltopdf'))
+        expect(RedmineReporterDashboards::Render::Registry.ids.first).to eq(:gotenberg)
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
+
+        expect(outcome).to be_ok
+        expect(outcome.engine_id).to eq('picked-wkhtmltopdf')
+      end
+
+      # THE DECLARED DEFAULT IS PREFERRED OVER WHATEVER SORTS FIRST, and the example that
+      # used to sit here could not fail, twice over. It asserted
+      # `expect(outcome.engine_id).not_to eq(:gotenberg)` — `engine_id` is a STRING, so a
+      # Symbol comparison is unconditionally true — and both adapters it registered
+      # rendered through the one shared `FakeAdapter.behaviour` lambda, so the value could
+      # not have discriminated even with the right type. Its own premise comment was wrong
+      # as well: it claimed the declared default sorted LAST while the line below asserted
+      # it sorted first. Found by an independent review; the identical lesson had been
+      # written into the example immediately above it three lines earlier.
+      #
+      # The discriminator is an engine the catalogue has never heard of whose id sorts
+      # BEFORE `chromium_cdp` — which is the `:athena` case `report_run.rb`'s own comment
+      # invents. Under the old `Registry.ids.first` fallback this example answers
+      # `picked-athena`; under the declared-default rule it answers `picked-chromium`.
+      it 'prefers the engine config/capabilities.yml declares as the default' do
+        RedmineReporterDashboards::Render::Registry.register(
+          :athena, ReportRunSpecSupport.named_adapter('picked-athena')
+        )
+        RedmineReporterDashboards::Render::Registry.register(
+          :chromium_cdp, ReportRunSpecSupport.named_adapter('picked-chromium')
+        )
+        # `:athena` sorts first, and it is auto-selectable — the catalogue does not know
+        # it, and being unknown is not evidence that it needs a service. So the ONLY thing
+        # that can put chromium_cdp ahead of it is the declared default being read.
+        expect(RedmineReporterDashboards::Render::Registry.ids.first).to eq(:athena)
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
+
+        expect(outcome).to be_ok
+        expect(outcome.engine_id).to eq('picked-chromium')
+      end
+
+      # A template may still ASK for it by name — that is what an engine hint is for, and
+      # it is the difference between choosing an engine and having one chosen for you.
+      it 'still honours a template that names it explicitly' do
+        RedmineReporterDashboards::Render::Registry.register(:gotenberg,
+                                                            ReportRunSpecSupport::FakeAdapter)
+        ReportRunSpecSupport::FakeAdapter.behaviour = lambda do |_request|
+          RedmineReporterDashboards::Render::Success.new(
+            bytes: ReportRunSpecSupport::PDF_BYTES, engine: 'gotenberg', engine_version: '8.35.0'
+          )
+        end
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      template: template(engine_hint: 'gotenberg')).call(pdf: true)
+
+        expect(outcome).to be_ok
+        expect(outcome.engine_id).to eq('gotenberg')
+      end
     end
 
     it 'reports an absent engine instead of quietly returning the HTML' do

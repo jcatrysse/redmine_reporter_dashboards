@@ -11,6 +11,7 @@ require_relative '../liquid/drops'
 require_relative '../render/batch_guard'
 require_relative '../render/asset_binding'
 require_relative '../render/document_request'
+require_relative '../render/engine_catalogue'
 require_relative '../render/registry'
 require_relative '../render/renderer'
 
@@ -637,8 +638,41 @@ module RedmineReporterDashboards
                     "which is not registered; using the configured default")
         end
 
-        id = registry.ids.first
+        id = auto_detected_engine_id(registry)
         id && registry.fetch(id)
+      end
+
+      # THE FALLBACK USED TO BE `registry.ids.first`, WHICH IS ALPHABETICAL ORDER.
+      #
+      # It answered `:chromium_cdp` for two releases and answered it by accident:
+      # `Registry.ids` is `keys.sort`, so the default of every install was whichever
+      # adapter id happened to sort first. T-34 adds `:gotenberg`, which sorts AFTER
+      # `chromium_cdp` and so changes nothing — and that is the point at which the
+      # accident is worth removing rather than relied on again. An engine named
+      # `:athena` would have become the default of every install in the release that
+      # added it, with no line of code stating the change.
+      #
+      # `config/capabilities.yml` has said `default: true` on exactly one engine since
+      # DoR-5, and `EngineCatalogue` validates that exactly one carries it. Nothing read
+      # it. It is read here.
+      #
+      # The second clause is T-34's Accept in executable form: an engine that NEEDS A
+      # SERVICE is never auto-detected, because an install with no container has not
+      # chosen `:gotenberg` — it has simply not chosen. Selecting it deliberately is what
+      # a template's `engine_hint` is for.
+      def auto_detected_engine_id(registry)
+        catalogue = ::RedmineReporterDashboards::Render::EngineCatalogue.load
+        declared = catalogue.default_engine_id
+        return declared if declared && registry.registered?(declared)
+
+        registry.ids.find { |id| catalogue.auto_selectable?(id.to_s) }
+      rescue StandardError => e
+        # A catalogue that will not load must not take the render path down with it. The
+        # old behaviour is the fallback, and it says so out loud rather than quietly
+        # reverting to alphabetical order.
+        warn_line("[reporting] config/capabilities.yml could not be read (#{e.class}); " \
+                  'falling back to the first registered engine id')
+        registry.ids.first
       end
 
       # A CLOSED SET, AND `else` IS NOT A BRANCH. `Template` validates `source` on save, and

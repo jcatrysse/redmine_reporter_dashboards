@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'engine_catalogue'
 require_relative 'preflight'
 require_relative 'registry'
 
@@ -40,8 +41,60 @@ module RedmineReporterDashboards
       # matching zero engines and reporting success is the same defect as an empty
       # registry reporting success, one level up. What each caller *does* about it is
       # theirs; that it cannot pass silently is decided here.
+      # AN ENGINE THAT NEEDS A SERVICE IS NOT IN THE DEFAULT SET, and this is the same
+      # rule `Reporting::ReportRun#resolve_engine` applies when it picks an engine to draw
+      # with — T-34 added it there and, for one afternoon, not here.
+      #
+      # The consequence was measured by two independent reviews: registering `:gotenberg`
+      # at boot put it into `Registry.ids`, so `rake reporter_dashboards:render:preflight`
+      # EXITED 1 on every install that does not run a container the documentation calls
+      # optional, and the admin page carried a permanent red row saying "the render service
+      # could not be reached — http://localhost:3000". Unlike a missing Chromium, that is
+      # not something the operator can fix by installing anything; they have not chosen
+      # Gotenberg, they have simply not chosen. And the README's own contract — "exit 0,
+      # so the task can be a deploy step" — was broken by an engine nobody asked for.
+      #
+      # It is EXCLUDED, NOT HIDDEN. A silently shorter list is the failure mode this file's
+      # own `resolved_ids` comment is about one paragraph down, so each excluded engine
+      # still gets a report, carrying one `:skip` that names it and says how to check it
+      # deliberately. A skip does not turn the exit code non-zero (`Preflight::Check#ok?`)
+      # and does keep the JSON artefact the same shape on every install, which is a
+      # property `Preflight::DOCUMENT_CHECKS` goes to some trouble to preserve.
+      #
+      # NAMING AN ENGINE OVERRIDES THIS ENTIRELY. `RRD_ENGINE=gotenberg` is how you ask,
+      # and asking is a decision — so it runs the real checks, including the credential one.
+      def default_ids
+        Registry.ids.reject { |id| service_engine?(id) }
+      end
+
+      def deferred_ids
+        Registry.ids.select { |id| service_engine?(id) }
+      end
+
+      def service_engine?(id)
+        !EngineCatalogue.load.auto_selectable?(id.to_s)
+      rescue StandardError
+        # A catalogue that will not load must not silence an engine. Running one that
+        # cannot be reached is a worse diagnostic than the truth and a better one than
+        # nothing.
+        false
+      end
+
+      def deferred_report(id)
+        Preflight::Report.new(
+          engine_id: id, engine_version: 'not checked', duration_ms: 0,
+          checks: [Preflight::Check.new(
+            id: :engine_not_selected, state: :skip,
+            title: 'the render engine needs a service, and this install has not chosen it',
+            detail: "#{id} is only used by a template that names it. To check it " \
+                    "deliberately — including its credential — run this with RRD_ENGINE=#{id}.",
+            duration_ms: 0
+          )]
+        )
+      end
+
       def resolved_ids
-        return Registry.ids if engine_ids.empty?
+        return default_ids if engine_ids.empty?
 
         unknown = engine_ids.reject { |id| Registry.registered?(id) }
         unless unknown.empty?
@@ -54,7 +107,10 @@ module RedmineReporterDashboards
       end
 
       def reports
-        resolved_ids.map { |id| report_for(id) }
+        listed = resolved_ids.map { |id| report_for(id) }
+        return listed unless engine_ids.empty?
+
+        listed + deferred_ids.map { |id| deferred_report(id) }
       end
 
       private

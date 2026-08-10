@@ -1,0 +1,160 @@
+# Gotenberg for `redmine_reporter_dashboards` — A DOCUMENTED EXAMPLE, NOT A DEPENDENCY.
+#
+# The plugin never ships a container and never starts one. This file exists because
+# technical-spec.md §5.2 clause 3 requires the safe configuration to be written down and
+# CI-checked rather than described in a paragraph an operator has to reconstruct: the
+# network isolation, the non-root user, the read-only root filesystem and the pinned
+# digest are the four things that make "an external container is acceptable AS ONE OF THE
+# OPTIONS" honest (OQ-3, curator decision 2026-08-04).
+#
+# It is documentation with a CI job attached. `render-smoke` starts the same image at the
+# same digest, and `gotenberg-cve` scans that digest nightly.
+#
+#     docker compose -f docker-compose.gotenberg.yml up -d
+#
+# --- WHY THE PLUGIN REFUSES AN UNAUTHENTICATED ONE -----------------------------------
+#
+# Gotenberg ships with NO authentication. An unauthenticated PDF service on an internal
+# network will render any HTML anybody who can reach it sends, which is the 2026
+# unauthenticated-critical CVE cluster in 02-analysis.md §Security. So `#preflight`
+# FAILS — with a named remediation, not a warning — both when no credential is configured
+# and when one is configured and the container answers the conversion route without it.
+#
+# MEASURED 2026-08-10 against this image: `/health` is EXEMPT from basic auth, so a
+# credential check written against the health endpoint would answer 200 on a locked-down
+# service and on a wide-open one alike. The plugin probes the CONVERT route instead.
+#
+# --- THE FOUR CONTROLS, AND WHAT EACH ONE COSTS --------------------------------------
+#
+#   internal: true    the container has NO route off this network. It is the cheapest
+#                     SSRF control there is, and it is the one that costs you something:
+#                     Redmine has to be ON this network to reach the service. If Redmine
+#                     runs outside Docker, see "IF REDMINE IS NOT IN DOCKER" below rather
+#                     than deleting this line.
+#   user: non-root    Chromium's own sandbox refuses to run as root, so this is also what
+#                     lets the sandbox stay ON. `--no-sandbox` appears nowhere here, and
+#                     adding it would trade the one control that contains a compromised
+#                     renderer for a container that starts more easily.
+#   read_only: true   the root filesystem is immutable. Gotenberg writes its per-job
+#                     directories under /tmp, so /tmp is a tmpfs and nothing else is
+#                     writable — a payload that reaches the renderer has nowhere to
+#                     persist itself to.
+#   image by digest   a tag is a moving target. `gotenberg/gotenberg:8` on two different
+#                     days is two different pieces of software, and the CVE scan below is
+#                     only meaningful against the exact bytes that will run.
+---
+services:
+  gotenberg:
+    # PINNED BY DIGEST, and the tag is kept beside it only so a human can read which
+    # major this is. The digest is what docker resolves; the tag is a comment with a
+    # colon in it.
+    #
+    # Measured 2026-08-10: gotenberg/gotenberg:8 -> Gotenberg 8.35.0, 2.44 GB.
+    image: gotenberg/gotenberg:8@sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+    restart: unless-stopped
+
+    # Gotenberg's image already defines an unprivileged `gotenberg` user; naming the uid
+    # here means the container is non-root even if a future image changes its default.
+    user: "1001:1001"
+
+    read_only: true
+    tmpfs:
+      # Gotenberg unpacks each multipart request into a job directory under /tmp and
+      # deletes it afterwards. The size cap is what stops one enormous report filling the
+      # host's memory; `--api-body-limit` below is the same bound asked one layer earlier,
+      # where the answer is a 413 rather than a failed render.
+      #
+      # `exec` IS SPELLED OUT because docker's tmpfs default is `noexec`, and Chromium is
+      # launched from a path Gotenberg maps in. Written as `noexec=false` first, which
+      # docker rejects outright ("invalid tmpfs option") — the useful kind of mistake,
+      # since the container refuses to start rather than starting and failing every
+      # render. Measured by running this file, not by reading it.
+      - /tmp:rw,exec,nosuid,nodev,size=512m
+
+    # Two more, and they are listed here rather than in the table above because they are
+    # cheap rather than because they are incidental. `no-new-privileges` stops a setuid
+    # binary inside the image from regaining anything; `cap_drop: ALL` leaves the process
+    # with no Linux capabilities at all. MEASURED 2026-08-10: with both of these, the
+    # non-root user and the read-only root filesystem, this container starts healthy and
+    # renders — Chromium's own sandbox needs unprivileged user namespaces, not
+    # capabilities, so dropping them costs nothing here. If your host has
+    # `kernel.unprivileged_userns_clone=0` the browser will refuse to start, and the fix
+    # is that sysctl and NOT `--no-sandbox`, which appears nowhere in this file.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    environment:
+      # CHANGE THESE. They are read by `--api-enable-basic-auth`, and the plugin is
+      # configured with the same pair through RRD_GOTENBERG_USERNAME / RRD_GOTENBERG_PASSWORD.
+      # A compose file is not a secret store: in anything but a trial install these
+      # belong in an env_file that is not in version control, or in your orchestrator's
+      # secret mechanism.
+      GOTENBERG_API_BASIC_AUTH_USERNAME: "${GOTENBERG_USERNAME:?set GOTENBERG_USERNAME}"
+      GOTENBERG_API_BASIC_AUTH_PASSWORD: "${GOTENBERG_PASSWORD:?set GOTENBERG_PASSWORD}"
+
+    command:
+      - gotenberg
+      # THE CONTROL THE PLUGIN REFUSES TO RUN WITHOUT.
+      - --api-enable-basic-auth
+      # Defence in depth behind `internal: true`: even on a network that had a route out,
+      # Chromium may not resolve a name to anything off-host. The plugin hands over a
+      # document that is already complete — every asset travels in the request — so there
+      # is nothing legitimate for the renderer to fetch. INV-8.
+      - --chromium-deny-private-ips
+      - --chromium-deny-public-ips
+      # The routes this plugin does not use, switched off. It only ever POSTs
+      # `convert/html`; LibreOffice and the PDF engines are attack surface with no
+      # corresponding feature.
+      - --libreoffice-disable-routes
+      - --pdfengines-disable-routes
+      # `--api-disable-download-from` removes the "fetch this URL for me" feature
+      # wholesale. That feature is the same hazard as the forbidden convert-from-URL
+      # route, reached through a form field instead of a path.
+      - --api-disable-download-from
+      # NOT SET, deliberately, and each would break something the adapter declares:
+      #   --chromium-disable-javascript   every chart would vanish, and Gotenberg would
+      #                                   SILENTLY ignore the readiness expression too
+      #                                   (measured). `#preflight` fails on this.
+      #   --chromium-disable-routes       there would be no convert/html to POST to.
+      #   --chromium-disable-web-security same-origin is one of the few things still
+      #                                   containing a hostile document at this point.
+      - --api-timeout=60s
+      - --api-body-limit=64MB
+
+    # The health check is the container's own, not the plugin's: `/health` is exempt from
+    # basic auth (measured), which makes it useless as a security check and perfect as a
+    # liveness one.
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    networks:
+      - reporter-render
+
+networks:
+  reporter-render:
+    # NAMED EXPLICITLY, and not for tidiness. Without `name:` Compose prefixes the project
+    # directory — the network becomes `<project>_reporter-render` — and the
+    # `docker network connect reporter-render <redmine-container>` in the note below, the
+    # FIRST and best of the three options, fails with "network reporter-render not found".
+    # The person who hits that is by definition the person who did not want to delete the
+    # `internal: true` line.
+    name: reporter-render
+    # NO ROUTE OFF THIS NETWORK. Note what this means in practice: there are deliberately
+    # NO published `ports:` above, because a published port is a route to the host and
+    # would undo the isolation this line buys.
+    #
+    # IF REDMINE IS NOT IN DOCKER, the honest options are, best first:
+    #   1. put Redmine on this network too (add it as a service here, or
+    #      `docker network connect reporter-render <redmine-container>`);
+    #   2. keep `internal: true` and publish the port ONLY on the loopback interface —
+    #      `ports: ["127.0.0.1:3000:3000"]` — which is weaker, and is a decision to make
+    #      knowingly rather than by deleting a line whose comment you did not read;
+    #   3. do not run Gotenberg. `:chromium_cdp` is the default for a reason and needs no
+    #      service at all.
+    internal: true

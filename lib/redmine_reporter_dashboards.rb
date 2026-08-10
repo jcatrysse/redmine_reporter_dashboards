@@ -35,7 +35,26 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight_suite'
 # The adapters. Requiring them REGISTERS them; it does not start a browser or run a
 # binary, so a host without either boots exactly as before and finds out at preflight.
+#
+# EVERY ADAPTER IS REQUIRED HERE, and T-34 is why the list must not have a hole in it.
+# `:gotenberg` was added to the tree and left off this list, so it registered NOWHERE at
+# boot — and two other places load that directory by SCANNING it: the `preflight` rake
+# task and `spec/conformance`. Two consequences, and both were measured rather than
+# reasoned about.
+#
+# In production, a template asking for `engine_hint: gotenberg` in a web request would
+# have raised `Registry::UnknownEngine` — the engine ships, is documented, and is
+# unreachable by the one mechanism that selects it.
+#
+# In the suite it was worse than a missing feature, because it made an UNRELATED test
+# fail: `test_it_exits_2_when_no_engine_is_registered` wraps the rake task in
+# `Registry.isolated`, the task's directory scan then `require`d gotenberg.rb FOR THE
+# FIRST TIME inside that block, and an engine appeared inside the one test whose subject
+# is that none is registered. `require` is idempotent, so the two adapters listed here
+# were no-ops there and only the unlisted one misbehaved. 47 failures and 66 errors, none
+# of them in the adapter.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/chromium_cdp'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/gotenberg'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engines/wkhtmltopdf'
 # The asset layer (T-33) and the seam that binds it to the render layer. It sits UPSTREAM
 # of render/ — see `assets.rb` for why it cannot live inside it (F-13b) — and like the

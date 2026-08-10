@@ -72,6 +72,7 @@ fact that CI has not yet run on this work at all.
 | T-20 | **done** — `{% geo_version_map %}` is a **deprecation shim**: same behaviour, same map shape, one log line per process (locked, so once means once under Puma), and `Version.visible` was already the scope. The addon's `VersionDrop` (108), `issue_drop_patch.rb` (43) and `custom_field_value_drop.rb` (32) are **deleted**, `register_issue_target_version_drop` with them, and **two `zero_reporter.allowlist` entries went with the files** — the ratchet shrank 18 → 16 rather than going stale. The linter gained `deprecated.geo_version_map` as a **warning, not an error**: the template still works, and `import:plan`'s "which templates need rework" is `errors.any?`. It also gained a counted usage marker, because the finding says *this breaks next minor* and the count says *this many templates must be touched first*. **It found two defects in itself and one gap in its own task definition** — §Findings **E-15** — and left **F-11** (the `issue.target_version` window before T-23) and **F-12** (`TagContext` reading `User.current`) for the curator. Green DB-less (1460, was 1433), Liquid **4.0.4 and 5.13.0** (278 each), and all six gates |
 | T-16 | **done** — `charts/` (palette, spec, layout, SVG renderer, Chart.js emitter, collector), `liquid/tags/chart_tag.rb`, `assets/javascripts/chart_boot.js`, **Chart.js 4.5.0 vendored** with its digest in `THIRD_PARTY.md` and a `vendor_integrity` gate that recomputes it. `{% chart %}` **emits no markup** — a placeholder and a `ChartSpec`, and the output binding decides: `<canvas>` + `<script type="application/json">` for HTML, inline `<svg>` for PDF with `<a xlink:href>` per element and no JavaScript at all. **One `ChartLayout` for both paths**, and the claim is MEASURED rather than argued: the falsifier renders a horizontal bar with twelve long labels in a real Chromium and compares `chart.chartArea` with `ChartLayout#plot` — worst edge **1.17%** against T-16's 2% tolerance, with Chart.js using exactly the ticks, min and max it was handed. **It found two defects doing so** (§Findings **E-16**), neither findable in Ruby. Ten SVG goldens as deterministic text; `responsive`/`animation`/`devicePixelRatio` derived from the output binding, never from the author (G3). Left for the curator: **F-13** (where the chart layer lives), **F-14** (a `:responsive_canvas` capability), **F-15** (the two legacy examples' CDN reference) |
 | T-33 | **done** — `assets/` (policy, origin, reference, content types, bundled assets, local store, fetcher, document scanner, resolver, resolution) plus `render/asset_binding.rb`, the plugin's first `settings` block and its admin partial, and two new `layer_purity` arms. **Its review found four blockers and they are fixed** — a stylesheet's own `url()`/`@import` reaching the engine live (which made the whole `:bundled` promise false), an `ArgumentError` out of a method documented never to raise, `<style/>` hiding an entire stylesheet from the scanner, and a production transport with no test at all. §Findings **E-17**. **`:bundled` is the default and `:asset_http` is never selected** — not "off wherever the engine supports upload", but off in every mode for every capability shape, asserted against an engine declaring all three. An **empty allowlist collapses any upgraded mode to `:bundled`** and the collapse is asserted as an equality of body, refusals, counts and models — the fail-closed clause T-33 flags as most likely to be got wrong. The fetcher's closed header set is proven by a **recording double**, not by reading the file; the resolved-IP check runs **after** DNS and the connection is made to the checked address via `ipaddr=`, which is the only version that closes the rebinding window; size, time, redirect and inline caps each have an AT-and-one-past test. Containment is `realpath`, tested against a literal `..`, a percent-encoded one, a **double**-encoded one and a **symlink** inside the root pointing out of it. **Structural inlining falls back to base64 on `</style` / `</script`**, which is an injection rather than a rendering bug. 201 new DB-less examples; **1768 total, 0 failures**; all seven gates green, `layer_purity` strict, and both new arms **negative-tested**. It settled **F-13, F-13b, F-14** and answered **F-15**, and left **F-16** and **T-39**. **F-16 IS NOW CLOSED (2026-08-09) — the layer is CALLED.** T-33 built the machinery and no producer, which is the same gap `RenderContext` and the drop layer each had; the difference is that this one shipped as a *promise about the output*, so a URL-referenced image drew blank in every report for four tasks and a commit message claimed otherwise (§Findings ~~S-28~~). `ReportRun` now resolves the engine FIRST, asks it for `#capabilities`, resolves each rendered body through `Assets::Resolver`, and binds the result with `Render::AssetBinding` — so a same-origin image is inlined off disk and anything unresolvable is a typed `Failure(:asset_unresolved)` **naming the URL** instead of a hole in the page. `Reporting::AttachmentMapper` is the `LocalStore#mappers` port T-33 specified and nothing implemented, gated on `Attachment#visible?(**the run's actor**)`. A fourth `Diagnostic` origin `:assets` exists because **no engine ran**. 21 mutations, 21 red, two of them survivors closed with new tests. What is still T-34's is `:asset_upload`: no shipped engine declares it, so `DocumentRequest#assets` remains empty by design |
+| T-34 | **done** — `render/engines/gotenberg.rb`, `docker-compose.gotenberg.yml`, `.github/workflows/gotenberg-cve.yml`, a `render-network` arm on `layer_purity.sh`, and the Gotenberg leg of `render-smoke`. **The corpus is 19 pass / 0 fail / 1 skip** against `gotenberg/gotenberg:8@sha256:a16a14e1f18a…` (8.35.0), the skip being `F-14-asset-inline` for an `:asset_inline` this engine does not declare — G12's first arm, working. **F-16's remaining half is CLOSED**: `:asset_upload` is now declared AND delivered, so `DocumentRequest#assets` is consumed end to end and the proof is a PIXEL — a green plate that travelled in the multipart request is read back off the page, because bytes coming back proves nothing (the first version of that probe double-encoded the plate, succeeded, and drew a blank). **Three of the security checks were rewritten after measuring that they COULD NOT FAIL**: `/health` is exempt from Gotenberg's basic auth so a credential probe pointed there answers 200 either way; `waitForExpression` is SILENTLY IGNORED under `--chromium-disable-javascript`, so the readiness contract is void and every chart vanishes with nothing failing (the discriminator is a throwing script plus `failOnConsoleExceptions` — 409 versus 200); and a JS-probe timeout read as a pass. **The corpus caught a real defect no unit assertion could have**: `landscape` rotates whatever dimensions it is given, so swapping the page AND setting the flag produced a portrait page for every landscape report (F-03, `expected 841.89, got 595.92`). `#preflight` fails with a NAMED remediation both when no credential is configured and when one is and the endpoint answers anyway, and the failure is OBSERVED — against a real `TCPServer` in the DB-less suite and a real unauthenticated container in `render-smoke`. **Auto-detection was fixed rather than asserted**: the fallback was `Registry.ids.first`, i.e. alphabetical order, so "never selects `:gotenberg`" was true by luck and untestable; the declared `default:` in `capabilities.yml` is now read, and an engine that `needs_service` is never auto-selected. **30 mutations**, and the harness's own first control run found two environment-dependent tests (`credential: nil` fell through to `ENV`) and one order-dependent one. `verification` moved `documented` → **`pending`**, not `corpus`: the corpus has not been read in CI yet, and claiming otherwise is INV-7's exact sin — promotion is a curator decision on a CI run, exactly as wkhtmltopdf's was. §Findings **E-27** |
 | T-35 | **done, re-scoped** — vendored Mermaid 11.16.1 (3.5 MB, digest in `THIRD_PARTY.md`, byte-identical across THREE independent origins), `liquid/tags/mermaid_tag.rb`, `assets/javascripts/mermaid_boot.js`, `:modern_javascript` in the closed vocabulary, and the regenerated support matrix. **No sanitiser, no `MermaidSpec`, no collector, no `:mermaid` capability** — §Findings F-17 is why, and the tag is 210 lines against `{% chart %}`'s 324 as a result. `{% mermaid %}` inherits `Liquid::Raw` so `B{Choice}` and `-->|yes|` survive; `interpolate: true` substitutes VALUES and escapes them, with no second `Template.parse` (the gate forbids one) and no `{% %}` execution. **The boot script is ES5 and that is load-bearing** — one arrow function and it dies at parse time on the very engine whose fallback it exists to produce, so it is asserted by a real ES5 parse plus 14 node-driven behaviour examples. **MEASURED end to end on both engines**: Chromium draws the diagram (labels present, source gone, interpolated value present, no degradations); wkhtmltopdf leaves the source visible and marks it unsupported. **Three cross-major defects found by running it under both Liquid majors** — §Findings **E-19** |
 | T-40 | **done** — `lib/redmine_reporter_dashboards/permissions.rb`, `spec/permissions/permission_map_spec.rb` and `spec/permissions/registration_dsl_spec.rb`, closing `[OQ-F]` the way the curator decided on 2026-08-06: **the `template_authoring` setting is deleted, not defaulted**, and replaced by 13 role permissions in two project modules (`technical-spec.md` §4.1). Three are live and unchanged, and the loop that replaced their three literal `permission` calls is asserted **twice** — once as data, once by a committed recorder that mimics `Redmine::Plugin#project_module`'s `instance_eval` and receives the same three calls argument for argument. Ten are declared as **design and deliberately not registered**, because a permission an administrator can tick that guards nothing is a lie in the interface. **Its review found four blockers and a refuted claim, and all five are fixed** — §Findings **E-20**: the coverage gate could not see a controller in a subdirectory, `authorize` was asserted per controller so `only:` plus `skip_before_action` hollowed it out, `define_method` and a `def` inside a version conditional were invisible, the "no grant" glob never scanned `init.rb` at all, and **`:admins_only` is not a construction guarantee** — core's `DefaultData::Loader` gives Manager every setable permission on a fresh install. `require: :member` is now genuinely **derived** from `authoring: true` rather than typed and asserted to agree; coverage is **per action** and reads `config/routes.rb` too; the reader's answers about `only:`/`except:`/`skip_before_action`/`define_method`/nested `def` are asserted against **fixture controllers**, because the four real ones contain none of those constructs. 81 examples, **1933 total, 0 failures**, 92 pending (no new skips), all seven gates green, and **fourteen negative tests** — the four bypasses the review used, plus a deleted `before_action :authorize`, a missing locale label, an authoring entry that types `requires` instead of deriving it, a label for an unregistered permission, a mapped action that does not exist, a `lands_in` naming a task absent from the plan, and three against §4.1's table (a drifted name, a wrong task, and the heading gone — which must fail loudly rather than extract nothing). **The last of those found a hole in the fix itself**: `actions_guarded_by` returned `nil` for a guard that was *absent*, which reads as "covers every action", so DELETING `before_action :authorize` outright still passed the per-action check. Absent is now `[]` |
 | T-22 + T-36 | **done, together, because CLAUDE.md §1 makes shipping them apart a refusal condition** — `db/migrate/002`…`007` (seven tables), six namespaced models under `app/models/redmine_reporter_dashboards/`, `Compat.column_present?`, gate `migration_reversibility.{rb,sh,allowlist}`, `script/migrate_updown.sh` + `script/schema_snapshot.rb`, the `migrate-updown` CI job, `spec/migrations/` (53 examples) and three `test/unit/` files (59 runs). **Both plugins can now be installed at once**, and that is not a slogan: `Object.const_defined?(:Document)` is already **true** on a stock Redmine, so the namespace is load-bearing. §7's security-motivated clauses are each asserted rather than commented — recipients are `user_id` only and **no table this plugin owns has a `to`/`cc`/`bcc`/`from` column**, `[schedule_id, occurrence_date]` is UNIQUE and proven by violating it, versions have no `updated_at` and are `readonly?` once persisted, a document cannot be created without an expiry. **T-36 is two halves that answer different questions**: the gate asks whether a reverse is DECLARED (it PARSES, because a regexp cannot tell `def down` from the word "down" in a comment explaining why there isn't one); `migrate_updown.sh` asks whether the reverse RESTORES the database, in two arms — the literal FR-69 assertion, and an honest statement of what a fresh install leaves behind. **Both were negative-tested before being trusted**: every one of the gate's eight rules has a committed fixture that fires it, and `migrate_updown.sh` was driven red by three plants including a down-migration that drops `reporter_project_tabs`. **Running it found three defects reading it did not** — a 64-character derived index name that aborts on PostgreSQL and would have SUCCEEDED on MySQL, a missing savepoint that let a refused occurrence claim poison the caller's transaction, and an RSpec constant leaking onto `Object` and breaking two of T-16's examples in the randomised full run while passing in isolation. **G11 is PASS on Rails 7.2 only**; 6.1 and 8.1 are the `migrate-updown` job's to answer. It raised **six spec findings, S-1…S-6**, none of them silently fixed |
@@ -103,6 +104,134 @@ A workflow cannot fork itself without reintroducing the very credential G1 remov
 a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
+
+**E-27 · T-34: THREE OF THE FOUR SECURITY CHECKS COULD NOT FAIL WHEN FIRST WRITTEN, AND
+THE CORPUS FOUND THE ONE DEFECT NO UNIT ASSERTION COULD SEE.** 2026-08-10. Everything below
+was reproduced against `gotenberg/gotenberg:8@sha256:a16a14e1f18a…` (8.35.0) with a probe or
+a mutation, never read.
+
+**The measurements, because each one inverted a design that looked obviously right.**
+
+| what looked right | what it measures | what was measured |
+|---|---|---|
+| probe `/health` unauthenticated to prove the credential is enforced | nothing | `/health` is **EXEMPT** from basic auth: 200 on a locked-down service and on a wide-open one. `/version` and `convert/html` are not. The probe is now an unauthenticated POST to the convert route — the route that matters, no render, 401/403 versus anything else |
+| send `waitForExpression` to prove JavaScript is alive | nothing | with `--chromium-disable-javascript` Gotenberg **silently ignores** it: 200 in 0.17 s, against 503-at-the-api-timeout when JS is live. The readiness contract is void, every chart is missing, nothing fails. Discriminator: a script that THROWS plus `failOnConsoleExceptions` — **409 live, 200 disabled**, half a second either way |
+| a JS-probe timeout is not a failure | nothing | it made the check unable to fail against the service least worth trusting. A timeout is now its own named failure |
+| swap the page for landscape, like the reference adapter | the wrong thing | `landscape` rotates **whatever dimensions it is given**, so swap-and-flag cancels: every landscape report came out PORTRAIT with correct margins and no error. **Conformance fixture F-03 caught it** (`expected 841.89 ± 3, got 595.92`) |
+| `Readiness::EXPRESSION` can be sent as-is | breaks every chart | it is `undefined` before the shell runs, and Gotenberg answers **400 "returned an exception or undefined"** in 0.2 s rather than waiting. `!!(…)` — which the reference adapter has always done — makes it a real `false` |
+
+**AND THE MUTATION HARNESS'S OWN FIRST CONTROL RUN FOUND TWO TESTS THAT WOULD HAVE BEEN RED
+IN CI AND GREEN EVERYWHERE ELSE.** The harness exports `RRD_GOTENBERG_USERNAME`; the adapter
+had `credential: nil` defaulting through `credential || credential_from_env`, so
+`Gotenberg.new(credential: nil)` — the exact subject of the security examples — picked the
+environment's credential up. Green on a clean laptop, red in `render-smoke`, which exports
+those variables. There was also no way to express "explicitly no credential" at all. Fixed
+with a `FROM_ENV` sentinel. A third example was order-dependent on `FakeAdapter.behaviour`,
+a class-level accessor other examples mutate. **None of the three was findable by reading**,
+and the control run is the only reason they were found before CI.
+
+**Auto-detection was FIXED, not asserted.** T-34's Accept says "a test asserts auto-detect
+never selects `:gotenberg`". Written directly that is a test that cannot fail: the fallback
+was `Registry.ids.first`, `Registry.ids` is `keys.sort`, and `chromium_cdp` sorts before
+`gotenberg` — so the property held by alphabetical accident, and a future `:athena` would
+have become the default of every install in the release that added it. Meanwhile
+`default: true` had sat in `capabilities.yml` since DoR-5, validated to be on exactly one
+engine, and was read by nobody. The fallback now reads it, and an engine the catalogue says
+`needs_service` is never auto-selectable — a rule whose test registers `:gotenberg` FIRST
+so the accident cannot make it pass.
+
+**THE ONE ARCHITECTURAL DECISION, AND IT WEAKENS A GATE ON PURPOSE — CURATOR, THIS IS THE
+ROW TO READ.** `layer_purity.sh` forbids `Net::HTTP` under `render/**`. An engine that IS a
+service cannot be reached without a socket, so the choice was never "socket or no socket"
+but *"a socket the gate can see, or a socket laundered through a neutral directory it
+cannot"*. The second is the two-hop evasion the `charts`/`assets` arms were written to stop
+— that gate's own comment says a boundary holding transitively holds only by luck. So the
+exemption is **named, scoped to one file, and bounded by its own arm**: `render-network`
+fails if any OTHER file under `render/` names `Net::HTTP`, fails if the exempt file STOPS
+naming it (a stale exemption is how an allowlist silently permits something later), and
+asserts Gotenberg's `convert/url` route is absent from every file that could issue a
+request. All four arms were negative-tested, including that documentation may still NAME the
+forbidden route — the first version failed on the technical spec's own clause forbidding it,
+which is HANDOVER's `<script>`-in-prose lint, met again.
+**Recommendation:** accept the narrowing as written. INV-8's subject in technical-spec §11 is
+the ASSET path — the renderer must not fetch a document's references on the viewer's behalf
+— and this adapter fetches nothing; it POSTs a complete document to an operator-configured
+endpoint. If the curator disagrees, the alternative is not a tidier adapter, it is dropping
+`:gotenberg`, and that reverses OQ-3.
+
+**AND THEN BOTH INDEPENDENT REVIEWS REJECTED IT, FOR THE SAME REASON, AND THEY WERE RIGHT.**
+A fresh reviewer briefed to reject and a UX pass ran separately and never saw each other's
+output. Each returned the identical blocker first, which is the reason to believe it:
+
+**THE CHECKS WERE HUNG ON A METHOD NOTHING IN THE SHIPPED PRODUCT CALLED.** `#preflight`
+returns a `Result` and is called by `spec/` and by the conformance harness. Both operator
+surfaces — *Administration → Render preflight* and
+`rake reporter_dashboards:render:preflight` — go through `Render::Preflight#run`, which only
+ever rendered a probe document. So the credential check, the version floor and the
+JavaScript probe — each one rewritten after MEASURING that its first version could not fail
+— could not fire where anybody would see them. Measured by the reviewer, running the exact
+command the README prints, against a Gotenberg with no authentication whatsoever:
+
+    render preflight: gotenberg 8.35.0 (OK so far …)   >>> exit code = 0, eight PASSes
+
+Three documents — the README, the compose file and `capabilities.yml` — asserted as shipped
+fact that an unauthenticated Gotenberg produces a preflight failure. *Fixed:* the adapter
+publishes `#configuration_checks` as data (`{id:, title:, state:, detail:}`), `Preflight#run`
+turns them into its own `Check`s and ABORTS on a failure rather than printing eight green
+document checks under one red one, and the proof is an example that drives
+`PreflightSuite` and `PreflightCommand` — not the adapter method — against a real
+unauthenticated listener and asserts a non-zero exit. The `id` is deliberately symbolic,
+because it is the part that is a contract rather than prose, which is what
+`ReporterPreflightHelper::CHECK_LABELS` keys a locale entry off (E-26 #6's own recommendation).
+
+**AND THE OTHER HALF OF IT: EVERY INSTALL'S PREFLIGHT WENT RED.** Registering `:gotenberg`
+at boot put it in `Registry.ids`, and `PreflightSuite` runs every registered engine — so the
+rake task the README calls a deploy step exited **1** on every install that does not run an
+optional container, with a permanent red row on the admin page that no amount of installing
+anything would fix. T-34 had added the `needs_service` rule to `ReportRun#resolve_engine`
+and not here. *Fixed*, and the engine is DEFERRED rather than hidden: it gets a report
+carrying one `:skip` that names it and says `RRD_ENGINE=gotenberg` is how to check it
+deliberately.
+
+**FOUR MORE THAT WERE FOUND BY MEASUREMENT AND ARE FIXED.** Each is worth reading, because
+none was findable by reading the file:
+
+| what | how it was found | why nothing saw it |
+|---|---|---|
+| **`Net::HTTP.start` sent the report and the credential to `$http_proxy`.** Its third positional is `p_addr = :ENV`, so keyword-only calls follow the ambient proxy rather than the configured endpoint. The reviewer stood up a fake proxy and read `Authorization: Basic …` plus the whole multipart report out of it | a listening socket | `URI#find_proxy` returns nil for `127.*`, and every spec and both CI containers are loopback. The first replacement test was loopback too and the mutation SURVIVED it — the fix is asserted twice now, on the argument and against TEST-NET-1 |
+| **A credential in the endpoint URL was accepted, never used, and printed.** `http://user:pass@host` authenticates nothing here, and `@endpoint` is interpolated into six failure messages — which reach the diagnostics panel, the scheduled-report failure MAIL, and a persisted `Snapshot` row | constructed | nothing tested a URL with userinfo. Now REFUSED rather than redacted: redacting would keep the silent non-authentication |
+| **The asset NAME was guarded and its CONTENT TYPE was not**, though both are header values in the same part. A CRLF produced 14 `Content-Disposition` headers for 13 parts | constructed | `SAFE_ASSET_NAME`'s own comment argues that "the only producer is safe" is a property of the current tree — and the identical argument was not made one line below it |
+| **`DEFAULT_ENDPOINT` was `http://localhost:3000`, which is Redmine's own port.** An unconfigured adapter POSTed a probe document, and a credential, to Redmine, got a 404, and reported `:internal` — the code whose comment says it means "a bug here, not an engine fault" | the UX pass, reading | there is no safe default. There is now no default: construction stays total and an unconfigured adapter answers a typed Failure naming `RRD_GOTENBERG_URL` |
+
+**AND THREE MISDIAGNOSES OF THE INV-4 SHAPE, all in the new remediation messages, all
+fixed.** A service that was DOWN, one that was NOT A GOTENBERG, and one merely ERRORING each
+got the same confident sentence — *"answered the conversion route WITHOUT the configured
+credential"* or *"has JavaScript disabled"* — and an instruction that could not help. The
+ordering was justified on COST (*"each check is cheaper than the one after it"*), which is
+the wrong axis for a diagnostic: **identity before verdict**. A `check_reachable` arm now
+runs first and only 200 means JavaScript is off. This is the third time this project has
+shipped that shape (E-26 #6 and #7 are the others), and the first time it was caught before
+the commit.
+
+**THE REVIEWER RAN 17 MUTATIONS OF ITS OWN CHOOSING AND 13 SURVIVED**, against a harness that
+had reported 30 of 30 killed. Choosing your own mutations tests the examples you were already
+thinking about — HANDOVER §1 says exactly this and it was still worth measuring again. Three
+were proved non-equivalent BY CONSTRUCTION and now have examples: the declared-default
+preference (the shipped example compared a String to a Symbol and could never fail), the
+retry's deadline (every readiness double raised INSTANTLY, so no time passed and the two
+branches were indistinguishable), and **the encoding** — not one byte above 0x7F went through
+this adapter in any test, in a plugin that ships nine locales and whose HANDOVER has three
+entries on that exact bug.
+
+**RECORDED, NOT FIXED. Each with what was measured.**
+
+| # | What | Measured | Recommendation |
+|---|---|---|---|
+| 1 | **`verification` is `pending`, not `corpus`.** The corpus is 19/0/1 locally and has never been read in CI | 19 pass, 0 fail, 1 skip, 0 harness error against 8.35.0 | INV-7: an untested configuration is unsupported, and *locally tested* is not *CI tested*. **Recommend** promotion to `corpus` after one green `render-smoke` — the same evidence, and the same curator act, as wkhtmltopdf's promotion on 2026-08-06. Until then the matrix cells say `not verified`, which is true |
+| 2 | **There is no install-wide way to SELECT `:gotenberg`.** A template's `engine_hint` is the only route | `resolve_engine` reads the hint, then the declared default; no setting exists | That is FR-50 / §5.2 clause 4 — the engine-selection UI, generated from `capabilities.yml` — and it is not in T-34's `Touches:`. **Recommend** it as the next task's clause rather than absorbing it here (CLAUDE.md §11.5). The interim is honest and documented: per-template hint, endpoint and credential in the environment |
+| 3 | **A `Failure` code for "the engine is misconfigured" does not exist**, so an unauthenticated Gotenberg is reported as `:engine_unavailable` | `Failure::CODES` is closed and exhaustively branched | Defensible — the adapter refuses to use it, so it IS unavailable — but the remedy is an operator's, not a retry. **Recommend** the curator decide whether `:engine_misconfigured` earns a place in the closed set; adding one touches every branching caller and the locale keys |
+| 4 | **The retry after a readiness timeout abandons a request the container keeps rendering** for up to its own `--api-timeout` | Chromium's concurrency in Gotenberg 8 is 6 | Bounded and self-clearing, and the alternative (waiting out somebody else's flag file) makes the readiness bound a property of their configuration. **Recommend** `--api-timeout=60s` in the example compose, which it now carries, and watching this if a report fleet ever runs readiness-timeout-heavy templates |
+| 5 | **The version probe is not bounded by the request's deadline.** It runs once per adapter instance, at `PROBE_TIMEOUT_MS` | one extra request on the first render, memoised | It happens *after* a successful render, so it cannot lose a document — it can only make a fast render report slowly. **Recommend** leaving it; the alternative is a version stamp that is sometimes absent, which defeats the stamp |
 
 **E-26 · F-16's THREE REVIEWS: what was fixed, and the ELEVEN THINGS THAT WERE NOT.**
 2026-08-09, three fresh subagents (reviewer, adversarial QA, UX). Two of them independently
@@ -2422,6 +2551,22 @@ engine, so the resolver always chooses `:inline` and `DocumentRequest#assets` is
 empty. That half belongs to **T-34** and the original text is kept below because it is still
 the accurate statement of it.
 
+**CLOSED 2026-08-10 BY T-34 — `:asset_upload` IS NOW DECLARED AND DELIVERED.** The two
+paragraphs below are kept because they are the accurate statement of what was owed and of
+why it was not paid in T-33; read them as history. What discharged them is the Gotenberg
+adapter, whose ONLY asset model is upload: `Assets::Resolver` now chooses `:upload` for a
+real engine, `Resolver#upload!` rewrites each reference to its content-addressed name, and
+the adapter sends every one as a sibling multipart part beside `index.html`. **The proof is a
+pixel, not a byte count** — a green plate that travelled in the request is read back off the
+rendered page (`spec/render/gotenberg_service_spec.rb`), because the first version of that
+probe double-encoded the plate, got a plausible PDF back, and drew a blank image. Declaring
+and delivering landed together, which is what G12's three-state rule requires and what INV-7
+is about. **The CDP `Fetch.enable` interceptor is NOT built and `:chromium_cdp` still does
+not declare `:asset_upload`** — that is a capability change to the DEFAULT engine, needing
+its own conformance fixture and a matrix regeneration, and absorbing it here would have been
+CLAUDE.md §11.5's second purpose. It is no longer blocking anything: the upload branch is
+exercised end to end by a shipped engine.
+
 **F-16 · nothing consumes `DocumentRequest#assets` yet, so T-33's upload model is proven at the
 resolver and NOT end to end.** §5.1 says "the CDP interceptor makes the reference engine
 implement it too" — `Fetch.enable` request interception serving `request.assets` from memory.
@@ -3678,7 +3823,20 @@ engine supports `:asset_upload` — the inversion that keeps INV-8 true. A test 
 **cannot** widen egress from template content.
 
 **T-34 · The Gotenberg adapter** *(deps: T-13; parallel with T-14/T-15)*
-*Touches:* `render/engines/gotenberg.rb`; `docker-compose.gotenberg.yml`; a third `render-smoke` leg.
+**DONE 2026-08-10.** Every Accept clause below is met and the evidence is in §Findings
+**E-27**; the corpus is **19 pass / 0 fail / 1 skip**, the one skip being `F-14-asset-inline`
+against an `:asset_inline` this engine does not declare, which is G12's first arm rather
+than a gap. `verification` moved `documented` → **`pending`**, not `corpus`: the run has not
+been read in CI, and the promotion is a curator act on that run (E-27 row 1).
+*Touches (as built — three additions to the stated list, each argued in E-27):*
+`render/engines/gotenberg.rb`; `docker-compose.gotenberg.yml`; a third `render-smoke` leg;
+**plus** `.github/workflows/gotenberg-cve.yml` (the nightly scan the Accept requires had no
+home — `ci.yml` runs on push, and a schedule there would run the whole matrix nightly),
+`script/gates/layer_purity.sh` (the `render-network` arm that BOUNDS this file's one
+`Net::HTTP` exemption and carries the boundary grep), and
+`render/engine_catalogue.rb` + `reporting/report_run.rb` (the "auto-detect never selects
+`:gotenberg`" clause was true by ALPHABETICAL ACCIDENT and therefore untestable; the
+declared `default:` is now read and a `needs_service` engine is never auto-selected).
 *Accept:* `convert/html` with `:asset_upload` only, and the boundary grep asserts
 `forms/chromium/convert/url` **absent from the whole tree**; passes T-12's corpus unmodified — the
 proof that the interface, not the adapter, is the contract; `#preflight` **fails with a named

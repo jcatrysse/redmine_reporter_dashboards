@@ -1,0 +1,116 @@
+# NIGHTLY CVE SCAN OF THE PINNED GOTENBERG DIGEST — T-34.
+#
+# `technical-spec.md` §5.2 makes the container a documented option rather than a
+# dependency, and the price of documenting it is keeping the recommendation current: a
+# pinned digest is a promise that the bytes do not move, which is exactly what makes a
+# published vulnerability in them YOUR problem rather than a tag's.
+#
+# WHY THIS IS A SEPARATE WORKFLOW. `ci.yml` runs on push and pull_request. Adding a
+# nightly schedule to it would run the whole matrix — four Redmine branches, three
+# database engines, a browser — every night to answer one question. It is also the
+# honest boundary: a red cell here is a fact about somebody else's image on a day nobody
+# changed this repository, and it must not read as "the plugin is broken".
+#
+# WHAT MAKES IT MEANINGFUL RATHER THAN DECORATIVE. The digest is READ OUT OF
+# `docker-compose.gotenberg.yml` rather than written here. Two pins drift; this project
+# has the receipts (a stale table in HANDOVER §3 named seven tables when the schema had
+# eleven). There is one pin, it is in the file an operator copies, and this scans that.
+---
+name: Gotenberg CVE scan
+
+on:
+  schedule:
+    # 04:17 UTC. Not on the hour: every scheduled workflow on GitHub fires at :00, and a
+    # queue is how a nightly job becomes a job that ran at 07:00 or not at all.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+  # Also on a change to the pin itself, so the answer to "is this digest clean" arrives
+  # in the pull request that moves it rather than the following night.
+  pull_request:
+    paths:
+      - 'docker-compose.gotenberg.yml'
+      - '.github/workflows/gotenberg-cve.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan the pinned Gotenberg image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ONE PIN, READ FROM THE FILE THAT CARRIES IT. If the compose file ever loses its
+      # digest — someone "simplifying" it back to a bare `:8` tag — this fails rather than
+      # silently scanning whatever `:8` means today, which would be a scan of a different
+      # image reported under this one's name.
+      - name: Read the digest out of the compose file
+        id: pin
+        run: |
+          set -euo pipefail
+          ref="$(grep -oE 'gotenberg/gotenberg:[0-9]+@sha256:[0-9a-f]{64}' \
+                 docker-compose.gotenberg.yml | head -1)"
+          if [ -z "$ref" ]; then
+            echo "::error file=docker-compose.gotenberg.yml::no digest-pinned gotenberg image."
+            echo "::error::The example compose file must pin by digest — a tag is a moving"
+            echo "::error::target and a CVE scan against one measures nothing. See §5.2."
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "scanning $ref"
+
+      # PULLED BY DIGEST, so what is scanned is what an operator following the example
+      # will actually run — not the tag as it stands tonight.
+      - name: Pull it
+        run: docker pull "${{ steps.pin.outputs.ref }}"
+
+      # The digest is asserted AFTER the pull, because `docker pull` on a digest ref is
+      # the only thing that proves the registry still serves those exact bytes. A deleted
+      # or re-pushed digest fails here, loudly, which is itself worth knowing.
+      - name: Confirm the bytes are the ones named
+        run: |
+          set -euo pipefail
+          want="${{ steps.pin.outputs.ref }}"
+          digest="${want##*@}"
+          docker image inspect "$want" --format '{{join .RepoDigests "\n"}}' | grep -q "$digest" \
+            || { echo "::error::the pulled image does not carry $digest"; exit 1; }
+          echo "confirmed $digest"
+
+      - name: Scan for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.pin.outputs.ref }}
+          format: table
+          # HIGH AND CRITICAL ONLY, and `exit-code: 1` so this is a gate rather than a
+          # report. §5.2's premise for accepting an external container at all is that the
+          # plugin can refuse an unsafe configuration; a scan that only prints is the
+          # advisory-versus-gate confusion CLAUDE.md §7 forbids in the other direction.
+          severity: HIGH,CRITICAL
+          # UNFIXED ONES ARE REPORTED BUT NOT FAILED. A CVE with no fix available cannot
+          # be acted on by bumping the pin, and failing on it would train whoever reads
+          # this into ignoring the job — which is how a real, fixable finding gets missed.
+          ignore-unfixed: true
+          exit-code: '1'
+          vuln-type: os,library
+
+      # A findings-free scan is the ordinary outcome, and it should still say what it
+      # checked. A job whose only successful output is a green tick teaches nobody which
+      # digest was clean on which night.
+      - name: Say what was clean
+        if: success()
+        run: |
+          echo "::notice::${{ steps.pin.outputs.ref }} has no fixable HIGH or CRITICAL findings"
+
+      # WHAT TO DO WHEN THIS GOES RED, written here because the person reading it at
+      # 04:17 did not write the compose file.
+      - name: What a red run means
+        if: failure()
+        run: |
+          echo "::error::The pinned Gotenberg image has fixable HIGH/CRITICAL findings."
+          echo "::error::This is not a defect in this plugin. The fix is to move the pin:"
+          echo "::error::  1. docker pull gotenberg/gotenberg:8"
+          echo "::error::  2. docker inspect --format '{{index .RepoDigests 0}}' gotenberg/gotenberg:8"
+          echo "::error::  3. put that digest in docker-compose.gotenberg.yml, and in"
+          echo "::error::     config/capabilities.yml's verification_note if it names one"
+          echo "::error::  4. re-run the render-smoke job, which runs the corpus against it"

@@ -929,6 +929,72 @@ jobs:
           done
           echo "::notice::no browser on this image; the corpus half will report no adapter"
 
+      # THE THIRD LEG — T-34. Two Gotenbergs, and the second one is the point.
+      #
+      # The AUTHENTICATED one comes from `docker-compose.gotenberg.yml`, so this job
+      # exercises the file an operator is told to copy rather than a hand-rolled
+      # `docker run` that happens to look like it: the non-root user, the read-only root
+      # filesystem, the dropped capabilities and the pinned digest are all under test
+      # here, and a compose file that stopped working would fail this step.
+      #
+      # THE OVERRIDE IS DOCUMENTED OPTION 2, not a hole. The shipped file has
+      # `internal: true` and publishes NOTHING, because the safe topology is Redmine on
+      # the same network. A GitHub runner is the "Redmine is not in Docker" case the file
+      # calls out, and the answer it gives is a LOOPBACK-ONLY publish. Making CI take the
+      # documented adaptation — rather than deleting `internal: true` from the shipped
+      # file — is what keeps the default safe and the example honest.
+      #
+      # The UNAUTHENTICATED one is deliberately NOT in the compose file, because that file
+      # is documentation and documenting an unsafe configuration is how it gets copied. It
+      # exists here for one reason: T-34's Accept requires the credential check to be
+      # OBSERVED failing against a real service that really does answer without one. A
+      # security check nobody has watched fail is not a check.
+      - name: Start Gotenberg — the documented one, and an unauthenticated one to fail against
+        id: gotenberg
+        run: |
+          set -euo pipefail
+          cat > /tmp/gotenberg.ci.yml <<'YML'
+          services:
+            gotenberg:
+              ports: ["127.0.0.1:3000:3000"]
+          YML
+          GOTENBERG_USERNAME=ci-user GOTENBERG_PASSWORD="$(openssl rand -hex 16)" \
+            docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml up -d
+          # The credential is generated per run and read back out of the container, so it
+          # is never a literal in this file — `script/gates/no_secrets.sh` is the rule and
+          # a plausible-looking password in a workflow is how the rule erodes.
+          password="$(docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml \
+                      exec -T gotenberg printenv GOTENBERG_API_BASIC_AUTH_PASSWORD)"
+          echo "::add-mask::$password"
+          echo "password=$password" >> "$GITHUB_OUTPUT"
+
+          # THE SAME DIGEST, so the unauthenticated instance is the same software. A
+          # different tag here would make the security check's subject a different build
+          # from the one the corpus runs against.
+          digest="$(grep -oE 'gotenberg/gotenberg:8@sha256:[0-9a-f]+' docker-compose.gotenberg.yml)"
+          docker run -d --name gotenberg-open -p 127.0.0.1:3001:3000 "$digest" >/dev/null
+
+          for port in 3000 3001; do
+            for _ in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1 && break
+              sleep 2
+            done
+            curl -fsS "http://127.0.0.1:$port/health" >/dev/null \
+              || { echo "::error::Gotenberg on $port never became healthy"; exit 1; }
+          done
+
+          # A CONTROL FOR THE CONTROL. If the "unauthenticated" instance were in fact
+          # refusing, every credential example below would pass for the wrong reason —
+          # so the premise is asserted here rather than assumed. Same for the other
+          # direction: a 401 from the authenticated one proves it is really enforcing.
+          open_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                       http://127.0.0.1:3001/forms/chromium/convert/html)"
+          auth_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                       http://127.0.0.1:3000/forms/chromium/convert/html)"
+          echo "unauthenticated instance answers $open_code; authenticated one answers $auth_code"
+          [ "$open_code" != "401" ] || { echo "::error::the open instance is refusing; the credential check would pass vacuously"; exit 1; }
+          [ "$auth_code" = "401" ] || { echo "::error::the compose file is NOT enforcing its credential"; exit 1; }
+
       # The harness's own tests: the three-state rule, the matrix generator, and the
       # catalogue's validation. No browser involved, so this half cannot be flaky and
       # cannot be skipped.
@@ -942,6 +1008,10 @@ jobs:
         env:
           RRD_CONFORMANCE: '1'
           RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
         run: rspec spec/conformance --format documentation
 
       # T-15's containment assertions, which need a real browser and assert on the
@@ -953,6 +1023,10 @@ jobs:
         env:
           RRD_CONFORMANCE: '1'
           RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
         run: rspec spec/render --format documentation
 
       # T-16's FALSIFIER, and it is the only place it can run. `ChartLayout` computes one
@@ -982,6 +1056,10 @@ jobs:
         env:
           RRD_CONFORMANCE: '1'
           RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
         run: |
           cp docs/engine-support-matrix.md /tmp/committed-matrix.md
           RRD_MATRIX_WRITE=1 rspec spec/conformance/conformance_spec.rb > /dev/null

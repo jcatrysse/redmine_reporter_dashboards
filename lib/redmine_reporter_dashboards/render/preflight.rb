@@ -145,9 +145,38 @@ module RedmineReporterDashboards
 
       attr_reader :engine, :redmine_base_url
 
+      # AN ENGINE'S OWN CONFIGURATION CHECKS RUN FIRST, AND THEY CAN END THE RUN.
+      #
+      # T-34, and it is here because two independent reviews found the same hole on the
+      # same afternoon: `:gotenberg` grew a credential check, a version floor and a
+      # JavaScript-liveness probe — each rewritten after MEASURING that its first version
+      # could not fail — and hung them on `engine.preflight`, which nothing in the shipped
+      # product called. Both operator surfaces (the admin page and the rake task) come
+      # through this method, and this method only ever rendered a probe document. Against a
+      # Gotenberg with no authentication at all, the command the README prints returned
+      # EXIT 0 AND EIGHT PASSES.
+      #
+      # A configuration fault ABORTS rather than degrading into the document checks, and
+      # that is not impatience: every check below reads a rendered PDF, and a service that
+      # is unauthenticated, too old, or silently running without JavaScript will produce a
+      # perfectly good one. Eight green rows under a red one is how a reader concludes the
+      # red one is cosmetic.
+      #
+      # `respond_to?` rather than a required interface: there is nothing to misconfigure
+      # about a Chromium you launched yourself, so the two binary-backed adapters answer to
+      # nothing here and are unaffected.
       def run
         started = monotonic_ms
-        render_started = started
+        configuration = configuration_checks
+        if configuration.any?(&:failed?)
+          return Report.new(engine_id: safe(:id, 'unknown'),
+                            engine_version: safe(:version, 'unknown'),
+                            checks: configuration,
+                            duration_ms: (monotonic_ms - started).round,
+                            bytes: nil)
+        end
+
+        render_started = monotonic_ms
         result = render_probe
         render_ms = (monotonic_ms - render_started).round
         checks = if result.is_a?(Success)
@@ -158,9 +187,29 @@ module RedmineReporterDashboards
 
         Report.new(engine_id: safe(:id, 'unknown'),
                    engine_version: safe(:version, 'unknown'),
-                   checks: checks,
+                   checks: configuration + checks,
                    duration_ms: (monotonic_ms - started).round,
                    bytes: result.is_a?(Success) ? result.bytes : nil)
+      end
+
+      # The adapter's own checks, as `Check`s. Plain hashes cross the seam — the adapter
+      # publishes `{id:, title:, state:, detail:}` and this is the one place that becomes a
+      # render type, the same arrangement `Render::AssetBinding` has with `Assets`.
+      #
+      # A raising adapter must not take the diagnostic down with it: the whole point of
+      # this page is to be readable when things are broken, so a check that cannot be run
+      # is reported as a FAILED check naming the exception rather than as a 500.
+      def configuration_checks
+        return [] unless engine.respond_to?(:configuration_checks)
+
+        Array(engine.configuration_checks).map do |entry|
+          Check.new(id: entry[:id], title: entry[:title], state: entry[:state],
+                    detail: entry[:detail], duration_ms: entry[:duration_ms])
+        end
+      rescue StandardError => e
+        [Check.new(id: :engine_configuration, state: :fail,
+                   title: 'the engine could be asked about its configuration',
+                   detail: "#{e.class}: #{e.message}", duration_ms: nil)]
       end
 
       # The probe document. Every element is here because something specific breaks it,

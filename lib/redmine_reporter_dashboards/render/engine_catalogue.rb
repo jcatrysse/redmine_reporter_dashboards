@@ -94,6 +94,47 @@ module RedmineReporterDashboards
         engines.find(&:default)
       end
 
+      # --- WHICH ENGINES AUTO-DETECTION MAY LAND ON (T-34) --------------------
+      #
+      # An engine that NEEDS A SERVICE must never be chosen by falling back to it. The
+      # operator of an install with no container has not decided anything, and picking
+      # `:gotenberg` for them turns every report into a connection error — the engine is
+      # perfectly good and simply is not there.
+      #
+      # This exists because the fallback in `Reporting::ReportRun#resolve_engine` was
+      # `Registry.ids.first`, i.e. WHICHEVER ENGINE ID SORTS FIRST ALPHABETICALLY. That
+      # answers `:chromium_cdp` today and answers it by luck: `:gotenberg` sorts after it,
+      # and a future `:brave_cdp` or `:athena` would silently become the default of every
+      # install in the release that added it. Meanwhile `default: true` sat in this file,
+      # validated to be present on exactly one engine, and was read by nobody.
+      #
+      # So the order is: the DECLARED default, then any registered engine that does not
+      # need a service, and never an alphabetical accident.
+      # AN ENGINE THIS FILE HAS NEVER HEARD OF IS SELECTABLE, and the first version had it
+      # the other way round. Fail-closed is this project's instinct and it was measured
+      # WRONG here: `Registry.isolated { register(:fake, FakeEngine) }` is how a hundred
+      # tests stand an adapter up, and refusing every id outside the catalogue turned all
+      # of them into "no render engine is registered" — 46 failures and 66 errors, none of
+      # them about Gotenberg. In production it would equally exclude an adapter registered
+      # by another plugin.
+      #
+      # The rule this method exists for is narrow and is exactly T-34's Accept: never
+      # auto-select an engine the catalogue SAYS needs a service. An entry it does not
+      # have is not one that says that. Being unknown is not evidence.
+      def auto_selectable?(id)
+        entry = self[id]
+        return true if entry.nil?
+
+        !entry.needs_service
+      end
+
+      # The declared default's id, or nil when this catalogue has none registered. A
+      # String, because `Engine#id` is one and `Registry` keys are Symbols — the caller
+      # converts, so the mismatch is visible at the seam rather than inside a lookup.
+      def default_engine_id
+        default_engine&.id
+      end
+
       private
 
       def build_engines(raw)
