@@ -938,6 +938,25 @@ plugin or the vendor gem, each listed with its reason in
 
 ## 3. Environment quirks (cloud sessions)
 
+- **DOCKER WORKS HERE, BUT `service docker start` DOES NOT.** The init script dies on
+  `ulimit: error setting limit (Operation not permitted)` and leaves no daemon, which
+  reads as "Docker is unavailable in this container" and is not. Start it directly:
+
+      nohup dockerd --iptables=false --ip6tables=false >/tmp/dockerd.log 2>&1 &
+
+  Measured 2026-08-09: daemon up, and `docker pull gotenberg/gotenberg:8` succeeds
+  through the proxy — **2.44 GB**, digest
+  `sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760`. Both halves
+  of T-34's premise therefore hold in a fresh container and neither needs re-deriving.
+  If it refuses to start with *"process with PID … is still running"*, a daemon is
+  already up — check `docker info` before deleting the pidfile.
+- **STARTING `dockerd` COINCIDED WITH POSTGRESQL GOING DOWN.** Immediately afterwards
+  every `rake` task failed with `PG::ConnectionBad: connection refused`, which surfaced
+  first as `ActiveRecord::Migration` complaining about a pending schema — so it reads as
+  a broken migration and cost a wrong diagnosis before `pg_isready` was tried.
+  `service postgresql start` restores it with its data intact. Not proven to be causal
+  (the container also idles, §3's own entry), but the two have now happened together;
+  re-check the database before believing the next red run.
 - **`rsync` may be absent.** `redmine_clone.sh` fails with exit 127 at the mirror step.
   `sudo apt-get install -y rsync`.
 - **`./.codex/redmine_clone.sh` WITH NO ARGUMENT DEFAULTS TO `5.1-stable` AND SWITCHES THE

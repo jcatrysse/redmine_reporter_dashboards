@@ -37,6 +37,16 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
   # `:output_empty`, so a short string would fail every test here for the wrong reason.
   PDF_BYTES = "%PDF-1.4\n#{'0' * 2_000}\n%%EOF"
 
+  # A one-pixel PNG, so a symlink target is a real image rather than bytes `ContentTypes`
+  # would refuse for its own reasons — the containment example must fail on CONTAINMENT.
+  module ReportRunFixtures
+    PNG = [
+      '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489',
+      '0000000a49444154789c6360000002000100ffff03000006000557bfabd4',
+      '0000000049454e44ae426082'
+    ].join.scan(/../).map { |pair| pair.to_i(16) }.pack('C*')
+  end
+
   # AN ENGINE THAT DECLARES `:asset_inline`, which is what both shipped adapters declare.
   # It records the request it was handed, because the request's BODY is the whole question:
   # before F-16 it carried `src="/attachments/download/16/testfile.png"` verbatim and the
@@ -337,6 +347,89 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     assert_nil mapper.call('')
   end
 
+  # A LOCKED ACCOUNT IS HOW REDMINE OFFBOARDS SOMEBODY, and `Attachment#visible?` cannot
+  # see it — `AttachmentsController#download` is unreachable for a locked user only because
+  # authentication rejects the request first, and a render has no such gate.
+  def test_the_mapper_refuses_a_locked_actor
+    locked = User.find_by!(login: 'dlopper')
+    hidden = Issue.create!(project: Project.find(1), tracker: Tracker.find(1),
+                           author: locked, subject: 'own', is_private: true,
+                           status: IssueStatus.first, priority: IssuePriority.first)
+    attachment = Attachment.create!(container: hidden, author: locked,
+                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    # The precondition IS the discriminator: while active, this actor resolves it. Without
+    # this half the example passes against a mapper that refuses dlopper for any reason.
+    assert_equal attachment.diskfile,
+                 AttachmentMapper.new(actor: locked).call(
+                   "/attachments/download/#{attachment.id}"
+                 )
+
+    locked.lock!
+    assert locked.reload.locked?, 'precondition: the account must really be locked'
+
+    assert_nil AttachmentMapper.new(actor: locked).call(
+      "/attachments/download/#{attachment.id}"
+    )
+  end
+
+  # ANONYMOUS IS NOT LOCKED, and refusing it would be a regression dressed as a rule: a
+  # public report must still embed a public project's attachments. This is why the guard
+  # asks `locked?` rather than `!active?` — `AnonymousUser` fails the second.
+  def test_the_mapper_does_not_refuse_anonymous_along_with_locked_accounts
+    # THIS EXAMPLE USED TO ASSERT `assert_nothing_raised`, WHICH IS TRUE OF BOTH ANSWERS.
+    # Mutating the guard from `locked?` to `!active?` — which refuses Anonymous, because
+    # `AnonymousUser` is not active — SURVIVED it. So the example now requires Anonymous to
+    # really RESOLVE something, which is the only observation that separates the two.
+    public_project = Project.find(1)
+    public_project.update!(is_public: true)
+    Role.anonymous.tap do |role|
+      role.permissions = %w[view_issues]
+      role.save!
+    end
+    issue = Issue.create!(project: public_project, tracker: Tracker.find(1), author: @actor,
+                          subject: 'public', status: IssueStatus.first,
+                          priority: IssuePriority.first)
+    set_tmp_attachments_directory
+    attachment = Attachment.create!(container: issue, author: @actor,
+                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    assert attachment.visible?(User.anonymous),
+           'precondition: Anonymous must genuinely be allowed to see this attachment'
+
+    assert_equal attachment.diskfile,
+                 AttachmentMapper.new(actor: User.anonymous).call(
+                   "/attachments/download/#{attachment.id}"
+                 )
+  end
+
+  # CONTAINMENT FOR A MAPPER RESULT. `LocalStore` skips its `realpath` check for mapper
+  # answers by design, so a symlink inside the attachment store pointing out of it was read
+  # and inlined — measured, with only "must have a typeable extension" standing in the way
+  # of `/etc/passwd`.
+  #
+  # A TEMPORARY STORE, AND NOT THE FIXTURES DIRECTORY. The first version of this example
+  # symlinked over attachment 16's real diskfile — a file that is COMMITTED TO THE REDMINE
+  # CHECKOUT and used by other tests, which its own `ensure` would then have deleted. Any
+  # test that mutates the attachment store has to own the store.
+  def test_the_mapper_refuses_a_diskfile_that_resolves_outside_the_attachment_store
+    set_tmp_attachments_directory
+    Dir.mktmpdir do |outside|
+      target = File.join(outside, 'secret.png')
+      File.binwrite(target, ReportRunFixtures::PNG)
+
+      attachment = Attachment.create!(container: Issue.find(1), author: @actor,
+                                      file: uploaded_test_file('testfile.txt', 'text/plain'))
+      FileUtils.rm_f(attachment.diskfile)
+      FileUtils.ln_s(target, attachment.diskfile)
+      assert File.exist?(attachment.diskfile), 'precondition: the symlink must resolve'
+      assert_equal File.realpath(target), File.realpath(attachment.diskfile),
+                   'precondition: the diskfile really points outside the store'
+
+      assert_nil AttachmentMapper.new(actor: @actor).call(
+        "/attachments/download/#{attachment.id}"
+      )
+    end
+  end
+
   def test_the_mapper_refuses_to_be_built_without_an_actor
     error = assert_raises(ArgumentError) { AttachmentMapper.new(actor: nil) }
 
@@ -442,6 +535,55 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
 
     assert_not outcome.pdf_attempted?
     assert_empty RecordingEngine.requests
+  end
+
+  # THE RUN-LEVEL BYTE BUDGET (G6). `Resolver`'s 32 MiB is PER DOCUMENT, and every request
+  # is built before the first is drawn — so 50 documents could hold 1.6 GiB resident, on a
+  # request any member can make. Driven by lowering the constant rather than by building a
+  # gigabyte: the branch is the claim, and a test that really allocated 128 MB would be one
+  # nobody runs.
+  def test_a_run_whose_embedded_files_exceed_the_budget_is_refused
+    with_run_budget(200) do
+      outcome = render('<p><img src="/attachments/download/16/testfile.png"></p>')
+
+      assert_not outcome.ok?
+      assert_equal :resource_limit, outcome.diagnostic.code
+      assert_empty RecordingEngine.requests, 'nothing may be drawn once the budget is spent'
+    end
+  end
+
+  # AND IT NAMES BOTH NUMBERS, the same rule the cap refusal follows: a limit message that
+  # does not say what the limit is leaves a reader unable to tell "slightly too big" from
+  # "absurd".
+  def test_the_budget_refusal_names_the_size_and_the_limit
+    # TWO DISTINCT NUMBERS, and the first version could not tell them apart. It drove a
+    # 200-byte budget, where the spent size and the limit both round to `0 MB` — so a
+    # mutation that deleted the SIZE from the message and kept the LIMIT survived both
+    # assertions. A body big enough to separate them is the only fixture that discriminates.
+    body = "<p>#{'x' * 3_000_000}</p>"
+    with_run_budget(1024 * 1024) do
+      outcome = render(body)
+
+      assert_not outcome.ok?
+      assert_includes outcome.diagnostic.message, '2 MB', 'the SIZE must be named'
+      assert_includes outcome.diagnostic.message, '1 MB', 'the LIMIT must be named'
+    end
+  end
+
+  # AT the budget is allowed and one past it is not — the AT-and-one-past pair CLAUDE.md
+  # §3 asks for on anything with a limit. Driven at the byte, against a body whose size is
+  # known exactly.
+  def test_the_budget_admits_a_run_exactly_at_the_limit
+    body = '<p>no assets at all</p>'
+    with_run_budget(body.bytesize) do
+      assert render(body).ok?, 'a run exactly at the budget must be allowed'
+    end
+    with_run_budget(body.bytesize - 1) do
+      outcome = render(body)
+
+      assert_not outcome.ok?
+      assert_equal :resource_limit, outcome.diagnostic.code
+    end
   end
 
   # A REPORT WITH NO ASSETS IS UNCHANGED, which is what stops this being a change to every
@@ -594,6 +736,19 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
   # DERIVED FROM THE CLASS, never from an instance: `CountingEngine` counts how many
   # times it is built, so constructing one here to ask its id would make the number
   # under test always wrong by one.
+  # Lowers `MAX_RUN_ASSET_BYTES` for one example and puts it back. `remove_const` first,
+  # because redefining a constant warns and the warning is the kind of noise that trains a
+  # reader to ignore warnings.
+  def with_run_budget(bytes)
+    previous = ReportRun::MAX_RUN_ASSET_BYTES
+    ReportRun.send(:remove_const, :MAX_RUN_ASSET_BYTES)
+    ReportRun.const_set(:MAX_RUN_ASSET_BYTES, bytes)
+    yield
+  ensure
+    ReportRun.send(:remove_const, :MAX_RUN_ASSET_BYTES)
+    ReportRun.const_set(:MAX_RUN_ASSET_BYTES, previous)
+  end
+
   def registry_id(engine)
     engine.name.split("::").last.gsub(/Engine\z/, "").downcase.to_sym
   end

@@ -101,14 +101,61 @@ module RedmineReporterDashboards
       # (`:not_found`). Answering nil for that here would collapse "you may not see this"
       # and "it is missing" into one indistinguishable outcome.
       def diskfile_for(id)
+        # A LOCKED ACCOUNT IS HOW REDMINE OFFBOARDS SOMEBODY, AND `visible?` CANNOT SEE IT.
+        # `Attachment#visible?` → `container.attachments_visible?` → `allowed_to?`, and none
+        # of those consults `User#active?` — `AttachmentsController#download` is unreachable
+        # for a locked account only because AUTHENTICATION rejects the request first, and a
+        # render has no such gate. Measured: a locked `dlopper` still resolved his own
+        # private issue's attachment.
+        #
+        # `locked?` and NOT `!active?`, deliberately. `AnonymousUser` is not active either,
+        # and refusing it would stop a legitimately public report embedding a public
+        # project's attachments — a real regression, in the name of a rule about
+        # offboarding. This refuses exactly the state the finding is about.
+        return nil if @actor.respond_to?(:locked?) && @actor.locked?
+
         attachment = ::Attachment.find_by(id: Integer(id, 10))
         return nil if attachment.nil?
         return nil unless attachment.visible?(@actor)
 
-        attachment.diskfile
+        contained(attachment.diskfile)
       rescue StandardError => e
         @logger&.warn("[reporter_dashboards] attachment #{id} could not be resolved for " \
                       "asset embedding (#{e.class}); the reference will be refused")
+        nil
+      end
+
+      # CONTAINMENT FOR A MAPPER RESULT, WHICH `LocalStore` DELIBERATELY DOES NOT DO.
+      #
+      # `LocalStore#real_path` returns immediately for `source == :mapper` — documented, and
+      # right on its own terms: *"the mapper IS the decision"*, because a diskfile lives
+      # outside every configured asset root by design. The consequence is that the ONE
+      # containment check in the asset layer is skipped on this path, and a symlink inside
+      # `Attachment.storage_path` pointing out of it is read and inlined into the PDF.
+      # Measured: `symlink outside root => OUTSIDE BYTES INLINED = true`. Only
+      # `ContentTypes.for_path` stopped `/etc/passwd`, i.e. "the target must have a typeable
+      # extension" — which is not containment.
+      #
+      # So the decision this class is trusted to make now includes the check that trust
+      # implies. It belongs HERE and not in `LocalStore`: the root is
+      # `Attachment.storage_path`, which is Redmine's, and `assets/` may not name it.
+      #
+      # It needs write access inside the attachment store to exploit, so this is
+      # defence-in-depth rather than a primitive — but `local_store.rb`'s own comment calls
+      # the symlink case "the one nobody remembers", and this was the branch that skipped it.
+      def contained(path)
+        root = File.realpath(::Attachment.storage_path)
+        real = File.realpath(path)
+        return real if real == root || real.start_with?("#{root}#{File::SEPARATOR}")
+
+        @logger&.warn('[reporter_dashboards] an attachment diskfile resolved outside ' \
+                      'Attachment.storage_path and was refused; check for a symlink in the ' \
+                      'attachment store')
+        nil
+      rescue SystemCallError
+        # Absent, unreadable, or a dangling symlink. `LocalStore` reports each of those with
+        # a reason an operator can act on, so answering nil here hands it that job rather
+        # than collapsing them into this one's message.
         nil
       end
     end

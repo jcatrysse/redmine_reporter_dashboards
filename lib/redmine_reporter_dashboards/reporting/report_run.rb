@@ -92,6 +92,25 @@ module RedmineReporterDashboards
       # remove and which the first version of F-16 left in place on this path.
       HTML_CAPABILITIES = %i[asset_inline].freeze
 
+      # THE RUN-LEVEL BYTE BUDGET, and G6 had no evidence for this path without it.
+      #
+      # `Assets::Resolver::MAX_TOTAL_BYTES` is 32 MiB and it is PER DOCUMENT — `State` is a
+      # local of one `#call`. `bind_assets` builds every `DocumentRequest`, each holding its
+      # fully inlined body, BEFORE the first one is drawn (`render_all` takes the list), so
+      # the resident total is documents × per-document budget: at `BatchGuard`'s default of
+      # 50 documents that is **1.6 GiB**, on a request any member can make. Measured by an
+      # independent QA pass, which also confirmed all requests are built up front.
+      #
+      # 128 MiB is the ceiling rather than a target: it still admits four full-size
+      # documents or fifty ordinary ones, and it bounds the worst case twelve-fold. It is a
+      # CONSTANT and not a setting for the reason `Resolver`'s caps are — a safety property
+      # is not a preference, and a setting is a thing an operator can be talked into raising.
+      #
+      # Past it the run is REFUSED, not truncated: half an export is the outcome §9b.2 and
+      # the per-record abort rule both reject, and `:resource_limit` is the code that says
+      # so without implicating the engine.
+      MAX_RUN_ASSET_BYTES = 128 * 1024 * 1024
+
       # One document to produce. `record` is nil for a combined report and the one row for
       # a per-record one — an Issue or a TimeEntry, which is why T-31 renamed it from
       # `issue`: a field whose name says issue while holding a time entry is how the next
@@ -478,6 +497,8 @@ module RedmineReporterDashboards
         requests = []
         degradations = []
 
+        spent = 0
+
         sections.each do |section|
           resolution = resolver.call(section.body)
           bound = ::RedmineReporterDashboards::Render::AssetBinding.apply(
@@ -491,6 +512,14 @@ module RedmineReporterDashboards
                                      failure: bound)
           end
 
+          spent += bound.body.bytesize
+          if spent > MAX_RUN_ASSET_BYTES
+            return BoundRequests.new(
+              requests: requests, degradations: degradations,
+              failure: run_budget_refusal(section, spent)
+            )
+          end
+
           requests << bound
           degradations.concat(
             ::RedmineReporterDashboards::Render::AssetBinding.degradations(resolution)
@@ -498,6 +527,21 @@ module RedmineReporterDashboards
         end
 
         BoundRequests.new(requests: requests, degradations: degradations, failure: nil)
+      end
+
+      # NAMES BOTH NUMBERS, which is the same rule `BatchGuard`'s cap refusal follows: a
+      # limit message that does not say what the limit is leaves the reader unable to tell
+      # a report that is slightly too big from one that is absurd. It does NOT name the
+      # section or the record — an asset budget is a property of the run, and naming one
+      # document would read as an accusation against that document.
+      def run_budget_refusal(section, spent)
+        ::RedmineReporterDashboards::Render::Failure.new(
+          code: :resource_limit,
+          message: "This report's embedded files come to #{spent / (1024 * 1024)} MB, " \
+                   "above the #{MAX_RUN_ASSET_BYTES / (1024 * 1024)} MB a single report " \
+                   'may hold. Select fewer records, or reference smaller files.',
+          correlation_id: section.job.correlation_id
+        )
       end
 
       # A PORT, for the same reason `template_renderer` is one (mechanism E5). The
@@ -687,6 +731,7 @@ module RedmineReporterDashboards
         resolver = asset_resolver_for(HTML_CAPABILITIES)
         resolved = []
         degradations = []
+        spent = 0
 
         sections.each do |section|
           resolution = resolver.call(section.body)
@@ -696,6 +741,12 @@ module RedmineReporterDashboards
             )
             return BoundRequests.new(requests: resolved, degradations: degradations,
                                      failure: failure)
+          end
+
+          spent += resolution.body.bytesize
+          if spent > MAX_RUN_ASSET_BYTES
+            return BoundRequests.new(requests: resolved, degradations: degradations,
+                                     failure: run_budget_refusal(section, spent))
           end
 
           resolved << Section.new(job: section.job, body: resolution.body,
