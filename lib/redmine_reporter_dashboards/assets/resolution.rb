@@ -32,8 +32,16 @@ module RedmineReporterDashboards
       # So the classification is made where the decision is made — in `Resolver`, which
       # knows whether it consulted the policy or the disk — and travels as data. Prose is
       # for the reader; this is for the caller.
+      # `cap_exceeded` IS THE SECOND CLASSIFICATION, and it exists for the same reason as
+      # the first: the CAUSE decides what a reader is told, and the cause cannot be
+      # recovered from the prose. A document past `MAX_REFERENCES` produced
+      # `Failure(:asset_unresolved)` listing URLs that "could not be resolved" — true of
+      # the mechanism and false as an explanation, because nothing is wrong with those URLs
+      # and resolving them individually would work. The reader needs "this report is too
+      # big", which is a different sentence, a different code, and a different remedy.
+      # Curator decision, 2026-08-10 (§Findings E-26 #4).
       Refusal = Struct.new(:url, :usage, :classification, :reason, :policy_caused,
-                           keyword_init: true) do
+                           :cap_exceeded, keyword_init: true) do
         # DEFAULTS TO FALSE, and that direction matters: a refusal nobody classified must
         # not claim the policy is at fault, because that is the answer that sends somebody
         # to open the network.
@@ -41,9 +49,14 @@ module RedmineReporterDashboards
           policy_caused ? true : false
         end
 
+        def cap_exceeded?
+          cap_exceeded ? true : false
+        end
+
         def to_h
           { 'url' => url, 'usage' => usage.to_s, 'classification' => classification.to_s,
-            'reason' => reason, 'policy_caused' => policy_caused? }.freeze
+            'reason' => reason, 'policy_caused' => policy_caused?,
+            'cap_exceeded' => cap_exceeded? }.freeze
         end
       end
 

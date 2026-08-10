@@ -37,6 +37,13 @@
 # that is exactly why: the recipient is NOT the person whose visibility produced the
 # numbers, so the mail says whose it is.
 class ReporterDashboardsMailer < Mailer
+  # HANDOVER §1: Redmine sets `include_all_helpers = false` (`config/application.rb:73`), so
+  # a mailer sees its OWN helper and nothing else. `scheduled_report_failure` calls
+  # `reporter_diagnostic_headline` — the one translated sentence on that mail (E-26 #6) —
+  # and without this line it would raise at delivery time, in a rescue path, for the owner
+  # of a schedule that had already failed once. That is exactly the shape T-23's views hit:
+  # every controller test passed because a controller test renders with the same helper set.
+  helper ReporterDashboards::TemplatesHelper
   # A DELIVERED REPORT.
   #
   # `attachments` is `[[filename, bytes], …]` and not a Hash — a per-record run can produce

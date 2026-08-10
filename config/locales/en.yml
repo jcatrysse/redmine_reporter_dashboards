@@ -55,7 +55,7 @@ en:
   label_reporter_asset_policy_bundled: "Bundled \u2014 nothing is fetched over the network (default)"
   label_reporter_asset_policy_redmine: "Redmine \u2014 fetch from this install only"
   label_reporter_asset_policy_external: "External \u2014 fetch from allowlisted hosts only"
-  text_reporter_asset_policy_info: "How the images, stylesheets, fonts and scripts a report references are obtained. Bundled reads them from disk and embeds them, so the render engine never touches the network. The other two are settings for this install and never for a template: a report author cannot widen them by editing a document."
+  text_reporter_asset_policy_info: "How the images, stylesheets, fonts and scripts a report references are obtained. Bundled reads them from disk and embeds them, so the render engine never touches the network. The other two are settings for this install and never for a template: a report author cannot widen them by editing a document. A reference this policy cannot obtain fails the whole report and names the URL; a report is never produced with an image missing from it."
   label_reporter_asset_allowlist: "Asset host allowlist"
   text_reporter_asset_allowlist_info: "One host name per line. Host names only \u2014 no scheme, no port, no path and no wildcards. Leaving this empty makes every policy behave exactly as Bundled, so a half-finished configuration cannot open network access by accident."
   label_reporter_asset_inline_max_bytes: "Embed assets up to (bytes)"

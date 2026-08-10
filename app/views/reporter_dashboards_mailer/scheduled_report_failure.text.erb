@@ -8,6 +8,12 @@
 %>
 <%= l(:text_reporter_schedule_mail_failed_recipients) %>
 
+<%# E-26 #6: the HEADLINE is the one sentence here that is translated. `message` is
+    built in `lib/` and is English in every locale, so without this a non-English owner
+    read a code and a paragraph of English. Naming the origin at least tells them WHICH
+    thing failed in their own language. %>
+<%= reporter_diagnostic_headline(@diagnostic) %>
+
 <%= l(:label_reporter_report_diagnostic_code) %>: <%= @diagnostic.code %>
 <%= @diagnostic.message %>
 

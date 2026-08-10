@@ -447,7 +447,8 @@ module RedmineReporterDashboards
           # exactly that reason — see `Diagnostic::ORIGINS`.
           return failed(Diagnostic.from_asset_refusal(bound.failure,
                                                       template_name: template.name),
-                        total, started, sections: sections, pdf_attempted: true)
+                        total, started, sections: sections, pdf_attempted: true,
+                        degradations: bound.degradations)
         end
 
         renderer = ::RedmineReporterDashboards::Render::Renderer.new(engine: engine,
@@ -682,11 +683,19 @@ module RedmineReporterDashboards
                     pdf_attempted: false)
       end
 
-      def failed(diagnostic, total, started, sections: [], pdf_attempted: false)
+      # `degradations:` IS A KEYWORD BECAUSE A FAILURE STILL HAS THINGS TO SAY. It used to
+      # pass `diagnostics.degradations` alone, so a run where section 1 collapsed an
+      # `srcset` and section 2 hit a CDN lost the first fact entirely — and
+      # `_degradations.html.erb` renders on the failure page too, deliberately and
+      # unconditionally, so there was a panel with nothing in it. Everything already
+      # collected is carried.
+      def failed(diagnostic, total, started, sections: [], pdf_attempted: false,
+                 degradations: [])
         Outcome.new(sections: sections, documents: [], diagnostic: diagnostic,
                     total_count: total, shown_count: shown_issue_count(total),
                     truncated: truncated?(total), duration_ms: elapsed(started),
-                    degradations: diagnostics.degradations, pdf_attempted: pdf_attempted)
+                    degradations: diagnostics.degradations + degradations,
+                    pdf_attempted: pdf_attempted)
       end
 
       # THE HTML PATH RESOLVES ASSETS TOO, and leaving it out was half a fix.
@@ -712,7 +721,8 @@ module RedmineReporterDashboards
         if bound.failure
           return failed(Diagnostic.from_asset_refusal(bound.failure,
                                                       template_name: template.name),
-                        total, started, sections: sections)
+                        total, started, sections: sections,
+                        degradations: bound.degradations)
         end
 
         Outcome.new(sections: bound.requests, documents: [], diagnostic: nil,

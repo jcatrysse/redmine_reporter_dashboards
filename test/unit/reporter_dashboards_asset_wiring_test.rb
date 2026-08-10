@@ -137,6 +137,16 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
                                  output: 'combined')
   end
 
+  # CREATES AN ATTACHMENT, SO IT OWNS THE STORE. `set_fixtures_attachments_directory` is
+  # right for READING attachment 16 — a committed fixture — and wrong for writing, because
+  # transactional fixtures roll back the ROW and leave the BYTES in the Redmine checkout for
+  # ever. An independent QA pass counted 227 orphans there before this was fixed.
+  def created_attachment(container:, author:, file: "testfile.txt", type: "text/plain")
+    set_tmp_attachments_directory
+    Attachment.create!(container: container, author: author,
+                       file: uploaded_test_file(file, type))
+  end
+
   # --- the factory ---------------------------------------------------------------------
 
   def test_the_factory_builds_a_resolver_carrying_the_engine_capabilities_it_was_given
@@ -296,8 +306,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
                            author: User.find_by!(login: 'dlopper'), subject: 'private',
                            is_private: true, status: IssueStatus.first,
                            priority: IssuePriority.first)
-    attachment = Attachment.create!(container: hidden, author: User.find_by!(login: 'dlopper'),
-                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    attachment = created_attachment(container: hidden, author: User.find_by!(login: 'dlopper'))
     assert_not attachment.visible?(@actor),
                'precondition: this attachment must really be invisible to the actor'
 
@@ -312,8 +321,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
                            author: User.find_by!(login: 'dlopper'), subject: 'private',
                            is_private: true, status: IssueStatus.first,
                            priority: IssuePriority.first)
-    attachment = Attachment.create!(container: hidden, author: User.find_by!(login: 'dlopper'),
-                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    attachment = created_attachment(container: hidden, author: User.find_by!(login: 'dlopper'))
 
     assert_nil AttachmentMapper.new(actor: @actor).call("/attachments/download/#{attachment.id}")
     assert_equal attachment.diskfile,
@@ -355,8 +363,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     hidden = Issue.create!(project: Project.find(1), tracker: Tracker.find(1),
                            author: locked, subject: 'own', is_private: true,
                            status: IssueStatus.first, priority: IssuePriority.first)
-    attachment = Attachment.create!(container: hidden, author: locked,
-                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    attachment = created_attachment(container: hidden, author: locked)
     # The precondition IS the discriminator: while active, this actor resolves it. Without
     # this half the example passes against a mapper that refuses dlopper for any reason.
     assert_equal attachment.diskfile,
@@ -390,8 +397,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
                           subject: 'public', status: IssueStatus.first,
                           priority: IssuePriority.first)
     set_tmp_attachments_directory
-    attachment = Attachment.create!(container: issue, author: @actor,
-                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    attachment = created_attachment(container: issue, author: @actor)
     assert attachment.visible?(User.anonymous),
            'precondition: Anonymous must genuinely be allowed to see this attachment'
 
@@ -416,8 +422,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
       target = File.join(outside, 'secret.png')
       File.binwrite(target, ReportRunFixtures::PNG)
 
-      attachment = Attachment.create!(container: Issue.find(1), author: @actor,
-                                      file: uploaded_test_file('testfile.txt', 'text/plain'))
+      attachment = created_attachment(container: Issue.find(1), author: @actor)
       FileUtils.rm_f(attachment.diskfile)
       FileUtils.ln_s(target, attachment.diskfile)
       assert File.exist?(attachment.diskfile), 'precondition: the symlink must resolve'
@@ -495,8 +500,7 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
                            author: User.find_by!(login: 'dlopper'), subject: 'private',
                            is_private: true, status: IssueStatus.first,
                            priority: IssuePriority.first)
-    attachment = Attachment.create!(container: hidden, author: User.find_by!(login: 'dlopper'),
-                                    file: uploaded_test_file('testfile.txt', 'text/plain'))
+    attachment = created_attachment(container: hidden, author: User.find_by!(login: 'dlopper'))
     assert_not attachment.visible?(@actor), 'precondition: really invisible'
 
     outcome = render(%(<p><img src="/attachments/download/#{attachment.id}"></p>))
@@ -584,6 +588,51 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
       assert_not outcome.ok?
       assert_equal :resource_limit, outcome.diagnostic.code
     end
+  end
+
+  # E-26 #4, curator decision 2026-08-10: A DOCUMENT PAST THE REFERENCE CAP IS TOLD IT IS
+  # TOO BIG, not that its URLs could not be resolved. The old message was true of the
+  # mechanism and false as an explanation — nothing is wrong with those URLs, each would
+  # resolve alone, and the remedy is to reference fewer rather than to fix any of them.
+  def test_a_document_past_the_reference_cap_is_told_it_is_too_big
+    over = RedmineReporterDashboards::Assets::Resolver::MAX_REFERENCES + 5
+    body = "<p>#{'<img src="/plugin_assets/redmine_reporter_dashboards/x.png">' * over}</p>"
+
+    outcome = render(body)
+
+    assert_not outcome.ok?
+    assert_equal :resource_limit, outcome.diagnostic.code
+    assert_includes outcome.diagnostic.message, 'too big'
+    # NOT the old sentence, and NOT a list of URLs: past the cap there are hundreds, and
+    # naming five with "and 900 more" tells a reader nothing they can act on.
+    assert_not_includes outcome.diagnostic.message, 'could not be resolved'
+    assert_not_includes outcome.diagnostic.message, 'asset policy'
+  end
+
+  # AND A DOCUMENT UNDER THE CAP WITH ONE BAD URL STILL GETS THE RESOLUTION MESSAGE. Without
+  # this the example above passes against an implementation that says "too big" always.
+  def test_a_document_under_the_cap_still_names_the_url_it_could_not_resolve
+    outcome = render('<p><img src="https://cdn.example.net/tracker.png"></p>')
+
+    assert_equal :asset_unresolved, outcome.diagnostic.code
+    assert_includes outcome.diagnostic.message, 'https://cdn.example.net/tracker.png'
+    assert_not_includes outcome.diagnostic.message, 'too big'
+  end
+
+  # E-26 #9: A FAILURE STILL HAS DEGRADATIONS TO REPORT, and they used to be dropped.
+  # `_degradations.html.erb` renders on the failure page too, deliberately, so this was a
+  # panel with nothing in it — a run that collapsed an `srcset` before hitting a CDN lost
+  # the first fact entirely.
+  def test_a_failed_run_still_carries_the_degradations_it_collected
+    @template.update!(output: 'per_record')
+    bodies = ['<p><img srcset="/attachments/download/16/testfile.png 1x, ' \
+              '/attachments/download/16/testfile.png 2x"></p>',
+              '<p><img src="https://cdn.example.net/tracker.png"></p>']
+
+    outcome = render_per_record(bodies)
+
+    assert_not outcome.ok?
+    assert_includes outcome.degradations.map(&:capability), :asset_srcset_collapsed
   end
 
   # A REPORT WITH NO ASSETS IS UNCHANGED, which is what stops this being a change to every

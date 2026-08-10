@@ -366,6 +366,44 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_not_include '<script>alert(1)</script>', response.body
   end
 
+  # §Findings E-25, AT THE LEVEL WHERE IT ACTUALLY BROKE. The defect was that
+  # `_degradations.html.erb` — rendered unconditionally by both `#show` and `#preview` —
+  # called a helper that read `#code` off every degradation, while `Render::Degradation`
+  # answers only `capability`/`detail`. wkhtmltopdf stamps one into EVERY `Success`, so
+  # every report drawn by the compatibility engine 500'd the page while its PDF was fine.
+  #
+  # The regression test written with the fix drives the HELPER directly, which is
+  # HANDOVER §1's own `include_all_helpers` lesson unlearned: a view-level defect needs a
+  # view-level test. This one goes through the controller and renders the real partial.
+  class DegradingEngine < FakeEngine
+    def render(request)
+      RedmineReporterDashboards::Render::Success.new(
+        bytes: "%PDF-1.4\n#{'0' * 2_000}\n%%EOF", engine: 'fake', engine_version: '1.0',
+        degradations: [
+          RedmineReporterDashboards::Render::Degradation.new(
+            capability: :legacy_engine, detail: 'drawn by a legacy engine'
+          )
+        ]
+      )
+    end
+  end
+
+  def test_a_render_degradation_does_not_break_the_preview_page
+    grant(:view_reporter_dashboards_reports, :add_reporter_dashboards_templates)
+
+    RedmineReporterDashboards::Render::Registry.isolated do
+      RedmineReporterDashboards::Render::Registry.register(:fake, DegradingEngine)
+      post :preview, params: { project_id: @project.identifier,
+                               template: template_params(content: '<p>hello</p>') }
+    end
+
+    # A 500 is what this used to be, and the assertion is the response rather than the
+    # markup: the exception escaped the helper, so the page never rendered at all.
+    assert_response :success
+    assert_select 'div.reporter-degradations'
+    assert_include l(:text_reporter_degradation_legacy_engine), response.body
+  end
+
   def test_view_permission_reaches_no_authoring_action
     template = create_template
     grant(:view_reporter_dashboards_reports)

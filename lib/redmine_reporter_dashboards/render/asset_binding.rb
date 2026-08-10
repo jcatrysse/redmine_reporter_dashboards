@@ -82,7 +82,34 @@ module RedmineReporterDashboards
           request_args.merge(required_capabilities: required, essential_capabilities: essential)
         end
 
+        # THE CAP IS A SIZE PROBLEM, NOT A RESOLUTION PROBLEM, and saying otherwise sent the
+        # reader after the wrong thing. A document past `MAX_REFERENCES` used to produce
+        # `Failure(:asset_unresolved)` listing URLs that "could not be resolved" — true of
+        # the mechanism and false as an explanation: nothing is wrong with those URLs, each
+        # would resolve on its own, and the remedy is not to fix them but to reference
+        # fewer. Curator decision, 2026-08-10 (§Findings E-26 #4): the reader is told the
+        # report is too big.
+        #
+        # `:resource_limit` is the same code the run-level byte budget answers with, which
+        # is the point — a report refused for being too large says so with one vocabulary,
+        # whether the limit it hit counts references or bytes.
+        #
+        # ANY cap refusal decides this, not "every refusal is one": past the cap, EVERY
+        # remaining reference is refused for that reason, so a document that also has a
+        # genuine third-party URL would otherwise report whichever cause happened to sort
+        # first. The size problem is the one that has to be fixed before the other is even
+        # visible.
         def failure_for(resolution, correlation_id, engine)
+          if resolution.refusals.any?(&:cap_exceeded?)
+            return Failure.new(
+              code: :resource_limit,
+              message: cap_message(resolution),
+              correlation_id: correlation_id,
+              engine: engine,
+              detail: resolution.refusals.map(&:to_h)
+            )
+          end
+
           Failure.new(
             code: :asset_unresolved,
             message: message_for(resolution),
@@ -90,6 +117,18 @@ module RedmineReporterDashboards
             engine: engine,
             detail: resolution.refusals.map(&:to_h)
           )
+        end
+
+        # NAMES BOTH NUMBERS, like every other limit message in this plugin — how many the
+        # report asked for, and how many one document may hold. It does NOT list the URLs:
+        # there are at least five hundred of them, and a message that names five and says
+        # "and 900 more" tells the reader nothing they can act on.
+        def cap_message(resolution)
+          refused = resolution.refusals.count(&:cap_exceeded?)
+          "This report is too big: it refers to more files than one document can embed. " \
+            "#{refused} reference#{'s' if refused != 1} past the limit " \
+            "#{refused == 1 ? 'was' : 'were'} not resolved. Reference fewer files, or " \
+            'split the report.'
         end
 
         # THE CAUSE IS NOT ALWAYS THE POLICY, and the first version said it was.
@@ -126,8 +165,20 @@ module RedmineReporterDashboards
                    "them over the network, which the current asset policy does not permit: #{list}."
           end
 
-          "This report references #{subject} that could not be resolved: #{list}. The reason for " \
-            'each is in the render diagnostics for this correlation id.'
+          # IT USED TO SAY "the reason for each is in the render diagnostics for this
+          # correlation id", and that is a pointer to a page which deliberately does not
+          # show it: `_diagnostics.html.erb`'s own comment says `Diagnostic#detail` is NOT
+          # printed, and the per-refusal reasons live in exactly that field. So the reader
+          # followed the sentence to the panel they were already looking at and found a
+          # code and an id. A remedy that provably does nothing is worse than none (INV-4)
+          # — the same rule that had already been broken one method down.
+          #
+          # It now says where the reasons actually are, and names the one person who can
+          # read them. Rendering `Resolution::Refusal#to_h` in the panel is the better fix
+          # and is §Findings E-26 #7; this is the honest sentence until somebody builds it.
+          "This report references #{subject} that could not be resolved: #{list}. An " \
+            'administrator can find the reason for each in the application log, under this ' \
+            'correlation id.'
         end
 
         # A refusal the asset policy is genuinely responsible for — ASKED AS DATA, and the

@@ -128,7 +128,7 @@ module RedmineReporterDashboards
           if state.references_exhausted?
             state.refuse(reference,
                          "is past the #{MAX_REFERENCES}-reference cap for one document and was " \
-                         'not resolved')
+                         'not resolved', cap_exceeded: true)
             next
           end
 
@@ -265,11 +265,11 @@ module RedmineReporterDashboards
         # `policy_caused` DEFAULTS TO FALSE so that adding a refusal site cannot silently
         # start blaming the asset policy — the direction that matters, because that is the
         # answer which sends an administrator to enable egress.
-        def refuse(reference, reason, policy_caused: false)
+        def refuse(reference, reason, policy_caused: false, cap_exceeded: false)
           @refusals << Resolution::Refusal.new(
             url: reference.display, usage: reference.usage,
             classification: reference.classification, reason: reason,
-            policy_caused: policy_caused
+            policy_caused: policy_caused, cap_exceeded: cap_exceeded
           )
           @counts[:refused] += 1
         end
@@ -347,7 +347,7 @@ module RedmineReporterDashboards
           if state.references_exhausted?
             state.refuse(nested,
                          "is past the #{MAX_REFERENCES}-reference cap for one document and was " \
-                         'not resolved')
+                         'not resolved', cap_exceeded: true)
             return nil
           end
 
