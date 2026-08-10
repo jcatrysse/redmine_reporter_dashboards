@@ -38,7 +38,7 @@ usage() { echo "usage: $(basename "$0") <trivy-report.json>" >&2; exit 2; }
 REPORT="$1"
 
 [ -f "$REPORT" ] || {
-  echo "cve_findings_from_trivy: FAIL — no such file: $REPORT" >&2
+  echo "cve_findings_from_trivy: FAIL — cannot read: $REPORT" >&2
   exit 2
 }
 

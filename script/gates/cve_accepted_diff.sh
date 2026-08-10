@@ -343,10 +343,15 @@ fi
 # --- 3. acceptances that no longer match anything -----------------------------------
 comm -23 "$WORK/accepted-ids" "$WORK/found-ids" > "$WORK/stale-ids"
 if [ -s "$WORK/stale-ids" ]; then
-  echo "cve_accepted_diff: FAIL — STALE entries; the scan no longer reports them:"
+  # NAMING BOTH CAUSES, because the message used to name only the happy one and the
+  # unhappy one is far more common on the day somebody first sees this: a mistyped id
+  # matches nothing and lands here, not in a grammar complaint.
+  echo "cve_accepted_diff: FAIL — STALE entries; this scan does not report them:"
 
   print_capped "$WORK/stale-ids"
-  echo "  Delete them. An exemption that exempts nothing still reads as though it means something."
+  echo "  Either upstream fixed them — in which case delete the entries — or an id is"
+  echo "  mistyped and covers nothing. An exemption that exempts nothing still reads as"
+  echo "  though it means something."
   bad=1
 fi
 

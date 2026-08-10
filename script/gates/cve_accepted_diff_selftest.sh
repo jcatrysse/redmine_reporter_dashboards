@@ -91,7 +91,7 @@ check "an acceptance valid through today" 0 "OK — 1 accepted"
 # --- 3. an acceptance nothing reports any more ---------------------------------------
 printf 'CVE-2026-19155 | 2026-09-09 | accepted\n' > "$ACC"
 printf '#scan targets=4 report=synthetic\n' > "$FOUND"
-check "a stale acceptance" 1 "STALE entries"
+check "a stale acceptance" 1 "STALE entries; this scan does not report them"
 
 # --- 4. malformed records ------------------------------------------------------------
 printf 'CVE-2026-19155 | soon | accepted\n' > "$ACC"
@@ -126,7 +126,7 @@ done
 # complaint because it names the real problem: this entry covers nothing.
 printf 'CVE-2026-19156 | 2026-09-09 | one digit wrong\n' > "$ACC"
 printf '#scan targets=4 report=synthetic\nCVE-2026-19155\n' > "$FOUND"
-check "a mistyped id surfaces as stale, not as bad grammar" 1 "STALE entries"
+check "a mistyped id surfaces as stale, not as bad grammar" 1 "mistyped and covers nothing"
 
 # A DATE-SHAPED STRING THAT IS NOT A DAY. Both of these satisfy `[0-9]{4}-[0-9]{2}-[0-9]{2}`
 # and NEITHER CAN EVER ARRIVE, so either is an acceptance that never expires — the exact
@@ -366,7 +366,7 @@ extract_rejects "a report with no scan targets" "$WORK/notargets.json" 1 "NOTHIN
 printf '{"SchemaVersion":2}' > "$WORK/noresults.json"
 extract_rejects "a report with no Results key at all" "$WORK/noresults.json" 1 "NOTHING WAS SCANNED"
 
-extract_rejects "a report file that is not there" "$WORK/absent.json" 2 "no such file"
+extract_rejects "a report file that is not there" "$WORK/absent.json" 2 "cannot read"
 
 # AND THE CASE THAT MUST *NOT* BE REJECTED: a real scan of a clean image. Targets present,
 # no vulnerabilities. This is the one green the gate has to keep believing, and conflating
