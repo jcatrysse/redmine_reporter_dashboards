@@ -1026,9 +1026,13 @@ jobs:
       - name: What Gotenberg itself says
         if: always()
         run: |
+          # `docker logs <name>`, NOT `docker compose logs`. Compose re-parses the file and
+          # therefore needs GOTENBERG_USERNAME — which was exported in a DIFFERENT STEP,
+          # and each `run:` block is its own shell. So the first version of this
+          # diagnostic failed with the very interpolation error it was added to look past,
+          # and printed nothing about the container. The plain client needs no variables.
           echo "::group::gotenberg container log"
-          docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml \
-            logs --no-color --tail 200 gotenberg || true
+          docker logs --tail 200 redmine_reporter_dashboards-gotenberg-1 2>&1 || true
           echo "::endgroup::"
           echo "::group::the unauthenticated instance"
           docker logs --tail 100 gotenberg-open 2>&1 || true
