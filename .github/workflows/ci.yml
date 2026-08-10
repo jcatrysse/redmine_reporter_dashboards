@@ -1043,14 +1043,43 @@ jobs:
           echo "unprivileged_userns_clone=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo unset)"
           echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo unset)"
           echo "::endgroup::"
-          echo "::group::one conversion, verbatim"
+          # TRIANGULATION, because the previous run left one fact unexplained: the
+          # verbatim conversion answered 500 and GOTENBERG'S OWN LOG HAS NO RECORD OF IT —
+          # only the 401 control probe. A request that does not appear in the access log
+          # of the server that supposedly answered it was answered by something else, or
+          # never arrived. These four vary one dimension at a time.
+          echo "::group::who is actually listening"
+          docker ps --format '{{.Names}}  {{.Image}}  {{.Ports}}' || true
+          ss -ltnp 2>/dev/null | grep -E ':300[01]' || true
+          echo "::endgroup::"
+          echo "::group::four requests, one dimension at a time"
           printf '%s' '<!DOCTYPE html><html><body><p>CI-DIAGNOSTIC</p></body></html>' > /tmp/diag.html
-          curl -sS -u "ci-user:${{ steps.gotenberg.outputs.password }}" \
-            -F "files=@/tmp/diag.html;filename=index.html" \
-            -o /tmp/diag.pdf -w 'status=%{http_code}\n' \
-            http://127.0.0.1:3000/forms/chromium/convert/html || true
-          head -c 400 /tmp/diag.pdf | tr -d '\0' || true
+          pw='${{ steps.gotenberg.outputs.password }}'
+          echo "password length: ${#pw}"
+          for label in "no-auth-no-body" "auth-no-body" "auth-body" "auth-body-verbose"; do
+            case "$label" in
+              no-auth-no-body) out=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html) ;;
+              auth-no-body)    out=$(curl -sS -o /dev/null -w '%{http_code}' -u "ci-user:$pw" -X POST \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html) ;;
+              auth-body)       out=$(curl -sS -o /tmp/diag.pdf -w '%{http_code}' -u "ci-user:$pw" \
+                                     -F "files=@/tmp/diag.html;filename=index.html" \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html) ;;
+              *)               curl -sS -v -u "ci-user:$pw" \
+                                     -F "files=@/tmp/diag.html;filename=index.html" \
+                                     -o /tmp/diag2.pdf \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html 2>&1 \
+                                     | grep -vE '^\{|Authorization' | tail -25
+                               out=see-above ;;
+            esac
+            echo "  $label -> $out"
+          done
+          echo "first bytes of the auth-body response:"
+          head -c 300 /tmp/diag.pdf | tr -d '\0' || true
           echo
+          echo "::endgroup::"
+          echo "::group::and what the container logged for all of that"
+          docker logs --tail 30 redmine_reporter_dashboards-gotenberg-1 2>&1 | tail -12 || true
           echo "::endgroup::"
 
       # The harness's own tests: the three-state rule, the matrix generator, and the
