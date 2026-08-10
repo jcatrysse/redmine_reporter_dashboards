@@ -147,7 +147,45 @@ accepting the very id they were told to accept. Final: **16 of 16 mutants killed
 runs the self-test and `--validate-only`. An exemption quietly outliving its date while every
 PR stays green is INV-4 again, one level up.
 
-**FOR THE CURATOR — three decisions, none taken here.**
+**THEN AN INDEPENDENT REVIEW AND AN ADVERSARIAL QA PASS REJECTED IT, and between them
+found six more defects in the gate written to prevent exactly this class.** Recorded
+because the pattern is the finding: every one is "the check cannot fail", and four of the
+six are the SAME defect displaced by one step.
+
+| # | what shipped | how it was found | what it would have done |
+|---|---|---|---|
+| 1 | the valid-through date was checked for SHAPE, never for being a real day | review, by running `9999-99-99 \| reason` | a security exemption that never expires — the `Digest::MD5` row of CLAUDE.md §5, in the gate written to forbid it. `2026-13-45` too |
+| 2 | no ceiling on the acceptance window | review | `2099-12-31` is well-formed, live, and permanent. Requiring an expiry to be PRESENT does not bound it. Now 90 days, enforced |
+| 3 | **an EMPTY found list was green** | QA, walking the whole chain | a broken scan makes every acceptance look stale → the gate prints "Delete them" → a human does → the job is green FOR EVER over an image nobody scans. And the allowlist is *designed* to shrink to zero, so that state is the design's destination, not an edge case. Fixed by stated provenance: `cve_findings_from_trivy.sh` says a scan happened; silence is no longer a clean bill |
+| 4 | an unreadable found file was laundered into "the scan no longer reports them" | QA, with `setpriv` | an I/O fault reported as a security verdict, with the remediation that produces #3 |
+| 5 | the `jq` extraction lived untested in the workflow | review, in ONE command | the `^CVE-` narrowing that mutation testing had just killed INSIDE the gate, reintroduced one step upstream: green job, unaccepted advisory in the image, self-test still 18/18. Now `cve_findings_from_trivy.sh` + a committed sample report |
+| 6 | the accepted-id grammar was stricter than the found side | QA | `pyup.io-38834`, `RHSA-2021:1234`, `openSUSE-SU-2021:0001` are all findable and were UNACCEPTABLE — the gate demands a remedy and then refuses it. INV-4 again. The grammar is now "a token that could have come off the found list"; a typo is caught by the STALE arm, which was always the real safety net |
+
+**AND THE MUTATION CLAIM ITSELF WAS A FINDING.** The first pass reported 16 of 16 killed
+from a harness in a scratch directory, and three different figures (14, 16, "six synthetic
+inputs") shipped across four files in one commit. A reviewer's point stands: a mutation
+score is a function of the mutant set, and the author picks the set — five mutants written
+by a reviewer *after* that clean sweep all survived. The harness is now committed as
+`script/gates/cve_accepted_diff_mutation.py` with those five in it, and no score is written
+into a comment. Today it prints **22 killed, 2 survived, 1 not-applied, 0 unmeasured** over
+**53 self-test cases**, control green before and after. Both survivors are EQUIVALENT
+MUTANTS on the date-shape pre-filter, established by construction rather than by reading:
+`date -u -d X +%F` always emits `YYYY-MM-DD`, so the round-trip equality already forces the
+shape, and 36 hand-built candidates run through all three variants gave zero differing
+verdicts.
+
+**A DECISION TAKEN, NOT DEFERRED — where the expiry blocks.** Both reviewers independently
+argued that a hard expiry in `ci.yml`'s `gates` job (which runs on `push: branches: ['**']`)
+means every branch in the repository goes red the morning after a date passes, over a third
+party's CVE, and that the cheapest unblock is a date bump nobody thinks about — the
+"furniture" outcome the expiry exists to prevent, through the door the expiry opened. The
+expiry is therefore HARD in the nightly scan and in any change touching the allowlist, the
+compose pin or the gate, and ADVISORY in the every-branch job. Record well-formedness stays
+hard everywhere. This is not §7's forbidden reclassification: the arm is still hard wherever
+it is the detector and wherever the person seeing it can act. **Curator may reverse it** —
+`--expiry-advisory` is one flag in one `ci.yml` step.
+
+**FOR THE CURATOR — four decisions, none taken here.**
 
 1. **Are these four acceptable for 30 days?** The three pdfcpu ones are unreachable as
    documented (`--pdfengines-disable-routes`), which is a mitigation and not a refutation.
@@ -166,6 +204,20 @@ PR stays green is INV-4 again, one level up.
 3. **Promotion of `:gotenberg` to `verification: corpus`** is still open from E-27 and is
    unaffected by this: the corpus evidence (19/0/1, run 31408759956) stands regardless of the
    image's CVE status.
+4. **An acceptance is keyed on the advisory id ALONE** — no package, no version, no
+   severity. Once `CVE-2026-19155` is listed it is accepted for any package at any severity,
+   including a future CRITICAL occurrence in a different component. `zero_reporter.allowlist`
+   and `layer_purity`'s exemption are both path-scoped; this one is not, and it is the looser
+   shape. Not fixed here because binding to package+version makes the list churn on every
+   image rebuild, which is its own way of training people to stop reading it.
+   Recommendation: leave as is while the list is four entries long, and revisit if it ever
+   exceeds ten.
+
+**STILL UNCLOSED, stated rather than implied.** GitHub disables `schedule:` workflows after
+60 days of repository inactivity, and the nightly scan is the ONLY detector of a newly
+published vulnerability — a quiet repository therefore stops scanning with nothing saying
+so. `push:`/`pull_request:` triggers on the pin, the allowlist and the gate now cover the
+cases where somebody is editing, but not the case where nobody is. No fix here.
 
 **E-27 · T-34: THREE OF THE FOUR SECURITY CHECKS COULD NOT FAIL WHEN FIRST WRITTEN, AND
 THE CORPUS FOUND THE ONE DEFECT NO UNIT ASSERTION COULD SEE.** 2026-08-10. Everything below

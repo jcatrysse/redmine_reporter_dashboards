@@ -28,6 +28,17 @@
 #   1. a fixable HIGH/CRITICAL this file does not name  — a new vulnerability
 #   2. an entry whose valid-through date has passed     — an acceptance nobody re-examined
 #   3. an entry the scan no longer reports              — a stale exemption; delete it
+#   4. a malformed record — an id that could not have come off a scan, a date that is not
+#      a real day, no reason, or an expiry more than 90 days out
+#
+# (2) is HARD in the nightly scan and in any change touching this file, the compose pin or
+# the gate. It is a WARNING in `ci.yml`'s `gates` job, which runs on every branch: a hard
+# expiry there turns the morning after a date passes into a red build on work that cannot
+# fix it, and the cheapest unblock would be a date bump nobody thought about. (4) is hard
+# everywhere.
+#
+# THE 90-DAY CEILING IS THE GATE'S, not a convention. `2099-12-31 | reason` is a permanent
+# exemption wearing a date, and requiring an expiry to be PRESENT does not bound it.
 #
 # (3) is what stops this file becoming permanent furniture, and it is the same assertion
 # zero_reporter.allowlist above it lives under: THIS LIST MAY ONLY SHRINK, except when a
@@ -37,7 +48,8 @@
 #
 # Not a prediction of when a fix lands. It is the date somebody must LOOK AGAIN: has
 # upstream rebuilt, and is the reason on the record still true? Thirty days makes that a
-# nightly build going red once a month rather than a calendar entry nobody keeps.
+# nightly build going red once a month rather than a calendar entry nobody keeps. The gate
+# will not accept more than 90.
 #
 # ======================================================================================
 # Gotenberg 8.35.0 — digest a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760

@@ -1,0 +1,107 @@
+{
+  "_comment": [
+    "A CUT-DOWN, REAL Trivy report — fixture for cve_findings_from_trivy.sh.",
+    "",
+    "Shape and field names are taken from the actual output of `aquasec/trivy:latest",
+    "image --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --format json` for",
+    "gotenberg/gotenberg:8@sha256:a16a14e1f18a… on 2026-08-10 (Trivy 0.73.0). The four",
+    "CVE ids, their packages and their fixed-in versions are the ones that run measured.",
+    "",
+    "THREE THINGS ARE HERE DELIBERATELY AND MUST NOT BE TIDIED AWAY:",
+    "",
+    "  1. GHSA-4wf9-vq2p-2xrm — an advisory with NO CVE assigned. Trivy emits these for Go",
+    "     and npm packages, and the gate filtered them out of both sides of its comparison",
+    "     until mutation testing caught it. If a future edit narrows extraction to ^CVE-,",
+    "     this id disappears and the self-test goes red. That is the whole point of it.",
+    "  2. usr/bin/gotenberg — a target with `Vulnerabilities: null`, which is what Trivy",
+    "     writes for a clean target, not an empty array.",
+    "  3. usr/bin/pdftk-all.jar — a target with NO Vulnerabilities key at all.",
+    "",
+    "Both 2 and 3 must contribute nothing rather than abort the extraction; a `jq` without",
+    "`?` on the traversal fails on one of them."
+  ],
+  "SchemaVersion": 2,
+  "ArtifactName": "gotenberg/gotenberg:8@sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760",
+  "ArtifactType": "container_image",
+  "Results": [
+    {
+      "Target": "gotenberg/gotenberg:8@sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760 (debian 13.6)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-19155",
+          "PkgName": "chromium",
+          "InstalledVersion": "151.0.7922.71-1~deb13u1",
+          "FixedVersion": "151.0.7922.108-1~deb13u1",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Title": "chromium-browser: Chromium: Sandbox escape via use-after-free in Payments"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-19155",
+          "PkgName": "chromium-common",
+          "InstalledVersion": "151.0.7922.71-1~deb13u1",
+          "FixedVersion": "151.0.7922.108-1~deb13u1",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Title": "chromium-browser: Chromium: Sandbox escape via use-after-free in Payments"
+        }
+      ]
+    },
+    {
+      "Target": "usr/bin/pdftk-all.jar",
+      "Class": "lang-pkgs",
+      "Type": "jar"
+    },
+    {
+      "Target": "usr/bin/gotenberg",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Vulnerabilities": null
+    },
+    {
+      "Target": "usr/bin/pdfcpu",
+      "Class": "lang-pkgs",
+      "Type": "gobinary",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-46602",
+          "PkgName": "golang.org/x/image",
+          "InstalledVersion": "v0.41.0",
+          "FixedVersion": "0.43.0",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Title": "The TIFF decoder does not set a limit on the size of..."
+        },
+        {
+          "VulnerabilityID": "CVE-2026-46604",
+          "PkgName": "golang.org/x/image",
+          "InstalledVersion": "v0.41.0",
+          "FixedVersion": "0.43.0",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Title": "The TIFF decoder can panic when decoding an invalid image with an..."
+        },
+        {
+          "VulnerabilityID": "CVE-2026-56852",
+          "PkgName": "golang.org/x/text",
+          "InstalledVersion": "v0.37.0",
+          "FixedVersion": "0.39.0",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Title": "golang.org/x/text: Denial of Service via invalid UTF-8 input"
+        },
+        {
+          "VulnerabilityID": "GHSA-4wf9-vq2p-2xrm",
+          "PkgName": "github.com/example/nocve",
+          "InstalledVersion": "v1.2.3",
+          "FixedVersion": "1.2.4",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Title": "An advisory with no CVE assigned — see _comment, item 1"
+        }
+      ]
+    }
+  ]
+}

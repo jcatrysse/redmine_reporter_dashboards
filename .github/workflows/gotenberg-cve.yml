@@ -57,13 +57,22 @@ on:
   # moment somebody needs to know whether the result still holds. Leaving the allowlist
   # off this filter would let an exemption be added in a pull request that never ran the
   # gate, which is how an allowlist stops meaning anything.
-  pull_request:
-    paths:
+  #
+  # AND ON PUSH, with the same paths. Without it a direct push that moves the pin or edits
+  # an acceptance never runs the comparison at all — only `ci.yml`'s record-validation
+  # half, which by construction cannot see a new vulnerability. Not every change to these
+  # files arrives as a pull request.
+  push:
+    paths: &pin_paths
       - 'docker-compose.gotenberg.yml'
       - '.github/workflows/gotenberg-cve.yml'
       - 'script/gates/gotenberg_accepted_cves.allowlist'
       - 'script/gates/cve_accepted_diff.sh'
       - 'script/gates/cve_accepted_diff_selftest.sh'
+      - 'script/gates/cve_findings_from_trivy.sh'
+      - 'script/gates/fixtures/trivy-report.sample.json'
+  pull_request:
+    paths: *pin_paths
 
 permissions:
   contents: read
@@ -83,8 +92,12 @@ jobs:
         id: pin
         run: |
           set -euo pipefail
+          # `|| true` IS LOad-BEARING. Under `set -euo pipefail` a `grep` that matches
+          # nothing exits 1 and aborts the step HERE, so the four explanatory lines below
+          # were unreachable and an operator got a bare non-zero with no message. Measured
+          # by de-pinning the compose file and running this step.
           ref="$(grep -oE 'gotenberg/gotenberg:[0-9]+@sha256:[0-9a-f]{64}' \
-                 docker-compose.gotenberg.yml | head -1)"
+                 docker-compose.gotenberg.yml | head -1 || true)"
           if [ -z "$ref" ]; then
             echo "::error file=docker-compose.gotenberg.yml::no digest-pinned gotenberg image."
             echo "::error::The example compose file must pin by digest — a tag is a moving"
@@ -231,21 +244,30 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The findings, as ids. Trivy has already filtered to fixable HIGH/CRITICAL, so
-          # everything in this list is something somebody could act on.
-          jq -r '[.Results[]?.Vulnerabilities[]?.VulnerabilityID] | unique[]' \
-            /tmp/trivy-out/report.json > /tmp/found-ids.txt
+          # THE EXTRACTION IS A TESTED SCRIPT, not a jq line in a YAML string. It was
+          # the latter, and a review broke it in one command by applying the same `^CVE-`
+          # narrowing that mutation testing had caught inside the gate — green job,
+          # unaccepted advisory in the image, self-test still reporting every case passing.
+          # It also owns "an unusable report is UNMEASURED, never clean", which is the
+          # distinction the whole DB-download split exists to preserve.
+          ./script/gates/cve_findings_from_trivy.sh /tmp/trivy-out/report.json \
+            > /tmp/found-ids.txt
 
           # THE DECISION IS THE SCRIPT'S, and the step after this one runs THAT SAME
           # SCRIPT on synthetic inputs to prove every one of its refusals is reachable.
-          bash script/gates/cve_accepted_diff.sh \
-            script/gates/gotenberg_accepted_cves.allowlist /tmp/found-ids.txt
+          ./script/gates/cve_accepted_diff.sh \
+            script/gates/gotenberg_accepted_cves.allowlist /tmp/found-ids.txt \
+            | tee /tmp/gate-out.txt
 
-          echo "accepted=$(grep -cE '^[[:space:]]*[A-Z][A-Z0-9]*-' \
-            script/gates/gotenberg_accepted_cves.allowlist)" >> "$GITHUB_OUTPUT"
+          # THE COUNT COMES FROM THE GATE, not from a second grep over the same file. The
+          # first version re-counted here with a slightly different regexp, so a duplicated
+          # or REJECTED record could inflate the notice above what the gate actually
+          # honoured — two ways of doing one thing, which is what the gate itself is about.
+          echo "accepted=$(sed -nE 's/^cve_accepted_diff: accepted=([0-9]+)$/\1/p' \
+            /tmp/gate-out.txt | tail -1)" >> "$GITHUB_OUTPUT"
 
       # THE GATE MUST BE ABLE TO FAIL, AND THIS IS WHERE THAT IS PROVED RATHER THAN
-      # ASSERTED. Fourteen synthetic runs of THE SAME SCRIPT the step above just ran, each
+      # ASSERTED. Every case runs THE SAME SCRIPT the step above just ran, each
       # constructed so that only one of its refusals can be what fires, and each matching
       # the TEXT of the refusal rather than only its exit code — every refusal exits 1, so
       # an exit code alone cannot tell the arms apart.
@@ -254,10 +276,12 @@ jobs:
       # place to build something that cannot go red: the event it guards against — a NEW
       # vulnerability in an image nobody here controls — does not exist on the day it is
       # written, so nothing disproves a gate that never fires. Mutation testing on
-      # 2026-08-10 killed 14 of 14 mutants against these cases, and two of those cases
-      # exist BECAUSE a mutant survived first: `GHSA-…` ids were being silently dropped
-      # from both sides of the comparison, which would have reported green with an
-      # unaccepted finding in the image.
+      # The score is not written here, because a number in a comment goes stale and this
+      # one already did — three different figures shipped in one commit. It is reproducible
+      # instead: `python3 script/gates/cve_accepted_diff_mutation.py`, committed beside the
+      # gate. Several of its cases exist BECAUSE a mutant survived: `GHSA-…` ids silently
+      # dropped from both sides of the comparison, a date validated by shape and never as
+      # a day, and an empty found list reading as a clean image.
       - name: Prove the gate can fail
         run: bash script/gates/cve_accepted_diff_selftest.sh
 
@@ -266,20 +290,35 @@ jobs:
       # digest was clean on which night — nor, now, what it was clean APART FROM.
       - name: Say what was clean
         if: success()
+        env:
+          PINNED: ${{ steps.pin.outputs.ref }}
+          ACCEPTED: ${{ steps.gate.outputs.accepted }}
         run: |
-          echo "::notice::${{ steps.pin.outputs.ref }}: no fixable HIGH/CRITICAL findings" \
-               "beyond the ${{ steps.gate.outputs.accepted }} accepted and dated in this workflow."
+          echo "::notice::$PINNED: no fixable HIGH/CRITICAL findings beyond the" \
+               "$ACCEPTED accepted, reasoned and dated in" \
+               "script/gates/gotenberg_accepted_cves.allowlist."
 
       # WHAT TO DO WHEN THIS GOES RED, written here because the person reading it at
       # 04:17 did not write the compose file. The recipe now names what the tag actually
       # resolves to, because the first version of this text told a human to move a pin
       # that had nowhere to move to.
+      # CONDITIONED ON THE GATE, not on `failure()`. Unqualified, this fired for every
+      # cause — including a Trivy database outage, whose own message says "NOTHING WAS
+      # SCANNED, this is not a verdict about the image" and which was then immediately
+      # contradicted by "it is a fact about the pinned image" plus a recipe for moving the
+      # pin. The commit that introduced this text exists because the previous version
+      # printed a remediation naming an action that did not exist; unconditioned, it still
+      # did, for every failure that is not the gate's.
       - name: What a red run means
-        if: failure()
+        if: failure() && steps.gate.outcome == 'failure'
+        env:
+          PINNED: ${{ steps.pin.outputs.ref }}
+          TAG: ${{ steps.pin.outputs.tag }}
+          CURRENT: ${{ steps.tag.outputs.current }}
         run: |
           echo "::error::This is not a defect in the plugin — it is a fact about the pinned image."
-          echo "::error::pinned:  ${{ steps.pin.outputs.ref }}"
-          echo "::error::${{ steps.pin.outputs.tag }} now resolves to: ${{ steps.tag.outputs.current }}"
+          echo "::error::pinned:  $PINNED"
+          echo "::error::$TAG now resolves to: $CURRENT"
           echo "::error::"
           echo "::error::If those two digests DIFFER, upstream has rebuilt and the fix is to move the pin:"
           echo "::error::  1. put the digest above in docker-compose.gotenberg.yml"

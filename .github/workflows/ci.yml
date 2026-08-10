@@ -751,7 +751,7 @@ jobs:
   # Non-test gates. A green suite says nothing about any of these.
   # ------------------------------------------------------------------
   gates:
-    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, single_parse, migration_reversibility)
+    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, single_parse, migration_reversibility, gotenberg_accepted_cves)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -823,19 +823,27 @@ jobs:
       # The nightly job compares the accepted list against a real Trivy report, which
       # needs docker, an image pull and a vulnerability database. This half needs none of
       # that, and what it catches is the failure the nightly one would notice too late:
-      # an acceptance whose valid-through date has PASSED. A security exemption expiring
-      # unnoticed while every pull request stays green is precisely the shape of "a
-      # remedy that provably does nothing" (INV-4), so the expiry blocks merges and the
-      # fix is to re-examine the entry and move its date — deliberately not a thing that
-      # can be done without looking.
+      # a malformed or unbounded acceptance — a date that is not a real day, a reason
+      # that is missing, an expiry so far out that it is permanent. Those are mistakes in
+      # the file, catchable anywhere, and they are HARD here.
       #
-      # The self-test runs first and is the more important of the two: it proves this
-      # gate can still say no. Mutation testing on 2026-08-10 killed 14 of 14 mutants
-      # against it, two of the cases having been added BECAUSE a mutant survived first.
+      # THE EXPIRY ITSELF IS ADVISORY IN THIS JOB, and only in this job. `ci.yml` runs on
+      # `push: branches: ['**']`, so a hard expiry here means that on the morning after a
+      # date passes, every branch in the repository is red over a third party's Chromium
+      # CVE — and the cheapest unblock is a one-character date bump with no
+      # re-examination, which is the "gate becomes furniture" outcome the expiry exists to
+      # prevent. It stays HARD where it is the detector and where whoever sees it can act:
+      # the nightly `gotenberg-cve` scan, and any pull request or push touching the
+      # allowlist, the compose pin or the gate. See --expiry-advisory in the gate script.
+      #
+      # The self-test runs first and is the more important of the two: it proves this gate
+      # can still say no. The mutation harness is committed beside it
+      # (`cve_accepted_diff_mutation.py`) rather than its score being quoted here, because
+      # a number in a comment goes stale — and this one did, three ways, in one commit.
       - name: gotenberg_accepted_cves
         run: |
           ./script/gates/cve_accepted_diff_selftest.sh
-          ./script/gates/cve_accepted_diff.sh --validate-only \
+          ./script/gates/cve_accepted_diff.sh --validate-only --expiry-advisory \
             script/gates/gotenberg_accepted_cves.allowlist
 
       # Not a gate, and deliberately not failing the build: the number that has to
