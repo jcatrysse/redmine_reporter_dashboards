@@ -1037,6 +1037,15 @@ jobs:
           echo "::group::the unauthenticated instance"
           docker logs --tail 100 gotenberg-open 2>&1 || true
           echo "::endgroup::"
+          # CAN GOTENBERG WRITE ITS JOB DIRECTORY? With a read-only root filesystem, a
+          # non-root user and a tmpfs whose mode docker may have reset to 0755, this is
+          # the one question that separates "the hardening is wrong" from "Chromium is
+          # unhappy" — and the symptom of the former is a 500 with no access-log entry.
+          echo "::group::can the container write /tmp"
+          docker exec redmine_reporter_dashboards-gotenberg-1 \
+            sh -c 'id; ls -ld /tmp; touch /tmp/ci-write-probe && echo WRITE-OK || echo WRITE-DENIED' \
+            2>&1 || true
+          echo "::endgroup::"
           echo "::group::how the container is running"
           docker inspect redmine_reporter_dashboards-gotenberg-1 \
             --format 'ReadonlyRootfs={{.HostConfig.ReadonlyRootfs}} User={{.Config.User}} CapDrop={{.HostConfig.CapDrop}} SecurityOpt={{.HostConfig.SecurityOpt}} Tmpfs={{.HostConfig.Tmpfs}}' || true

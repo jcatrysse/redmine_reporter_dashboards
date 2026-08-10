@@ -69,7 +69,19 @@ services:
       # docker rejects outright ("invalid tmpfs option") — the useful kind of mistake,
       # since the container refuses to start rather than starting and failing every
       # render. Measured by running this file, not by reading it.
-      - /tmp:rw,exec,nosuid,nodev,size=512m
+      # `mode=1777` IS SPELLED OUT FOR THE SAME REASON `exec` IS, and it cost a CI cycle
+      # to learn the second one. Docker's tmpfs default is 1777 only when you pass NO
+      # options; once you pass any, some versions mount it 0755 root-owned — and this
+      # container runs as uid 1001 with a read-only root filesystem, so Gotenberg then
+      # cannot create the job directory it unpacks each upload into.
+      #
+      # The failure that produces is genuinely nasty, which is why it is worth this
+      # comment: the service starts, reports healthy, authenticates correctly, answers 401
+      # and 415 exactly as it should — and returns a bare `500 Internal Server Error` to
+      # every request that CARRIES A BODY, with NO LINE IN ITS OWN ACCESS LOG, because it
+      # fails before the logging middleware. Measured on a GitHub runner (docker 28.x)
+      # while this container was green on a developer machine (docker 29.3.1, tmpfs 1777).
+      - /tmp:rw,exec,mode=1777,nosuid,nodev,size=512m
 
     # Two more, and they are listed here rather than in the table above because they are
     # cheap rather than because they are incidental. `no-new-privileges` stops a setuid
