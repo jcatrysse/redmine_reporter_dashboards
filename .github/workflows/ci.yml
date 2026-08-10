@@ -817,6 +817,27 @@ jobs:
       - name: migration_reversibility
         run: ./script/gates/migration_reversibility.sh
 
+      # T-34 — the Gotenberg CVE acceptances, checked on EVERY pull request rather than
+      # only in the nightly scan that owns the other half.
+      #
+      # The nightly job compares the accepted list against a real Trivy report, which
+      # needs docker, an image pull and a vulnerability database. This half needs none of
+      # that, and what it catches is the failure the nightly one would notice too late:
+      # an acceptance whose valid-through date has PASSED. A security exemption expiring
+      # unnoticed while every pull request stays green is precisely the shape of "a
+      # remedy that provably does nothing" (INV-4), so the expiry blocks merges and the
+      # fix is to re-examine the entry and move its date — deliberately not a thing that
+      # can be done without looking.
+      #
+      # The self-test runs first and is the more important of the two: it proves this
+      # gate can still say no. Mutation testing on 2026-08-10 killed 14 of 14 mutants
+      # against it, two of the cases having been added BECAUSE a mutant survived first.
+      - name: gotenberg_accepted_cves
+        run: |
+          ./script/gates/cve_accepted_diff_selftest.sh
+          ./script/gates/cve_accepted_diff.sh --validate-only \
+            script/gates/gotenberg_accepted_cves.allowlist
+
       # Not a gate, and deliberately not failing the build: the number that has to
       # reach zero by 1.0, printed where a reviewer sees it move.
       - name: Report the remaining reporter surface

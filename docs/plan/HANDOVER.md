@@ -1159,6 +1159,28 @@ plugin or the vendor gem, each listed with its reason in
   of T-34's premise therefore hold in a fresh container and neither needs re-deriving.
   If it refuses to start with *"process with PID … is still running"*, a daemon is
   already up — check `docker info` before deleting the pidfile.
+- **THE HOST'S DOCKER REACHES THE REGISTRY; A CONTAINER'S NETWORK DOES NOT.** Measured
+  2026-08-10, and it is the reason the CVE gate is CI-only. `docker pull` works (the
+  daemon uses the proxy), but a process *inside* a container gets no DNS:
+
+      docker run --rm aquasec/trivy:latest image --download-db-only
+      -> lookup mirror.gcr.io on 8.8.8.8:53: read udp …: i/o timeout
+
+  So `gotenberg-cve`'s scan CANNOT be reproduced from a cloud session — only the parts
+  of it that are plain shell. That is why the verdict was moved OUT of Trivy and into
+  `script/gates/cve_accepted_diff.sh`, which needs neither docker nor a database and has
+  its own self-test (`cve_accepted_diff_selftest.sh`, 18 cases) that runs locally in under
+  a second. Registry *metadata* is reachable with plain `curl` against
+  `auth.docker.io` + `registry-1.docker.io`, which is how "the `:8` tag still resolves to
+  the pinned digest" was established without pulling anything.
+- **`< /dev/null` AFTER A HEREDOC SILENTLY EMPTIES IT**, and it cost a whole mutation run
+  that reported 12 of 12 survivors — including a mutant that deleted the verdict entirely,
+  which is impossible. `python3 - "$f" <<'PY' … PY < /dev/null` redirects stdin *after* the
+  heredoc is attached, so python reads nothing, does nothing, and **exits 0**. The
+  `< /dev/null` was itself a fix for an earlier harness that hung reading stdin; the right
+  place for it is on commands that are not already fed by a heredoc. If every mutant
+  survives, suspect the harness before the tests: run one mutation by hand and confirm the
+  file on disk actually changed.
 - **STARTING `dockerd` COINCIDED WITH POSTGRESQL GOING DOWN.** Immediately afterwards
   every `rake` task failed with `PG::ConnectionBad: connection refused`, which surfaced
   first as `ActiveRecord::Migration` complaining about a pending schema — so it reads as

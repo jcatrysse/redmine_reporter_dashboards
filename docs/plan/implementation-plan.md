@@ -105,6 +105,68 @@ a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
 
+**E-28 · T-34: THE CVE GATE WENT RED ON ITS FIRST REAL RUN AND ITS OWN REMEDIATION DID NOT
+EXIST.** 2026-08-10. Measured, not reasoned.
+
+`gotenberg-cve` was written as `trivy … --exit-code 1` and shipped green-by-assumption — it
+had never been run against the pinned image, because the workflow only fires on a change to
+the compose file. Its first real execution (run 31410189128) went red, and the DB-download
+split did its job: the database fetched, the scan ran, and the finding is a fact about the
+image rather than about the network.
+
+| | |
+|---|---|
+| what the scan found | **5 fixable HIGH across 4 advisories** in `gotenberg/gotenberg:8@sha256:a16a14e1f18a…` (8.35.0). `CVE-2026-19155`, chromium/chromium-common 151.0.7922.71 — sandbox escape via use-after-free, fixed in 151.0.7922.108-1~deb13u1. Three more in `usr/bin/pdfcpu`: `CVE-2026-46602` / `CVE-2026-46604` (golang.org/x/image, TIFF decode) and `CVE-2026-56852` (golang.org/x/text) |
+| what the workflow told a human to do | pull `gotenberg/gotenberg:8`, read its digest, move the pin |
+| what that would have achieved | **nothing.** `gotenberg/gotenberg:8` and `gotenberg/gotenberg:8.35.0` BOTH resolve to the digest already pinned, and 8.35.0 is the newest tag upstream publishes (registry manifest API, 448 tags enumerated). The Debian fixes exist; a Gotenberg image carrying them does not |
+
+**Why this was a design defect and not just bad luck.** A gate no action can satisfy gets
+switched off, and a switched-off gate is worse than none — INV-4. Making it advisory is
+forbidden in the other direction (CLAUDE.md §7). So the verdict moved out of Trivy and into
+`script/gates/cve_accepted_diff.sh`: Trivy runs with `--exit-code 0` and reports, and the
+gate is a set comparison against `script/gates/gotenberg_accepted_cves.allowlist`, where
+each acceptance carries a reason and a **valid-through date**. It refuses a finding nobody
+named, an acceptance past its date, an acceptance the scan no longer reports, and a
+malformed record. The stale arm is what stops the list becoming furniture — the same
+assertion `layer_purity.sh` and `zero_reporter.allowlist` already make about their own
+exemptions. The workflow also now resolves where the tag points *today*, so a red run says
+"move the pin to X" or "there is nowhere to move to" instead of always the first.
+
+**MUTATION TESTING FOUND A REAL DEFECT IN THE GATE, and it is the defect this project keeps
+shipping.** Two mutants survived the first pass. One was verdict-equivalent and got an
+assertion anyway. The other was not: the gate filtered both sides of the comparison to
+`^CVE-`, and **Trivy's `VulnerabilityID` is not always a CVE** — Go and npm advisories with
+no CVE assigned arrive as `GHSA-…`, Debian's tracked entries as `TEMP-…`. Such a finding
+would have been dropped from the found list and the job would have reported **green with an
+unaccepted vulnerability in the image**. Fixed to an uppercase-advisory-prefix shape, which
+admits every scheme without an enumeration that would go stale and lock somebody out of
+accepting the very id they were told to accept. Final: **16 of 16 mutants killed, 0 survived,
+0 unmeasured**, control green before and after, over 18 self-test cases.
+
+**The expiry is enforced on every pull request, not only nightly** — `ci.yml`'s `gates` job
+runs the self-test and `--validate-only`. An exemption quietly outliving its date while every
+PR stays green is INV-4 again, one level up.
+
+**FOR THE CURATOR — three decisions, none taken here.**
+
+1. **Are these four acceptable for 30 days?** The three pdfcpu ones are unreachable as
+   documented (`--pdfengines-disable-routes`), which is a mitigation and not a refutation.
+   `CVE-2026-19155` is in the render path itself; what stands between it and the host is the
+   compose file's containment (`internal: true`, non-root with Chromium's sandbox left ON,
+   read-only root, `cap_drop: ALL`, `no-new-privileges`). Recommendation: **accept to
+   2026-09-09**, which is what is committed, and re-decide when it expires.
+2. **`gotenberg/gotenberg:8.35.0-chromium` is a distinct, smaller image**
+   (`sha256:d2aa8428406e…`) carrying only the Chromium module — no `pdftk-all.jar`, no
+   `pdfcpu`, so **3 of the 4 advisories are not in it at all**, and it matches what the
+   compose file already asks for by disabling those routes. It does **not** clear
+   `CVE-2026-19155`, so it does not make this gate green and switching to it was left out of
+   this change as scope growth (R-02). Recommendation: **a separate task** — the flags
+   `--libreoffice-disable-routes` / `--pdfengines-disable-routes` may not be accepted by a
+   build that has no such modules, which is a measurement, not a guess.
+3. **Promotion of `:gotenberg` to `verification: corpus`** is still open from E-27 and is
+   unaffected by this: the corpus evidence (19/0/1, run 31408759956) stands regardless of the
+   image's CVE status.
+
 **E-27 · T-34: THREE OF THE FOUR SECURITY CHECKS COULD NOT FAIL WHEN FIRST WRITTEN, AND
 THE CORPUS FOUND THE ONE DEFECT NO UNIT ASSERTION COULD SEE.** 2026-08-10. Everything below
 was reproduced against `gotenberg/gotenberg:8@sha256:a16a14e1f18a…` (8.35.0) with a probe or
