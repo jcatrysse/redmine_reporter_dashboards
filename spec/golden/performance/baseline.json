@@ -763,96 +763,96 @@
   ],
   "blocked": [
     {
-      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
-      "owed_by": "T-10",
+      "reason": "the renderer and an engine both exist now (measured 2026-08-10: ReportRun#call, and chromium_cdp 20/0/0 in this container when run non-root). What is missing is a harness: these cells need a BOOTED Redmine, and the aggregation cells are measured in spec/adapter, which is a synthetic schema with stub models",
+      "owed_by": "T-03",
       "cell": "html/sample-report@1000",
       "medium": "html",
       "template": "sample-report",
       "issues": 1000
     },
     {
-      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
-      "owed_by": "T-10",
+      "reason": "the renderer and an engine both exist now (measured 2026-08-10: ReportRun#call, and chromium_cdp 20/0/0 in this container when run non-root). What is missing is a harness: these cells need a BOOTED Redmine, and the aggregation cells are measured in spec/adapter, which is a synthetic schema with stub models",
+      "owed_by": "T-03",
       "cell": "html/sample-report@10000",
       "medium": "html",
       "template": "sample-report",
       "issues": 10000
     },
     {
-      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
-      "owed_by": "T-10",
+      "reason": "the renderer and an engine both exist now (measured 2026-08-10: ReportRun#call, and chromium_cdp 20/0/0 in this container when run non-root). What is missing is a harness: these cells need a BOOTED Redmine, and the aggregation cells are measured in spec/adapter, which is a synthetic schema with stub models",
+      "owed_by": "T-03",
       "cell": "html/sample-report@100000",
       "medium": "html",
       "template": "sample-report",
       "issues": 100000
     },
     {
-      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
-      "owed_by": "T-10",
+      "reason": "the renderer and an engine both exist now (measured 2026-08-10: ReportRun#call, and chromium_cdp 20/0/0 in this container when run non-root). What is missing is a harness: these cells need a BOOTED Redmine, and the aggregation cells are measured in spec/adapter, which is a synthetic schema with stub models",
+      "owed_by": "T-03",
       "cell": "html/version-status@1000",
       "medium": "html",
       "template": "version-status",
       "issues": 1000
     },
     {
-      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
-      "owed_by": "T-10",
+      "reason": "the renderer and an engine both exist now (measured 2026-08-10: ReportRun#call, and chromium_cdp 20/0/0 in this container when run non-root). What is missing is a harness: these cells need a BOOTED Redmine, and the aggregation cells are measured in spec/adapter, which is a synthetic schema with stub models",
+      "owed_by": "T-03",
       "cell": "html/version-status@10000",
       "medium": "html",
       "template": "version-status",
       "issues": 10000
     },
     {
-      "reason": "no Liquid renderer in this plugin yet — the only one today is redmine_reporter's, which is a separate private plugin",
-      "owed_by": "T-10",
+      "reason": "the renderer and an engine both exist now (measured 2026-08-10: ReportRun#call, and chromium_cdp 20/0/0 in this container when run non-root). What is missing is a harness: these cells need a BOOTED Redmine, and the aggregation cells are measured in spec/adapter, which is a synthetic schema with stub models",
+      "owed_by": "T-03",
       "cell": "html/version-status@100000",
       "medium": "html",
       "template": "version-status",
       "issues": 100000
     },
     {
-      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
-      "owed_by": "T-10",
+      "reason": "same harness gap as html. The engine is no longer the blocker — chromium_cdp passes its whole conformance corpus here and gotenberg is measured in CI (T-34) — but ReportRun#call(pdf: true) needs a booted Redmine and a substrate at 1k/10k/100k, which the minitest environment does not have",
+      "owed_by": "T-03",
       "cell": "pdf/sample-report@1000",
       "medium": "pdf",
       "template": "sample-report",
       "issues": 1000
     },
     {
-      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
-      "owed_by": "T-10",
+      "reason": "same harness gap as html. The engine is no longer the blocker — chromium_cdp passes its whole conformance corpus here and gotenberg is measured in CI (T-34) — but ReportRun#call(pdf: true) needs a booted Redmine and a substrate at 1k/10k/100k, which the minitest environment does not have",
+      "owed_by": "T-03",
       "cell": "pdf/sample-report@10000",
       "medium": "pdf",
       "template": "sample-report",
       "issues": 10000
     },
     {
-      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
-      "owed_by": "T-10",
+      "reason": "same harness gap as html. The engine is no longer the blocker — chromium_cdp passes its whole conformance corpus here and gotenberg is measured in CI (T-34) — but ReportRun#call(pdf: true) needs a booted Redmine and a substrate at 1k/10k/100k, which the minitest environment does not have",
+      "owed_by": "T-03",
       "cell": "pdf/sample-report@100000",
       "medium": "pdf",
       "template": "sample-report",
       "issues": 100000
     },
     {
-      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
-      "owed_by": "T-10",
+      "reason": "same harness gap as html. The engine is no longer the blocker — chromium_cdp passes its whole conformance corpus here and gotenberg is measured in CI (T-34) — but ReportRun#call(pdf: true) needs a booted Redmine and a substrate at 1k/10k/100k, which the minitest environment does not have",
+      "owed_by": "T-03",
       "cell": "pdf/version-status@1000",
       "medium": "pdf",
       "template": "version-status",
       "issues": 1000
     },
     {
-      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
-      "owed_by": "T-10",
+      "reason": "same harness gap as html. The engine is no longer the blocker — chromium_cdp passes its whole conformance corpus here and gotenberg is measured in CI (T-34) — but ReportRun#call(pdf: true) needs a booted Redmine and a substrate at 1k/10k/100k, which the minitest environment does not have",
+      "owed_by": "T-03",
       "cell": "pdf/version-status@10000",
       "medium": "pdf",
       "template": "version-status",
       "issues": 10000
     },
     {
-      "reason": "no PDF engine reachable from this session (no Gotenberg, no headless Chromium render path yet)",
-      "owed_by": "T-10",
+      "reason": "same harness gap as html. The engine is no longer the blocker — chromium_cdp passes its whole conformance corpus here and gotenberg is measured in CI (T-34) — but ReportRun#call(pdf: true) needs a booted Redmine and a substrate at 1k/10k/100k, which the minitest environment does not have",
+      "owed_by": "T-03",
       "cell": "pdf/version-status@100000",
       "medium": "pdf",
       "template": "version-status",

@@ -1159,6 +1159,37 @@ plugin or the vendor gem, each listed with its reason in
   of T-34's premise therefore hold in a fresh container and neither needs re-deriving.
   If it refuses to start with *"process with PID … is still running"*, a daemon is
   already up — check `docker info` before deleting the pidfile.
+- **`:chromium_cdp` CANNOT RUN AS ROOT, AND YOU ARE ROOT HERE.** This is why the engine
+  looked unavailable in this container for five sessions, and P-2 recorded it as a fact
+  about the tree. It is not:
+
+      preflight failed: engine_crashed: the browser exited while we were waiting for it
+      [chromium: Running as root without --no-sandbox is not supported.]
+
+  CI never hit it because GitHub runners are unprivileged. The fix is a non-root user, and
+  **not** `--no-sandbox` — the sandbox is the one control that contains a compromised
+  renderer, and `docker-compose.gotenberg.yml` refuses that flag for the same reason:
+
+      useradd -m -u 4242 rrdbench
+      chmod -R a+rX /home/user/redmine_reporter_dashboards
+      su rrdbench -c 'cd .../redmine && export HOME=/home/rrdbench \
+        CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome && \
+        RRD_CONFORMANCE=1 bundle exec rspec -I plugins/…/spec plugins/…/spec/conformance'
+
+  MEASURED 2026-08-10: **20 pass / 0 fail / 0 skip** on Chromium 141.0.7390.37, the full
+  corpus, locally. `wkhtmltopdf` runs 18/0/2 as root — it has no sandbox to refuse — so a
+  run that skips only Chromium looks like a Chromium problem and is a *uid* problem.
+- **THE MIRROR TRAP CAUGHT ME AGAIN, and it presents as a PASSING spec.** `rspec` run from
+  inside `redmine/` reads `redmine/plugins/redmine_reporter_dashboards/`, which `rsync -a
+  --delete` populated at clone time. I edited a constant the suite asserts on, ran the
+  spec, and got **51 examples, 0 failures** — from the unedited copy. The assertion that
+  should have caught the edit was fine; it never saw it. §8's rule with the command:
+
+      rsync -a --delete --exclude redmine/ --exclude .git/ ./ \
+        redmine/plugins/redmine_reporter_dashboards/
+
+  Re-mirror BEFORE every run, and if a change you expected to break something does not,
+  diff the mirror against `git show HEAD:<path>` before believing the green.
 - **THE HOST'S DOCKER REACHES THE REGISTRY; A CONTAINER'S NETWORK DOES NOT.** Measured
   2026-08-10, and it is the reason the CVE gate is CI-only. `docker pull` works (the
   daemon uses the proxy), but a process *inside* a container gets no DNS:

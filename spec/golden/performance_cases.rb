@@ -62,13 +62,41 @@ module RrdGolden
     # them. An unmeasured cell that is written down as unmeasured is a pause point; an
     # unmeasured cell that is simply absent is a baseline quietly claiming coverage it
     # does not have (INV-7 applied to performance rather than to versions).
+    #
+    # BOTH ORIGINAL REASONS ARE NOW FALSE, and leaving them here would be worse than the
+    # blocked cells themselves: a cell that says "owed by T-10" while T-10 is green reads
+    # as coverage that is coming rather than coverage that is owed. Measured 2026-08-10:
+    #
+    #   * the plugin owns its Liquid renderer — T-10…T-19 are done and `ReportRun#call`
+    #     takes (template, actor, scope) to HTML and, with `pdf: true`, to PDF;
+    #   * an engine IS reachable. `:chromium_cdp` runs the full 20-fixture conformance
+    #     corpus in this container, 20 pass / 0 fail / 0 skip — the trick is that it must
+    #     not run as ROOT (Chromium refuses its own sandbox and the preflight reports
+    #     `engine_crashed`), and CI never hit it because CI runners are unprivileged.
+    #     `:gotenberg` is measured in CI as of T-34, 19/0/1.
+    #
+    # WHAT ACTUALLY BLOCKS THEM NOW is a harness, and it is a different harness rather
+    # than a bigger one. The aggregation cells are measured in `spec/adapter/`, which is
+    # deliberately NOT a booted Redmine — it builds a synthetic schema with stub models
+    # because what it tests is the aggregator's SQL, not Redmine's authorization
+    # (`adapter_helper.rb:17-27`). `ReportRun` needs the real thing: templates, users,
+    # permissions and drops over Redmine's own models. So the render axis has to be
+    # measured in the minitest environment, which has no bulk seeding at these sizes.
+    #
+    # That is a task, not a footnote, and it is named as one rather than absorbed.
     BLOCKED_MEDIA = {
-      HTML => { 'reason' => 'no Liquid renderer in this plugin yet — the only one today is ' \
-                            "redmine_reporter's, which is a separate private plugin",
-                'owed_by' => 'T-10' },
-      PDF  => { 'reason' => 'no PDF engine reachable from this session (no Gotenberg, no ' \
-                            'headless Chromium render path yet)',
-                'owed_by' => 'T-10' }
+      HTML => { 'reason' => 'the renderer and an engine both exist now (measured 2026-08-10: ' \
+                            'ReportRun#call, and chromium_cdp 20/0/0 in this container when ' \
+                            'run non-root). What is missing is a harness: these cells need a ' \
+                            'BOOTED Redmine, and the aggregation cells are measured in ' \
+                            'spec/adapter, which is a synthetic schema with stub models',
+                'owed_by' => 'T-03' },
+      PDF  => { 'reason' => 'same harness gap as html. The engine is no longer the blocker — ' \
+                            'chromium_cdp passes its whole conformance corpus here and ' \
+                            'gotenberg is measured in CI (T-34) — but ReportRun#call(pdf: true) ' \
+                            'needs a booted Redmine and a substrate at 1k/10k/100k, which the ' \
+                            'minitest environment does not have',
+                'owed_by' => 'T-03' }
     }.freeze
 
     # Id-range slices of one substrate. 100 000 is the largest because it is the

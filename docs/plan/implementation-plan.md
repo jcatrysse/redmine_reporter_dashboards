@@ -52,7 +52,7 @@ fact that CI has not yet run on this work at all.
 | T-00 | **VOID** — the fork is out of scope (curator, 2026-08-05). See below. |
 | T-01 | **done** — reference date, canonicaliser, baseline commit, the 176-case value corpus, the per-adapter overlay, the 46-triple scope fixture and the `corpus` CI job. **It found defect D-1 on the way in** — see §Findings |
 | T-02 | **done** — `rake reporter_dashboards:migrate_from_reporter:plan`, read-only (proven by a no-writes assertion, not by a comment), plus the template linter's first 13 rules. Three of R-15's four queries answered; the fourth is a log grep and is reported as unanswerable **with the command**. It found the G8 tension in §Findings F-3 |
-| T-03 | **partly done** — the aggregation baseline is measured and committed (9 workloads × 3 issue counts, 20 warm runs, provenance-stamped) and R7's three *absolute* criteria are now hard assertions on every engine. **The HTML\|PDF half is blocked and recorded as blocked** — see §Findings P-2 |
+| T-03 | **partly done** — the aggregation baseline is measured and committed (9 workloads × 3 issue counts, 20 warm runs, provenance-stamped) and R7's three *absolute* criteria are now hard assertions on every engine. **The HTML\|PDF half is still unmeasured — but its recorded blocker was FALSE and is now corrected (2026-08-10).** Both of P-2's premises fell: the renderer exists (`ReportRun#call(pdf:)`), and `:chromium_cdp` passes its whole 20-fixture conformance corpus in-container — **20/0/0** — once it is not run as ROOT, which is why it looked unavailable for five sessions. The 12 cells said `owed_by: T-10` for four tasks after T-10 went green; they now name **T-03** and a reason that is true, and two new assertions in `performance_spec.rb` stop either drifting again. What is actually owed is a harness in the BOOTED-Redmine environment: `spec/adapter/` is a synthetic schema with stub models by design, and `ReportRun` needs real templates, users and permissions — see §Findings P-2 |
 | T-04 | **done** — `RedmineReporterDashboards::Positioned` replaces `up_acts_as_list` |
 | T-05 | **done** — reporter optional; `ReporterPresence`, memoised at `after_plugins_loaded` |
 | T-06 | **done** — widgets leave the picker, degrade in place, `report_pdf` 404s |
@@ -1956,7 +1956,28 @@ and a DB-less spec asserts they are all still declared blocked. An unmeasured ce
 unmeasured is a pause point; an unmeasured cell that is simply absent is a baseline quietly claiming
 coverage it does not have — INV-7's rule applied to performance instead of to versions.
 
-**P-2's premise is now HALF FALSE, measured 2026-08-05 — and it changes what T-11…T-13 can attempt.**
+**P-2 IS NOW FULLY FALSE, measured 2026-08-10 — both premises, and the cells were still
+blaming T-10 four tasks after T-10 closed.** The entry below records the half-retraction of
+2026-08-05; this is the rest of it, and the reason it matters is that a blocked cell naming a
+completed task reads as coverage that is coming rather than coverage that is owed. That is the
+INV-7 failure this artefact exists to avoid, committed *into* the artefact.
+
+| P-2's premise | status |
+|---|---|
+| "the only Liquid renderer today is `redmine_reporter`'s" | **false.** T-10…T-19 are done; `Reporting::ReportRun#call(pdf:)` takes (template, actor, scope) to HTML and to PDF |
+| "there is no PDF engine reachable from this session" | **false, and it was a `uid` problem.** `:chromium_cdp` runs the whole 20-fixture conformance corpus in this container — **20 pass / 0 fail / 0 skip** — once it is not run as ROOT. Chromium refuses its own sandbox under uid 0 and the preflight reports `engine_crashed`; CI never saw it because runners are unprivileged. `wkhtmltopdf` runs 18/0/2 as root, so the failure looks engine-specific and is not. HANDOVER §3 carries the command |
+
+**WHAT ACTUALLY BLOCKS THE 12 CELLS NOW is a harness, and it is a different one rather than a
+bigger one.** The aggregation cells are measured in `spec/adapter/`, which is deliberately NOT a
+booted Redmine: it builds a synthetic schema with stub models because what it tests is the
+aggregator's SQL, not Redmine's authorization (`adapter_helper.rb:17-27`). `ReportRun` needs the
+real thing — templates, users, permissions, drops over Redmine's own models — so the render axis
+belongs in the minitest environment, which has no bulk seeding at 1 000/10 000/100 000. The cells
+are re-pointed at **T-03**, whose row already reads *partly done*, rather than at an invented id,
+and `performance_spec.rb` now asserts both that the owner has moved and that the reason does not
+name a completed task.
+
+**P-2's premise WAS HALF FALSE, measured 2026-08-05 — and it changed what T-11…T-13 could attempt.**
 P-2 gives two reasons the render axis is unmeasurable here. The first still holds: the only Liquid
 renderer today is `redmine_reporter`'s. **The second does not.** "There is no PDF engine reachable
 from this session" is true of Gotenberg, which the curator said they cannot provide — but

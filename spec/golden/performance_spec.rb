@@ -372,10 +372,27 @@ RSpec.describe RrdGolden::PerformanceCases do
     expect(large / small).to be >= 100
   end
 
+  # T-03, NOT T-10, SINCE 2026-08-10 — and the move is the point of the assertion rather
+  # than an edit to it. These cells said `owed_by: T-10` for as long as T-10 was open and
+  # for four tasks after it closed, which is how a blocked cell stops being a pause point
+  # and becomes furniture: it reads as coverage that is coming rather than coverage that
+  # is owed. Both of the original reasons were measured false (the renderer exists;
+  # `:chromium_cdp` passes 20/0/0 in a container, non-root). What is owed is a harness in
+  # the BOOTED-Redmine environment, and that is T-03's own remaining half.
   it 'declares both render media blocked, each naming the task that owes it' do
     expect(described_class::BLOCKED_MEDIA.keys.sort).to eq([described_class::HTML, described_class::PDF])
     described_class::BLOCKED_MEDIA.each_value do |entry|
-      expect(entry['owed_by']).to eq('T-10')
+      expect(entry['owed_by']).to eq('T-03')
+    end
+  end
+
+  # AND THE REASON MUST NOT NAME A COMPLETED TASK. This is the mechanical form of the
+  # trap above: a blocked cell blaming something already green is worse than no reason,
+  # because it tells a reader the debt has an owner when it does not.
+  it 'gives a reason that does not blame a task the plan calls done' do
+    described_class::BLOCKED_MEDIA.each_value do |entry|
+      expect(entry['reason']).not_to match(/no Liquid renderer|no PDF engine reachable/)
+      expect(entry['reason']).to match(/harness|booted/i)
     end
   end
 
