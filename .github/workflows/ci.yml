@@ -1013,6 +1013,42 @@ jobs:
           [ "$open_code" != "401" ] || { echo "::error::the open instance is refusing; the credential check would pass vacuously"; exit 1; }
           [ "$auth_code" = "401" ] || { echo "::error::the compose file is NOT enforcing its credential"; exit 1; }
 
+      # WHEN GOTENBERG MISBEHAVES, ITS OWN LOG IS THE ONLY THING THAT SAYS WHY, and the
+      # first version of this job did not collect it. The failure it produced was eight
+      # rspec expectations reporting `500 from /forms/chromium/convert/html: Internal
+      # Server Error` — a status, from outside the container, with no cause attached —
+      # while the identical image, the identical compose file and the identical spec run
+      # green on a developer machine. That leaves guessing as the only next step, which is
+      # what this repository has a rule about.
+      #
+      # It runs `if: always()` rather than `if: failure()` on purpose: the healthy log is
+      # what a red one has to be compared against, and nobody has one yet.
+      - name: What Gotenberg itself says
+        if: always()
+        run: |
+          echo "::group::gotenberg container log"
+          docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml \
+            logs --no-color --tail 200 gotenberg || true
+          echo "::endgroup::"
+          echo "::group::the unauthenticated instance"
+          docker logs --tail 100 gotenberg-open 2>&1 || true
+          echo "::endgroup::"
+          echo "::group::how the container is running"
+          docker inspect redmine_reporter_dashboards-gotenberg-1 \
+            --format 'ReadonlyRootfs={{.HostConfig.ReadonlyRootfs}} User={{.Config.User}} CapDrop={{.HostConfig.CapDrop}} SecurityOpt={{.HostConfig.SecurityOpt}} Tmpfs={{.HostConfig.Tmpfs}}' || true
+          echo "unprivileged_userns_clone=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo unset)"
+          echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo unset)"
+          echo "::endgroup::"
+          echo "::group::one conversion, verbatim"
+          printf '%s' '<!DOCTYPE html><html><body><p>CI-DIAGNOSTIC</p></body></html>' > /tmp/diag.html
+          curl -sS -u "ci-user:${{ steps.gotenberg.outputs.password }}" \
+            -F "files=@/tmp/diag.html;filename=index.html" \
+            -o /tmp/diag.pdf -w 'status=%{http_code}\n' \
+            http://127.0.0.1:3000/forms/chromium/convert/html || true
+          head -c 400 /tmp/diag.pdf | tr -d '\0' || true
+          echo
+          echo "::endgroup::"
+
       # The harness's own tests: the three-state rule, the matrix generator, and the
       # catalogue's validation. No browser involved, so this half cannot be flaky and
       # cannot be skipped.
