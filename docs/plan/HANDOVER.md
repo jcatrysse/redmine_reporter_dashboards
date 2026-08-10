@@ -950,6 +950,47 @@ mutation run that happened to export the variables, not by any example. Two rule
 SENTINEL (`FROM_ENV`) when `nil` is a meaningful value, and when a spec's subject is "no
 credential", make it assert against an environment that HAS one.
 
+**A LOCALLY GREEN SUITE SAYS NOTHING ABOUT A CI STEP YOU JUST WROTE, AND T-34 WAS REPORTED
+COMPLETE WITH CI RED.** Gates, four Redmine branches, three databases, the corpus and a
+regenerated matrix were all green on this machine; the first push went red and stayed red
+for five commits. Twenty-five of twenty-six jobs passed every time — the one that failed was
+the leg the task had added, which by definition had never run. **Check the run before
+reporting.** `curl -sS "https://api.github.com/repos/<owner>/<repo>/actions/runs?branch=<b>&event=push&per_page=1"`
+answers it in one line, and the GitHub MCP tools work for the session's own repository.
+
+**`VAR=x docker compose up -d` SETS THE VARIABLE FOR EXACTLY ONE INVOCATION**, and every
+later `docker compose` call re-parses the file and needs it again. The container starts and
+the NEXT call dies with "required variable … is missing a value". In GitHub Actions add the
+second trap on top: each `run:` block is its own shell, so `export` does not survive between
+steps either. This bit twice — once in the startup step, once in the diagnostic added to
+debug it. `docker logs <name>` needs no variables; `docker compose logs` does.
+
+**`internal: true` PLUS `ports:` PUBLISHES NOTHING, SILENTLY.** Docker accepts the
+configuration, starts a healthy container, and binds no port: `docker port` prints nothing
+and `.NetworkSettings.Ports` is `map[3000/tcp:[]]`. There is no warning anywhere. This was
+written into `docker-compose.gotenberg.yml` as advice for operators whose Redmine is not in
+Docker, and it was wrong — the honest options are to put Redmine on the network, or to drop
+`internal: true` AND publish on loopback, which is a real trade rather than a smaller one.
+**Follow your own instructions once before shipping them.**
+
+**A CONTAINER THAT SURVIVED A `dockerd` RESTART ANSWERS 500 TO EVERYTHING UNTIL IT IS
+RECREATED.** Local trap, cost twenty minutes of chasing a CI failure that was not the same
+bug. `docker compose up -d` reports "Running" and does not fix it; `--force-recreate` does.
+Whenever this container starts misbehaving right after the daemon was restarted — which in
+this environment happens whenever it idles — recreate before diagnosing.
+
+**HEADLESS CHROMIUM IN A `read_only: true` CONTAINER NEEDS A WRITABLE HOME AND MORE THAN
+64 MB OF `/dev/shm`,** and the error names neither: `chrome failed to start:
+chrome_crashpad_handler: --database is required`. Gotenberg reports that as a bare
+`500 Internal Server Error` with NO LINE IN ITS OWN ACCESS LOG, because it fails before the
+logging middleware — while `/health`, 401 and 415 all behave perfectly. Point `HOME`,
+`XDG_CACHE_HOME` and `XDG_CONFIG_HOME` at the tmpfs and set `shm_size`. Two caveats worth
+carrying: this reproduced on a GitHub runner and NOT on a developer machine with the
+identical file, image and spec, so the trigger is still unidentified; and the two
+hypotheses before it were both wrong, refuted by a four-line write probe added to the CI
+step. **When you cannot reproduce a failure, spend the cycle on a diagnostic that can
+refute you rather than on the fix you like best.**
+
 **`#$&` IN A REGEXP LITERAL IS GLOBAL-VARIABLE INTERPOLATION, AND IT ATE A SECURITY GUARD.**
 T-34 wrote a media-type allowlist as `%r{…[A-Za-z0-9!#$&^_.+-]…}` and the class COMPILED as
 `[A-Za-z0-9!^_.+-]` — `#$&` is Ruby's shorthand for interpolating `$&`, which was empty. It

@@ -239,11 +239,33 @@ change turned out to be worth as much as the original review, which is the reusa
 | **`version_within` had no test at all** — four mutations survived | reverting fix 8 wholesale was invisible | yes — four examples |
 | **A published check with no `:state` gave `failed? == false`** (a broken check reading as a passing one) and then 500'd the page on `state_class(nil)` | constructed | yes — an unknown state becomes a FAILED check naming what was published |
 
+**AND CI WAS RED FOR FIVE COMMITS AFTERWARDS, WHICH IS THE PART WORTH READING.** T-34 was
+reported complete on local evidence — gates, four Redmine branches, three engines, the
+corpus, a regenerated matrix — and CI was red on the first push and stayed red through four
+more. Twenty-five of twenty-six jobs were green every time; the one that failed was the leg
+this task added. Three of the four causes were defects in the change, and one of them would
+have reached operators:
+
+| what | how it was found | why local runs could not see it |
+|---|---|---|
+| `VAR=x docker compose up -d` sets the variable for ONE invocation, and every later `docker compose` call re-parses the file. The container came up; the next call died | CI | nothing locally ran two compose commands in separate shells |
+| `aquasecurity/trivy-action@0.28.0` DOES NOT EXIST — I guessed a version tag I could not verify from this environment | CI | the workflow had never run |
+| **The compose file's own "if Redmine is not in Docker" advice does not work.** Keeping `internal: true` and adding `ports:` publishes NOTHING — docker accepts it, starts a healthy container, and binds no port (`.NetworkSettings.Ports` is `map[3000/tcp:[]]`) | CI, then reproduced locally | I wrote the advice and never followed it; every local test used a peer container on the same network |
+| Chromium could not start in the hardened container on the runner: `chrome_crashpad_handler: --database is required`. `read_only: true` leaves HOME unwritable and docker's `/dev/shm` is 64 MB | CI, after adding a step that dumps the container's own log | green on this machine with the identical file, image and spec — still unexplained, and the fix is correct regardless |
+
+**THE FIRST TWO ATTEMPTS AT THE LAST ONE WERE WRONG, AND THE DIAGNOSTIC IS WHAT SAID SO.**
+The `mode=1777` hypothesis looked compelling — a 500 with no access-log line, only on
+requests carrying a body, on a read-only container writing uploads to a tmpfs — and the
+write probe added alongside it answered `WRITE-OK` against `drwxrwxrwt`. Without that probe
+the next step would have been to argue about tmpfs modes. **A diagnostic that can refute
+your hypothesis is worth more than one that can only confirm it**, and this one cost four
+lines.
+
 **RECORDED, NOT FIXED. Each with what was measured.**
 
 | # | What | Measured | Recommendation |
 |---|---|---|---|
-| 1 | **`verification` is `pending`, not `corpus`.** The corpus is 19/0/1 locally and has never been read in CI | 19 pass, 0 fail, 1 skip, 0 harness error against 8.35.0 | INV-7: an untested configuration is unsupported, and *locally tested* is not *CI tested*. **Recommend** promotion to `corpus` after one green `render-smoke` — the same evidence, and the same curator act, as wkhtmltopdf's promotion on 2026-08-06. Until then the matrix cells say `not verified`, which is true |
+| 1 | **`verification` is `pending`, not `corpus` — and the evidence for promoting it now EXISTS.** | CI run **31408759956**, 2026-08-10: `[conformance] gotenberg 8.35.0: 19 pass, 0 fail, 1 skip, 0 harness error`, with ZERO occurrences of "gotenberg is not available here" — so it ran rather than skipping — alongside `spec/render` 337/0 including the real-container spec, and the job's own control probes (open instance 415, authenticated 401). 26 of 26 jobs green | The condition this row set has been met. **Recommend promotion to `corpus`**, which is the same act on the same kind of evidence as wkhtmltopdf's on 2026-08-06, and it is left to the curator because it changes a support claim (§9, G9) and because `corpus` makes a dead Gotenberg preflight a HARD render-smoke failure rather than a skip. One trade to weigh with it: under `corpus`, every render-smoke run depends on Docker Hub serving that digest |
 | 2 | **There is no install-wide way to SELECT `:gotenberg`.** A template's `engine_hint` is the only route | `resolve_engine` reads the hint, then the declared default; no setting exists | That is FR-50 / §5.2 clause 4 — the engine-selection UI, generated from `capabilities.yml` — and it is not in T-34's `Touches:`. **Recommend** it as the next task's clause rather than absorbing it here (CLAUDE.md §11.5). The interim is honest and documented: per-template hint, endpoint and credential in the environment |
 | 3 | **A `Failure` code for "the engine is misconfigured" does not exist**, so an unauthenticated Gotenberg is reported as `:engine_unavailable` | `Failure::CODES` is closed and exhaustively branched | Defensible — the adapter refuses to use it, so it IS unavailable — but the remedy is an operator's, not a retry. **Recommend** the curator decide whether `:engine_misconfigured` earns a place in the closed set; adding one touches every branching caller and the locale keys |
 | 4 | **The retry after a readiness timeout abandons a request the container keeps rendering** for up to its own `--api-timeout` | Chromium's concurrency in Gotenberg 8 is 6 | Bounded and self-clearing, and the alternative (waiting out somebody else's flag file) makes the readiness bound a property of their configuration. **Recommend** `--api-timeout=60s` in the example compose, which it now carries, and watching this if a report fleet ever runs readiness-timeout-heavy templates |
