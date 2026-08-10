@@ -92,12 +92,33 @@ services:
     # capabilities, so dropping them costs nothing here. If your host has
     # `kernel.unprivileged_userns_clone=0` the browser will refuse to start, and the fix
     # is that sysctl and NOT `--no-sandbox`, which appears nowhere in this file.
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+
+    # CHROMIUM NEEDS MORE THAN DOCKER'S DEFAULT 64 MB OF SHARED MEMORY, and a renderer
+    # that runs out of it dies in ways that read as anything but "out of shared memory".
+    # This is the standard recommendation for headless Chromium in a container, and the
+    # alternative (`--disable-dev-shm-usage`) moves the same traffic onto /tmp.
+    shm_size: 256m
 
     environment:
+      # A WRITABLE HOME, POINTED AT THE ONE WRITABLE PLACE. `read_only: true` means this
+      # user's home is not writable, and Chromium wants somewhere to put its crash
+      # database, its cache and its user data directory. Left alone it fails in the
+      # container with a message that names none of that:
+      #
+      #     chrome failed to start:
+      #     chrome_crashpad_handler: --database is required
+      #
+      # HONEST STATUS, because this is the second guess at a failure I could not
+      # reproduce: that error was measured on a GitHub runner, where EVERY conversion
+      # answered 500 and Gotenberg's access log recorded none of them, while this same
+      # file was green on a developer machine. What is measured here is that pointing
+      # HOME at the tmpfs changes nothing locally (still 200) and that it is the right
+      # thing to do for a read-only root filesystem regardless. Whether it is what the
+      # runner needed is what CI is now being asked.
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp
+      XDG_CONFIG_HOME: /tmp
+
       # CHANGE THESE. They are read by `--api-enable-basic-auth`, and the plugin is
       # configured with the same pair through RRD_GOTENBERG_USERNAME / RRD_GOTENBERG_PASSWORD.
       # A compose file is not a secret store: in anything but a trial install these
@@ -105,6 +126,11 @@ services:
       # secret mechanism.
       GOTENBERG_API_BASIC_AUTH_USERNAME: "${GOTENBERG_USERNAME:?set GOTENBERG_USERNAME}"
       GOTENBERG_API_BASIC_AUTH_PASSWORD: "${GOTENBERG_PASSWORD:?set GOTENBERG_PASSWORD}"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
     command:
       - gotenberg
