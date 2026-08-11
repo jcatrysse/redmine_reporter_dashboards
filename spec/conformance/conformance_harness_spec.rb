@@ -260,6 +260,31 @@ module RedmineReporterDashboards
           expect(markdown).to include('| `:outline` | — |')
           expect(markdown).to include('| `:tagged_pdf` | yes |')
         end
+
+        # THE GENERATOR'S UNVERIFIED HALF, KEPT ALIVE BY A SYNTHETIC ENTRY. `Matrix#cell`'s
+        # `'not verified'` branch and the whole `footer_section` became unreachable from the
+        # shipped catalogue on 2026-08-11, and an unreachable branch with no stand-in test is
+        # how the next engine's column silently prints wrong. Found by a UX review reading the
+        # regenerated matrix.
+        it 'prints "not verified" and the note for an engine that has not been run' do
+          pending_engine = Render::EngineCatalogue::Engine.new(
+            id: 'unrun', label: 'u', role: 'documented', default: true,
+            verification: 'pending',
+            verification_note: 'nobody has run this, and this sentence is what the matrix ' \
+                               'prints instead of cells nobody measured',
+            needs_service: true, renders_offline: true, install: 'a service you run',
+            version_floor: 'v1', asset_models: ['upload'], deprecated: false, deprecation: nil,
+            trade: 'a stand-in for an engine at pending', capabilities: [:timeout]
+          )
+          stub = instance_double(Render::EngineCatalogue, engines: [pending_engine],
+                                                         source_name: '`stub`')
+          markdown = Matrix.render(reports: {}, fixtures: [synthetic(id: 'S-90')],
+                                   catalogue: stub)
+
+          expect(markdown).to include('| `S-90` | synthetic S-90 | not verified |')
+          expect(markdown).to include('## Columns that are not measurements')
+          expect(markdown).to include('nobody has run this')
+        end
       end
     end
 
@@ -295,7 +320,16 @@ module RedmineReporterDashboards
 
       # An engine that is not corpus-verified must SAY why, in the file, where the
       # matrix generator can print it. INV-7 applied to engines.
+      #
+      # THIS LOOP IS EMPTY TODAY, AND SAYING SO IS THE POINT. Every shipped engine has been
+      # `verification: corpus` since 2026-08-11, so it iterates nothing and passes — the
+      # shape this repository keeps rediscovering. It stays, because the property has to hold
+      # for the next engine added at `pending`; the SYNTHETIC example below is what keeps the
+      # generator's unverified path alive, and the assertion on the catalogue itself is what
+      # stops this passing because the file failed to load.
       it 'makes every unverified engine explain itself' do
+        expect(catalogue.engines).not_to be_empty
+
         catalogue.engines.reject(&:corpus_verified?).each do |engine|
           expect(engine.verification_note.to_s.length).to be > 40,
                                                           "#{engine.id} is unverified and says nothing about why"

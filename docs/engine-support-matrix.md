@@ -23,6 +23,24 @@ design (gate G12):
 | `SKIP` | the engine **does not declare** the capability — the fixture does not apply, and the reason names it |
 | `FAIL` | the engine **declares** the capability and the fixture failed. A declaration is a promise |
 
+And the Role column, which is spelled out here because one of its three values is
+also a `verification:` value meaning something else entirely — a UX review read
+`documented` in a row headed by measured cells and took it for "no adapter ships":
+
+| Role | Means |
+|---|---|
+| `reference` | the default, and the engine every other column is compared against |
+| `compatibility` | kept so existing installs keep rendering; deprecated on arrival |
+| `documented` | a first-class adapter you choose deliberately, because it needs a service you run. **Not** `verification: documented`, which means no adapter ships at all |
+
+**Which build produced these cells is not in this file, on purpose** — see the note in
+`spec/conformance/matrix.rb`: a matrix that goes red because Chromium shipped a patch
+release trains people to regenerate it without reading it. Per-engine provenance (the
+version, the pinned digest, the CI run) is recorded in `config/capabilities.yml`'s
+`verification_note`, and the run's own log carries the exact versions. That mattered
+less while an unverified engine's note was printed below; every engine is verified
+now, so this sentence is where a reader is sent instead.
+
 ## The engines
 
 | Engine | Role | Default | Needs a service | Renders offline | Install cost |
@@ -89,5 +107,4 @@ same fact written where an operator can read it (`config/capabilities.yml`).
 | `F-18-fonts` | text goes onto the page and comes back off it | PASS | PASS | PASS |
 | `F-19-pathological-input` | malformed and oversized input is bounded, either way | PASS | PASS | PASS |
 | `F-20-escaping-payloads` | the escaping payload set under this engine's JS parser | PASS | PASS | PASS |
-
 

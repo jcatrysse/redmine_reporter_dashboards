@@ -783,11 +783,14 @@ closed code set (`:engine_unavailable :engine_misconfigured :engine_version_unsu
 :timeout :readiness_timeout :resource_limit :asset_unresolved :capability_unsupported
 :engine_crashed :output_not_pdf :output_empty :internal`). **Never raises. Never returns
 HTML.** *`:engine_misconfigured` was added on 2026-08-11 by curator decision (§Findings E-27
-row 3): the engine is there and refuses to be used as configured, so the remedy is an
-operator's and no retry will produce a different answer — as against `:engine_unavailable`,
-where the engine is not there at all. Reachability, transport and any probe that could not be
-COMPLETED stay `:engine_unavailable`, because a wrong address and a service that is down are
-not distinguishable from the caller.*
+row 3). The tie-break is **whether this side can tell whose problem it is**, and the words are
+`render/failure.rb`'s rather than a paraphrase of them, because two normative statements of one
+rule is how a vocabulary acquires two meanings: `:engine_misconfigured` means the engine IS
+there and refuses to be used as configured, the remedy is an operator's and it is NAMED in the
+message; `:engine_unavailable` means the engine is not there and the diagnosis stops at "it did
+not answer", so the message has to name more than one remedy and the code must not pretend to
+have chosen. Reachability, transport and any probe that could not be COMPLETED are therefore
+`:engine_unavailable` — identity before verdict.*
 
 **INV-5 becomes mechanical** via two post-conditions enforced by `Render::Renderer`, the wrapper
 **above** every adapter: bytes must start `%PDF-` and contain `%%EOF`, else rewritten to

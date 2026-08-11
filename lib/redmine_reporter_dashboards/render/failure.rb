@@ -22,13 +22,23 @@ module RedmineReporterDashboards
       # Added 2026-08-11 by curator decision. The two are one question apart, and the
       # question is *whose* problem it is:
       #
-      #   `:engine_unavailable`    the engine is not THERE. Not installed, not answering,
-      #                            the pool refused, the socket died. A retry can succeed
-      #                            and nothing an operator TYPES changes the diagnosis.
+      #   `:engine_unavailable`    the engine is not THERE, and this side cannot tell why.
+      #                            Not installed, not answering, the pool refused, the
+      #                            socket died. The diagnosis stops at "it did not answer" —
+      #                            the remedy might be a retry, an install or an address, so
+      #                            the MESSAGE has to name more than one of them and the
+      #                            CODE must not pretend to have chosen.
       #   `:engine_misconfigured`  the engine IS there and refuses to be used as
       #                            configured — or is configured in a way this plugin will
-      #                            not use. The remedy is an operator's, and no retry will
-      #                            ever produce a different answer.
+      #                            not use. The remedy is an operator's, it is NAMED in the
+      #                            message, and no retry will ever produce a different
+      #                            answer.
+      #
+      # THE FIRST DRAFT OF THIS COMMENT FAILED ITS OWN TEST, and an independent UX review
+      # caught it: it said `:engine_unavailable` is where "nothing an operator TYPES changes
+      # the diagnosis" and listed "not installed" as an example — but installing the binary
+      # is exactly what fixes that one. The discriminator is not "can an operator act on it";
+      # it is "do we KNOW what to tell them".
       #
       # E-27 row 3 recorded the old behaviour as *defensible*: the adapter refuses to use
       # an unauthenticated Gotenberg, so it IS unavailable to it. What that collapses is
@@ -43,16 +53,29 @@ module RedmineReporterDashboards
       # old collapse defensible in the first place:
       #
       #   * reachability and transport — "nothing answered", "answered 502 and does not
-      #     look like a Gotenberg", a dead socket. Identity before verdict (HANDOVER §1):
-      #     a wrong address and a service that is down are indistinguishable from here,
-      #     and guessing between them is how this project shipped three confident wrong
-      #     remediations in one afternoon.
+      #     look like a Gotenberg", a dead socket. Identity before verdict (HANDOVER §1).
+      #     We could OFTEN tell a name that does not resolve from a socket that refuses —
+      #     the exception class is in `detail`, and the same UX review measured
+      #     `Socket::ResolutionError` against `Errno::ECONNREFUSED` reaching the page under
+      #     one identical sentence — and the code deliberately does not split on it,
+      #     because the check's SENTENCE already names both remedies and a code that
+      #     guesses between them is how this project shipped three confident wrong
+      #     remediations in one afternoon. If that changes, split the ARM and its message,
+      #     not this bullet. Recorded as a recommendation in §Findings E-27.
       #   * a probe that could not be COMPLETED. "The JavaScript check answered 503" is
       #     not a verdict about JavaScript, and it must not read as one.
-      #   * the binary-backed engines. There is nothing to misconfigure about a Chromium
-      #     you launched yourself, which is why the only producer today is the Gotenberg
-      #     adapter. A code with one producer is fine; a code with none is dead
-      #     vocabulary and this file has a precedent for deleting those.
+      #   * `Render::Failure`'s only producer today is the Gotenberg adapter, and that is
+      #     narrower than "the binary-backed engines have nothing to misconfigure" — which
+      #     is what this bullet said until a UX review measured two counter-examples.
+      #     `wkhtmltopdf.rb` reads `RRD_WKHTMLTOPDF_BINARY`, an operator-typed path, and
+      #     answers `Errno::EACCES` — a file that exists and is not executable — with
+      #     `:engine_unavailable`; and `Reporting::ReportRun#no_engine_diagnostic` mints
+      #     `:engine_unavailable` for "no render engine is registered", which no retry will
+      #     ever change either. Both are candidates, both are pre-existing, and both are
+      #     recorded in §Findings E-27 rather than moved in the same commit that introduces
+      #     the code — a vocabulary change and a re-classification of two unrelated call
+      #     sites are two reviews, not one. A code with one producer is fine; a code with
+      #     none is dead vocabulary, and this file has a precedent for deleting those.
       CODES = %i[
         engine_unavailable engine_misconfigured engine_version_unsupported timeout
         readiness_timeout resource_limit asset_unresolved capability_unsupported

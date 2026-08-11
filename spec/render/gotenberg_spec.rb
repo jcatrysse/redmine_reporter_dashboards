@@ -1482,12 +1482,41 @@ module RedmineReporterDashboards
               when :answers_without_credential then { unauthenticated: ->(_r) { ok } }
               when :javascript_off then { javascript: ->(_r) { ok } }
               when :nothing_there then { identity: ->(_r) { raise Errno::ECONNREFUSED } }
+              when :identity_timed_out then { identity: ->(_r) { raise Net::ReadTimeout } }
               when :not_a_gotenberg
                 { identity: ->(_r) { status(Net::HTTPNotFound, '404', '<html>nginx</html>') } }
+              when :version_not_a_version
+                { version: ->(_r) { ok('<html>hello</html>') } }
+              when :convert_route_answers_oddly
+                { unauthenticated: ->(_r) { status(Net::HTTPServiceUnavailable, '503') } }
               when :javascript_probe_broken
                 { javascript: ->(_r) { status(Net::HTTPServiceUnavailable, '503') } }
+              when :javascript_probe_timed_out
+                { javascript: ->(_r) { raise Net::ReadTimeout } }
+              when :javascript_probe_threw then { javascript: ->(_r) { raise IOError, 'pipe' } }
               else {}
               end
+            end
+
+            # THE DOUBLE'S OWN PREMISE, ASSERTED. An independent review demonstrated that
+            # `locked` can be quietly made friendly again — answering an unauthenticated
+            # `/version` 200-with-the-version, as no locked Gotenberg does — and all twelve
+            # rows below still pass, against a service that cannot exist. The comment above
+            # was the only thing holding it, and a comment is not a control (CLAUDE.md §3).
+            #
+            # The number is MEASURED against the real container, not chosen:
+            #   curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3098/version  ->  401
+            it 'is scripted from what a locked Gotenberg really answers, not from convenience' do
+              # ASSERTED ON THE SCRIPT ITSELF, with no adapter in the way: the premise is a
+              # property of the double, so the double is what is interrogated. Going through
+              # `#preflight` would prove only that the run passed, which is what every row
+              # below already does — and what survived the friendly-double mutation.
+              unauthenticated = Net::HTTP::Get.new(described_class::VERSION_PATH)
+              authenticated = Net::HTTP::Get.new(described_class::VERSION_PATH)
+              authenticated['Authorization'] = 'Basic dXNlcjpwYXNz'
+
+              expect(locked({}).call(unauthenticated, 1).code).to eq('401')
+              expect(locked({}).call(authenticated, 2).code).to eq('200')
             end
 
             {
@@ -1503,10 +1532,24 @@ module RedmineReporterDashboards
               # above it, and each is a question this adapter cannot answer from here.
               'nothing is at the address' =>
                 [:engine_unavailable, %w[user pass], :nothing_there],
+              'nothing answers in time' =>
+                [:engine_unavailable, %w[user pass], :identity_timed_out],
               'something answers and is not a Gotenberg' =>
                 [:engine_unavailable, %w[user pass], :not_a_gotenberg],
+              # FIVE OF THESE ROWS EXIST BECAUSE AN INDEPENDENT REVIEW MOVED THEIR ARMS AND
+              # THE WHOLE SUITE STAYED GREEN — 2569 examples, 0 failures, with all five
+              # mutants applied at once. The block's own header claims moving any one of them
+              # is the defect it exists to catch, and it pinned seven arms out of twelve.
+              'the endpoint answered /version with something that is not a version' =>
+                [:engine_unavailable, %w[user pass], :version_not_a_version],
+              'the conversion route answers something that is not about authentication' =>
+                [:engine_unavailable, %w[user pass], :convert_route_answers_oddly],
               'the JavaScript probe could not be COMPLETED, so there is no verdict' =>
-                [:engine_unavailable, %w[user pass], :javascript_probe_broken]
+                [:engine_unavailable, %w[user pass], :javascript_probe_broken],
+              'the JavaScript probe did not answer in time, which is also not a verdict' =>
+                [:engine_unavailable, %w[user pass], :javascript_probe_timed_out],
+              'the JavaScript probe threw, which is not a verdict either' =>
+                [:engine_unavailable, %w[user pass], :javascript_probe_threw]
             }.each do |label, (expected, credential, scenario_name)|
               it "reports #{expected} when #{label}" do
                 http = recording_http(&locked(scenario(scenario_name)))
@@ -1520,9 +1563,15 @@ module RedmineReporterDashboards
             end
 
             # THE CODE IS NOT DECORATION ON THE SENTENCE: it is what a caller branches on,
-            # so the two must agree. A misconfiguration always names something an operator
-            # sets; an unavailability never claims to know which.
-            it 'never accuses a configuration when it only knows the service did not answer' do
+            # so the two must agree. The claim asserted here is the narrow one that is TRUE —
+            # an arm that only knows "nothing answered" does not accuse the credential or
+            # JavaScript. The broader sentence this comment used to carry ("an unavailability
+            # never claims to know which configuration is wrong") was refuted by an
+            # independent review with the shipped 404 message, which does name the address and
+            # `--api-root-path`: it is telling an operator the two things it CAN distinguish,
+            # which is right, and the code stays `:engine_unavailable` because it cannot tell
+            # a wrong path from a service that is down.
+            it 'never accuses the credential or JavaScript when it only knows nothing answered' do
               http = recording_http(&locked(identity: ->(_r) { raise Errno::ECONNREFUSED }))
               result = described_class.new(endpoint: 'http://gotenberg.test:3000',
                                            credential: %w[user pass], http: http.to_proc).preflight
@@ -1530,6 +1579,43 @@ module RedmineReporterDashboards
               expect(result.code).to eq(:engine_unavailable)
               expect(result.message).not_to include('credential')
               expect(result.message).not_to include('JavaScript')
+            end
+
+            # `#preflight` MUST NEVER RAISE (technical-spec.md §5), and an adversarial QA
+            # pass measured the one path that did: `check_credential`'s authenticated
+            # `/version` probe had no rescue, so a service that answers the identity probe
+            # and then stops listening — a restart, an OOM kill, `--force-recreate` — threw
+            # `Errno::ECONNREFUSED` out of `#preflight` altogether. Under
+            # `verification: pending` that became a skip; at `corpus` it is one conformance
+            # example with a raw stack trace reading as a plugin defect.
+            #
+            # Both the CLASSES that escape and the RESULT are asserted: `send_request` turns
+            # only the three timeout classes into `TIMED_OUT`, so each of these reaches the
+            # rescue as itself.
+            [Errno::ECONNREFUSED, EOFError, Errno::ECONNRESET, SocketError].each do |error|
+              it "answers a Failure rather than raising #{error} mid-preflight" do
+                calls = 0
+                http = recording_http do |req, _n|
+                  calls += 1
+                  # The identity probe answers, so the sequence gets past `check_reachable`
+                  # and into the arm that had no rescue. Anything else dies.
+                  next status(Net::HTTPUnauthorized, '401') if calls == 1
+
+                  raise error
+                end
+                engine = described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                             credential: %w[user pass], http: http.to_proc)
+
+                result = nil
+                expect { result = engine.preflight }.not_to raise_error
+                expect(result).to be_failure
+                expect(result.code).to eq(:engine_unavailable)
+                expect(result.message).to include('nothing answered at')
+                # AND THE CLASS IS IN THE DETAIL RATHER THAN THE MESSAGE, which is the rule
+                # for every other transport failure in this adapter.
+                expect(result.detail).to include(error.name)
+                expect(result.message).not_to include(error.name)
+              end
             end
 
             # An unconfigured install: no endpoint at all. This is the one an operator of
@@ -1788,6 +1874,65 @@ module RedmineReporterDashboards
             report = PreflightSuite.new(engine_ids: 'gotenberg').reports.first
 
             expect(report.checks.map(&:id)).not_to include(:engine_not_selected)
+          end
+
+          # ------------------------------------------------------------------
+          # FR-50 — AND THE INSTALL'S OWN CHOICE STOPS THE DEFERRAL, which is the third place
+          # this rule has had to be written (§Findings E-27's "a rule about 'an install has not
+          # chosen this' belongs everywhere an engine is chosen FOR the operator"). Without it
+          # the skip's own sentence — "this install has not chosen it" — is false on exactly
+          # the installs that chose it, and the diagnostic refuses to check the engine every
+          # report renders through.
+          #
+          # `RRD_GOTENBERG_URL` IS PINNED TO nil IN ALL THREE, and that is not tidiness: the
+          # render-smoke job exports it, so without the pin these examples would make real
+          # HTTP requests there and none here — green in both, measuring two different things.
+          # E-27's control run found exactly that shape in this file's credential examples.
+          it 'does NOT defer an engine this installation selected' do
+            report = with_env('RRD_GOTENBERG_URL' => nil) do
+              PreflightSuite.new(selected_engine_id: 'gotenberg')
+                            .reports.find { |r| r.engine_id.to_s == 'gotenberg' }
+            end
+
+            expect(report.checks.map(&:id)).not_to include(:engine_not_selected)
+            # AND IT REALLY RAN: an unconfigured endpoint is its OWN named failure, which is
+            # what an operator who selected this engine needs to see instead of a skip.
+            expect(report.checks.find(&:failed?).id).to eq(:gotenberg_endpoint)
+          end
+
+          # THE DISCRIMINATOR. Without this, `selected?` returning true for everything would
+          # pass the example above — and would silently un-defer every service-backed engine
+          # on every install, which is the defect E-27 row's "every install's preflight went
+          # red" was about.
+          it 'still defers it when the installation selected a DIFFERENT engine' do
+            report = with_env('RRD_GOTENBERG_URL' => nil) do
+              PreflightSuite.new(selected_engine_id: 'chromium_cdp')
+                            .reports.find { |r| r.engine_id.to_s == 'gotenberg' }
+            end
+
+            expect(report.checks.map(&:id)).to eq([:engine_not_selected])
+          end
+
+          it 'treats an empty selection as no selection, because that is how an unset setting posts' do
+            report = with_env('RRD_GOTENBERG_URL' => nil) do
+              PreflightSuite.new(selected_engine_id: '')
+                            .reports.find { |r| r.engine_id.to_s == 'gotenberg' }
+            end
+
+            expect(report.checks.map(&:id)).to eq([:engine_not_selected])
+          end
+
+          # AND THE SAME CLAIM ON THE READER, because the behavioural half above is an
+          # EQUIVALENT MUTANT and the mutation run said so: with the blank normalisation
+          # deleted, `selected_engine_id` becomes `''`, `selected?('gotenberg')` is still
+          # false, and the deferral still happens — so the example passes against a guard
+          # that is not there. `''` reaching a reader that means "an engine id" is the thing
+          # the guard produces, so that is what is asserted (HANDOVER §1: the claim is about
+          # the CONSTRUCTOR, so assert on the constructor).
+          ['', '   ', nil].each do |value|
+            it "reads #{value.inspect} back as no selection at all" do
+              expect(PreflightSuite.new(selected_engine_id: value).selected_engine_id).to be_nil
+            end
           end
 
           it 'says what to set when no endpoint is configured, rather than guessing one' do

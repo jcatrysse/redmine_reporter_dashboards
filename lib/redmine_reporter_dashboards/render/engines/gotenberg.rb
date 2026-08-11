@@ -423,7 +423,10 @@ module RedmineReporterDashboards
         end
 
         CHECK_TITLES = {
-          gotenberg_endpoint: 'an endpoint is configured for the render service',
+          # "ADDRESS", not "endpoint": `label_reporter_preflight_check_gotenberg_endpoint`
+          # and the failure message both say address, and one screen with two nouns for one
+          # thing was a review rejection in this project on 2026-08-11.
+          gotenberg_endpoint: 'an address is configured for the render service',
           gotenberg_reachable: 'the render service answers, and is a Gotenberg',
           gotenberg_credential: 'the render service enforces its credential',
           gotenberg_version: 'the render service is Gotenberg 8 or later',
@@ -871,6 +874,32 @@ module RedmineReporterDashboards
             'listener) is exposing the same service unauthenticated.',
             detail: "an unauthenticated POST to #{CONVERT_PATH} answered #{probe}",
             code: :engine_misconfigured
+          )
+        rescue StandardError => e
+          # `#preflight` MUST NEVER RAISE (technical-spec.md §5), and this was the one
+          # transport call in the sequence with no rescue — found by an adversarial QA pass
+          # against a real listener that answers the identity probe and then stops
+          # listening, which is a container restart, an OOM kill or a `--force-recreate`
+          # mid-run. `send_request` only converts the three TIMEOUT classes into
+          # `TIMED_OUT`, so `Errno::ECONNREFUSED`, `EOFError`, `Errno::ECONNRESET` and
+          # `SocketError` escaped from here — past `configuration_checks`, out of
+          # `#preflight`, and into `spec/conformance`, which calls it with no rescue at all.
+          #
+          # THE PROMOTION IS WHAT MADE THIS A DEFECT RATHER THAN A SKIP: while this engine
+          # was `verification: pending` a raise here became an "unavailable" skip; at
+          # `corpus` it is one example with a raw stack trace reading as a plugin bug next
+          # to twenty-two with the right message.
+          #
+          # The answer is the same shape `check_reachable`'s rescue already has — the
+          # service went away, we cannot tell why, so `:engine_unavailable` and a message
+          # naming more than one remedy.
+          preflight_failure(
+            started, "nothing answered at #{@endpoint}",
+            'Confirm the container is still running and that Redmine can reach it at this ' \
+            'address — it answered the first probe and then stopped, which is what a ' \
+            'restart, an OOM kill or a `docker compose up --force-recreate` looks like ' \
+            'from here.',
+            detail: "#{e.class}: #{e.message}"
           )
         end
 

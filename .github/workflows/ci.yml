@@ -884,7 +884,9 @@ jobs:
   #
   # It runs the harness half on every push (no engine needed, no browser touched) and
   # the corpus half against whatever adapters are registered. **All three engines are
-  # `verification: corpus` since 2026-08-11**, so all three columns are measurements and
+  # `verification: corpus` as of 2026-08-11** — `:chromium_cdp` from the start,
+  # `:wkhtmltopdf` on 2026-08-06 and `:gotenberg` last — so all three columns are
+  # measurements and
   # the matrix no longer carries a "Columns that are not measurements" section at all —
   # which also means a Gotenberg that will not come up here is a HARD failure rather than
   # a skip, and this job now depends on the registry serving the pinned digest.
@@ -936,9 +938,14 @@ jobs:
       # that used to be here said the catalogue keeps it at `pending` with no cells, and
       # that stopped being true on the day of the promotion.
       #
-      # `continue-on-error` on the INSTALL only: a release asset that 404s must not fail
-      # a job whose subject is the reference engine. A wkhtmltopdf that installs and then
-      # fails the corpus is a finding, and that failure is not suppressed.
+      # `continue-on-error` ON THE INSTALL ONLY, AND IT NO LONGER BUYS WHAT IT USED TO.
+      # Since the 2026-08-06 promotion a missing wkhtmltopdf is a HARD corpus failure —
+      # measured by an independent review at 23 red examples with the binary pointed at a
+      # path that does not exist — so a 404 release asset DOES fail this job, further down,
+      # with a message naming the catalogue instead of the download. The flag is kept so the
+      # failure arrives from the corpus with its reason attached rather than from `curl`; it
+      # is not a suppression any more. If the asset host becomes unreliable, the answer is a
+      # mirror or a demotion, not this line.
       - name: Install the compatibility engine
         continue-on-error: true
         run: |

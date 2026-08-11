@@ -20,11 +20,23 @@ sudo apt-get install -y poppler-utils          # pdfinfo, pdftotext, pdftoppm
 # the harness's own tests — no browser, no database, always runnable
 rspec spec/conformance/conformance_harness_spec.rb
 
+# THE FULL CORPUS NEEDS A GOTENBERG SINCE 2026-08-11, and this is not a preference: all
+# three engines are `verification: corpus`, and a corpus engine whose preflight fails is a
+# HARD failure rather than a skip. Without the two variables below the run answers 23 red
+# examples reading "gotenberg claims `verification: corpus` … and its preflight failed".
+docker run --rm -d --name gt-auth -p 127.0.0.1:3098:3000 \
+  -e GOTENBERG_API_BASIC_AUTH_USERNAME=rrd -e GOTENBERG_API_BASIC_AUTH_PASSWORD=s3cret \
+  "$(grep -oE 'gotenberg/gotenberg:8@sha256:[0-9a-f]+' docker-compose.gotenberg.yml)" \
+  gotenberg --api-enable-basic-auth --api-timeout=60s
+export RRD_GOTENBERG_URL=http://127.0.0.1:3098 \
+       RRD_GOTENBERG_USERNAME=rrd RRD_GOTENBERG_PASSWORD=s3cret
+
 # the corpus, against every registered adapter
 RRD_CONFORMANCE=1 rspec spec/conformance
 
-# one engine only
-RRD_CONFORMANCE=1 RRD_ENGINE=chromium_cdp rspec spec/conformance
+# one engine only. NOTE this leaves the G9 matrix example RED — the matrix can only be
+# generated from a run in which every `corpus` engine executed, which is the point of it.
+RRD_CONFORMANCE=1 RRD_ENGINE=chromium_cdp rspec spec/conformance/conformance_spec.rb
 
 # regenerate the support matrix (gate G9 compares the committed file with a fresh run)
 RRD_CONFORMANCE=1 RRD_MATRIX_WRITE=1 rspec spec/conformance
