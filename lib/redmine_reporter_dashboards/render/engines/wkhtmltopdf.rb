@@ -243,24 +243,32 @@ module RedmineReporterDashboards
         # and is not executable — one fault, one remedy, and no retry will ever help — which
         # is `:engine_misconfigured` by the rule in `render/failure.rb`.
         #
-        # "PRESENT" WAS ASSERTED AND IS NOT ESTABLISHED — measured, and the paragraph that used
-        # to stand here claimed the opposite. The reasoning was that `execve`'s errno for a
-        # path holding nothing is `ENOENT`, so `EACCES` proves something is there. It does not:
-        # a review ran a child dropped to an unprivileged uid against a `0700` parent directory
-        # and got `EACCES` for a file **that does not exist**, because the kernel refuses the
-        # path lookup before it can say so. `RRD_WKHTMLTOPDF_BINARY=/opt/private/wkhtmltopdf`
-        # with `/opt/private` mode `0700` and Redmine running as `redmine` is an ordinary
-        # operator mistake, and "the engine is present" would have been a confident wrong
-        # diagnosis of it — the exact shape this whole line of work exists to remove.
+        # THIS SENTENCE DOES NOT ENUMERATE, AND TWO ATTEMPTS THAT DID WERE BOTH REFUTED BY
+        # MEASUREMENT. That history is the reason for the shape:
         #
-        # So the sentence names what IS known: the path could not be executed, for one of two
-        # reasons, and both are an operator's. The CODE is unaffected — no retry helps either
-        # way and `chmod` is the remedy in both — which is why `:engine_misconfigured` survives
-        # a finding that killed the sentence.
+        #   1. *"the render engine is present and cannot be executed"* — killed because
+        #      `EACCES` also arrives for a file that DOES NOT EXIST, when a parent directory
+        #      is unsearchable: the kernel refuses the lookup before it can say so. Measured
+        #      with a child dropped to an unprivileged uid under a `0700` parent.
+        #   2. *"either not executable, or in a directory Redmine may not enter"* — killed by
+        #      a `noexec` mount: mode `0755`, every parent world-searchable, and still
+        #      `EACCES`. Neither named reason is true there, and `chmod +x` does nothing.
+        #      `/tmp`, `/var/tmp`, `/home` and NFS are routinely `noexec` on hardened hosts,
+        #      and an operator pointing `RRD_WKHTMLTOPDF_BINARY` into a mounted volume is
+        #      exactly who this arm is for. SELinux and AppArmor denials land here too.
+        #
+        # So it reports the fact — the kernel refused permission to execute this path — and
+        # lists what to CHECK rather than asserting which of them is wrong. Two over-confident
+        # enumerations were each a confident wrong remediation, which is the defect this whole
+        # line of work exists to remove. The CODE is unaffected by both findings: every one of
+        # these is an operator's to fix and no retry helps, which is what `:engine_misconfigured`
+        # means.
         rescue Errno::EACCES => e
           [nil, failure(request, :engine_misconfigured,
-                        'the render engine at the configured path could not be executed — it ' \
-                        'is either not executable, or in a directory Redmine may not enter',
+                        'Redmine was refused permission to execute the render engine at the ' \
+                        'configured path. Check the execute bit on the file, the search ' \
+                        'permission on the directories above it, and whether that filesystem ' \
+                        'is mounted noexec',
                         detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
         rescue Errno::ENOENT => e
           [nil, failure(request, :engine_unavailable,

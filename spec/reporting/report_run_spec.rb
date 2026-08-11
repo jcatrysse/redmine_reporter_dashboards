@@ -459,12 +459,13 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
         expect(outcome.diagnostic.message).to include('needs a separate service')
         expect(outcome.diagnostic.message).to include('Administration')
         expect(outcome.diagnostic.message).not_to include('no render engine is registered')
-        # AND IT MUST STAY DRAWABLE. `MinimalPdf` is Windows-1252, so a `→` in a sentence that
-        # might ever reach an artefact is replaced wholesale by "value unavailable" — measured
-        # by a review on the first draft of this message, which used one.
+        # AND IT STAYS DRAWABLE. `MinimalPdf` is Windows-1252, so a `→` in a sentence that ever
+        # reached a drawn artefact WOULD be replaced wholesale by "value unavailable" — measured
+        # on the first draft of this message, which used one. Conditional on purpose: `message`
+        # is not among `FailureDocument`'s fields today, so this guards the character against a
+        # future field set rather than a live bug. `—` is Windows-1252 (0x97) and stays.
         expect(outcome.diagnostic.message).not_to include('→')
         expect(outcome.diagnostic.detail).to include('registered=gotenberg')
-        expect(outcome.diagnostic.detail).to include('selected=none')
       end
 
       # THE THIRD STATE, found twice independently — by an adversarial pass here and by a
@@ -477,62 +478,26 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       it 'does not tell an installation that selected a stale engine that it selected nothing' do
         RedmineReporterDashboards::Render::Registry.register(:gotenberg,
                                                             ReportRunSpecSupport::FakeAdapter)
+        logger = ReportRunSpecSupport::Recorder.new
 
         outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
-                      engine_preference: 'athena').call(pdf: true)
+                      engine_preference: 'athena', logger: logger).call(pdf: true)
 
         expect(outcome).not_to be_ok
         expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
         # The message says only what is true in EVERY state that reaches it.
         expect(outcome.diagnostic.message).to include('can be selected automatically')
         expect(outcome.diagnostic.message).not_to match(/none has been selected/i)
-        # The discriminator is in the admin-facing half, where it is worth having.
-        expect(outcome.diagnostic.detail).to include('selected=athena')
-      end
-
-      # THE PORT IS READ ONCE PER RUN, AND NOTHING SAID SO UNTIL A MUTATION SURVIVED. Making
-      # `no_engine_diagnostic` name the selection gave `engine_preference` a second caller, and
-      # the sentinel used to be resolved on every CALL — so a failing run did two settings
-      # reads and could write the same `dropped` complaint into the log twice, which an
-      # operator reads as two problems with one setting. The memoisation that fixes it is
-      # invisible from the outside except by COUNTING, so this counts.
-      #
-      # HAND-ROLLED AND UNDONE IN `ensure`, in this file's style — the stand-ins here are
-      # built, not mocked — and `|**_kwargs|` rather than a bare `**` because the plugin's
-      # syntax floor is Ruby 2.7.
-      #
-      # THE PORT DOES NOT EXIST IN THIS PROCESS, and that is the answer to "why was the
-      # `FROM_SETTINGS` branch never covered". `RedmineReporterDashboards.render_engine_id`
-      # lives in the boot file, which the DB-less suite does not load — reaching that branch
-      # here used to raise `NameError`, so no example went near it. Standing the port up for
-      # the duration is what makes the branch reachable, and the example removes it again
-      # rather than leaving a method on a shared module for whatever runs next.
-      it 'reads the installation setting once per run, not once per caller' do
-        RedmineReporterDashboards::Render::Registry.register(:gotenberg,
-                                                            ReportRunSpecSupport::FakeAdapter)
-        reads = 0
-        mod = RedmineReporterDashboards
-        existed = mod.respond_to?(:render_engine_id)
-        original = existed ? mod.method(:render_engine_id) : nil
-        mod.define_singleton_method(:render_engine_id) do |**_kwargs|
-          reads += 1
-          nil
-        end
-
-        begin
-          outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
-                        engine_preference: described_class::FROM_SETTINGS).call(pdf: true)
-
-          expect(outcome).not_to be_ok
-          expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
-          expect(reads).to eq(1)
-        ensure
-          if existed
-            mod.define_singleton_method(:render_engine_id, original)
-          else
-            mod.singleton_class.send(:remove_method, :render_engine_id)
-          end
-        end
+        # AND THE DISCRIMINATOR IS IN THE LOG, WHICH IS WHERE A READER IS. A draft put
+        # `selected=athena` into `Diagnostic#detail` and called that "admin-facing"; a review
+        # measured that detail is printed nowhere at all — the panel names it under "WHAT IS
+        # DELIBERATELY NOT PRINTED", `to_h` omits it, `FailureDocument` excludes it, no logger
+        # writes it. The stale value was already reaching the log from `selected_engine_id`,
+        # which is what this asserts instead. The log line is the fix; the detail was decoration
+        # nobody could read.
+        expect(logger.lines.join("\n")).to include('athena')
+        expect(logger.lines.join("\n")).to include('not registered here')
+        expect(outcome.diagnostic.detail).not_to include('athena')
       end
 
       it 'passes over it for one that needs nothing, even though it sorts first' do
@@ -750,8 +715,14 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       expect(outcome.diagnostic.message).to include('no render engine is registered')
       # THE DETAIL, which nothing anywhere asserted. The same review mutated it to nonsense
       # and the FULL suite stayed green (2671 examples, 0 failures) — and it is the surviving
-      # half of the pair the previous round's commit message claimed were both killed. It is
-      # what an administrator reads in the diagnostics panel beside the code.
+      # half of the pair the previous round's commit message claimed were both killed.
+      #
+      # IT IS NOT WHAT AN ADMINISTRATOR READS, and the first version of this comment said it
+      # was. `Diagnostic#detail` is printed nowhere — the panel lists it under "WHAT IS
+      # DELIBERATELY NOT PRINTED", `to_h` omits it so no serialiser can leak it, and its only
+      # readers are the two delivery `restamp` sites. It is still worth pinning: it is part of
+      # this object's contract, it is carried across a delivery, and a string that nothing
+      # asserts is a string that quietly becomes wrong.
       expect(outcome.diagnostic.detail).to include('Registry.ids is empty')
       expect(outcome).to be_pdf_attempted
     end

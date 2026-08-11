@@ -1678,7 +1678,8 @@ module RedmineReporterDashboards
             # scenario above raises a bare `SocketError`; a real unresolvable host raises
             # `Socket::ResolutionError`, which exists from Ruby 3.3 and is a `SocketError`
             # subclass — measured on 3.3.6, where `Net::HTTP` to an unresolvable name raises it
-            # with `error_code` −2. Two of CI's four cells run 3.3+, so on those this example
+            # with `error_code` −2. THREE of CI's four cells run 3.3+ (they are 3.2, 3.3, 3.4, 3.4 — a
+            # review caught this said two), so on those this example
             # exercises the real class and on the others it is skipped with a reason rather
             # than silently proving nothing.
             it 'catches the class a real unresolvable host raises, not just its parent' do
@@ -1946,6 +1947,16 @@ module RedmineReporterDashboards
             # skip that does not say what to do about it is the next one.
             expect(report.checks.first.detail).to include('RRD_ENGINE=gotenberg')
             expect(report.checks).to all(be_ok)
+            # AND ITS TITLE IS TRUE IN ALL THREE SELECTION STATES (§Findings E-32). It used to
+            # say "this install has not chosen it", which is false for a STORED selection
+            # naming an engine that is no longer registered — `EnginePreference` drops such a
+            # value, so `selected_engine_id` arrives nil and this arm answers anyway. Nothing
+            # asserted this sentence at all, on the one surface where it is reachable in a
+            # booted Redmine: the admin preflight page and the rake task.
+            expect(report.checks.first.title).to include("this installation's selected engine")
+            expect(report.checks.first.title).not_to match(/has not chosen/i)
+            # One spelling of the menu path per release; `report_run.rb` cannot use `→`.
+            expect(report.checks.first.detail).not_to include('→')
           end
 
           it 'still runs it, for real, when the operator names it' do

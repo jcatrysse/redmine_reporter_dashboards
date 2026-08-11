@@ -37,9 +37,11 @@ ONLY PLACE IT SHOWS.** The ten `spec/golden` byte-identity examples (`RrdGolden:
 extract — or any copy made with `rsync --exclude .git/`, which is the isolation recipe §3
 recommends and which most measurement in this project uses — they skip with a reason and the run
 still says *0 failures*. That is **G7, the byte-identity gate**, the one irreversible thing in this
-plan. Measured 2026-08-11 on the same tree: the real working directory gives `2671 examples, 0
-failures, 127 pending` and a `git archive` extract gives `2670 examples, 0 failures, 137 pending`,
-differing by exactly those ten. **A `137 pending` number in this file or in a session log is a run
+plan. Measured 2026-08-11 on one tree at `cdb272e`: the real working directory gives `2673
+examples, 0 failures, 127 pending` and a `git archive` extract gives `2673 examples, 0 failures, 137
+pending` — the SAME example total, differing by exactly those ten PENDING. (An earlier version of
+this entry compared 2670 with 2671 and read the example counts as differing too. They were one
+apart because that round had added an example; a review caught the conflation.) **A `137 pending` number in this file or in a session log is a run
 that did not check G7** — several earlier ones are exactly that. Two rules. Report G7 from a run in
 a directory with `.git` present (`rspec spec/golden` is **167 examples in 0.55 s**, so there is no
 excuse — and note that number: the first version of this line said 71, which was a FILE SUBSET
@@ -1566,7 +1568,7 @@ directory on Ruby 3.3.6 — and 128 pending on the Redmine 5.1 / Ruby 3.2 cell**
 adds the suite's first Ruby-version-conditional skip (`Socket::ResolutionError` is 3.3+). That is
 the pending total becoming version-dependent for the first time; a bare number is no longer enough — read the G7 trap at the top of §1 before comparing that pending count with any
 older one — `rake redmine:plugins:test` **920 runs / 0 failures / 0 errors / 4 skips** on
-PostgreSQL, the eight `script/gates/*.sh` all OK, the three-engine conformance corpus green
+PostgreSQL, the nine `script/gates/*.sh` that run without arguments all OK (`cve_accepted_diff.sh` and `cve_findings_from_trivy.sh` need arguments and are driven by CI), the three-engine conformance corpus green
 against the real containers (`chromium_cdp` 20/0/0, `gotenberg` 19/0/1, `wkhtmltopdf` 18/0/2),
 and **G9 measured rather than assumed**: regenerated with `RRD_MATRIX_WRITE=1` from that run and
 `diff`ed against the committed file — identical. 14 mutations against the round's own guards, 14 killed —

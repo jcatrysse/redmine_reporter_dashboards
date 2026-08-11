@@ -825,8 +825,9 @@ module RedmineReporterDashboards
         #
         # `Socket::ResolutionError#error_code` would discriminate EAI_AGAIN from EAI_NONAME,
         # but only on Ruby 3.3+ — below it there is nothing but the message — so the split
-        # would hold on two of the four supported cells and guess on the others. One sentence
-        # naming both remedies is honest on all four.
+        # would hold on three of the four supported cells (3.2, 3.3, 3.4, 3.4 — a review counted
+        # this where an earlier comment said two) and guess on the fourth. One sentence naming
+        # both remedies is honest on all four.
         #
         # `SocketError` AND NOT `Socket::ResolutionError` as the arm's class: the latter is
         # Ruby 3.3+ and this plugin's floor is 2.7 (§8 raises it to 3.1, still below 3.3), so
@@ -1257,14 +1258,18 @@ module RedmineReporterDashboards
           # It is the most natural way an operator writes basic auth for a service URL, and
           # this adapter does not use it — `DEFAULT_HTTP` connects with host and port only,
           # so the credential would be silently ignored AND carried in `@endpoint`, which is
-          # interpolated into most of the failure messages this file produces. (That clause
-          # used to carry a COUNT, and the count went stale twice — six, when it was nine, and
-          # then ten. A number nobody updates in a security-bearing comment is worse than no
-          # number, and the property does not depend on one.) `Failure#message` reaches the
-          # diagnostics panel, the scheduled-report failure MAIL sent to every recipient,
-          # and `Snapshot`'s persisted row. So the password would be displayed, e-mailed
-          # and stored, while not authenticating anything. Found by an independent review,
-          # measured end to end.
+          # interpolated into failure messages this file produces, and into details as well.
+          # (That clause used to carry a COUNT, which went stale twice — six, when it was nine,
+          # and then ten — and was then replaced by "MOST of the failure messages", which a
+          # review measured as false too: ten of thirty-six message-bearing sites. A number
+          # nobody updates is worse than none, and a superlative nobody counts is worse than
+          # both. The property does not depend on either.) `Failure#message` reaches the
+          # diagnostics panel, the scheduled-report failure MAIL — sent to the schedule's
+          # OWNER, not to every recipient, which the mailer view says in as many words and a
+          # review corrected here — and `Snapshot`'s persisted row. So the password would be
+          # displayed, e-mailed and stored, while not authenticating anything. The severity
+          # does not need the inflated audience. Found by an independent review, measured end
+          # to end.
           #
           # Redacting would fix the leak and keep the silent non-authentication. Refusing
           # fixes both, and the message says where the credential actually goes.

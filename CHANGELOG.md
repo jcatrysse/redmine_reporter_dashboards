@@ -329,8 +329,10 @@ All notable changes to this plugin are documented in this file.
   cause it — a misspelt address, a container on another network, or a name server Redmine
   cannot reach — instead of telling an administrator to check whether the service is running.
   **A render engine that cannot be executed** no longer reads as one that is not installed:
-  the message names both reasons that produce it, a file without the execute bit and a
-  directory Redmine may not enter. And an installation that produces no PDF is now told which
+  the message says the operating system refused permission, and names what to check — the
+  execute bit, the directories above the file, and whether that filesystem is mounted
+  `noexec`. It deliberately does not guess which one it is, because two earlier versions
+  that did were each wrong for a real case. And an installation that produces no PDF is now told which
   of two things is wrong: **no render engine at all**, or **every engine it has needs a
   separate service, so none can be chosen automatically** — the second names the setting that
   fixes it, and used to claim no engine was installed when one was.

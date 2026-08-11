@@ -700,20 +700,18 @@ module RedmineReporterDashboards
       # does not exist — it happens once per run because `resolve_engine` is called once, and
       # the boot file argues against memoising the read itself (an administrator who switches
       # away from a container must not keep POSTing to it until a restart).
-      # MEMOISED PER RUN, which is what the paragraph above already claims happens and what
-      # was not quite true: the sentinel was resolved on every CALL, and `no_engine_diagnostic`
-      # now needs the same answer to say what this installation selected. A second call meant
-      # a second settings read and a second `dropped` log line about the same stored value —
-      # an operator reading two identical complaints about one setting. Per-RUN and not per
-      # process: the boot file's argument against memoising is about an administrator who
-      # switches away from a container not having to restart Redmine, and a `ReportRun` lives
-      # for one render.
+      # ONE CALLER, DELIBERATELY, AND THERE WAS BRIEFLY A SECOND. A draft had
+      # `no_engine_diagnostic` call this too, to name the stored selection in its `detail` —
+      # which needed a per-run memo so one failing run did not read the setting twice and log
+      # the same complaint twice. A review then measured that `Diagnostic#detail` is printed
+      # NOWHERE (see `no_engine_diagnostic`), so the memo existed to serve a field with no
+      # reader. Both are gone. If a second caller ever appears, the memo comes back with it,
+      # and per-RUN is the shape it wants: the boot file's argument against memoising is about
+      # an administrator who switches away from a container not having to restart Redmine.
       def engine_preference
         return @engine_preference unless @engine_preference == FROM_SETTINGS
-        return @resolved_engine_preference if defined?(@resolved_engine_preference)
 
-        @resolved_engine_preference =
-          ::RedmineReporterDashboards.render_engine_id(logger: logger)
+        ::RedmineReporterDashboards.render_engine_id(logger: logger)
       end
 
       # THE FALLBACK USED TO BE `registry.ids.first`, WHICH IS ALPHABETICAL ORDER.
@@ -807,7 +805,19 @@ module RedmineReporterDashboards
       # cannot reach it, because `EnginePreference` drops an unregistered id at the settings
       # boundary; the `engine_preference:` port can, and this file already carries one example
       # that exists purely because "the port is public". So the claim the code cannot support
-      # is gone from the message and the truth is in `detail`, which is admin-facing.
+      # is gone.
+      #
+      # AND THE DISCRIMINATOR IS NOT PUT IN `detail`, WHICH WAS THE FIRST FIX AND WAS WORSE.
+      # `Diagnostic#detail` is printed NOWHERE: `_diagnostics.html.erb` has a "WHAT IS
+      # DELIBERATELY NOT PRINTED" section naming it, `Diagnostic#to_h` omits it so no
+      # serialiser can pick it up by accident, `FailureDocument` excludes it, and no logger
+      # writes it — its only readers are the two `restamp` call sites. A fifth review measured
+      # all of that after a draft had shipped `selected=<value>` into it, described as
+      # "admin-facing". It is not, and the information was never missing anyway:
+      # `selected_engine_id` already writes *"this installation selects render engine "athena",
+      # which is not registered here"* to the log, where the person who can act on it is, and
+      # an example pins that line. So the third state's fix is the SENTENCE being true, and
+      # nothing else was needed.
       #
       # WHAT THIS DOES NOT CLAIM. `PreflightCommand` answers exit 0 and *"OK so far"* for the
       # second state, so one surface calls it fine while this one calls it a misconfiguration.
@@ -829,9 +839,7 @@ module RedmineReporterDashboards
                    'every registered engine needs a separate service. Choose one under ' \
                    'Administration > Plugins, or install an engine that needs none',
           correlation_id: correlation_id,
-          detail: "registered=#{ids.map(&:to_s).sort.join(',')} " \
-                  "selected=#{engine_preference.to_s.empty? ? 'none' : engine_preference} " \
-                  'none auto-selectable'
+          detail: "registered=#{ids.map(&:to_s).sort.join(',')} none auto-selectable"
         )
       end
 

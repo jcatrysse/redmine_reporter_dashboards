@@ -139,7 +139,19 @@ module RedmineReporterDashboards
           engine_id: id, engine_version: 'not checked', duration_ms: 0,
           checks: [Preflight::Check.new(
             id: :engine_not_selected, state: :skip,
-            title: 'the render engine needs a service, and this install has not chosen it',
+            # "IS NOT THIS INSTALLATION'S SELECTED ENGINE" AND NOT "HAS NOT CHOSEN IT", which
+            # is the same correction `ReportRun#no_engine_diagnostic` needed and got one round
+            # earlier (§Findings E-32). `selected_engine_id` arrives here nil for a STORED
+            # selection naming an engine that is no longer registered — `EnginePreference`
+            # drops such a value — so "has not chosen it" was told to an operator who had
+            # chosen. And unlike `no_engine_diagnostic`, whose two arms cannot be reached in a
+            # booted Redmine, THIS one is on the admin preflight page and the rake task, so it
+            # was the reachable copy of the same false sentence. The stored value is not put
+            # here: this object is given `selected_engine_id:`, which is already nil by then,
+            # and inventing a second port to carry a value the log already names would be a
+            # mechanism for one sentence.
+            title: "the render engine needs a service and it is not this installation's " \
+                   'selected engine',
             # `RRD_ENGINE=…` COMES FIRST. The text surface truncates a detail at 90
             # characters (`preflight.rb`'s `one_line`), and in the first version the only
             # actionable words started at index 120 — thirty past the cut. The example
@@ -149,9 +161,13 @@ module RedmineReporterDashboards
             # characters), and the last clause had to change when FR-50 landed: "used only
             # by a template that names it" stopped being true the moment an installation
             # could choose one.
+            # `Administration > Plugins` WITH `>` AND NOT `→`, to match the one sentence in
+            # `report_run.rb` that had to drop the arrow (`MinimalPdf` is Windows-1252). This
+            # detail is HTML-only and could keep the arrow; two spellings of one menu path in
+            # one release is the reason it does not.
             detail: "run with RRD_ENGINE=#{id} to check it deliberately, including its " \
                     'credential. Or pick it in the engine selector on the admin preflight ' \
-                    "page, or as this installation's engine in Administration → Plugins. " \
+                    "page, or as this installation's engine in Administration > Plugins. " \
                     "#{id} needs " \
                     'a service, so nothing selects it for you.',
             duration_ms: 0

@@ -291,17 +291,18 @@ module RedmineReporterDashboards
               absent = described_class.new(binary: File.join(dir, 'nope')).render(request)
 
               expect(denied.code).to eq(:engine_misconfigured)
-              expect(denied.message).to include('could not be executed')
+              expect(denied.message).to include('refused permission to execute')
               expect(denied.detail).to include('EACCES')
               expect(absent.code).to eq(:engine_unavailable)
               expect(absent.message).to include('not installed')
-              # AND IT MUST NOT CLAIM THE FILE IS THERE. A review measured `EACCES` arriving
-              # for a path that holds NOTHING — a missing file under a `0700` parent, where the
-              # kernel refuses the lookup before it can say so — so "the engine is present"
-              # was a confident wrong diagnosis of an ordinary permissions mistake. The
-              # sentence names both reasons instead.
-              expect(denied.message).not_to include('present')
-              expect(denied.message).to include('directory Redmine may not enter')
+              # AND IT MUST NOT ENUMERATE THE CAUSE, because two enumerations were each
+              # measured false: "the engine is present" (`EACCES` also arrives for a MISSING
+              # file under an unsearchable parent) and "either not executable, or in a
+              # directory Redmine may not enter" (a `noexec` mount gives `EACCES` with the
+              # execute bit set and every parent searchable). `\bpresent\b` and not a bare
+              # substring, so the guard cannot be satisfied by "represents".
+              expect(denied.message).not_to match(/\bpresent\b/)
+              expect(denied.message).to include('noexec')
             end
           end
 
