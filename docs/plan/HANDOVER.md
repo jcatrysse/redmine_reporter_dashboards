@@ -1105,6 +1105,37 @@ caches REQUESTS must script its double from measured behaviour, not from the sha
 keeps the rest of the file short — a convenience double is exactly as vacuous as a
 convenience fixture, and only a mutation run says so.
 
+**A TABLE THAT PINS SOME OF A THING'S ARMS AND NOT THE REST IS A COMMENT, AND ITS HEADER
+WILL SAY OTHERWISE.** 2026-08-11, §Findings E-29. A twelve-row classification of Gotenberg's
+failure arms was written as a seven-row table whose own header said *"moving any one of them
+across the line is the defect this block exists to catch"*. An independent review moved FIVE
+of the twelve — including the two a source comment claims by name are protected — and the
+whole tree stayed green: **2569 examples, 0 failures**, byte-identical to the control, with
+all five mutants applied at once. Two rules. When you write a table to pin a boundary,
+ENUMERATE THE ARMS FROM THE SOURCE (`rg -n 'preflight_failure\(' file`) rather than from the
+ones you were already thinking about; and mutate every row of it, because a row that cannot
+fail is indistinguishable from a row that is right.
+
+**A MUTATION HARNESS WHOSE RESTORE CAN BE INTERRUPTED MUST VERIFY THE TREE BEFORE EVERY
+VERDICT, NOT AFTER THE BATCH.** 2026-08-11, disclosed by the adversarial QA pass that hit it:
+a two-minute tool timeout landed BETWEEN applying a mutation and restoring it, so the next
+three mutations in that batch ran against a dirty tree and one of them reported a
+contaminated KILLED. It was caught only because the harness re-verified against
+`git show HEAD:` afterwards and re-ran all four. The cheap fix is a precondition rather than
+a postcondition — diff the file against `git show HEAD:<path>` before applying, and treat a
+mismatch as UNMEASURED. This is the §1 entry above from the other side: there, a commit could
+not tell a mutation from an edit; here, a mutation could not tell a clean tree from a
+mutated one.
+
+**AND THE FRIENDLY-DOUBLE ENTRY BELOW WAS RE-VIOLATED IN THE NEXT TASK, BY SOMEBODY WHO HAD
+READ IT.** The same session wrote a comment above its new double saying, in as many words,
+that scripting it from convenience is what made a mutation unkillable on 2026-08-11 — and
+left the premise (a locked Gotenberg answers **401** to an unauthenticated `/version`)
+asserted nowhere. Reintroducing the friendly answer kept all seven rows and the control
+green. **A comment recording a lesson is not a control**: assert the double's own answers, at
+the double, in the same file (`expect(locked({}).call(unauthenticated_get, 1).code).to
+eq('401')`).
+
 **`URI.parse` MAKES A SCHEMELESS VALUE OPAQUE, AND EVERY PARSED-URI GUARD SILENTLY SKIPS
 IT.** E-27 row 9's first fix, rejected in review on 2026-08-11.
 `URI.parse('gotenberg:3000/?token=abc')` has `scheme: "gotenberg"`, `query: nil` — so a
@@ -1197,8 +1228,18 @@ plugin or the vendor gem, each listed with its reason in
       useradd -m -u 4242 rrdbench
       chmod -R a+rX /home/user/redmine_reporter_dashboards
       su rrdbench -c 'cd .../redmine && export HOME=/home/rrdbench \
-        CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome && \
+        CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome \
+        RRD_GOTENBERG_URL=http://127.0.0.1:3098 \
+        RRD_GOTENBERG_USERNAME=rrd RRD_GOTENBERG_PASSWORD=s3cret && \
         RRD_CONFORMANCE=1 bundle exec rspec -I plugins/…/spec plugins/…/spec/conformance'
+
+  **THE THREE `RRD_GOTENBERG_*` VARIABLES ARE NOT OPTIONAL SINCE 2026-08-11**, and this
+  recipe carried none until an independent review ran it: `:gotenberg` is
+  `verification: corpus` now, so a corpus engine whose preflight fails is a HARD failure
+  rather than a skip — **69 examples, 23 failures**, every one of them reading
+  *"gotenberg claims `verification: corpus` … and its preflight failed:
+  engine_misconfigured: RRD_GOTENBERG_URL is unset"*. Start the containers first (the
+  Docker entry below has the two `docker run` lines).
 
   MEASURED 2026-08-10: **20 pass / 0 fail / 0 skip** on Chromium 141.0.7390.37, the full
   corpus, locally. `wkhtmltopdf` runs 18/0/2 as root — it has no sandbox to refuse — so a
@@ -1254,7 +1295,10 @@ plugin or the vendor gem, each listed with its reason in
 
   Then `RRD_GOTENBERG_URL=http://127.0.0.1:3098 RRD_GOTENBERG_OPEN_URL=http://127.0.0.1:3099
   RRD_GOTENBERG_USERNAME=rrd RRD_GOTENBERG_PASSWORD=s3cret`. `spec/render/gotenberg_service_spec.rb`
-  SKIPS with a reason without them, and the corpus reports gotenberg as unavailable.
+  SKIPS with a reason without them, and **the corpus FAILS — it does not report gotenberg as
+  unavailable any more.** That sentence was true while the engine was `verification: pending`
+  and became false with the promotion on 2026-08-11: an engine the catalogue calls `corpus`
+  and cannot reach is a raise, by design (`conformance_spec.rb`'s three-state rule).
   A third, `--chromium-disable-javascript` **and** authenticated, is what proves the
   JavaScript check fires — with no credential it fails at the credential arm first and
   the JS arm is never reached, which reads as the JS check passing.
@@ -1381,6 +1425,7 @@ record as of the last local run.
 | **T-12/T-13 DB-less half** | **yes, locally (2026-08-06)** | 155 examples green as root with no browser (45 pending), and 155 green as `rrd` with Chromium (22 pending — wkhtmltopdf, skipping with its reason). Includes the harness's own negative tests and 30 browser-less adapter examples |
 | **`:wkhtmltopdf`** | **YES — and PROMOTED to `verification: corpus` on 2026-08-06** | Its first run ever (CI 31059574558) was 13 of 20; four failures were fixture bugs, one a real egress defect, and two were held as a curator decision (§Findings E-5). All seven are resolved, and the two that looked like capability differences turned out to be an **unpatched-Qt build** (§Findings E-18). Against the patched build CI uses: **18 PASS / 0 FAIL / 2 SKIP**, both skips naming `:readiness_expression`, an undeclared capability — G12's three-state rule working. The matrix was **regenerated from that run** (`RRD_MATRIX_WRITE=1`) and re-verified against a second clean run: 67 examples, 0 failures, 2 pending. Its twenty cells are now real, and a regression in any of them is a build failure |
 | **`:gotenberg`** | **YES — and PROMOTED to `verification: corpus` on 2026-08-11** | The condition E-27 row 1 set was met: CI run 31408759956 and every run since (31469385598 on `ee22bd6`) reported **19 pass / 0 fail / 1 skip** with zero occurrences of "gotenberg is not available here", and the same numbers came back from a local run against two real containers on 2026-08-11. The one skip is `F-14-asset-inline` for an `:asset_inline` this engine does not declare — G12's first arm, not a gap. Matrix **regenerated from a run in which all three corpus engines executed** (`RRD_MATRIX_WRITE=1`; chromium_cdp 20/0/0, wkhtmltopdf 18/0/2 patched-qt, gotenberg 19/0/1), which also **deleted the whole "Columns that are not measurements" section** — no engine is unverified any more, so `Matrix.footer_section` emits nothing. **What it costs, accepted knowingly:** a Gotenberg that will not come up in `render-smoke` is now a HARD failure, so every run of that job depends on the registry serving the pinned digest |
+| **FR-50 — the install-wide engine selection** | **yes, locally (2026-08-11)** | **2650 DB-less examples, 0 failures**, 137 pending (was 2601 at `ee22bd6`), plus the full-application suite and the settings round trip. **16 mutations, 16 killed** — and the two that survived the first run are the entry worth keeping: one was a REDUNDANT SORT (`from_settings` normalises the id list before `new` does, so mutating the instance-level sort measured the class method twice) and one was a GUARD WITH NO BEHAVIOURAL SIGNATURE (blanking `selected_engine_id: ''` changes no outcome, because no engine is named `''`). Both were fixed the way §1 says: assert the claim where it is MADE — on the constructor, and on the reader — rather than through behaviour that cannot see it |
 | **T-14: the render preflight, BOTH engines, in CI (run 31079493206)** | **YES** | **chromium_cdp 9/9 in 465 ms and wkhtmltopdf 9/9 in 380 ms**, both with the hosted image `EXPECTED_FAILURE` — INV-8 containment confirmed on two independent engines. This is the first time wkhtmltopdf has drawn the probe at all. It was **not** an argument for promoting it — `verification: corpus` is about T-12's twenty fixtures, and at the time neither of E-5's two open items had moved. Both have since, and the promotion happened on the corpus evidence rather than on this |
 | **T-14: the render preflight, Chromium 141** | **yes, locally (2026-08-06)** | 9 of 9 checks pass in **943 ms**, run as the non-root user (see the Chromium note in §1): page breaks → 2 pages, `Page 1 of 2` compiled, page rgb[0,170,255] and badge rgb[204,0,0], the inline data: image decoding to its own colour, `CANVAS-STATE drawn`, `SHELL present`, and the Redmine-hosted image `EXPECTED_FAILURE` — INV-8 containment confirmed against a real browser rather than argued. **The first run took 17.5 s and was red**; the three defects it found were all in the diagnostic, not the engine (§Findings E-10) |
 | **T-14 DB-less half** | **yes, locally (2026-08-06)** | 41 examples green with no browser (`spec/render/preflight_spec.rb`, `preflight_command_spec.rb`), including every one of the six document checks driven RED against a canned single-page PDF. `spec/render` + `spec/conformance` together: 205 examples, 0 failures, 49 pending. The Minitest half (`test/functional/reporter_preflight_controller_test.rb`, `test/unit/render_preflight_rake_test.rb`) **has not been executed** — it needs a booted Redmine, so the `standalone` CI job is its first run |

@@ -343,20 +343,39 @@ itself, it needs no service, and it is the one every other section here assumes.
 is offered as *one* of the options — it buys a render path that is already isolated at the
 network level, and it costs you a service to run, monitor and patch.
 
-**Verified in CI since 2026-08-11.** Its column in
+**Measured in CI, enforced since 2026-08-11.** The numbers come from run 31408759956
+(2026-08-10) and every run since; the promotion — the decision that those cells are a
+contract rather than a report — was taken on 2026-08-11. Its column in
 [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md) carries measurements now —
 19 fixtures pass and one is skipped, because Gotenberg does not declare the `:asset_inline`
-capability that fixture needs. Those cells are a contract rather than a report: a
-regression in any of them fails the build, and so does a Gotenberg that will not start in
-CI. What that costs, stated plainly: the render-conformance job depends on the container
-registry serving the pinned digest.
+capability that fixture needs — its asset model is **upload** rather than inline, which changes
+nothing about how you write a template (see *What it can and cannot do* below). Those cells are a contract rather than a report: a
+regression in any of them fails the build, and so does a Gotenberg that will not start
+**wherever the corpus runs** — CI, or a developer's machine. What that costs, stated plainly:
+the render-conformance job depends on the container registry serving the pinned digest, and a
+local `RRD_CONFORMANCE=1 rspec spec/conformance` now needs a Gotenberg running and its
+`RRD_GOTENBERG_*` variables set (`spec/conformance/README.md` has the commands).
 
 Nothing auto-detects it. An engine that needs a service is never chosen for you: an install
-without a container has not picked Gotenberg, it has simply not picked, and quietly
-selecting it would turn every report into a connection error. A template asks for it by
-name, through its `engine_hint`. **There is no form field for that yet** — the
-engine-selection screen is a later task — so today you set it by exporting the template,
-adding `engine_hint: gotenberg`, and importing it again.
+without a container has not picked Gotenberg, it has simply not picked, and quietly selecting
+it would turn every report into a connection error. You pick it, in one of two places:
+
+- **Administration → Plugins → Redmine Reporter Dashboards → Render engine** — the whole
+  installation. The dropdown is built from the engines actually registered on this host, and
+  the line under each one says what it needs, whether it needs a service, whether it renders
+  offline and what it cannot do — generated from `config/capabilities.yml` rather than written
+  out, so it cannot drift from what the code does.
+- **A template's `engine_hint`** — one report. A hint **outranks** the setting, deliberately:
+  a hint is a statement about a document ("this one needs a modern JavaScript engine") and the
+  setting is a statement about the installation, so an existing template keeps rendering
+  exactly as it did when somebody changes the installation's engine. There is still no form
+  field for a hint; you set it by exporting the template, adding `engine_hint: gotenberg`, and
+  importing it again.
+
+The full order is: the template's hint, then this installation's setting, then the engine
+`config/capabilities.yml` declares as the default, then any engine that needs no service. An
+engine that is not installed on this host is ignored at every step, with a line in the log,
+rather than failing the report — so a template written elsewhere stays portable.
 
 ### It is refused unless it is authenticated
 
@@ -411,6 +430,11 @@ Or without a shell: **Administration → Render preflight** has an engine select
 `gotenberg` and run it. Either way, naming the engine is what runs its real checks
 (credential included); the default run defers an engine that needs a service, because
 you have not chosen it.
+
+If you **have** chosen it — in the setting above — the default run stops deferring it and
+checks it like any other engine, which also means `rake reporter_dashboards:render:preflight`
+starts failing when your container is down. That is the point: the engine an installation
+renders with is the one its deploy step has to be able to verify.
 
 Two of those checks are worth knowing about, because both of them catch a container that
 looks completely healthy:
@@ -2238,7 +2262,7 @@ Report widgets show an **Export as PDF** link in their header. It opens the same
 
 The section above describes how PDF export works **today**: through Reporter's own
 wkhtmltopdf call, with a fixed delay and injected polyfills. An owned render path now
-exists in the plugin alongside it — two engines behind one interface, a readiness
+exists in the plugin alongside it — three engines behind one interface, a readiness
 protocol instead of the fixed delay, and a conformance corpus that measures what each
 engine actually does. [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md)
 is that measurement, generated from the run rather than written by hand.

@@ -272,6 +272,56 @@ All notable changes to this plugin are documented in this file.
   missing was which report failed. That matters most on the preview screen, where what
   failed is the unsaved text in the editor rather than the template named in the heading.
 
+- **You can now choose which engine draws your PDFs, for the whole installation.**
+
+  **Administration → Plugins → Redmine Reporter Dashboards → Render engine.** Until now the
+  only way to select an engine was to put `engine_hint:` inside a template — which meant
+  exporting it, editing the file and importing it again, once per report. The choice belongs
+  to the installation, so it is a setting.
+
+  Under the dropdown is one line per engine saying what it needs installed, whether it needs
+  a service you run, whether it renders offline and what it cannot do. Those lines are
+  **generated from `config/capabilities.yml`**, the same file the support matrix and the
+  adapters are checked against, so they cannot drift into describing an engine you do not
+  have.
+
+  Three things worth knowing:
+
+  - **A template that names an engine keeps it.** A hint outranks this setting, deliberately:
+    a hint says something about a document, the setting says something about the
+    installation, and an existing report must not start looking different because somebody
+    changed an installation-wide preference.
+  - **An engine that needs a service can be chosen here and is never chosen for you.** If you
+    pick one, the page says so and points at *Administration → Render preflight*, and the
+    preflight stops deferring it — so `rake reporter_dashboards:render:preflight` starts
+    failing when your container is down. That is the point of choosing it.
+  - **A value that names no installed engine is refused rather than stored**, listed on the
+    page with the reason, and the declared default keeps rendering. The engine's address and
+    credential are still environment variables, not fields on this page: they are deployment
+    secrets, and the settings table is neither encrypted nor hidden from anyone who can read
+    the administration page.
+
+- **Gotenberg's column in the engine support matrix is now measurements rather than
+  "not verified".**
+
+  `docs/engine-support-matrix.md` is generated from an actual render of twenty documents
+  through each engine, never written by hand. Gotenberg's column said *not verified* for
+  every row — honest, and not useful. It has now been run in CI against the pinned image:
+  **nineteen of the twenty pass**, and the twentieth is skipped with its reason in the cell
+  (this engine carries assets *alongside* a document rather than inside it, so the fixture
+  about embedded images does not apply to it).
+
+  What this changes for you: the column is something you can plan against, and a regression
+  in any of those twenty cells now fails the build instead of being reported and ignored.
+
+- **A failed report now says whether the render engine is missing or misconfigured.**
+
+  Both used to be reported as "the engine is unavailable". They send an administrator to
+  different places — one to check whether the service is running, the other to fix a
+  credential, an address or a container flag — so a report that fails because Gotenberg is
+  refusing the configured password now says so with its own code, and the diagnostics panel,
+  the failure mail and the failure PDF all carry it.
+
 - **The engine support matrix now covers wkhtmltopdf, with real results instead of
   "not verified".**
 
@@ -518,7 +568,7 @@ All notable changes to this plugin are documented in this file.
     plugins, and an attachment's `file_url`, which produced a permanent unauthenticated
     link to the file. Attachments keep their ordinary authenticated URLs.
 
-- **An owned PDF render path, with two engines and a conformance corpus that judges
+- **An owned PDF render path, with three engines and a conformance corpus that judges
   them.** Nothing user-facing changes yet — no button, no menu item and no report
   currently goes through it (the widget export still uses Reporter's own path). What
   exists is the interface, the engines and the evidence, and it is being landed before
@@ -532,10 +582,23 @@ All notable changes to this plugin are documented in this file.
     queue that **refuses** rather than hanging when it is full.
   - `:wkhtmltopdf`, the compatibility engine: the same interface over the engine
     `bundle install` already provides, so existing installs keep rendering. Deprecated
-    on arrival with a stated removal condition. **It is not yet verified** — its package
-    no longer exists in Ubuntu 24.04 and CI is where its first real results will come
-    from. Until then `docs/engine-support-matrix.md` shows its cells as *not verified*
-    rather than guessing at them.
+    on arrival with a stated removal condition. Its column in
+    `docs/engine-support-matrix.md` carries **eighteen of twenty passing**, with the two
+    that do not skipped and the reason printed in the cell — this engine cannot be asked
+    "are you ready yet?", so the two fixtures that depend on that question do not apply
+    to it.
+  - `:gotenberg`, the containerised option: the same Chromium in a service you run, for
+    installs that would rather isolate the renderer at the network level than run a
+    browser inside Redmine's own process tree. **The plugin never ships or starts a
+    container**, and it is never chosen for you — an install without one has not picked
+    Gotenberg, it has simply not picked. `docker-compose.gotenberg.yml` is a documented
+    example carrying the isolation, the non-root user, the read-only root filesystem and
+    the image pinned by digest, with a nightly CI job scanning exactly those bytes.
+    Its address and credential live in Redmine's environment, not in the settings table.
+    **It refuses to run unauthenticated**: an endpoint reachable without the configured
+    credential is a preflight failure with a named remediation, not a warning. Its
+    column carries **nineteen of twenty passing** and one skip naming a capability it
+    does not declare.
   - A **readiness protocol** replacing the fixed three-second wait: the page tells the
     engine when its charts are finished, an in-page watchdog explains itself if they
     never are, and a document that runs out of time is still produced — with what it is
