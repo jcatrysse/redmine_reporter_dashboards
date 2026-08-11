@@ -158,6 +158,29 @@ module RedmineReporterDashboards
           expect { PreflightSuite.new(engine_ids: 'nope').resolved_ids }
             .to raise_error(Registry::UnknownEngine, /nope.*Known: a, b/m)
         end
+
+        # E-27 row 8. `RRD_ENGINE='  '` and `RRD_ENGINE=','` normalised to an EMPTY list,
+        # and an empty list means "run the defaults" — so a mangled selection in a deploy
+        # step silently verified engines nobody named, while `RRD_ENGINE=chromium_cpd`
+        # correctly exited 2. Given-but-unparseable is now the typo case.
+        ['  ', ',', ' , ', "\t"].each do |mangled|
+          it "exits 2 on #{mangled.inspect} — a selection was given and it names nothing" do
+            expect(run(engine_ids: mangled)).to eq(described_class::NOTHING_TO_RUN)
+            expect(out.string).to include('names no render engine')
+            expect(out.string).to include('Known: a, b')
+            expect(out.string).to include('Nothing was verified')
+          end
+        end
+
+        # And the rule cuts at NON-EMPTY, deliberately: unset and `VAR=` are both how an
+        # environment says "nobody selected", and refusing those would turn every deploy
+        # script that does not export RRD_ENGINE into exit 2.
+        [nil, ''].each do |unset|
+          it "still runs the default set for #{unset.inspect}" do
+            expect(run(engine_ids: unset)).to eq(described_class::OK)
+            expect(out.string.scan('render preflight:').length).to eq(2)
+          end
+        end
       end
 
       describe 'output format' do

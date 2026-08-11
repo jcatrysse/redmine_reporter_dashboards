@@ -218,6 +218,92 @@ class ReporterPreflightControllerTest < ActionController::TestCase
     end
   end
 
+  # ---- the engine selector (§Findings E-27 row 6) -------------------------
+  #
+  # Before this parameter existed, an engine that needs a service could not be diagnosed
+  # from this page at all: the deferral always applied, and its remediation named a rake
+  # variable — an instruction the one reader this page exists for has no shell to follow.
+
+  def test_the_form_offers_the_default_set_and_every_registered_engine
+    @request.session[:user_id] = @admin.id
+
+    with_engine(:stub, StubAdapter) do
+      get :show
+
+      assert_response :success
+      assert_select 'select#engine' do
+        assert_select 'option', 2
+        assert_select 'option[value=?]', '', text: I18n.t(:label_reporter_preflight_engine_default)
+        assert_select 'option[value=?]', 'stub'
+      end
+    end
+  end
+
+  def test_naming_an_engine_runs_only_that_engine
+    @request.session[:user_id] = @admin.id
+    report = Render::Preflight::Report.new(
+      engine_id: :stub, engine_version: 'stub-1', duration_ms: 12,
+      checks: [Render::Preflight::Check.new(id: :engine, title: 't', state: :pass,
+                                            detail: 'ok', duration_ms: 3)]
+    )
+    Render::Preflight.any_instance.stubs(:run).returns(report)
+
+    Render::Registry.isolated do
+      Render::Registry.register(:stub, StubAdapter)
+      Render::Registry.register(:other, StubAdapter)
+
+      post :run, params: { engine: 'stub' }
+
+      assert_response :success
+      assert_equal 1, assigns(:reports).length
+    end
+  end
+
+  # The registry lookup is the validation. A hand-crafted POST naming an engine that does
+  # not exist — or a value that names nothing at all — must be an error an administrator
+  # can read, never a 500 and never a silent run of the default set (the row-8 sin one
+  # surface up).
+  def test_an_unknown_engine_name_is_an_error_message_not_a_500
+    @request.session[:user_id] = @admin.id
+
+    with_engine(:stub, StubAdapter) do
+      post :run, params: { engine: 'gotenbrg' }
+
+      assert_response :success
+      assert_nil assigns(:reports)
+      assert_equal I18n.t(:text_reporter_preflight_unknown_engine, engines: 'stub'),
+                   flash[:error]
+    end
+  end
+
+  def test_a_blank_but_given_engine_name_is_the_same_error
+    @request.session[:user_id] = @admin.id
+
+    with_engine(:stub, StubAdapter) do
+      post :run, params: { engine: '  ' }
+
+      assert_response :success
+      assert_nil assigns(:reports)
+      assert_not_nil flash[:error]
+    end
+  end
+
+  # Nothing may be constructed from the parameter: an unknown name must be refused
+  # before any adapter is newed up, or the parameter is a way to make the server do
+  # work on unvalidated input.
+  def test_an_unknown_engine_name_constructs_no_adapter
+    @request.session[:user_id] = @admin.id
+
+    with_engine(:stub, UnstartableAdapter) do
+      post :run, params: { engine: 'gotenbrg' }
+
+      assert_response :success
+      # UnstartableAdapter raises on construction, and a constructed adapter becomes a
+      # failed :engine check — so a nil @reports proves nothing ran.
+      assert_nil assigns(:reports)
+    end
+  end
+
   # Not a blank page. "Nothing can render at all" is the most alarming answer this page
   # has, so it has to be the loudest — a green-looking empty page is the failure mode
   # this repository keeps rediscovering.
@@ -293,7 +379,9 @@ class ReporterPreflightControllerTest < ActionController::TestCase
               label_reporter_preflight_duration_ms label_reporter_preflight_json
               text_reporter_preflight_json
               label_reporter_preflight_state label_reporter_preflight_check
-              label_reporter_preflight_detail]
+              label_reporter_preflight_detail
+              label_reporter_preflight_engine label_reporter_preflight_engine_default
+              text_reporter_preflight_unknown_engine]
 
     %w[de en es hu it pl pt-BR ru zh].each do |locale|
       ::I18n.with_locale(locale) do

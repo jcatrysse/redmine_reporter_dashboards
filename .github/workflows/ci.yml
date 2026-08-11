@@ -1139,6 +1139,23 @@ jobs:
           RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
         run: rspec spec/conformance --format documentation
 
+      # THE PREFLIGHT'S EXIT-CODE CONTRACT, read off a real process — §Findings E-27
+      # row 11. The rake task documents 0/1/2 as a deploy-step interface and, until this
+      # step, no CI run had ever read one of those codes for real: the rake glue is
+      # unit-tested against a stubbed Preflight, and the command's spec drives the codes
+      # in-process. This drives all three through a process boundary against the two live
+      # Gotenbergs — 0 on the authenticated one, 1 on the open one (the credential check
+      # failing where a deploy step can see it), and 2 twice (a typo, and row 8's
+      # names-nothing selection). The logic is a committed, locally runnable script, not
+      # workflow inlines — E-28 #5 is what happens to logic that lives only here.
+      - name: The preflight exit-code contract, against real services
+        env:
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
+        run: ./script/render_preflight_exit_codes.sh
+
       # T-15's containment assertions, which need a real browser and assert on the
       # PROCESS TABLE rather than on a return value. A timeout that answers on time
       # while the browser keeps burning CPU passes every ordinary test and is the

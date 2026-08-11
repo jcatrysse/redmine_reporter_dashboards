@@ -276,9 +276,8 @@ namespace :reporter_dashboards do
     desc 'Render a probe document through each engine and report what actually worked ' \
          '(exit 1 on failure, 2 if no engine is registered; RRD_ENGINE=id, RRD_FORMAT=json)'
     task preflight: :environment do
-      engines_dir = File.expand_path('../redmine_reporter_dashboards/render/engines', __dir__)
-      Dir[File.join(engines_dir, '*.rb')].sort.each { |path| require path }
       require File.expand_path('../redmine_reporter_dashboards/render/preflight_command', __dir__)
+      RedmineReporterDashboards::Render::PreflightCommand.load_engines!
 
       # The port `render/**` may not reach for itself: this is the one line that knows
       # Redmine has a Setting table. See PreflightCommand's note on mechanism E5.

@@ -735,6 +735,61 @@ module RedmineReporterDashboards
             thread&.kill
           end
 
+          # E-27 row 11: the `use_ssl: false` mutation SURVIVED the whole suite — there was
+          # no HTTPS coverage anywhere, so an https endpoint silently spoken in plaintext
+          # (credential, report and all) was invisible. Two halves, like the proxy pair
+          # above and for the same reason:
+          #
+          #   the ARGUMENT — the claim is about what `Net::HTTP.start` is handed, so it is
+          #     asserted on the call, for BOTH schemes;
+          #   the BEHAVIOUR — against a plaintext listener, an https endpoint's first bytes
+          #     on the wire must be a TLS ClientHello (0x16), never an HTTP request line.
+          it 'pins use_ssl to the endpoint scheme, on the call itself' do
+            captured = {}
+            allow(Net::HTTP).to receive(:start) do |*_args, **kwargs|
+              captured = kwargs
+              raise Errno::ECONNREFUSED
+            end
+
+            described_class.new(endpoint: 'https://gotenberg.test:3443', credential: %w[u p])
+                           .render(request(timeout_ms: 1_000))
+            expect(captured[:use_ssl]).to be(true),
+                                          'an https endpoint did not ask for TLS — the credential ' \
+                                          'and the report would cross the network in plaintext'
+
+            described_class.new(endpoint: 'http://gotenberg.test:3000', credential: %w[u p])
+                           .render(request(timeout_ms: 1_000))
+            expect(captured[:use_ssl]).to be(false)
+          end
+
+          it 'and behaviourally: an https endpoint puts TLS on the wire, not the request' do
+            server = TCPServer.new('127.0.0.1', 0)
+            first_bytes = nil
+            thread = Thread.new do
+              client = server.accept
+              first_bytes = client.read(5).to_s
+              client.close
+            rescue IOError, Errno::EBADF
+              nil
+            end
+
+            result = described_class.new(endpoint: "https://127.0.0.1:#{server.addr[1]}",
+                                         credential: %w[u p])
+                                    .render(request(timeout_ms: 2_000))
+            thread.join(5)
+
+            expect(result).to be_failure
+            expect(first_bytes).not_to be_nil, 'nothing reached the listener at all'
+            # 0x16 is the TLS handshake content type, the first byte of every ClientHello.
+            expect(first_bytes.bytes.first).to eq(0x16),
+                                               "expected a TLS ClientHello, got #{first_bytes.inspect} — " \
+                                               'the request went out in plaintext'
+            expect(first_bytes).not_to match(/\A(GET|POST)/)
+          ensure
+            server&.close
+            thread&.kill
+          end
+
           it 'refuses an endpoint carrying a credential, rather than leaking it into a message' do
             engine = with_env('RRD_GOTENBERG_URL' => nil) do
               described_class.new(endpoint: 'http://user:hunter2@gotenberg.test:3000')
@@ -748,6 +803,63 @@ module RedmineReporterDashboards
             # message reaches the diagnostics panel and the scheduled-report failure mail.
             expect(result.message).not_to include('hunter2')
             expect(result.detail.to_s).not_to include('hunter2')
+          end
+
+          # E-27 row 9 — the OTHER natural spelling of a credential in a URL. Userinfo
+          # was refused because it authenticates nothing here and `@endpoint` travels in
+          # six failure messages; a query token has the identical shape (`uri_for` joins
+          # request paths onto the endpoint, and resolution drops the base's query), and
+          # for a whole release it was accepted, unused and interpolated.
+          it 'refuses an endpoint carrying a token in its query string, as it does userinfo' do
+            engine = with_env('RRD_GOTENBERG_URL' => nil) do
+              described_class.new(endpoint: 'http://gotenberg.test:3000/?token=hunter2')
+            end
+            result = engine.render(request)
+
+            expect(engine.endpoint).to be_nil
+            expect(result).to be_failure
+            expect(result.message).to include('query string')
+            expect(result.message).to include('RRD_GOTENBERG_USERNAME')
+            # AND THE TOKEN IS NOT IN WHAT THE USER SEES — this message reaches the
+            # diagnostics panel and the scheduled-report failure mail.
+            expect(result.message).not_to include('hunter2')
+            expect(result.detail.to_s).not_to include('hunter2')
+          end
+
+          it 'refuses a fragment too, and keeps its value out of the message' do
+            engine = with_env('RRD_GOTENBERG_URL' => nil) do
+              described_class.new(endpoint: 'http://gotenberg.test:3000/#token=hunter2')
+            end
+            result = engine.preflight
+
+            expect(engine.endpoint).to be_nil
+            expect(result).to be_failure
+            expect(result.message).not_to include('hunter2')
+            expect(result.detail.to_s).not_to include('hunter2')
+          end
+
+          # THE SPELLINGS THAT DODGED THE FIRST VERSION OF THIS GUARD, found by an
+          # independent review. `URI.parse('gotenberg:3000/?token=abc')` is an OPAQUE
+          # URI whose `#query` is nil, so a parsed-URI check never fired for the
+          # schemeless spellings — and the value then fell to arms whose messages
+          # interpolated `value.inspect` (the scheme arm) or the parser's own message,
+          # which repeats the raw value (the InvalidURIError rescue). `hunter2` was
+          # demonstrated arriving in a preflight failure message through both. The rule
+          # is stronger than "refuse `?`": NO refusal message may carry the value.
+          ['gotenberg:3000/?token=hunter2', '127.0.0.1:3000?token=hunter2',
+           'user:hunter2@gotenberg:3000', 'ftp://hunter2.example:3000',
+           'http://[hunter2'].each do |sneaky|
+            it "keeps the refused value out of every message for #{sneaky.inspect}" do
+              engine = with_env('RRD_GOTENBERG_URL' => nil) do
+                described_class.new(endpoint: sneaky)
+              end
+              result = engine.preflight
+
+              expect(engine.endpoint).to be_nil
+              expect(result).to be_failure
+              expect(result.message).not_to include('hunter2')
+              expect(result.detail.to_s).not_to include('hunter2')
+            end
           end
 
           # The asset NAME was guarded and the content type — the other header value in
@@ -1034,7 +1146,8 @@ module RedmineReporterDashboards
           # compose file. Only `nil` and `''` had been tested, and only those two were total.
           [nil, '', '   ', "\t", 'gotenberg:3000', 'localhost:3000',
            "http://gotenberg:3000\n", ' http://gotenberg:3000 ', '"http://gotenberg:3000"',
-           'http://user:pass@gotenberg:3000'].each do |value|
+           'http://user:pass@gotenberg:3000', 'http://gotenberg:3000/?token=abc',
+           'http://gotenberg:3000/#token=abc'].each do |value|
             it "builds without raising for #{value.inspect}, and refuses in the RESULT" do
               engine = nil
               # THE ENVIRONMENT IS CLEARED. `endpoint: nil` means "I did not say", so with
@@ -1297,6 +1410,116 @@ module RedmineReporterDashboards
 
               expect(result).to be_failure
               expect(result.message).to include('did not answer the JavaScript check in time')
+            end
+          end
+
+          # E-27 row 10. The identity and credential probes both GET `/version` and threw
+          # the body away, so `check_version` fetched it a third time for a fact two
+          # earlier probes had already read.
+          context 'the version probe is fetched once, not once per check that wants it' do
+            it 'asks /version exactly twice — the unauthenticated identity probe and the credential probe' do
+              # NOT `healthy`, and the difference is what this example is about: `healthy`
+              # answers the UNAUTHENTICATED identity probe 200 with the version, which a
+              # real locked-down Gotenberg never does (measured: 401). Scripted that way,
+              # the identity memo covers for a deleted credential-probe memo and the
+              # mutation survives — the first version of this example did exactly that.
+              http = recording_http do |req, _n|
+                if req['Authorization'].nil?
+                  status(Net::HTTPUnauthorized, '401')
+                elsif req.path.end_with?('/version')
+                  ok('8.35.0')
+                elsif req.body.to_s.include?('failOnConsoleExceptions')
+                  status(Net::HTTPConflict, '409', 'console exception')
+                else
+                  ok
+                end
+              end
+              engine = described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                           credential: %w[user pass], http: http.to_proc)
+              expect(engine.preflight).to be_success
+
+              version_gets = http.calls.select { |c| c.request.path.end_with?('/version') }
+              expect(version_gets.length).to eq(2)
+              # And they are the two probes that carry different questions — one with no
+              # credential (identity), one with it (acceptance). The version CHECK reads
+              # the memo.
+              expect(version_gets.map { |c| c.request['Authorization'].nil? }).to eq([true, false])
+            end
+
+            it 'learns the version from the identity probe on an open service, with no second fetch' do
+              # An OPEN service with no credential: the identity probe reads the version
+              # 200 and the credential check then fails without another request — so the
+              # report header's `engine.version` must come off the memo, not the wire.
+              http = recording_http { |req, _n| req.path.end_with?('/version') ? ok('8.35.0') : ok }
+              engine = described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                           credential: nil, http: http.to_proc)
+              expect(engine.preflight).to be_failure
+
+              fetches = http.calls.count { |c| c.request.path.end_with?('/version') }
+              expect(fetches).to eq(1)
+              expect(engine.version).to eq('8.35.0')
+              expect(http.calls.count { |c| c.request.path.end_with?('/version') }).to eq(1)
+            end
+
+            # `engine_version` travels in failure messages, mail and Snapshot rows; a
+            # body that opens with a version must contribute ONLY the version. The
+            # second body has no whitespace at all — the first token class (`\S*`) kept
+            # everything after the version in exactly that case, and an adversarial QA
+            # pass is what said so.
+            ["8.35.0\ntrailing noise", '8.35.0<script>alert(1)</script>',
+             "8.35.0;#{'A' * 500}"].each do |body|
+              it "memoises the version token and none of the rest of #{body[0, 24].inspect}" do
+                http = recording_http do |req, _n|
+                  req.path.end_with?('/version') ? ok(body) : ok
+                end
+                engine = described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                             credential: nil, http: http.to_proc)
+                engine.preflight
+
+                expect(engine.version).to eq('8.35.0')
+              end
+            end
+
+            it 'does not adopt a non-version body as the engine version' do
+              engine, = adapter(healthy(version: ->(_r) { ok('<html>login</html>') }))
+              result = engine.preflight
+
+              expect(result).to be_failure
+              # The junk 200 fails the identity check; memoising its body would stamp
+              # `<html>login</html>` into this failure's engine_version.
+              expect(result.engine_version).to eq('unknown')
+            end
+          end
+
+          # The other half of row 10: these hashes carried no `duration_ms`, so the admin
+          # page printed "0 ms" for a configuration check that had just spent ten seconds
+          # timing out.
+          context 'the configuration checks carry their own durations' do
+            it 'stamps an integer duration on every check' do
+              engine, = adapter(healthy)
+              checks = engine.configuration_checks
+
+              expect(checks.length).to eq(4)
+              expect(checks.map { |c| c[:duration_ms] }).to all(be_a(Integer))
+            end
+
+            it 'measures the check rather than stamping a constant' do
+              engine, = adapter(healthy(version: lambda { |_r|
+                sleep 0.03
+                ok('8.35.0')
+              }))
+              checks = engine.configuration_checks
+
+              reachable = checks.find { |c| c[:id] == :gotenberg_reachable }
+              expect(reachable[:duration_ms]).to be >= 20
+            end
+
+            it 'stamps 0 rather than nil on the unconfigured check' do
+              engine = with_env('RRD_GOTENBERG_URL' => nil) { described_class.new }
+              check = engine.configuration_checks.first
+
+              expect(check[:id]).to eq(:gotenberg_endpoint)
+              expect(check[:duration_ms]).to eq(0)
             end
           end
 

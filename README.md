@@ -330,7 +330,9 @@ Three things worth knowing about the output:
   names the package, the run is reported as *incomplete*, and the summary never reads a
   bare "OK".
 - **Exit codes**, so the task can be a deploy step: `0` everything that ran passed,
-  `1` at least one check failed, `2` no engine is registered — nothing was verified.
+  `1` at least one check failed, `2` nothing was verified — no engine is registered,
+  the id you named does not exist, or the selection named nothing at all (a mangled
+  `RRD_ENGINE=','` is a typo, not a request for the default set).
   `RRD_ENGINE=<id>` limits it to one engine; `RRD_FORMAT=json` prints the report as
   JSON for an issue or a log.
 
@@ -401,6 +403,11 @@ hidden from anyone who can read the administration page.
 ```bash
 RRD_ENGINE=gotenberg bundle exec rake reporter_dashboards:render:preflight RAILS_ENV=production
 ```
+
+Or without a shell: **Administration → Render preflight** has an engine selector — pick
+`gotenberg` and run it. Either way, naming the engine is what runs its real checks
+(credential included); the default run defers an engine that needs a service, because
+you have not chosen it.
 
 Two of those checks are worth knowing about, because both of them catch a container that
 looks completely healthy:

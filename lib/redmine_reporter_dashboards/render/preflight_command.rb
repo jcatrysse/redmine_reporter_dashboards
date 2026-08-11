@@ -44,6 +44,15 @@ module RedmineReporterDashboards
       FAILURES = 1
       NOTHING_TO_RUN = 2
 
+      # Engine adapters register themselves at require time and live in one directory.
+      # Every operator surface needs the same sweep before constructing this command —
+      # the rake task and `script/render_preflight_standalone.rb` — and two copies of
+      # the glob are how those surfaces drift (CLAUDE.md hard rule 6; an independent
+      # review flagged the second copy the day it appeared).
+      def self.load_engines!
+        Dir[File.join(__dir__, 'engines', '*.rb')].sort.each { |path| require path }
+      end
+
       FORMATS = %i[text json].freeze
 
       def initialize(engine_ids: nil, redmine_base_url: nil, format: :text,

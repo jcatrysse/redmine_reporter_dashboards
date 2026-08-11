@@ -1093,6 +1093,30 @@ running it; no amount of reading it found it.
 
 ---
 
+**A DOUBLE THAT ANSWERS AN UNAUTHENTICATED PROBE WITH DATA A LOCKED SERVICE REFUSES MAKES A
+CACHING MUTATION UNKILLABLE.** E-27 row 10, 2026-08-11. `gotenberg_spec.rb`'s `healthy`
+script answered `/version` 200-with-the-version whether or not the request carried a
+credential; a real locked-down Gotenberg answers **401** unauthenticated (measured, and the
+adapter's own comments say so). Under that double, deleting the credential-probe
+memoisation SURVIVED its mutation run — the identity probe's memo covered for it, in a
+world that does not exist. The example about fetch-counting now scripts the measured
+answers instead of reusing the friendly default. Rule: an example that counts, orders or
+caches REQUESTS must script its double from measured behaviour, not from the shape that
+keeps the rest of the file short — a convenience double is exactly as vacuous as a
+convenience fixture, and only a mutation run says so.
+
+**`URI.parse` MAKES A SCHEMELESS VALUE OPAQUE, AND EVERY PARSED-URI GUARD SILENTLY SKIPS
+IT.** E-27 row 9's first fix, rejected in review on 2026-08-11.
+`URI.parse('gotenberg:3000/?token=abc')` has `scheme: "gotenberg"`, `query: nil` — so a
+`uri.query` refusal never fires for precisely the schemeless spellings the endpoint spec
+already lists as "what an operator actually types", and the value fell through to arms
+whose messages interpolated `value.inspect` or the parser's message (which REPEATS the raw
+value). `hunter2` was demonstrated arriving in a preflight failure message — the surface
+that reaches mail and Snapshot rows — through both. Two rules. A guard about a URL's
+CONTENT tests the RAW STRING before the parser gets a say. And no refusal message may
+interpolate the refused value or the parser's account of it; the operator has the value in
+front of them, the report recipient must never have it.
+
 ## 1b. Working agreement — verification, decided by the curator
 
 **Curator decision, 2026-08-05: prefer pushing and letting CI judge over stopping.** Asked

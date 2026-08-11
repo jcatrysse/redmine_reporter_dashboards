@@ -394,9 +394,9 @@ module RedmineReporterDashboards
         # is true of both binary-backed engines: there is nothing to misconfigure about a
         # Chromium you launched yourself.
         def configuration_checks
-          started = monotonic_ms
           unless @endpoint
-            return [check_hash(:gotenberg_endpoint, unconfigured_failure('preflight'))]
+            return [check_hash(:gotenberg_endpoint, unconfigured_failure('preflight'),
+                               duration_ms: 0)]
           end
 
           checks = []
@@ -404,8 +404,15 @@ module RedmineReporterDashboards
            %i[gotenberg_credential check_credential],
            %i[gotenberg_version check_version],
            %i[gotenberg_javascript check_javascript]].each do |id, method|
-            failure = send(method, started)
-            checks << check_hash(id, failure)
+            # EACH CHECK CARRIES ITS OWN CLOCK (E-27 row 10). These hashes used to have no
+            # `duration_ms` at all, so `Preflight` built its `Check`s with nil and the
+            # admin page's `ms.to_i` printed "0 ms" for a row that had just spent ten
+            # seconds timing out — a timing column that lies in exactly the case an
+            # operator is reading it.
+            check_started = monotonic_ms
+            failure = send(method, check_started)
+            checks << check_hash(id, failure,
+                                 duration_ms: (monotonic_ms - check_started).round)
             # STOPS AT THE FIRST FAILURE, deliberately. The checks are ordered so that each
             # one's premise is established by the one before it — asking whether JavaScript
             # is alive on a service that is not a Gotenberg produces a confident wrong
@@ -756,6 +763,7 @@ module RedmineReporterDashboards
           # service refused the configured credential" — the diagnosis got WORSE. A 401 only
           # means "enforcing" if nothing was presented.
           response = request_get(VERSION_PATH, timeout_ms: PROBE_TIMEOUT_MS, credential: nil)
+          memoise_version(response)
 
           if response.equal?(TIMED_OUT)
             return preflight_failure(
@@ -813,6 +821,7 @@ module RedmineReporterDashboards
           # authenticated `/version` probe answered 401, every arm read it as health, and
           # the run failed two checks later on "did not answer /version with a version".
           authenticated = request_get(VERSION_PATH, timeout_ms: PROBE_TIMEOUT_MS)
+          memoise_version(authenticated)
           if authenticated.is_a?(Net::HTTPUnauthorized) || authenticated.is_a?(Net::HTTPForbidden)
             return preflight_failure(
               started, 'the render service refused the configured credential',
@@ -970,10 +979,11 @@ module RedmineReporterDashboards
           )
         end
 
-        def check_hash(id, failure)
+        def check_hash(id, failure, duration_ms:)
           { id: id, title: CHECK_TITLES.fetch(id),
             state: failure ? :fail : :pass,
             detail: failure ? failure.message : nil,
+            duration_ms: duration_ms,
             failure: failure }
         end
 
@@ -1121,7 +1131,35 @@ module RedmineReporterDashboards
         end
 
         def validate_endpoint!(value)
-          uri = URI.parse(value.to_s)
+          raw = value.to_s
+
+          # THE RAW STRING IS ASKED ABOUT `?` AND `#` BEFORE THE PARSER GETS A SAY, and
+          # an independent review is why (E-27 row 9's fix, reviewed). The first version
+          # checked `uri.query`/`uri.fragment` off the PARSED value — and
+          # `URI.parse('gotenberg:3000/?token=abc')` is an OPAQUE URI whose `#query` is
+          # nil, so the guard never fired for exactly the schemeless spellings the
+          # endpoint spec calls "what an operator actually types", and the value fell
+          # through to an arm whose message interpolated it, token and all. A `?` or `#`
+          # anywhere in an endpoint is meaningless to this adapter under every parse
+          # (`uri_for` joins request paths, and resolution drops the base's query and
+          # fragment), so the raw test refuses nothing legitimate and no parser quirk
+          # can carry a LITERAL `?` or `#` past it. The claim stops there, deliberately:
+          # a percent-encoded `%3F` is not a query to any parser and is not decoded
+          # here, and a secret an operator writes into the PATH is preserved and shown,
+          # because the path is part of the endpoint's identity (`--api-root-path`).
+          # The refusals are about the slots credentials ride in — userinfo, query,
+          # fragment — not about every byte sequence an operator could regret.
+          if raw.include?('?') || raw.include?('#')
+            raise ArgumentError,
+                  'a Gotenberg endpoint must not carry a query string or fragment. ' \
+                  'Requests are joined onto the endpoint and drop both, so a token ' \
+                  'there would authenticate nothing — and it would then travel in ' \
+                  'every failure message, including the ones e-mailed to report ' \
+                  'recipients. This adapter authenticates with RRD_GOTENBERG_USERNAME ' \
+                  'and RRD_GOTENBERG_PASSWORD.'
+          end
+
+          uri = URI.parse(raw)
 
           # `http://user:pass@host` IS REFUSED, and it is refused rather than redacted.
           #
@@ -1145,20 +1183,55 @@ module RedmineReporterDashboards
                   'e-mailed to report recipients.'
           end
 
+          # THE VALUE IS DELIBERATELY NOT IN THIS MESSAGE, and neither arm below carries
+          # it. A schemeless spelling with a secret in it — `user:pass@gotenberg:3000`,
+          # `gotenberg:3000/token` — survives to here, and this message travels exactly
+          # where the userinfo comment above says: the diagnostics panel, the
+          # scheduled-report failure MAIL, and a persisted `Snapshot` row. The reviewer
+          # demonstrated `hunter2` arriving in a preflight message through this arm. An
+          # operator who wants the rejected value has RRD_GOTENBERG_URL in front of them;
+          # a report recipient must never have it.
           unless ENDPOINT_SCHEMES.include?(uri.scheme) && !uri.host.to_s.empty?
             raise ArgumentError,
-                  "#{value.inspect} is not a usable Gotenberg endpoint. It must be an " \
-                  "#{ENDPOINT_SCHEMES.join('/')} URL naming a host — this is operator " \
-                  'configuration and is never derived from a document, a template or a ' \
-                  'request parameter.'
+                  'the configured value is not a usable Gotenberg endpoint. It must be ' \
+                  "an #{ENDPOINT_SCHEMES.join('/')} URL naming a host — for example " \
+                  'http://gotenberg:3000 — and it is operator configuration, never ' \
+                  'derived from a document, a template or a request parameter.'
           end
 
           # A trailing slash so `URI.join` cannot eat the last path segment of an endpoint
           # served under a root path (`--api-root-path`).
           uri.path = "#{uri.path}/" unless uri.path.end_with?('/')
           uri.to_s.freeze
-        rescue URI::InvalidURIError => e
-          raise ArgumentError, "#{value.inspect} is not a usable Gotenberg endpoint: #{e.message}"
+        rescue URI::InvalidURIError
+          # `e.message` REPEATS THE RAW VALUE (`bad URI "http://…"`), so interpolating it
+          # is the same leak as interpolating the value — neither travels.
+          raise ArgumentError,
+                'the configured value could not be parsed as a URL at all. It must be ' \
+                "an #{ENDPOINT_SCHEMES.join('/')} URL naming a host, such as " \
+                'http://gotenberg:3000.'
+        end
+
+        # THE IDENTITY AND CREDENTIAL PROBES ALREADY CARRY THE VERSION, and until E-27
+        # row 10 both threw it away — so a preflight against a healthy service fetched
+        # `/version` again in `check_version` for a body two earlier probes had already
+        # read. Memoised ONLY when the body is version-shaped: `check_reachable`'s probe
+        # can answer 200 with anything (an nginx greeting page, a Redmine login), and a
+        # junk body stored here would become the `engine_version` stamped into every
+        # failure message. A non-version body is left for `check_version` to fetch and
+        # report in its own words.
+        def memoise_version(response)
+          return unless response.is_a?(Net::HTTPSuccess)
+
+          # THE TOKEN, NOT THE BODY — and the class is dotted-words, not "up to the
+          # first whitespace". `/\A\d+\.\S*/` was the first spelling, and an adversarial
+          # QA pass fed it `8.35.0<script>…` — no whitespace, so the WHOLE body was
+          # memoised and stamped into `engine_version`, which travels in mail and
+          # Snapshot rows, the same surfaces the endpoint messages are kept clean for.
+          # `\w` cuts at the first character no version carries; a suffix like `-rc1`
+          # is dropped rather than trusted, which is the right trade for a stamp.
+          token = response.body.to_s.strip[/\A\d+(?:\.\w+)*/]
+          @version = token if token
         end
 
         def credential_from_env

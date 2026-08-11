@@ -17,6 +17,21 @@
 </div>
 
 <%= form_tag(run_reporter_preflight_path, method: :post) do %>
+  <%#
+    THE ENGINE SELECTOR — §Findings E-27 row 6. Without it, an engine that needs a
+    service (`:gotenberg`) could not be diagnosed from this page at all: the default set
+    defers it, and the deferral's remediation names a rake variable — an instruction the
+    one reader this page exists for cannot follow. Naming an engine is the decision that
+    runs its real checks, credential included, exactly as `RRD_ENGINE=<id>` does.
+
+    The options come off the registry, never off input, and the blank option is the
+    default set — the same engines the button ran before the selector existed.
+  %>
+  <p>
+    <label for="engine"><%= l(:label_reporter_preflight_engine) %></label>
+    <%= select_tag :engine,
+                   options_for_select(reporter_preflight_engine_options, params[:engine].to_s) %>
+  </p>
   <p class="buttons">
     <%= submit_tag l(:button_reporter_preflight_run), name: nil %>
   </p>

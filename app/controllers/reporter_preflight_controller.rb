@@ -43,9 +43,32 @@ class ReporterPreflightController < ApplicationController
     @reports = nil
   end
 
+  # `engine` NAMES ONE ENGINE TO CHECK DELIBERATELY, and its absence keeps the old
+  # behaviour: the default set, with a named skip per service-backed engine. Without it
+  # this page could not diagnose `:gotenberg` at all (§Findings E-27 row 6): the deferral
+  # always applied, and the skip told an administrator — the one reader who has no shell
+  # — to go and run a rake task. Naming an engine is a decision, so it runs the real
+  # checks, credential included, exactly as `RRD_ENGINE=<id>` does on the rake surface.
+  #
+  # The value is handed to `PreflightSuite`, whose registry lookup is the validation —
+  # a name it does not know, or a value that parses to no id at all (`'  '`, `','`),
+  # raises rather than silently running the default set, and the page answers with an
+  # error naming the known engines instead of a 500. Nothing is ever constructed from
+  # the parameter: every id in it is matched against `Registry.ids` or the whole value
+  # is refused. "Every id" because the suite parses a comma-separated LIST, exactly as
+  # `RRD_ENGINE` does — the select offers single ids, but a hand-crafted
+  # `engine=a,b` runs both, which is the rake surface's own documented meaning and
+  # admin-gated either way.
   def run
-    @reports = Render::PreflightSuite.new(redmine_base_url: redmine_base_url,
+    engine = params[:engine].to_s
+    @reports = Render::PreflightSuite.new(engine_ids: engine.empty? ? nil : engine,
+                                          redmine_base_url: redmine_base_url,
                                           logger: Rails.logger).reports
+    render :show
+  rescue Render::Registry::UnknownEngine
+    flash.now[:error] = l(:text_reporter_preflight_unknown_engine,
+                          engines: Render::Registry.ids.map(&:to_s).join(', '))
+    @reports = nil
     render :show
   end
 

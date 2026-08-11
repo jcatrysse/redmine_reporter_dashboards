@@ -67,6 +67,16 @@ module ReporterPreflightHelper
     expected_failure: 'icon icon-warning'
   }.freeze
 
+  # The engine selector's options (E-27 row 6): the default set first, then every
+  # registered engine BY ITS ID. Ids are ops vocabulary, the same tokens the rake
+  # surface's `RRD_ENGINE=` takes and the report headings already print, so they are
+  # deliberately not translated — a localised alias here would be one more name for a
+  # thing that has exactly one name everywhere else.
+  def reporter_preflight_engine_options
+    [[l(:label_reporter_preflight_engine_default), '']] +
+      RedmineReporterDashboards::Render::Registry.ids.map { |id| [id.to_s, id.to_s] }
+  end
+
   # Even the unit. `ms` reads the same in most of the nine locales and not in all of
   # them, and a view that hardcodes one token is a view that hardcodes the next one too.
   def reporter_preflight_duration(ms)

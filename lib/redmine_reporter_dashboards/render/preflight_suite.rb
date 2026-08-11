@@ -49,6 +49,18 @@ module RedmineReporterDashboards
 
       def initialize(engine_ids: nil, redmine_base_url: nil, logger: nil)
         @engine_ids = normalise_ids(engine_ids)
+        # A SELECTION THAT WAS GIVEN AND PARSES TO NOTHING IS THE TYPO CASE, NOT THE
+        # DEFAULT SET (E-27 row 8). `RRD_ENGINE='  '` and `RRD_ENGINE=','` normalised to
+        # an empty list, and an empty list means "run the defaults" — so a mangled
+        # selection in a deploy step silently verified engines nobody named, while
+        # `RRD_ENGINE=chromium_cpd` correctly exited 2. The rule cuts at NON-EMPTY: `nil`
+        # and `''` still mean "nobody selected" (unset and `VAR=` are how an environment
+        # says that), and anything carrying a character that then yields no id raises the
+        # same `UnknownEngine` a typo does. Recorded here rather than in `resolved_ids`
+        # so the raw value is still in hand for the message.
+        @unparseable_selection =
+          @engine_ids.empty? && Array(engine_ids).any? { |id| !id.to_s.empty? } &&
+          engine_ids.inspect
         @redmine_base_url = redmine_base_url
         @logger = logger
       end
@@ -111,14 +123,20 @@ module RedmineReporterDashboards
             # that "proved" the remediation asserted on the Check object and never on
             # rendered output, which is the same shape as the blocker this commit fixes.
             detail: "run with RRD_ENGINE=#{id} to check it deliberately, including its " \
-                    "credential. #{id} needs a service, so it is used only by a template " \
-                    'that names it.',
+                    'credential. Or pick it in the engine selector on the admin ' \
+                    "preflight page. #{id} needs a service, so it is used only by a " \
+                    'template that names it.',
             duration_ms: 0
           )]
         )
       end
 
       def resolved_ids
+        if @unparseable_selection
+          raise Registry::UnknownEngine,
+                "an engine selection was given (#{@unparseable_selection}) but names " \
+                "no render engine. Known: #{Registry.ids.map(&:to_s).join(', ')}."
+        end
         return default_ids if engine_ids.empty?
 
         unknown = engine_ids.reject { |id| Registry.registered?(id) }
