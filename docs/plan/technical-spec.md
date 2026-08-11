@@ -779,9 +779,15 @@ never `File.exist?`; `#render(request) → Result`.
 
 `Result = Success{bytes, page_count, duration_ms, engine, engine_version, degradations}` |
 `Failure{code, message, engine, engine_version, duration_ms, detail, correlation_id}` with a
-closed code set (`:engine_unavailable :engine_version_unsupported :timeout :readiness_timeout
-:resource_limit :asset_unresolved :capability_unsupported :engine_crashed :output_not_pdf
-:output_empty :internal`). **Never raises. Never returns HTML.**
+closed code set (`:engine_unavailable :engine_misconfigured :engine_version_unsupported
+:timeout :readiness_timeout :resource_limit :asset_unresolved :capability_unsupported
+:engine_crashed :output_not_pdf :output_empty :internal`). **Never raises. Never returns
+HTML.** *`:engine_misconfigured` was added on 2026-08-11 by curator decision (§Findings E-27
+row 3): the engine is there and refuses to be used as configured, so the remedy is an
+operator's and no retry will produce a different answer — as against `:engine_unavailable`,
+where the engine is not there at all. Reachability, transport and any probe that could not be
+COMPLETED stay `:engine_unavailable`, because a wrong address and a service that is down are
+not distinguishable from the caller.*
 
 **INV-5 becomes mechanical** via two post-conditions enforced by `Render::Renderer`, the wrapper
 **above** every adapter: bytes must start `%PDF-` and contain `%%EOF`, else rewritten to

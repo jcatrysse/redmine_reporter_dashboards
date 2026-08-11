@@ -568,7 +568,12 @@ module RedmineReporterDashboards
           case response
           when Net::HTTPSuccess then response.body
           when Net::HTTPUnauthorized, Net::HTTPForbidden
-            failure(request, :engine_unavailable, unauthorized_message,
+            # THE ONE THAT REACHES A REPORT READER. The service is up, it answered, and it
+            # will keep answering 401 until somebody fixes the credential — so this is the
+            # render path's `:engine_misconfigured` (§Findings E-27 row 3). Reported as
+            # `:engine_unavailable` it read as "the container is down" in a mail nobody
+            # could act on.
+            failure(request, :engine_misconfigured, unauthorized_message,
                     detail: "#{response.code} from #{CONVERT_PATH}", started: started)
           when Net::HTTPServiceUnavailable
             # 503 is what this route answers when its own `--api-timeout` runs out. It is
@@ -813,7 +818,8 @@ module RedmineReporterDashboards
               'environment variables set, then configure the same user and password for ' \
               'this engine. An unauthenticated PDF service on an internal network renders ' \
               'any HTML anybody can reach it with.',
-              detail: "no credential is configured for #{@endpoint}"
+              detail: "no credential is configured for #{@endpoint}",
+              code: :engine_misconfigured
             )
           end
 
@@ -828,7 +834,8 @@ module RedmineReporterDashboards
               'Check the user and password against GOTENBERG_API_BASIC_AUTH_USERNAME and ' \
               'GOTENBERG_API_BASIC_AUTH_PASSWORD on the container. They have to be the same ' \
               'pair on both sides.',
-              detail: "an authenticated GET #{VERSION_PATH} answered #{authenticated.code}"
+              detail: "an authenticated GET #{VERSION_PATH} answered #{authenticated.code}",
+              code: :engine_misconfigured
             )
           end
 
@@ -862,7 +869,8 @@ module RedmineReporterDashboards
             'it with `--api-enable-basic-auth` and both GOTENBERG_API_BASIC_AUTH_* ' \
             'environment variables set, and confirm nothing else (a proxy, a second ' \
             'listener) is exposing the same service unauthenticated.',
-            detail: "an unauthenticated POST to #{CONVERT_PATH} answered #{probe}"
+            detail: "an unauthenticated POST to #{CONVERT_PATH} answered #{probe}",
+            code: :engine_misconfigured
           )
         end
 
@@ -951,7 +959,13 @@ module RedmineReporterDashboards
             'JavaScript off Gotenberg silently ignores the readiness expression as well — ' \
             'so every chart would be missing from every report and nothing would fail.',
             detail: "a document whose script throws answered #{response.code} with " \
-                    'failOnConsoleExceptions set; a live JavaScript engine answers 409'
+                    'failOnConsoleExceptions set; a live JavaScript engine answers 409',
+            # THE VERDICT gets `:engine_misconfigured`; the two arms above — a timeout and
+            # a non-success answer — deliberately keep `:engine_unavailable`, because
+            # neither is a statement about JavaScript at all. That distinction is the
+            # whole of HANDOVER's "identity before verdict" entry, and it would be undone
+            # by moving the code up to `check_javascript`'s other exits.
+            code: :engine_misconfigured
           )
         rescue StandardError => e
           preflight_failure(started, 'the JavaScript check could not be run',
@@ -972,8 +986,12 @@ module RedmineReporterDashboards
                 'this Redmine.'
             end
 
+          # `:engine_misconfigured`, not `:engine_unavailable` (§Findings E-27 row 3).
+          # Nothing has been reached and nothing is down: there is no address to reach, or
+          # the one configured cannot be used. A retry cannot change that answer and
+          # `RRD_GOTENBERG_URL` can.
           Failure.new(
-            code: :engine_unavailable, engine: ID, engine_version: 'unknown',
+            code: :engine_misconfigured, engine: ID, engine_version: 'unknown',
             correlation_id: correlation_id, duration_ms: 0, message: message,
             detail: @endpoint_error || 'RRD_GOTENBERG_URL is unset and no endpoint was injected'
           )

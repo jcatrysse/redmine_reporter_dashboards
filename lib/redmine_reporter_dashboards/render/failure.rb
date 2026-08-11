@@ -16,10 +16,47 @@ module RedmineReporterDashboards
     class Failure
       # The CLOSED code set (technical-spec.md §5). Closed so a caller can exhaustively
       # branch on it, and so "some new string" cannot appear in a mail template.
+      #
+      # --- `:engine_misconfigured` VERSUS `:engine_unavailable` (§Findings E-27 row 3) ---
+      #
+      # Added 2026-08-11 by curator decision. The two are one question apart, and the
+      # question is *whose* problem it is:
+      #
+      #   `:engine_unavailable`    the engine is not THERE. Not installed, not answering,
+      #                            the pool refused, the socket died. A retry can succeed
+      #                            and nothing an operator TYPES changes the diagnosis.
+      #   `:engine_misconfigured`  the engine IS there and refuses to be used as
+      #                            configured — or is configured in a way this plugin will
+      #                            not use. The remedy is an operator's, and no retry will
+      #                            ever produce a different answer.
+      #
+      # E-27 row 3 recorded the old behaviour as *defensible*: the adapter refuses to use
+      # an unauthenticated Gotenberg, so it IS unavailable to it. What that collapses is
+      # the only thing a reader of a failed report can act on. "The render service could
+      # not be reached" sends an operator to `docker ps`; "the service answered the
+      # conversion route without the configured credential" sends them to
+      # `--api-enable-basic-auth`. Both were the same code, and the second sentence was
+      # already being written — the code was throwing the distinction away after the
+      # message had made it.
+      #
+      # WHAT DOES NOT GET THIS CODE, deliberately, because the same row is what made the
+      # old collapse defensible in the first place:
+      #
+      #   * reachability and transport — "nothing answered", "answered 502 and does not
+      #     look like a Gotenberg", a dead socket. Identity before verdict (HANDOVER §1):
+      #     a wrong address and a service that is down are indistinguishable from here,
+      #     and guessing between them is how this project shipped three confident wrong
+      #     remediations in one afternoon.
+      #   * a probe that could not be COMPLETED. "The JavaScript check answered 503" is
+      #     not a verdict about JavaScript, and it must not read as one.
+      #   * the binary-backed engines. There is nothing to misconfigure about a Chromium
+      #     you launched yourself, which is why the only producer today is the Gotenberg
+      #     adapter. A code with one producer is fine; a code with none is dead
+      #     vocabulary and this file has a precedent for deleting those.
       CODES = %i[
-        engine_unavailable engine_version_unsupported timeout readiness_timeout
-        resource_limit asset_unresolved capability_unsupported engine_crashed
-        output_not_pdf output_empty internal
+        engine_unavailable engine_misconfigured engine_version_unsupported timeout
+        readiness_timeout resource_limit asset_unresolved capability_unsupported
+        engine_crashed output_not_pdf output_empty internal
       ].freeze
 
       class UnknownCode < ArgumentError; end

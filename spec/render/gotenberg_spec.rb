@@ -994,9 +994,14 @@ module RedmineReporterDashboards
 
         # ------------------------------------------------------------------
         describe 'what each answer means' do
+          # 401/403 ARE `:engine_misconfigured` AND THE NEIGHBOURS IN THIS TABLE ARE WHY IT
+          # IS A TABLE (§Findings E-27 row 3). The service answered — it is not away — and
+          # it will answer 401 until a credential changes, which is a sentence only an
+          # operator can act on. The other five rows must not move with it: a 503 is the
+          # container giving up on a render, a 400/415 is a bug HERE, and a 500 is a crash.
           {
-            [Net::HTTPUnauthorized, '401'] => :engine_unavailable,
-            [Net::HTTPForbidden, '403'] => :engine_unavailable,
+            [Net::HTTPUnauthorized, '401'] => :engine_misconfigured,
+            [Net::HTTPForbidden, '403'] => :engine_misconfigured,
             [Net::HTTPServiceUnavailable, '503'] => :timeout,
             [Net::HTTPBadRequest, '400'] => :internal,
             [Net::HTTPUnsupportedMediaType, '415'] => :internal,
@@ -1160,7 +1165,10 @@ module RedmineReporterDashboards
 
               result = engine.render(request)
               expect(result).to be_failure
-              expect(result.code).to eq(:engine_unavailable)
+              # NOT `:engine_unavailable`: nothing was reached and nothing is down. There
+              # is either no address or an unusable one, and only an operator can change
+              # that (§Findings E-27 row 3).
+              expect(result.code).to eq(:engine_misconfigured)
               expect(result.message).to include('Gotenberg render service')
               # Every method a caller may reach for, on an adapter that has no endpoint.
               expect(engine.id).to eq(:gotenberg)
@@ -1293,7 +1301,7 @@ module RedmineReporterDashboards
               result = engine.preflight
 
               expect(result).to be_failure
-              expect(result.code).to eq(:engine_unavailable)
+              expect(result.code).to eq(:engine_misconfigured)
               expect(result.message).to include('WITHOUT the configured credential')
               expect(result.message).to include('--api-enable-basic-auth')
               expect(result.detail).to include('/forms/chromium/convert/html')
@@ -1410,6 +1418,128 @@ module RedmineReporterDashboards
 
               expect(result).to be_failure
               expect(result.message).to include('did not answer the JavaScript check in time')
+            end
+          end
+
+          # ------------------------------------------------------------------
+          # WHOSE PROBLEM IS IT — `:engine_misconfigured` VERSUS `:engine_unavailable`.
+          #
+          # §Findings E-27 row 3, decided by the curator on 2026-08-11. Written as ONE
+          # table rather than as a code assertion added to each existing example, because
+          # the thing that has to hold is a BOUNDARY: every row below is a real answer a
+          # real Gotenberg gives, and moving any one of them across the line is the defect
+          # this block exists to catch. Three of them sit one HTTP status apart from a row
+          # on the other side.
+          #
+          # THE DOUBLE IS SCRIPTED FROM MEASURED BEHAVIOUR, not from `healthy` (HANDOVER
+          # §1, 2026-08-11): a locked-down Gotenberg answers **401** to an unauthenticated
+          # `/version`, and the friendly default answers 200-with-the-version — which is a
+          # service that does not exist and which has already made one mutation in this
+          # file unkillable.
+          context 'whose problem the failure is' do
+            def locked(overrides = {})
+              lambda do |req, _n|
+                key = if req['Authorization'].nil? && req.path.end_with?('/version')
+                        :identity
+                      elsif req.path.end_with?('/version')
+                        :version
+                      elsif req['Authorization'].nil?
+                        :unauthenticated
+                      elsif req.body.to_s.include?('failOnConsoleExceptions')
+                        :javascript
+                      else
+                        :render
+                      end
+                handler = overrides[key]
+                next handler.call(req) if handler
+
+                case key
+                when :identity, :unauthenticated then status(Net::HTTPUnauthorized, '401')
+                when :version then ok('8.35.0')
+                when :javascript then status(Net::HTTPConflict, '409', 'console exception')
+                else ok
+                end
+              end
+            end
+
+            # The control: without it, every row below could be passing because this
+            # double fails everything.
+            it 'is a double a healthy preflight passes against' do
+              engine, = adapter(locked)
+              expect(engine.preflight).to be_success
+            end
+
+            # THE OVERRIDES ARE BUILT INSIDE THE EXAMPLE, not in the table. `ok` and
+            # `status` are example-scope helpers, and a lambda written in the table literal
+            # closes over the example GROUP — where neither exists. The first version did
+            # exactly that and three of these seven errored with "`status` is not available
+            # on an example group", which is a real property of RSpec worth not
+            # re-discovering.
+            def scenario(name)
+              case name
+              when :refused_credential
+                { version: ->(_r) { status(Net::HTTPUnauthorized, '401') } }
+              when :answers_without_credential then { unauthenticated: ->(_r) { ok } }
+              when :javascript_off then { javascript: ->(_r) { ok } }
+              when :nothing_there then { identity: ->(_r) { raise Errno::ECONNREFUSED } }
+              when :not_a_gotenberg
+                { identity: ->(_r) { status(Net::HTTPNotFound, '404', '<html>nginx</html>') } }
+              when :javascript_probe_broken
+                { javascript: ->(_r) { status(Net::HTTPServiceUnavailable, '503') } }
+              else {}
+              end
+            end
+
+            {
+              'no credential is configured' =>
+                [:engine_misconfigured, nil, :none],
+              'the configured credential is refused' =>
+                [:engine_misconfigured, %w[user pass], :refused_credential],
+              'the service answers the conversion route without the credential' =>
+                [:engine_misconfigured, %w[user pass], :answers_without_credential],
+              'JavaScript is disabled, which is the VERDICT' =>
+                [:engine_misconfigured, %w[user pass], :javascript_off],
+              # And the three that must NOT move. Each is one status code away from a row
+              # above it, and each is a question this adapter cannot answer from here.
+              'nothing is at the address' =>
+                [:engine_unavailable, %w[user pass], :nothing_there],
+              'something answers and is not a Gotenberg' =>
+                [:engine_unavailable, %w[user pass], :not_a_gotenberg],
+              'the JavaScript probe could not be COMPLETED, so there is no verdict' =>
+                [:engine_unavailable, %w[user pass], :javascript_probe_broken]
+            }.each do |label, (expected, credential, scenario_name)|
+              it "reports #{expected} when #{label}" do
+                http = recording_http(&locked(scenario(scenario_name)))
+                engine = described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                             credential: credential, http: http.to_proc)
+                result = engine.preflight
+
+                expect(result).to be_failure
+                expect(result.code).to eq(expected)
+              end
+            end
+
+            # THE CODE IS NOT DECORATION ON THE SENTENCE: it is what a caller branches on,
+            # so the two must agree. A misconfiguration always names something an operator
+            # sets; an unavailability never claims to know which.
+            it 'never accuses a configuration when it only knows the service did not answer' do
+              http = recording_http(&locked(identity: ->(_r) { raise Errno::ECONNREFUSED }))
+              result = described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                           credential: %w[user pass], http: http.to_proc).preflight
+
+              expect(result.code).to eq(:engine_unavailable)
+              expect(result.message).not_to include('credential')
+              expect(result.message).not_to include('JavaScript')
+            end
+
+            # An unconfigured install: no endpoint at all. This is the one an operator of
+            # a fresh install meets, and it is a misconfiguration by definition — there is
+            # nothing to be unavailable.
+            it 'reports an install that has configured no endpoint as misconfigured' do
+              engine = with_env('RRD_GOTENBERG_URL' => nil) { described_class.new }
+
+              expect(engine.preflight.code).to eq(:engine_misconfigured)
+              expect(engine.render(request).code).to eq(:engine_misconfigured)
             end
           end
 
@@ -1558,7 +1688,7 @@ module RedmineReporterDashboards
             result = engine.preflight
 
             expect(result).to be_failure
-            expect(result.code).to eq(:engine_unavailable)
+            expect(result.code).to eq(:engine_misconfigured)
             expect(result.message).to include('WITHOUT the configured credential')
           end
 

@@ -90,7 +90,11 @@ module RedmineReporterDashboards
             result = Gotenberg.new(endpoint: open_endpoint, credential: %w[user pass]).preflight
 
             expect(result).to be_failure
-            expect(result.code).to eq(:engine_unavailable)
+            # `:engine_misconfigured` against a REAL open container, which is the only
+            # place this code's meaning can be checked rather than asserted: the service
+            # is up and answering, so "unavailable" was the one thing it was not
+            # (§Findings E-27 row 3).
+            expect(result.code).to eq(:engine_misconfigured)
             expect(result.message).to include('WITHOUT the configured credential')
             expect(result.message).to include('--api-enable-basic-auth')
           end
