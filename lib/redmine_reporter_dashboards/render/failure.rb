@@ -53,29 +53,35 @@ module RedmineReporterDashboards
       # old collapse defensible in the first place:
       #
       #   * reachability and transport — "nothing answered", "answered 502 and does not
-      #     look like a Gotenberg", a dead socket. Identity before verdict (HANDOVER §1).
-      #     We could OFTEN tell a name that does not resolve from a socket that refuses —
-      #     the exception class is in `detail`, and the same UX review measured
-      #     `Socket::ResolutionError` against `Errno::ECONNREFUSED` reaching the page under
-      #     one identical sentence — and the code deliberately does not split on it,
-      #     because the check's SENTENCE already names both remedies and a code that
-      #     guesses between them is how this project shipped three confident wrong
-      #     remediations in one afternoon. If that changes, split the ARM and its message,
-      #     not this bullet. Recorded as a recommendation in §Findings E-27.
+      #     look like a Gotenberg", a dead socket. Identity before verdict (HANDOVER §1):
+      #     a service that is down, one behind a wrong `--api-root-path` and one that is
+      #     something else entirely are not distinguishable from here, so the message names
+      #     more than one remedy and the code does not pretend to have chosen.
+      #
+      #     ONE EXCEPTION, AND IT IS THE RULE WORKING RATHER THAN BENDING (§Findings E-29):
+      #     a host that does not RESOLVE is `SocketError`, is unambiguous — no retry and no
+      #     restart can help, and a spelling or a network can — so it has its own arm, its
+      #     own sentence and `:engine_misconfigured`. The bullet used to say we deliberately
+      #     did not split on it; a UX pass measured both faults arriving under one identical
+      #     sentence with the discriminator sitting unused in `detail`, and splitting the ARM
+      #     is what that asked for. `Errno::ECONNREFUSED` is not a `SocketError`, which is
+      #     what keeps the refused socket on this side of the line.
       #   * a probe that could not be COMPLETED. "The JavaScript check answered 503" is
       #     not a verdict about JavaScript, and it must not read as one.
-      #   * `Render::Failure`'s only producer today is the Gotenberg adapter, and that is
-      #     narrower than "the binary-backed engines have nothing to misconfigure" — which
-      #     is what this bullet said until a UX review measured two counter-examples.
-      #     `wkhtmltopdf.rb` reads `RRD_WKHTMLTOPDF_BINARY`, an operator-typed path, and
-      #     answers `Errno::EACCES` — a file that exists and is not executable — with
-      #     `:engine_unavailable`; and `Reporting::ReportRun#no_engine_diagnostic` mints
-      #     `:engine_unavailable` for "no render engine is registered", which no retry will
-      #     ever change either. Both are candidates, both are pre-existing, and both are
-      #     recorded in §Findings E-27 rather than moved in the same commit that introduces
-      #     the code — a vocabulary change and a re-classification of two unrelated call
-      #     sites are two reviews, not one. A code with one producer is fine; a code with
-      #     none is dead vocabulary, and this file has a precedent for deleting those.
+      #   * a MISSING binary. `wkhtmltopdf.rb` reads `RRD_WKHTMLTOPDF_BINARY`, an
+      #     operator-typed path, so `Errno::ENOENT` might be a package nobody installed or a
+      #     path somebody mistyped — two remedies, and this side cannot tell, so it stays
+      #     `:engine_unavailable`. `Errno::EACCES` is the twin that DOES get the new code: the
+      #     file is there and is not executable, which is one fault with one remedy.
+      #
+      # WHO PRODUCES IT. The Gotenberg adapter (seven arms), the wkhtmltopdf adapter's
+      # `EACCES` arm, and `Reporting::ReportRun#no_engine_diagnostic` — an install with no
+      # engine registered at all, which is not an engine that is missing. The last two were
+      # recorded as candidates when this code was introduced and moved on 2026-08-11, in
+      # their own change with their own tests, because a vocabulary addition and a
+      # re-classification of two unrelated call sites are two reviews rather than one
+      # (§Findings E-29). A code with three producers is healthy; a code with none is dead
+      # vocabulary, and this file has a precedent for deleting those.
       CODES = %i[
         engine_unavailable engine_misconfigured engine_version_unsupported timeout
         readiness_timeout resource_limit asset_unresolved capability_unsupported

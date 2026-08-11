@@ -800,6 +800,27 @@ module RedmineReporterDashboards
             'credential.',
             detail: "GET #{VERSION_PATH} answered #{response.code}: #{body_excerpt(response)}"
           )
+        # THE ONE FAULT HERE WHOSE REMEDY IS UNAMBIGUOUS, and §Findings E-29 recorded it as a
+        # recommendation before it was taken. A UX pass measured a name that does not resolve
+        # and a socket that refuses arriving under ONE sentence and one code — *"nothing
+        # answered at …, Confirm the container is running"* — with the discriminator sitting
+        # unused in `detail`. A host that does not resolve cannot be fixed by starting
+        # anything, and it is not a service that is down: it is a spelling or a network the
+        # container is not on. So it gets its own sentence and `:engine_misconfigured`, and
+        # everything else keeps the two-remedy sentence and `:engine_unavailable`.
+        #
+        # `SocketError` AND NOT `Socket::ResolutionError`: the latter is Ruby 3.3+ and this
+        # plugin's floor is 2.7. It is a subclass, so one rescue covers both — and
+        # `Errno::ECONNREFUSED` is deliberately NOT a `SocketError`, which is what keeps the
+        # refused-socket case on the other side of the line.
+        rescue SocketError => e
+          preflight_failure(
+            started, 'the address configured for the Gotenberg render service does not resolve',
+            'Check the spelling of RRD_GOTENBERG_URL, and that Redmine is on the same ' \
+            'network as the container — with `internal: true` in the example compose file a ' \
+            "container's name resolves only for services on that network.",
+            detail: "#{e.class}: #{e.message}", code: :engine_misconfigured
+          )
         rescue StandardError => e
           preflight_failure(
             started, "nothing answered at #{@endpoint}",

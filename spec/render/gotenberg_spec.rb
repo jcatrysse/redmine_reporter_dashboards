@@ -1482,6 +1482,8 @@ module RedmineReporterDashboards
               when :answers_without_credential then { unauthenticated: ->(_r) { ok } }
               when :javascript_off then { javascript: ->(_r) { ok } }
               when :nothing_there then { identity: ->(_r) { raise Errno::ECONNREFUSED } }
+              when :name_does_not_resolve
+                { identity: ->(_r) { raise SocketError, 'getaddrinfo: Name or service not known' } }
               when :identity_timed_out then { identity: ->(_r) { raise Net::ReadTimeout } }
               when :not_a_gotenberg
                 { identity: ->(_r) { status(Net::HTTPNotFound, '404', '<html>nginx</html>') } }
@@ -1532,6 +1534,11 @@ module RedmineReporterDashboards
               # above it, and each is a question this adapter cannot answer from here.
               'nothing is at the address' =>
                 [:engine_unavailable, %w[user pass], :nothing_there],
+              # THE ONE REACHABILITY FAULT WHOSE REMEDY IS UNAMBIGUOUS (E-29's own
+              # recommendation, taken): a host that does not resolve cannot be fixed by
+              # starting anything.
+              'the configured name does not resolve' =>
+                [:engine_misconfigured, %w[user pass], :name_does_not_resolve],
               'nothing answers in time' =>
                 [:engine_unavailable, %w[user pass], :identity_timed_out],
               'something answers and is not a Gotenberg' =>
@@ -1616,6 +1623,31 @@ module RedmineReporterDashboards
                 expect(result.detail).to include(error.name)
                 expect(result.message).not_to include(error.name)
               end
+            end
+
+            # AND THE TWO SENTENCES ARE DIFFERENT, which is the half a code alone cannot
+            # carry: before this, a name that does not resolve and a socket that refuses both
+            # said "nothing answered at …, Confirm the container is running" — the INV-4
+            # misdiagnosis shape, with the discriminator sitting unused in `detail`.
+            it 'tells a name that does not resolve apart from a socket that refuses' do
+              def result_for(scenario_name)
+                http = recording_http(&locked(scenario(scenario_name)))
+                described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                    credential: %w[user pass], http: http.to_proc).preflight
+              end
+
+              unresolvable = result_for(:name_does_not_resolve)
+              refused = result_for(:nothing_there)
+
+              expect(unresolvable.message).to include('does not resolve')
+              expect(unresolvable.message).to include('RRD_GOTENBERG_URL')
+              expect(unresolvable.message).not_to include('is running')
+              expect(refused.message).to include('nothing answered at')
+              expect(refused.message).not_to include('does not resolve')
+              # The class stays in the detail and out of the user-facing sentence, as every
+              # other transport failure in this adapter does.
+              expect(unresolvable.detail).to include('SocketError')
+              expect(unresolvable.message).not_to include('SocketError')
             end
 
             # An unconfigured install: no endpoint at all. This is the one an operator of

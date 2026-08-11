@@ -759,10 +759,17 @@ module RedmineReporterDashboards
         )
       end
 
+      # `:engine_misconfigured` SINCE 2026-08-11, and §Findings E-29 is where the argument
+      # is: this is not an engine that is missing, it is an INSTALL with no engine at all.
+      # `render/failure.rb`'s tie-break is whether this side can tell whose problem it is,
+      # and here it can — `Registry.ids` is empty, nothing is ambiguous, no retry will ever
+      # change it, and what fixes it is something an operator does. `PreflightCommand`
+      # already reports the same state as `NOTHING_TO_RUN` rather than as a failure, which
+      # is the same judgement one surface over.
       def no_engine_diagnostic(sections)
         Diagnostic.new(
           origin: :engine,
-          code: :engine_unavailable,
+          code: :engine_misconfigured,
           template_name: template.name,
           message: 'no render engine is registered, so no PDF could be produced',
           correlation_id: sections.first&.job&.correlation_id || mint_id,

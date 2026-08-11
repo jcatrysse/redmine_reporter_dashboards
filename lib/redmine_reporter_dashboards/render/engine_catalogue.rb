@@ -186,6 +186,20 @@ module RedmineReporterDashboards
 
       def engine_asset_models(attrs, id)
         list = Array(fetch!(attrs, 'asset_models', id)).map(&:to_s)
+        # AT LEAST ONE, and §Findings E-29 row 14 is why. An empty list validated, and the
+        # settings screen then printed `—` in the Assets column — indistinguishable from an
+        # engine this file has never described — while the engine's inability to carry ANY
+        # asset was excluded from "Not supported" as a matter of policy. `Resolver` refuses
+        # every reference for such an engine, so it is a real absence rendered as a dash.
+        # This is the same shape as the `default:`-on-exactly-one-engine check above: a file
+        # that cannot express the fact is better than a file that expresses it invisibly.
+        if list.empty?
+          raise InvalidCatalogue,
+                "engine #{id} declares no asset models. Every engine carries a document's " \
+                "images and stylesheets somehow — one of #{ASSET_MODELS.inspect} (§5.1) — " \
+                'and an empty list renders as an em dash that reads like "not described".'
+        end
+
         unknown = list - ASSET_MODELS
         unless unknown.empty?
           raise InvalidCatalogue,

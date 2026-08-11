@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../spec_helper'
+require 'tmpdir'
 require_relative '../../lib/redmine_reporter_dashboards/render/engines/chromium_cdp'
 require_relative '../../lib/redmine_reporter_dashboards/render/engines/wkhtmltopdf'
 require_relative '../../lib/redmine_reporter_dashboards/render/engine_catalogue'
@@ -267,6 +268,29 @@ module RedmineReporterDashboards
             expect(result).to be_a(Failure)
             expect(result.code).to eq(:engine_unavailable)
             expect { result.bytes }.to raise_error(NoMethodError)
+          end
+
+          # A BINARY THAT EXISTS AND CANNOT BE EXECUTED IS THE OPERATOR'S, and it used to
+          # share both the code and the sentence with "not installed" (§Findings E-29's
+          # recommendation, taken). The two are one `chmod` apart and only one of them is
+          # ambiguous: `ENOENT` might be a missing package or a mistyped
+          # `RRD_WKHTMLTOPDF_BINARY` and this side cannot tell, while `EACCES` has exactly
+          # one remedy.
+          it 'tells a binary it may not execute apart from one that is not there' do
+            Dir.mktmpdir do |dir|
+              present = File.join(dir, 'wkhtmltopdf')
+              File.write(present, "#!/bin/sh\nexit 0\n")
+              File.chmod(0o000, present)
+
+              denied = described_class.new(binary: present).render(request)
+              absent = described_class.new(binary: File.join(dir, 'nope')).render(request)
+
+              expect(denied.code).to eq(:engine_misconfigured)
+              expect(denied.message).to include('cannot be executed')
+              expect(denied.detail).to include('EACCES')
+              expect(absent.code).to eq(:engine_unavailable)
+              expect(absent.message).to include('not installed')
+            end
           end
 
           # --- REGRESSION, and the corpus in CI is what found it ---

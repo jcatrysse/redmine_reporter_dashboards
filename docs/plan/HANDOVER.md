@@ -1273,6 +1273,24 @@ plugin or the vendor gem, each listed with its reason in
 
   Re-mirror BEFORE every run, and if a change you expected to break something does not,
   diff the mirror against `git show HEAD:<path>` before believing the green.
+- **A FRESHLY-STARTED GOTENBERG FAILS THE PREFLIGHT'S JAVASCRIPT CHECK, AND THE CONTAINER
+  IS FINE.** Measured 2026-08-11, three consecutive red runs of
+  `script/render_preflight_exit_codes.sh` against a container created two minutes earlier —
+  arm 1 reporting *"did not answer the JavaScript check in time"*. The JS probe is the FIRST
+  conversion the container ever sees (`configuration_checks` run before the document
+  checks), so it pays Chromium's cold start, and the container's own log says so:
+  `process first start: context canceled`, **latency 10.011 s** against a
+  `PROBE_TIMEOUT_MS` of 10 s. A plain conversion is 0.15–0.38 s once warm.
+
+      # warm it, then the contract holds — two consecutive clean runs, measured
+      printf '<html><body>x</body></html>' > /tmp/probe.html
+      curl -s -o /dev/null -u rrd:s3cret -F 'files=@/tmp/probe.html;filename=index.html' \
+        http://127.0.0.1:3098/forms/chromium/convert/html
+
+  So a RED run of that script against a fresh container means nothing until you have warmed
+  the browser — the mirror image of this section's usual trap. It is recorded as a product
+  defect in §Findings **E-29 row 16**, because an operator following the README meets it on
+  their first ever preflight; CI does not, because `render-smoke` runs the corpus first.
 - **THE HOST'S DOCKER REACHES THE REGISTRY; A CONTAINER'S NETWORK DOES NOT.** Measured
   2026-08-10, and it is the reason the CVE gate is CI-only. `docker pull` works (the
   daemon uses the proxy), but a process *inside* a container gets no DNS:

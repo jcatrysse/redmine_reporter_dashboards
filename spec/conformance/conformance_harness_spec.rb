@@ -347,6 +347,21 @@ module RedmineReporterDashboards
         end
       end
 
+      # AN ENGINE MUST DECLARE AT LEAST ONE ASSET MODEL (§Findings E-29 row 14, taken). An
+      # empty list validated, and the settings screen printed `—` in the Assets column —
+      # indistinguishable from an engine this file has never described — while the engine's
+      # inability to carry ANY asset was excluded from "Not supported" as a matter of policy.
+      it 'refuses an engine that declares no asset model at all' do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, 'capabilities.yml')
+          File.write(path, File.read(described_class::DEFAULT_PATH, encoding: 'UTF-8')
+                               .sub("    asset_models: [inline]\n", "    asset_models: []\n"))
+
+          expect { described_class.new(path) }
+            .to raise_error(described_class::InvalidCatalogue, /declares no asset models/)
+        end
+      end
+
       it 'refuses a file with two defaults, because the fallback would depend on hash order' do
         Dir.mktmpdir do |dir|
           path = File.join(dir, 'capabilities.yml')

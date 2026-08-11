@@ -446,7 +446,11 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
         outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
 
         expect(outcome).not_to be_ok
-        expect(outcome.diagnostic.code).to eq(:engine_unavailable)
+        # `:engine_misconfigured` since 2026-08-11 (§Findings E-29): auto-detection found
+        # nothing it may select, so this install has NO engine — which is not an engine that
+        # is missing, and `render/failure.rb`'s tie-break is whether this side can tell whose
+        # problem it is. Here it can.
+        expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
       end
 
       it 'passes over it for one that needs nothing, even though it sorts first' do
@@ -576,7 +580,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
                      engine_preference: 'gotenberg').call(pdf: true)
 
         expect(refused).not_to be_ok
-        expect(refused.diagnostic.code).to eq(:engine_unavailable)
+        expect(refused.diagnostic.code).to eq(:engine_misconfigured)
         expect(chosen).to be_ok
         expect(chosen.engine_id).to eq('picked-gotenberg')
       end
@@ -645,7 +649,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
 
       expect(outcome).not_to be_ok
-      expect(outcome.diagnostic.code).to eq(:engine_unavailable)
+      expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
       expect(outcome).to be_pdf_attempted
     end
 

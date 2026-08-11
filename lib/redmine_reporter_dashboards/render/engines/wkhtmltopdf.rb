@@ -230,7 +230,18 @@ module RedmineReporterDashboards
             @asset_degradation = true
             [bytes, nil]
           end
-        rescue Errno::ENOENT, Errno::EACCES => e
+        # TWO FAULTS, TWO SENTENCES, TWO CODES — §Findings E-29's recommendation, taken.
+        # These shared one message and one code, and they are not the same thing: `ENOENT`
+        # means nothing is at that path, which an install OR a corrected
+        # `RRD_WKHTMLTOPDF_BINARY` fixes and this side cannot tell which, so it stays
+        # `:engine_unavailable` with a sentence naming both. `EACCES` means the file IS there
+        # and is not executable — one fault, one remedy, and no retry will ever help — which
+        # is `:engine_misconfigured` by the rule in `render/failure.rb`.
+        rescue Errno::EACCES => e
+          [nil, failure(request, :engine_misconfigured,
+                        'the render engine is present and cannot be executed',
+                        detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
+        rescue Errno::ENOENT => e
           [nil, failure(request, :engine_unavailable,
                         'the render engine is not installed or cannot be started',
                         detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
