@@ -69,30 +69,25 @@ same fact written where an operator can read it (`config/capabilities.yml`).
 
 | Fixture | What it asserts | `chromium_cdp` | `gotenberg` | `wkhtmltopdf` |
 |---|---|---|---|---|
-| `F-01-page-geometry` | A4 portrait is 595 x 842 pt | PASS | not verified | PASS |
-| `F-02-custom-page-size` | Letter is honoured over the engine default | PASS | not verified | PASS |
-| `F-03-orientation-margins` | landscape A4 with 25 mm margins | PASS | not verified | PASS |
-| `F-04-page-furniture` | per-page footer with page numbers | PASS | not verified | PASS |
-| `F-05-page-breaks` | three explicit breaks make four pages | PASS | not verified | PASS |
-| `F-06-background-printing` | backgrounds print by default | PASS | not verified | PASS |
-| `F-07-column-layout` | a two-column layout stays side by side | PASS | not verified | PASS |
-| `F-08-readiness-none` | a chart-free document is ready immediately | PASS | not verified | PASS |
-| `F-09-readiness-charts` | three charts that finish, and the wait is theirs | PASS | not verified | PASS |
-| `F-10-readiness-watchdog` | a chart that never ends is cut short by the page, not the engine | PASS | not verified | PASS |
-| `F-11-readiness-timeout` | a page that never signals is rendered anyway, and degraded | PASS | not verified | SKIP — wkhtmltopdf does not declare :readiness_expression |
-| `F-12-readiness-strict` | strict turns the same timeout into a typed failure | PASS | not verified | SKIP — wkhtmltopdf does not declare :readiness_expression |
-| `F-13-readiness-late-signal` | a chart signalling at 6 s is waited for, and only for that | PASS | not verified | PASS |
-| `F-14-asset-inline` | a data: URI image resolves without any fetch | PASS | not verified | PASS |
-| `F-15-egress-denial` | the engine reaches nothing on the network | PASS | not verified | PASS |
-| `F-16-failure-semantics` | an unsupported capability is refused, in type | PASS | not verified | PASS |
-| `F-17-resource-envelope` | 2 000 rows render inside a stated envelope | PASS | not verified | PASS |
-| `F-18-fonts` | text goes onto the page and comes back off it | PASS | not verified | PASS |
-| `F-19-pathological-input` | malformed and oversized input is bounded, either way | PASS | not verified | PASS |
-| `F-20-escaping-payloads` | the escaping payload set under this engine's JS parser | PASS | not verified | PASS |
+| `F-01-page-geometry` | A4 portrait is 595 x 842 pt | PASS | PASS | PASS |
+| `F-02-custom-page-size` | Letter is honoured over the engine default | PASS | PASS | PASS |
+| `F-03-orientation-margins` | landscape A4 with 25 mm margins | PASS | PASS | PASS |
+| `F-04-page-furniture` | per-page footer with page numbers | PASS | PASS | PASS |
+| `F-05-page-breaks` | three explicit breaks make four pages | PASS | PASS | PASS |
+| `F-06-background-printing` | backgrounds print by default | PASS | PASS | PASS |
+| `F-07-column-layout` | a two-column layout stays side by side | PASS | PASS | PASS |
+| `F-08-readiness-none` | a chart-free document is ready immediately | PASS | PASS | PASS |
+| `F-09-readiness-charts` | three charts that finish, and the wait is theirs | PASS | PASS | PASS |
+| `F-10-readiness-watchdog` | a chart that never ends is cut short by the page, not the engine | PASS | PASS | PASS |
+| `F-11-readiness-timeout` | a page that never signals is rendered anyway, and degraded | PASS | PASS | SKIP — wkhtmltopdf does not declare :readiness_expression |
+| `F-12-readiness-strict` | strict turns the same timeout into a typed failure | PASS | PASS | SKIP — wkhtmltopdf does not declare :readiness_expression |
+| `F-13-readiness-late-signal` | a chart signalling at 6 s is waited for, and only for that | PASS | PASS | PASS |
+| `F-14-asset-inline` | a data: URI image resolves without any fetch | PASS | SKIP — gotenberg does not declare :asset_inline | PASS |
+| `F-15-egress-denial` | the engine reaches nothing on the network | PASS | PASS | PASS |
+| `F-16-failure-semantics` | an unsupported capability is refused, in type | PASS | PASS | PASS |
+| `F-17-resource-envelope` | 2 000 rows render inside a stated envelope | PASS | PASS | PASS |
+| `F-18-fonts` | text goes onto the page and comes back off it | PASS | PASS | PASS |
+| `F-19-pathological-input` | malformed and oversized input is bounded, either way | PASS | PASS | PASS |
+| `F-20-escaping-payloads` | the escaping payload set under this engine's JS parser | PASS | PASS | PASS |
 
-## Columns that are not measurements
 
-INV-7's rule, applied to engines: a configuration nobody ran is unsupported, and
-saying so is cheaper than finding out from a user.
-
-* **`gotenberg`** — MEASURED IN CI 2026-08-10 against Gotenberg 8.35.0, at the digest pinned in `docker-compose.gotenberg.yml` — which is the ONE place that digest is written, so that the nightly CVE scan and this note cannot come to disagree. Run 31408759956: 19 pass, 0 fail, 1 skip, the skip being `F-14-asset-inline` against an `:asset_inline` this engine does not declare, which is G12's first arm rather than a gap. Still `pending` rather than `corpus` because promotion is a curator act on a run somebody has read — the same act, on the same kind of evidence, as wkhtmltopdf's on 2026-08-06 — and until it happens the cells below are deliberately not measurements. The security conditions hold as designed: convert/url is a forbidden code path asserted absent from every file that could request it, only `convert/html` with the upload model, and an endpoint reachable without the configured credential is a preflight FAILURE with a named remediation. Two of those checks were rewritten after measuring that they could not fail — Gotenberg exempts `/health` from basic auth, and it silently ignores `waitForExpression` when JavaScript is disabled.

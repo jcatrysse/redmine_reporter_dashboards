@@ -164,13 +164,22 @@ engines:
     label: Gotenberg (containerised Chromium)
     role: documented
     default: false
-    # T-34 SHIPPED THE ADAPTER, so `documented` — which means "no adapter ships" — became
-    # false and this moved to `pending`. That is exactly the state wkhtmltopdf sat in, for
-    # exactly as long as its reason held: the adapter exists, its results are printed, and
-    # nobody has yet read a CI run and decided they are the contract. Promotion to
-    # `corpus` is a curator decision on a CI run, the way wkhtmltopdf's was on 2026-08-06
-    # — see the recommendation in implementation-plan.md §Findings.
-    verification: pending
+    # PROMOTED 2026-08-11 BY CURATOR DECISION, on a CI run somebody read — the same act,
+    # on the same kind of evidence, as wkhtmltopdf's on 2026-08-06.
+    #
+    # T-34 shipped the adapter, so `documented` — which means "no adapter ships" — became
+    # false and this moved to `pending`: the adapter exists, its results are printed, and
+    # nobody had yet decided they are the contract. That condition was met by run
+    # 31408759956 and every run since (31469385598 on `ee22bd6`), and by a local run
+    # against real containers on 2026-08-11 — 19 pass / 0 fail / 1 skip each time, the one
+    # skip being `F-14-asset-inline` for an `:asset_inline` this engine does not declare,
+    # which is G12's first arm rather than a gap.
+    #
+    # THE TRADE THE CURATOR ACCEPTED KNOWINGLY, recorded here because it is paid by
+    # somebody else later: under `corpus` the cells below are the contract, so a Gotenberg
+    # that does not come up in `render-smoke` is a HARD failure rather than a skip — and
+    # that makes every render-smoke run depend on Docker Hub serving the pinned digest.
+    verification: corpus
     needs_service: true
     renders_offline: true
     install: an operator-run container; the plugin never ships one
@@ -178,14 +187,14 @@ engines:
     asset_models: [upload]
     deprecated: false
     verification_note: >-
-      MEASURED IN CI 2026-08-10 against Gotenberg 8.35.0, at the digest pinned in
+      MEASURED IN CI against Gotenberg 8.35.0, at the digest pinned in
       `docker-compose.gotenberg.yml` — which is the ONE place that digest is written, so
-      that the nightly CVE scan and this note cannot come to disagree. Run 31408759956:
-      19 pass, 0 fail, 1 skip, the skip being `F-14-asset-inline` against an
-      `:asset_inline` this engine does not declare, which is G12's first arm rather than a
-      gap. Still `pending` rather than `corpus` because promotion is a curator act on a run
-      somebody has read — the same act, on the same kind of evidence, as wkhtmltopdf's on
-      2026-08-06 — and until it happens the cells below are deliberately not measurements. The security conditions hold as
+      that the nightly CVE scan and this note cannot come to disagree. Run 31408759956
+      (2026-08-10) and every run since: 19 pass, 0 fail, 1 skip, the skip being
+      `F-14-asset-inline` against an `:asset_inline` this engine does not declare, which is
+      G12's first arm rather than a gap. `pending` meant "reported and not enforced, no
+      cells in the matrix"; since the promotion on 2026-08-11 the cells are real and a
+      regression in any of them is a build failure. The security conditions hold as
       designed: convert/url is a forbidden code path asserted absent from every file that
       could request it, only `convert/html` with the upload model, and an endpoint
       reachable without the configured credential is a preflight FAILURE with a named

@@ -883,9 +883,11 @@ jobs:
   #        of exactly that, four minor versions long.
   #
   # It runs the harness half on every push (no engine needed, no browser touched) and
-  # the corpus half against whatever adapters are registered. Until T-13 registers one,
-  # the corpus half has nothing to drive and the catalogue says so in as many words —
-  # `verification: pending`, printed into the matrix.
+  # the corpus half against whatever adapters are registered. **All three engines are
+  # `verification: corpus` since 2026-08-11**, so all three columns are measurements and
+  # the matrix no longer carries a "Columns that are not measurements" section at all —
+  # which also means a Gotenberg that will not come up here is a HARD failure rather than
+  # a skip, and this job now depends on the registry serving the pinned digest.
   # ------------------------------------------------------------------
   render-smoke:
     name: Render conformance (G9, G12)
@@ -927,12 +929,12 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || \
             echo "::notice::no AppArmor userns restriction to lift on this image"
 
-      # THE COMPATIBILITY ENGINE, which cannot be installed in the container this was
-      # developed in — its package is gone from Ubuntu 24.04's archive and only exists
-      # as a release .deb. So CI is where `:wkhtmltopdf` gets measured for the first
-      # time, the same way MariaDB and MySQL are measured here and not locally. Until a
-      # green run has been read, `config/capabilities.yml` keeps it at
-      # `verification: pending` and the committed matrix carries no cells for it.
+      # THE COMPATIBILITY ENGINE. Its package is gone from Ubuntu 24.04's archive and only
+      # exists as a release .deb, which is what this step installs — the same build the
+      # corpus was promoted on. **It is `verification: corpus` since 2026-08-06**, so its
+      # twenty cells are the contract and a regression in one fails this job; the sentence
+      # that used to be here said the catalogue keeps it at `pending` with no cells, and
+      # that stopped being true on the day of the promotion.
       #
       # `continue-on-error` on the INSTALL only: a release asset that 404s must not fail
       # a job whose subject is the reference engine. A wkhtmltopdf that installs and then

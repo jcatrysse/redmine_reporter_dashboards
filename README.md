@@ -343,10 +343,13 @@ itself, it needs no service, and it is the one every other section here assumes.
 is offered as *one* of the options — it buys a render path that is already isolated at the
 network level, and it costs you a service to run, monitor and patch.
 
-**Not yet verified in CI.** The adapter has been measured locally against
-`gotenberg/gotenberg:8` (Gotenberg 8.35.0) and its column in the support matrix reads *not
-verified* for every fixture, honestly. Chromium is the engine whose cells are measurements.
-Treat Gotenberg as supported-by-design and unproven-by-run until that column changes.
+**Verified in CI since 2026-08-11.** Its column in
+[`docs/engine-support-matrix.md`](docs/engine-support-matrix.md) carries measurements now —
+19 fixtures pass and one is skipped, because Gotenberg does not declare the `:asset_inline`
+capability that fixture needs. Those cells are a contract rather than a report: a
+regression in any of them fails the build, and so does a Gotenberg that will not start in
+CI. What that costs, stated plainly: the render-conformance job depends on the container
+registry serving the pinned digest.
 
 Nothing auto-detects it. An engine that needs a service is never chosen for you: an install
 without a container has not picked Gotenberg, it has simply not picked, and quietly
