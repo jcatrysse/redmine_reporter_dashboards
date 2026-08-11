@@ -337,8 +337,10 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
       assert_response :unprocessable_entity, "#{code} did not refuse"
       message = flash.now[:error].to_s
       assert_not message.strip.empty?, "#{code} refused with no message at all"
-      assert_not_includes message, 'translation missing',
-                          "#{code} has no locale key"
+      # CASE-INSENSITIVE: Rails renders "Translation missing: …" with a capital T, so the
+      # lowercase form never matches (measured 2026-08-11 — see E-29).
+      assert_no_match(/translation missing/i, message,
+                      "#{code} has no locale key")
       assert_not_includes message, code.to_s,
                           "#{code} printed its raw symbol instead of a sentence"
     end
@@ -459,7 +461,7 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
     # that reason — so the assertion they carried had never run.
     label = I18n.t(:label_reporter_adhoc_mail_user_gone)
     assert_includes @response.body, label
-    assert_not_includes @response.body, 'translation missing'
+    assert_no_match(/translation missing/i, @response.body)
     assert_not_includes @response.body, 'Translation missing'
   end
 

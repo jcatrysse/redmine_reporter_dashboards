@@ -304,6 +304,50 @@ class ReporterPreflightControllerTest < ActionController::TestCase
     end
   end
 
+  # FR-50 — THE INSTALLATION'S SELECTED ENGINE REACHES THE SUITE FROM HERE.
+  #
+  # `PreflightSuite` may not read a `Setting` (mechanism E5; `render/**` is gated), so the
+  # selection arrives as a port that THIS controller fills. A port a caller forgets is the
+  # defect an independent review already found once in this plugin (`asset_resolver:`), and
+  # its signature is invisible from the outside: the page renders identically either way and
+  # only a deferred engine's skip row moves.
+  #
+  # So the claim is asserted about the CONSTRUCTOR — HANDOVER §1's rule for exactly this
+  # shape — and in BOTH directions, because `expects` with a matcher passes against a caller
+  # that never constructs one at all.
+  def test_the_installations_selected_engine_is_handed_to_the_suite
+    @request.session[:user_id] = @admin.id
+    original = Setting.send(:plugin_redmine_reporter_dashboards)
+    Setting.send(:plugin_redmine_reporter_dashboards=,
+                 original.merge('render_engine' => 'chromium_cdp'))
+
+    suite = mock('suite')
+    suite.stubs(:reports).returns([])
+    Render::PreflightSuite.expects(:new)
+                          .with { |args| args[:selected_engine_id] == 'chromium_cdp' }
+                          .returns(suite)
+
+    post :run
+
+    assert_response :success
+  ensure
+    Setting.send(:plugin_redmine_reporter_dashboards=, original)
+  end
+
+  def test_no_selection_hands_the_suite_nothing_to_prefer
+    @request.session[:user_id] = @admin.id
+
+    suite = mock('suite')
+    suite.stubs(:reports).returns([])
+    Render::PreflightSuite.expects(:new)
+                          .with { |args| args[:selected_engine_id].nil? }
+                          .returns(suite)
+
+    post :run
+
+    assert_response :success
+  end
+
   # Not a blank page. "Nothing can render at all" is the most alarming answer this page
   # has, so it has to be the loudest — a green-looking empty page is the failure mode
   # this repository keeps rediscovering.
@@ -388,7 +432,7 @@ class ReporterPreflightControllerTest < ActionController::TestCase
         keys.each do |key|
           value = ::I18n.t(key, default: nil)
           assert value.present?, "#{locale}.yml is missing #{key}"
-          refute_match(/translation missing/, value.to_s)
+          refute_match(/translation missing/i, value.to_s)
         end
       end
     end

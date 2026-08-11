@@ -1116,6 +1116,24 @@ ENUMERATE THE ARMS FROM THE SOURCE (`rg -n 'preflight_failure\(' file`) rather t
 ones you were already thinking about; and mutate every row of it, because a row that cannot
 fail is indistinguishable from a row that is right.
 
+**EVERY `assert_not_includes … 'translation missing'` IN THIS PROJECT WAS BLIND, BECAUSE
+RAILS CAPITALISES IT.** 2026-08-11, found by mutation. Rails renders a missing key as
+**`"Translation missing: en.label_…"`** — measured in the test environment — so the
+lowercase literal never matches, and DELETING a locale key the page under test uses left
+the suite GREEN. Five call sites were affected across four files, the oldest shipped with
+T-33, and every one of them is a control whose whole job is to notice an absent key. All
+five are now `assert_no_match(/translation missing/i, …)` — case-insensitive rather than
+capitalised, because the casing is Rails' and this plugin spans three Rails majors — and
+the mutation (delete one key per page) now fails both settings tests. The general rule:
+**a control that asserts the ABSENCE of a string must be measured by planting the string
+it looks for**, and the cheapest way to plant it is to delete the key.
+
+**AND `git checkout <path>` IN A MUTATION HARNESS DESTROYS UNCOMMITTED WORK.** Same
+afternoon: a harness that restored one of its targets with `git checkout` silently reverted
+an uncommitted change to that file, and the following control run reported 7 errors that had
+nothing to do with any mutation. Restore from a COPY made before the mutation, never from
+the index — the index is not where uncommitted work lives.
+
 **A MUTATION HARNESS WHOSE RESTORE CAN BE INTERRUPTED MUST VERIFY THE TREE BEFORE EVERY
 VERDICT, NOT AFTER THE BATCH.** 2026-08-11, disclosed by the adversarial QA pass that hit it:
 a two-minute tool timeout landed BETWEEN applying a mutation and restoring it, so the next

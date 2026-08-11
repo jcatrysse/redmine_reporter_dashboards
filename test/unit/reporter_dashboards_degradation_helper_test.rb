@@ -186,7 +186,8 @@ class ReporterDashboardsDegradationHelperTest < ActionView::TestCase
                  headlines.values.uniq.length,
                  "each origin needs its own sentence, got #{headlines.inspect}"
     headlines.each_value do |sentence|
-      assert_not_includes sentence, 'translation missing', 'a locale key is absent'
+      # CASE-INSENSITIVE — Rails capitalises it (E-29).
+      assert_no_match(/translation missing/i, sentence, 'a locale key is absent')
     end
   end
 

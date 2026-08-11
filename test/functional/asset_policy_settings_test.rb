@@ -99,9 +99,16 @@ class AssetPolicySettingsTest < ActionController::TestCase
 
     assert_response :success
     assert_select 'label', text: l(:label_reporter_asset_policy)
-    # A missing key renders as "translation missing", which reads as a broken page in every
-    # locale but English and is invisible in English.
-    assert_not_includes response.body, 'translation missing'
+    # A missing key renders as "Translation missing: …", which reads as a broken page in
+    # every locale but English and is invisible in English.
+    # CASE-INSENSITIVE SINCE 2026-08-11, AND A MUTATION RUN IS WHY. This assertion has been vacuous
+    # since T-33 shipped it. Rails renders a missing key as
+    # **"Translation missing: en.…"** with a capital T (measured on Rails 7.2), so
+    # `assert_not_includes response.body, 'translation missing'` never matches and the
+    # control is vacuous: deleting a key this page uses left this test GREEN. The regexp is
+    # case-insensitive rather than capitalised because the casing is Rails', not ours, and
+    # this plugin spans three Rails majors.
+    assert_no_match(/translation missing/i, response.body)
   end
 
   def test_a_non_admin_cannot_reach_it
