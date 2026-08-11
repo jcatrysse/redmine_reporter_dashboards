@@ -84,13 +84,16 @@ module RedmineReporterDashboards
       #
       # ONE MORE PRODUCER LIVES OUTSIDE THIS TYPE, and saying so is the point of naming it
       # here: `Reporting::ReportRun#no_engine_diagnostic` mints a `Reporting::Diagnostic`,
-      # legal only through `Diagnostic.codes`' union with this set, for an installation whose
-      # every registered engine needs a service and which has selected none. That call site
-      # ALSO answers `:engine_unavailable`, for the neighbouring state where no engine is
-      # registered at all — one method, two states, two codes, because a review measured the
-      # single sentence they used to share as false in the second. A code with three producers
-      # is healthy; a code with none is dead vocabulary, and this file has a precedent for
-      # deleting those.
+      # legal only through `Diagnostic.codes`' union with this set, for an installation where
+      # every registered engine needs a service and so none can be selected automatically.
+      # That call site ALSO answers `:engine_unavailable`, for the neighbouring state where no
+      # engine is registered at all — one method, two states, two codes, because a review
+      # measured the single sentence they used to share as false in the second. (This bullet
+      # said "and which has selected none" until a further review measured a third state where
+      # a selection HAS been made and names an engine that is no longer registered. Neither
+      # the sentence nor this comment claims anything about the selection now; `detail` carries
+      # it.) A code with three producers is healthy; a code with none is dead vocabulary, and
+      # this file has a precedent for deleting those.
       CODES = %i[
         engine_unavailable engine_misconfigured engine_version_unsupported timeout
         readiness_timeout resource_limit asset_unresolved capability_unsupported

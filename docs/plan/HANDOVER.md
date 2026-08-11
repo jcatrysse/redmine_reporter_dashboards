@@ -41,8 +41,9 @@ plan. Measured 2026-08-11 on the same tree: the real working directory gives `26
 failures, 127 pending` and a `git archive` extract gives `2670 examples, 0 failures, 137 pending`,
 differing by exactly those ten. **A `137 pending` number in this file or in a session log is a run
 that did not check G7** — several earlier ones are exactly that. Two rules. Report G7 from a run in
-a directory with `.git` present (`rspec spec/golden` is 71 examples and takes 0.2 s, so there is no
-excuse), and when a pending count moves, diff the pending LISTS before attributing it to your
+a directory with `.git` present (`rspec spec/golden` is **167 examples in 0.55 s**, so there is no
+excuse — and note that number: the first version of this line said 71, which was a FILE SUBSET
+quoted as if it were the directory, caught by the next review), and when a pending count moves, diff the pending LISTS before attributing it to your
 change — that is how this was found, after first assuming the change had caused it.
 
 **A PLANTED LOCALE KEY LOSES TO A SHIPPED ONE, AND IT HAS NOW COST TWO ROUNDS IN ONE TASK.**
@@ -1560,14 +1561,18 @@ need the private reporter plugin, they carry a reason, and they are the accepted
 of a CI that runs on fork pull requests.
 
 **2026-08-11, the E-30 round** (a fourth review of the E-29 follow-ups, which rejected them).
-Executed in this container: `rspec` **2671 / 0 failures / 127 pending in the real working
-directory** — read the G7 trap at the top of §1 before comparing that pending count with any
+Executed in this container: `rspec` **2673 / 0 failures / 127 pending in the real working
+directory on Ruby 3.3.6 — and 128 pending on the Redmine 5.1 / Ruby 3.2 cell**, because this round
+adds the suite's first Ruby-version-conditional skip (`Socket::ResolutionError` is 3.3+). That is
+the pending total becoming version-dependent for the first time; a bare number is no longer enough — read the G7 trap at the top of §1 before comparing that pending count with any
 older one — `rake redmine:plugins:test` **920 runs / 0 failures / 0 errors / 4 skips** on
 PostgreSQL, the eight `script/gates/*.sh` all OK, the three-engine conformance corpus green
 against the real containers (`chromium_cdp` 20/0/0, `gotenberg` 19/0/1, `wkhtmltopdf` 18/0/2),
 and **G9 measured rather than assumed**: regenerated with `RRD_MATRIX_WRITE=1` from that run and
-`diff`ed against the committed file — identical. 14 mutations against the round's own guards, 14
-killed. Not run here, and therefore UNVERIFIED for this round: `migrate-updown` (G11) and
+`diff`ed against the committed file — identical. 14 mutations against the round's own guards, 14 killed —
+and then a fifth review wrote 20 more and found **2 survivors that set had no mutant for**, both
+now pinned, plus 13 further mutations on the corrections with 0 survivors. The number that matters
+is not 14 or 13: it is that a self-written set covers only what its author thought to attack. Not run here, and therefore UNVERIFIED for this round: `migrate-updown` (G11) and
 `render-smoke` (G12), neither of which this change reaches — no migration, no capability
 declaration, no matrix cell.
 

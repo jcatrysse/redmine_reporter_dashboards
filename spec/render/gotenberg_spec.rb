@@ -1661,6 +1661,13 @@ module RedmineReporterDashboards
               # remediation with a retry that would have worked.
               expect(unresolvable.message).to match(/spelling/i)
               expect(unresolvable.message).to match(/resolver/i)
+              # AND THE THIRD CAUSE GETS AN ACTION, not a wait. The sentence used to end "the
+              # resolver itself may be temporarily unreachable, and then this clears on its
+              # own" — and a review pointed out its own reproduction was a PERMANENTLY
+              # unreachable resolver, which never clears. Two `/spelling/` and `/resolver/`
+              # matchers could not tell the two versions apart: the mutation survived until
+              # this line existed.
+              expect(unresolvable.message).to match(/DNS configuration/i)
               # The class stays in the detail and out of the user-facing sentence, as every
               # other transport failure in this adapter does.
               expect(unresolvable.detail).to include('SocketError')

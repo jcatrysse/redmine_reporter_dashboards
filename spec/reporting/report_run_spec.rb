@@ -447,18 +447,92 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
         expect(outcome).not_to be_ok
         # `:engine_misconfigured` since 2026-08-11 (§Findings E-29): the engines ARE here and
-        # every one of them needs a service this installation has not selected, so the remedy
-        # is an operator's and it has a page to point at.
+        # none of them can be picked automatically, so the remedy is an operator's and it has
+        # a page to point at.
         expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
         # AND THE SENTENCE, which is the half the code cannot carry (§Findings E-30). A
         # review mutated this message to nonsense and the FULL suite stayed green — 2670
         # examples, 0 failures — while the message it shipped said "no render engine is
-        # registered" three lines under an assertion that one is. It is printed by the
-        # diagnostics panel, the failure mail and the failure PDF.
+        # registered" three lines under an assertion that one is. It reaches the diagnostics
+        # panel and the scheduled-failure mail; NOT the failure PDF, which carries a
+        # deliberately narrower field set (`failure_document.rb` argues it).
         expect(outcome.diagnostic.message).to include('needs a separate service')
         expect(outcome.diagnostic.message).to include('Administration')
         expect(outcome.diagnostic.message).not_to include('no render engine is registered')
-        expect(outcome.diagnostic.detail).to include('gotenberg')
+        # AND IT MUST STAY DRAWABLE. `MinimalPdf` is Windows-1252, so a `→` in a sentence that
+        # might ever reach an artefact is replaced wholesale by "value unavailable" — measured
+        # by a review on the first draft of this message, which used one.
+        expect(outcome.diagnostic.message).not_to include('→')
+        expect(outcome.diagnostic.detail).to include('registered=gotenberg')
+        expect(outcome.diagnostic.detail).to include('selected=none')
+      end
+
+      # THE THIRD STATE, found twice independently — by an adversarial pass here and by a
+      # fourth review — after the two-state split shipped claiming to be exhaustive. A stored
+      # selection naming an engine that is NOT registered leaves `selected_engine_id` nil, so
+      # this arm answers, and the sentence used to end "and none has been selected" for an
+      # operator who had selected one. `EnginePreference` drops such a value at the settings
+      # boundary so production cannot reach it — but the `engine_preference:` port is public,
+      # which is the same reason the empty-selection example below this one exists.
+      it 'does not tell an installation that selected a stale engine that it selected nothing' do
+        RedmineReporterDashboards::Render::Registry.register(:gotenberg,
+                                                            ReportRunSpecSupport::FakeAdapter)
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      engine_preference: 'athena').call(pdf: true)
+
+        expect(outcome).not_to be_ok
+        expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
+        # The message says only what is true in EVERY state that reaches it.
+        expect(outcome.diagnostic.message).to include('can be selected automatically')
+        expect(outcome.diagnostic.message).not_to match(/none has been selected/i)
+        # The discriminator is in the admin-facing half, where it is worth having.
+        expect(outcome.diagnostic.detail).to include('selected=athena')
+      end
+
+      # THE PORT IS READ ONCE PER RUN, AND NOTHING SAID SO UNTIL A MUTATION SURVIVED. Making
+      # `no_engine_diagnostic` name the selection gave `engine_preference` a second caller, and
+      # the sentinel used to be resolved on every CALL — so a failing run did two settings
+      # reads and could write the same `dropped` complaint into the log twice, which an
+      # operator reads as two problems with one setting. The memoisation that fixes it is
+      # invisible from the outside except by COUNTING, so this counts.
+      #
+      # HAND-ROLLED AND UNDONE IN `ensure`, in this file's style — the stand-ins here are
+      # built, not mocked — and `|**_kwargs|` rather than a bare `**` because the plugin's
+      # syntax floor is Ruby 2.7.
+      #
+      # THE PORT DOES NOT EXIST IN THIS PROCESS, and that is the answer to "why was the
+      # `FROM_SETTINGS` branch never covered". `RedmineReporterDashboards.render_engine_id`
+      # lives in the boot file, which the DB-less suite does not load — reaching that branch
+      # here used to raise `NameError`, so no example went near it. Standing the port up for
+      # the duration is what makes the branch reachable, and the example removes it again
+      # rather than leaving a method on a shared module for whatever runs next.
+      it 'reads the installation setting once per run, not once per caller' do
+        RedmineReporterDashboards::Render::Registry.register(:gotenberg,
+                                                            ReportRunSpecSupport::FakeAdapter)
+        reads = 0
+        mod = RedmineReporterDashboards
+        existed = mod.respond_to?(:render_engine_id)
+        original = existed ? mod.method(:render_engine_id) : nil
+        mod.define_singleton_method(:render_engine_id) do |**_kwargs|
+          reads += 1
+          nil
+        end
+
+        begin
+          outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                        engine_preference: described_class::FROM_SETTINGS).call(pdf: true)
+
+          expect(outcome).not_to be_ok
+          expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
+          expect(reads).to eq(1)
+        ensure
+          if existed
+            mod.define_singleton_method(:render_engine_id, original)
+          else
+            mod.singleton_class.send(:remove_method, :render_engine_id)
+          end
+        end
       end
 
       it 'passes over it for one that needs nothing, even though it sorts first' do
@@ -658,18 +732,27 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
     it 'reports an absent engine instead of quietly returning the HTML' do
       # §9b.2: "a preview that only proves the easy path is a false signal". With no
       # engine there is no PDF, and the one thing this must not do is say nothing.
-      expect(RedmineReporterDashboards::Render::Registry.ids).to eq([])
-
       outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
 
       expect(outcome).not_to be_ok
       # THE OTHER STATE OF THE SAME METHOD, and the one that keeps `:engine_unavailable`
       # (§Findings E-30): nothing is registered, so nothing is THERE, and what fixes it is an
-      # install rather than a setting. The sibling example above is the registry-not-empty
-      # half. Asserting `ids == []` first is what stops the two examples silently becoming
-      # one case if registration leaks between them.
+      # install rather than a setting. The sibling example in the block above is the
+      # registry-not-empty half.
+      #
+      # THIS EXAMPLE USED TO OPEN WITH `expect(Registry.ids).to eq([])`, claiming to stop the
+      # two examples "silently becoming one case". A review proved that control cannot fail:
+      # it simulated a total registry leak and the guard fired at **0 of 12 seeds**, because
+      # RSpec runs a group's own examples before its child groups and because no adapter file
+      # is required in this DB-less process. A guard that cannot fail is worse than none — it
+      # reads as cover. The line it occupied now buys something that CAN fail:
       expect(outcome.diagnostic.code).to eq(:engine_unavailable)
       expect(outcome.diagnostic.message).to include('no render engine is registered')
+      # THE DETAIL, which nothing anywhere asserted. The same review mutated it to nonsense
+      # and the FULL suite stayed green (2671 examples, 0 failures) — and it is the surviving
+      # half of the pair the previous round's commit message claimed were both killed. It is
+      # what an administrator reads in the diagnostics panel beside the code.
+      expect(outcome.diagnostic.detail).to include('Registry.ids is empty')
       expect(outcome).to be_pdf_attempted
     end
 

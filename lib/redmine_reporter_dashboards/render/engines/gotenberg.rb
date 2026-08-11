@@ -840,8 +840,8 @@ module RedmineReporterDashboards
             'Check the spelling of RRD_GOTENBERG_URL and that Redmine is on the same network ' \
             'as the container — with `internal: true` in the example compose file a ' \
             "container's name resolves only for services on that network. If both are right, " \
-            'the resolver itself may be temporarily unreachable, and then this clears on ' \
-            'its own.',
+            "the resolver itself is unreachable: if that is temporary it clears on its own, " \
+            "and if it is not, check Redmine's own DNS configuration.",
             detail: "#{e.class}: #{e.message}"
           )
         rescue StandardError => e
@@ -1256,8 +1256,11 @@ module RedmineReporterDashboards
           #
           # It is the most natural way an operator writes basic auth for a service URL, and
           # this adapter does not use it — `DEFAULT_HTTP` connects with host and port only,
-          # so the credential would be silently ignored AND carried in `@endpoint`, which
-          # is interpolated into six failure messages. `Failure#message` reaches the
+          # so the credential would be silently ignored AND carried in `@endpoint`, which is
+          # interpolated into most of the failure messages this file produces. (That clause
+          # used to carry a COUNT, and the count went stale twice — six, when it was nine, and
+          # then ten. A number nobody updates in a security-bearing comment is worse than no
+          # number, and the property does not depend on one.) `Failure#message` reaches the
           # diagnostics panel, the scheduled-report failure MAIL sent to every recipient,
           # and `Snapshot`'s persisted row. So the password would be displayed, e-mailed
           # and stored, while not authenticating anything. Found by an independent review,

@@ -700,10 +700,20 @@ module RedmineReporterDashboards
       # does not exist — it happens once per run because `resolve_engine` is called once, and
       # the boot file argues against memoising the read itself (an administrator who switches
       # away from a container must not keep POSTing to it until a restart).
+      # MEMOISED PER RUN, which is what the paragraph above already claims happens and what
+      # was not quite true: the sentinel was resolved on every CALL, and `no_engine_diagnostic`
+      # now needs the same answer to say what this installation selected. A second call meant
+      # a second settings read and a second `dropped` log line about the same stored value —
+      # an operator reading two identical complaints about one setting. Per-RUN and not per
+      # process: the boot file's argument against memoising is about an administrator who
+      # switches away from a container not having to restart Redmine, and a `ReportRun` lives
+      # for one render.
       def engine_preference
         return @engine_preference unless @engine_preference == FROM_SETTINGS
+        return @resolved_engine_preference if defined?(@resolved_engine_preference)
 
-        ::RedmineReporterDashboards.render_engine_id(logger: logger)
+        @resolved_engine_preference =
+          ::RedmineReporterDashboards.render_engine_id(logger: logger)
       end
 
       # THE FALLBACK USED TO BE `registry.ids.first`, WHICH IS ALPHABETICAL ORDER.
@@ -767,18 +777,37 @@ module RedmineReporterDashboards
       # `Registry.ids == [:gotenberg]` three lines above the expectation, so an engine IS
       # registered while the operator is told none is. That predates the code change it was
       # found under; it is fixed here rather than recorded, because `message` is what the
-      # diagnostics panel, the failure mail and the failure PDF all print.
+      # diagnostics panel and the failure mail print (`_diagnostics.html.erb`,
+      # `scheduled_report_failure.text.erb`).
+      #
+      # NOT THE FAILURE PDF, and the first draft of this comment said it was. A review
+      # measured the artefact: `failure_document.rb` carries a deliberately NARROWER field set
+      # and says so — *"`Diagnostic#message` is NOT among them, and neither is `#detail`. The
+      # document is the artefact that TRAVELS, so it gets the narrower set"*. Which is also
+      # why the sentence below spells the menu path with `>` and not `→`: `MinimalPdf` draws
+      # Windows-1252 and would replace an unencodable string wholesale, so a sentence that
+      # might ever reach an artefact must stay drawable.
       #
       #   nothing registered      no adapter at all. Nothing is there, and what would fix it
       #                           is an install — `:engine_unavailable`, which is where this
       #                           has always been and where `render/failure.rb`'s rule keeps
       #                           it.
       #   registered, none usable every registered adapter is one the catalogue SAYS needs a
-      #                           separate service (that is the only thing `auto_selectable?`
-      #                           refuses on), and this installation has not selected one.
-      #                           The engines ARE there, the remedy is an operator's and it
-      #                           is nameable — FR-50 put the control on a page this sentence
-      #                           can point at — so this one is `:engine_misconfigured`.
+      #                           separate service — that is the only thing `auto_selectable?`
+      #                           refuses on — so nothing here can be picked automatically.
+      #                           The engines ARE there, the remedy is an operator's and it is
+      #                           nameable: `technical-spec.md` §5.2 clause 4 put the control
+      #                           on a page this sentence can point at.
+      #
+      # THE SENTENCE SAYS NOTHING ABOUT WHAT WAS SELECTED, and that is a correction rather than
+      # an omission. It used to end *"and none has been selected"*, which two independent
+      # measurements — an adversarial pass here and a fourth review — found FALSE for a third
+      # state: a stored selection naming an engine that is no longer registered
+      # (`selected_engine_id`'s own comment calls that §7 rule 5's routine case). Production
+      # cannot reach it, because `EnginePreference` drops an unregistered id at the settings
+      # boundary; the `engine_preference:` port can, and this file already carries one example
+      # that exists purely because "the port is public". So the claim the code cannot support
+      # is gone from the message and the truth is in `detail`, which is admin-facing.
       #
       # WHAT THIS DOES NOT CLAIM. `PreflightCommand` answers exit 0 and *"OK so far"* for the
       # second state, so one surface calls it fine while this one calls it a misconfiguration.
@@ -796,12 +825,13 @@ module RedmineReporterDashboards
           origin: :engine,
           code: :engine_misconfigured,
           template_name: template.name,
-          message: 'every render engine on this installation needs a separate service, and ' \
-                   'none has been selected — choose one under Administration → Plugins, or ' \
-                   'install an engine that needs no service',
+          message: 'no render engine on this installation can be selected automatically: ' \
+                   'every registered engine needs a separate service. Choose one under ' \
+                   'Administration > Plugins, or install an engine that needs none',
           correlation_id: correlation_id,
-          detail: "registered=#{ids.map(&:to_s).sort.join(',')} none auto-selectable and " \
-                  'none selected'
+          detail: "registered=#{ids.map(&:to_s).sort.join(',')} " \
+                  "selected=#{engine_preference.to_s.empty? ? 'none' : engine_preference} " \
+                  'none auto-selectable'
         )
       end
 

@@ -243,14 +243,24 @@ module RedmineReporterDashboards
         # and is not executable — one fault, one remedy, and no retry will ever help — which
         # is `:engine_misconfigured` by the rule in `render/failure.rb`.
         #
-        # "PRESENT" IS ESTABLISHED AND NOT ASSUMED, which a review asked about: nothing here
-        # stats the path, but `execve` is what answers, and its errno for a path that holds
-        # nothing is `ENOENT`. Reaching `EACCES` therefore means something IS at that path —
-        # a non-executable file, a file in a directory the Redmine user may not traverse, or
-        # a DIRECTORY, all of which are present and none of which will run.
+        # "PRESENT" WAS ASSERTED AND IS NOT ESTABLISHED — measured, and the paragraph that used
+        # to stand here claimed the opposite. The reasoning was that `execve`'s errno for a
+        # path holding nothing is `ENOENT`, so `EACCES` proves something is there. It does not:
+        # a review ran a child dropped to an unprivileged uid against a `0700` parent directory
+        # and got `EACCES` for a file **that does not exist**, because the kernel refuses the
+        # path lookup before it can say so. `RRD_WKHTMLTOPDF_BINARY=/opt/private/wkhtmltopdf`
+        # with `/opt/private` mode `0700` and Redmine running as `redmine` is an ordinary
+        # operator mistake, and "the engine is present" would have been a confident wrong
+        # diagnosis of it — the exact shape this whole line of work exists to remove.
+        #
+        # So the sentence names what IS known: the path could not be executed, for one of two
+        # reasons, and both are an operator's. The CODE is unaffected — no retry helps either
+        # way and `chmod` is the remedy in both — which is why `:engine_misconfigured` survives
+        # a finding that killed the sentence.
         rescue Errno::EACCES => e
           [nil, failure(request, :engine_misconfigured,
-                        'the render engine is present and cannot be executed',
+                        'the render engine at the configured path could not be executed — it ' \
+                        'is either not executable, or in a directory Redmine may not enter',
                         detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
         rescue Errno::ENOENT => e
           [nil, failure(request, :engine_unavailable,
