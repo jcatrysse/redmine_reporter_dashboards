@@ -235,16 +235,15 @@ module RedmineReporterDashboards
             @asset_degradation = true
             [bytes, nil]
           end
-        # TWO FAULTS, TWO SENTENCES, TWO CODES — §Findings E-29's recommendation, taken.
-        # These shared one message and one code, and they are not the same thing: `ENOENT`
-        # means nothing is at that path, which an install OR a corrected
-        # `RRD_WKHTMLTOPDF_BINARY` fixes and this side cannot tell which, so it stays
-        # `:engine_unavailable` with a sentence naming both. `EACCES` means the file IS there
-        # and is not executable — one fault, one remedy, and no retry will ever help — which
-        # is `:engine_misconfigured` by the rule in `render/failure.rb`.
+        # TWO FAULTS, TWO CODES — §Findings E-29's recommendation, taken. `ENOENT` means
+        # nothing is at that path, which an install OR a corrected `RRD_WKHTMLTOPDF_BINARY`
+        # fixes and this side cannot tell which, so it stays `:engine_unavailable` with a
+        # sentence naming both. `EACCES` means the kernel refused to execute what is at that
+        # path; the remedy is an operator's whatever the reason, and no retry helps, which is
+        # `:engine_misconfigured` by the rule in `render/failure.rb`.
         #
-        # THIS SENTENCE DOES NOT ENUMERATE, AND TWO ATTEMPTS THAT DID WERE BOTH REFUTED BY
-        # MEASUREMENT. That history is the reason for the shape:
+        # THE SENTENCE DOES NOT NAME THE CAUSE, AND THREE DRAFTS THAT DID WERE EACH REFUTED BY
+        # MEASUREMENT. That history is the whole reason for its shape:
         #
         #   1. *"the render engine is present and cannot be executed"* — killed because
         #      `EACCES` also arrives for a file that DOES NOT EXIST, when a parent directory
@@ -256,20 +255,30 @@ module RedmineReporterDashboards
         #      `/tmp`, `/var/tmp`, `/home` and NFS are routinely `noexec` on hardened hosts,
         #      and an operator pointing `RRD_WKHTMLTOPDF_BINARY` into a mounted volume is
         #      exactly who this arm is for. SELinux and AppArmor denials land here too.
+        #   3. A paragraph three lines up asserting *"`EACCES` means the file IS there and is
+        #      not executable — one fault, one remedy"*, which survived both corrections above
+        #      because the diff that killed the sentence did not look at the comment beside it.
+        #      Both halves are false and both were measured false.
         #
-        # So it reports the fact — the kernel refused permission to execute this path — and
-        # lists what to CHECK rather than asserting which of them is wrong. Two over-confident
-        # enumerations were each a confident wrong remediation, which is the defect this whole
-        # line of work exists to remove. The CODE is unaffected by both findings: every one of
-        # these is an operator's to fix and no retry helps, which is what `:engine_misconfigured`
-        # means.
+        # SO IT REPORTS THE FACT AND LISTS WHAT TO CHECK, and the ONE cause this side can
+        # establish gets its own sentence instead of a guess: a path naming a DIRECTORY answers
+        # `EACCES` too, and `File.directory?` settles it without guessing. That is the project's
+        # own rule — discriminate where you can, name more than one remedy where you cannot.
+        # `File.directory?` answers false when the path cannot be stat'ed at all, so the branch
+        # can only claim what it has actually seen.
         rescue Errno::EACCES => e
-          [nil, failure(request, :engine_misconfigured,
-                        'Redmine was refused permission to execute the render engine at the ' \
-                        'configured path. Check the execute bit on the file, the search ' \
-                        'permission on the directories above it, and whether that filesystem ' \
-                        'is mounted noexec',
-                        detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
+          if File.directory?(@binary)
+            [nil, failure(request, :engine_misconfigured,
+                          'the configured render engine path names a directory, not the ' \
+                          'wkhtmltopdf program inside it',
+                          detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
+          else
+            [nil, failure(request, :engine_misconfigured,
+                          'permission to execute the render engine at the configured path was ' \
+                          'refused — check its execute bit, the directories above it, and ' \
+                          'whether that filesystem is mounted noexec',
+                          detail: "#{@binary}: #{e.class}: #{e.message}", started: started)]
+          end
         rescue Errno::ENOENT => e
           [nil, failure(request, :engine_unavailable,
                         'the render engine is not installed or cannot be started',

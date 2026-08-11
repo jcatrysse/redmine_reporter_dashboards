@@ -50,7 +50,7 @@ it:
   label_reporter_preflight_check_gotenberg_credential: "Il servizio di rendering richiede le sue credenziali"
   label_reporter_preflight_check_gotenberg_version: "Il servizio di rendering è Gotenberg 8 o successivo"
   label_reporter_preflight_check_gotenberg_javascript: "Nel servizio di rendering JavaScript è attivo, quindi i grafici possono essere disegnati"
-  label_reporter_preflight_check_engine_not_selected: "Il motore di rendering richiede un servizio, e questa installazione non lo ha scelto"
+  label_reporter_preflight_check_engine_not_selected: "Il motore di rendering richiede un servizio e non è il motore scelto di questa installazione"
   label_reporter_preflight_check_engine_configuration: "È stato possibile chiedere al motore la sua configurazione"
   label_reporter_preflight_check_engine: "Il motore di rendering ha prodotto un documento"
   label_reporter_preflight_check_degradations: "Nulla è stato ridotto in modo silenzioso"

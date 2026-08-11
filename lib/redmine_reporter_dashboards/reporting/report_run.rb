@@ -813,11 +813,22 @@ module RedmineReporterDashboards
       # serialiser can pick it up by accident, `FailureDocument` excludes it, and no logger
       # writes it — its only readers are the two `restamp` call sites. A fifth review measured
       # all of that after a draft had shipped `selected=<value>` into it, described as
-      # "admin-facing". It is not, and the information was never missing anyway:
-      # `selected_engine_id` already writes *"this installation selects render engine "athena",
-      # which is not registered here"* to the log, where the person who can act on it is, and
-      # an example pins that line. So the third state's fix is the SENTENCE being true, and
-      # nothing else was needed.
+      # "admin-facing". It is not, and the information is not missing either — but WHICH line
+      # carries it depends on the surface, and the first correction named the wrong one:
+      #
+      #   in production   `EnginePreference.from_settings` writes *"[reporter_dashboards]
+      #                   render setting render_engine="athena" dropped: no render engine is
+      #                   registered under that name"* and hands this class `nil`. So
+      #                   `selected_engine_id` returns at its own `id.nil?` guard and its
+      #                   `warn_line` never runs.
+      #   through the port `selected_engine_id`'s own line does run — *"this installation
+      #                   selects render engine "athena", which is not registered here"* — and
+      #                   an example pins it.
+      #
+      # A review measured that, after a comment here had cited the second as though it were
+      # the first. Either way an operator gets the stored value in the log; neither way does it
+      # belong in a `Diagnostic` field nobody prints. So the third state's fix is the SENTENCE
+      # being true, and nothing else was needed.
       #
       # WHAT THIS DOES NOT CLAIM. `PreflightCommand` answers exit 0 and *"OK so far"* for the
       # second state, so one surface calls it fine while this one calls it a misconfiguration.

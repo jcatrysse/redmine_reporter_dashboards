@@ -485,9 +485,16 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
         expect(outcome).not_to be_ok
         expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
-        # The message says only what is true in EVERY state that reaches it.
-        expect(outcome.diagnostic.message).to include('can be selected automatically')
-        expect(outcome.diagnostic.message).not_to match(/none has been selected/i)
+        # THE WHOLE SENTENCE. A review reworded the lie rather than restoring it — "every
+        # registered engine needs a separate service and you have selected nothing" — and the
+        # guard passed, because `not_to match(/none has been selected/i)` pins one PHRASING of
+        # the falsehood instead of the property. A message that has been wrong twice is pinned
+        # entire, so the next rewording is deliberate and has a failing test in front of it.
+        expect(outcome.diagnostic.message).to eq(
+          'no render engine on this installation can be selected automatically: every ' \
+          'registered engine needs a separate service. Choose one under Administration > ' \
+          'Plugins, or install an engine that needs none'
+        )
         # AND THE DISCRIMINATOR IS IN THE LOG, WHICH IS WHERE A READER IS. A draft put
         # `selected=athena` into `Diagnostic#detail` and called that "admin-facing"; a review
         # measured that detail is printed nowhere at all — the panel names it under "WHAT IS
@@ -498,6 +505,49 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
         expect(logger.lines.join("\n")).to include('athena')
         expect(logger.lines.join("\n")).to include('not registered here')
         expect(outcome.diagnostic.detail).not_to include('athena')
+      end
+
+      # THE `FROM_SETTINGS` BRANCH, WHICH THE ROUND BEFORE THIS LEFT UNCOVERED IN RSPEC. That
+      # round deleted an example whose subject was a memoisation it also deleted — correctly —
+      # and a review then measured the cost: mutating `engine_preference` to ignore the
+      # sentinel entirely survived the whole rspec suite (2672 examples, 0 failures) and was
+      # caught only by `test/functional/render_engine_settings_test.rb`. CI held, so nothing
+      # shipped broken; but a branch covered on one surface only is one deletion away from
+      # being covered nowhere. This is the branch, and nothing else.
+      #
+      # THE PORT DOES NOT EXIST IN THIS PROCESS, which is why the branch was never covered
+      # here: `RedmineReporterDashboards.render_engine_id` lives in the boot file, which the
+      # DB-less suite does not load, so reaching the sentinel used to raise `NameError`. The
+      # example stands the port up for its duration and removes it again — hand-rolled in this
+      # file's style, and `|**_kwargs|` rather than a bare `**` for the Ruby 2.7 floor.
+      it 'resolves the sentinel through the installation port rather than using it as an id' do
+        RedmineReporterDashboards::Render::Registry.register(:gotenberg,
+                                                            ReportRunSpecSupport::FakeAdapter)
+        asked = 0
+        mod = RedmineReporterDashboards
+        existed = mod.respond_to?(:render_engine_id)
+        original = existed ? mod.method(:render_engine_id) : nil
+        mod.define_singleton_method(:render_engine_id) do |**_kwargs|
+          asked += 1
+          nil
+        end
+
+        begin
+          outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                        engine_preference: described_class::FROM_SETTINGS).call(pdf: true)
+
+          expect(asked).to eq(1)
+          expect(outcome).not_to be_ok
+          # AND THE SENTINEL IS NEVER TREATED AS AN ENGINE NAME. Without the resolution the
+          # symbol itself would be looked up, which is the shape this branch exists to prevent.
+          expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
+        ensure
+          if existed
+            mod.define_singleton_method(:render_engine_id, original)
+          else
+            mod.singleton_class.send(:remove_method, :render_engine_id)
+          end
+        end
       end
 
       it 'passes over it for one that needs nothing, even though it sorts first' do

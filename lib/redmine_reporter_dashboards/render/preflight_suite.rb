@@ -105,8 +105,10 @@ module RedmineReporterDashboards
       # the same rule has had to be written, and E-27 said so in as many words: "a rule about
       # 'an install has not chosen this' belongs everywhere an engine is chosen FOR the
       # operator, and there were two such places". FR-50 gives an install a way to choose, so
-      # without this the skip's own sentence — "the render engine needs a service, and this
-      # install has not chosen it" — would be FALSE on exactly the installs that chose one,
+      # without this the skip's own sentence — then "the render engine needs a service, and this
+      # install has not chosen it", since corrected twice: it is now "…and it is not this
+      # installation's selected engine", true whatever was chosen — would be FALSE on exactly
+      # the installs that chose one,
       # and the one diagnostic that exists to check the render path would refuse to check the
       # engine it renders with. Naming an engine explicitly still overrides all of it.
       def default_ids
@@ -161,10 +163,12 @@ module RedmineReporterDashboards
             # characters), and the last clause had to change when FR-50 landed: "used only
             # by a template that names it" stopped being true the moment an installation
             # could choose one.
-            # `Administration > Plugins` WITH `>` AND NOT `→`, to match the one sentence in
-            # `report_run.rb` that had to drop the arrow (`MinimalPdf` is Windows-1252). This
-            # detail is HTML-only and could keep the arrow; two spellings of one menu path in
-            # one release is the reason it does not.
+            # `Administration > Plugins` WITH `>` AND NOT `→`, matching the one sentence in
+            # `report_run.rb` that HAD to drop the arrow (`MinimalPdf` is Windows-1252, and
+            # this detail also reaches the rake text surface). The rule is that narrow: `>`
+            # wherever a string could reach a drawn artefact or a terminal. It is NOT a
+            # release-wide convention — nine locale files and the README still write `→` in
+            # HTML-only copy, correctly, and a review caught this comment claiming otherwise.
             detail: "run with RRD_ENGINE=#{id} to check it deliberately, including its " \
                     'credential. Or pick it in the engine selector on the admin preflight ' \
                     "page, or as this installation's engine in Administration > Plugins. " \

@@ -50,7 +50,7 @@ pl:
   label_reporter_preflight_check_gotenberg_credential: "Usługa renderowania wymaga swoich poświadczeń"
   label_reporter_preflight_check_gotenberg_version: "Usługa renderowania to Gotenberg 8 lub nowszy"
   label_reporter_preflight_check_gotenberg_javascript: "W usłudze renderowania włączono JavaScript, więc wykresy mogą się rysować"
-  label_reporter_preflight_check_engine_not_selected: "Silnik renderujący wymaga usługi, a ta instalacja go nie wybrała"
+  label_reporter_preflight_check_engine_not_selected: "Silnik renderujący wymaga usługi i nie jest wybranym silnikiem tej instalacji"
   label_reporter_preflight_check_engine_configuration: "Udało się zapytać silnik o jego konfigurację"
   label_reporter_preflight_check_engine: "Silnik renderujący utworzył dokument"
   label_reporter_preflight_check_degradations: "Nic nie zostało po cichu ograniczone"

@@ -50,7 +50,7 @@ pt-BR:
   label_reporter_preflight_check_gotenberg_credential: "O serviço de renderização exige suas credenciais"
   label_reporter_preflight_check_gotenberg_version: "O serviço de renderização é Gotenberg 8 ou posterior"
   label_reporter_preflight_check_gotenberg_javascript: "O serviço de renderização está com JavaScript ativado, então os gráficos podem ser desenhados"
-  label_reporter_preflight_check_engine_not_selected: "O mecanismo de renderização precisa de um serviço, e esta instalação não o escolheu"
+  label_reporter_preflight_check_engine_not_selected: "O mecanismo de renderização precisa de um serviço e não é o mecanismo escolhido desta instalação"
   label_reporter_preflight_check_engine_configuration: "Foi possível consultar a configuração do mecanismo"
   label_reporter_preflight_check_engine: "O mecanismo de renderização produziu um documento"
   label_reporter_preflight_check_degradations: "Nada foi degradado silenciosamente"

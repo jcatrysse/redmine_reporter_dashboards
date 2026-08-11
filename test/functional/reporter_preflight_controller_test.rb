@@ -401,6 +401,35 @@ class ReporterPreflightControllerTest < ActionController::TestCase
     end
   end
 
+  # THE SENTENCE AN ADMINISTRATOR ACTUALLY READS, and until now nothing asserted a word of
+  # it. Two tests above assert the deferral's locale KEY exists, and in all nine files — and
+  # both stayed green while the key's VALUE said *"this install has not chosen it"*, which is
+  # false for an installation whose stored selection names an engine that is no longer
+  # registered. `EnginePreference` drops such a value, so `selected_engine_id` arrives nil and
+  # this row appears anyway.
+  #
+  # ASSERTED ON THE RENDERED ROW, not on the `Check`. The round before this one corrected
+  # `Check#title` and thought it had fixed the page; a review measured that the page prints
+  # `reporter_preflight_check_label`, which prefers the locale key and never reaches the
+  # title. The title now only reaches the rake text and the JSON artefact. So the guard has
+  # to be here, on the HTML, or the same slip happens again.
+  def test_the_deferral_row_does_not_tell_an_installation_it_chose_nothing
+    @request.session[:user_id] = @admin.id
+
+    # A FAKE UNDER THE `:gotenberg` ID, which this file's header requires and the deferral
+    # allows: `deferred?` keys on the registry ID and `deferred_report` never instantiates the
+    # adapter, so nothing here can reach a browser or a container.
+    with_engine(:gotenberg, StubAdapter) do
+      post :run
+
+      assert_response :success
+      assert_select 'td', text: /is not this installation's selected engine/
+      assert_select 'td', text: /has not chosen/, count: 0
+      # The English fallback is silent by design, so a missing key would read as a pass.
+      assert_no_match(/translation missing/i, @response.body)
+    end
+  end
+
   def test_every_state_has_a_label_and_a_distinct_class
     assert_equal Render::Preflight::STATES.sort,
                  ReporterPreflightHelper::STATE_LABELS.keys.sort

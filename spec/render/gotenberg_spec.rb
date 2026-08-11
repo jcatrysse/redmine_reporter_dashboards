@@ -1953,8 +1953,14 @@ module RedmineReporterDashboards
             # value, so `selected_engine_id` arrives nil and this arm answers anyway. Nothing
             # asserted this sentence at all, on the one surface where it is reachable in a
             # booted Redmine: the admin preflight page and the rake task.
-            expect(report.checks.first.title).to include("this installation's selected engine")
-            expect(report.checks.first.title).not_to match(/has not chosen/i)
+            # THE NEGATION, NOT THE NOUN PHRASE. A review inverted the title to "…and it IS
+            # this installation's selected engine" — false in every state that reaches this
+            # arm — and both of the first two guards passed it, because one matched the noun
+            # phrase and the other only forbade the old wording.
+            expect(report.checks.first.title).to eq(
+              "the render engine needs a service and it is not this installation's " \
+              'selected engine'
+            )
             # One spelling of the menu path per release; `report_run.rb` cannot use `→`.
             expect(report.checks.first.detail).not_to include('→')
           end
@@ -1969,9 +1975,9 @@ module RedmineReporterDashboards
           # FR-50 — AND THE INSTALL'S OWN CHOICE STOPS THE DEFERRAL, which is the third place
           # this rule has had to be written (§Findings E-27's "a rule about 'an install has not
           # chosen this' belongs everywhere an engine is chosen FOR the operator"). Without it
-          # the skip's own sentence — "this install has not chosen it" — is false on exactly
-          # the installs that chose it, and the diagnostic refuses to check the engine every
-          # report renders through.
+          # the skip's own sentence — then "this install has not chosen it", now "…and it is not
+          # this installation's selected engine" — is false on exactly the installs that chose
+          # it, and the diagnostic refuses to check the engine every report renders through.
           #
           # `RRD_GOTENBERG_URL` IS PINNED TO nil IN ALL THREE, and that is not tidiness: the
           # render-smoke job exports it, so without the pin these examples would make real

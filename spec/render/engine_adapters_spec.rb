@@ -274,35 +274,61 @@ module RedmineReporterDashboards
           # share both the code and the sentence with "not installed" (§Findings E-29's
           # recommendation, taken). The two are one `chmod` apart and only one of them is
           # ambiguous: `ENOENT` might be a missing package or a mistyped
-          # `RRD_WKHTMLTOPDF_BINARY` and this side cannot tell, while `EACCES` has exactly
-          # one remedy.
+          # `RRD_WKHTMLTOPDF_BINARY` and this side cannot tell, while `EACCES` is an
+          # operator's whatever its cause. ("`EACCES` has exactly one remedy" is what this
+          # comment used to say, and three measurements refuted it — see the adapter.)
           it 'tells a binary it may not execute apart from one that is not there' do
             Dir.mktmpdir do |dir|
-              present = File.join(dir, 'wkhtmltopdf')
-              File.write(present, "#!/bin/sh\nexit 0\n")
+              # NOT NAMED `present`: the guard below forbids that word in the message, and a
+              # local of the same name in the same example is a reader's trap for nothing.
+              unexecutable = File.join(dir, 'wkhtmltopdf')
+              File.write(unexecutable, "#!/bin/sh\nexit 0\n")
               # `0o644` AND NOT `0o000`, which a review measured as the weaker fixture: as
               # root `File.readable?` is true even at `0o000`, so that mode leaves "could not
               # read it" and "may not execute it" tangled together. `0o644` isolates the
               # missing exec bit — and it is the realistic mistake, a binary somebody
               # downloaded and never `chmod +x`'d.
-              File.chmod(0o644, present)
+              File.chmod(0o644, unexecutable)
 
-              denied = described_class.new(binary: present).render(request)
+              denied = described_class.new(binary: unexecutable).render(request)
               absent = described_class.new(binary: File.join(dir, 'nope')).render(request)
 
               expect(denied.code).to eq(:engine_misconfigured)
-              expect(denied.message).to include('refused permission to execute')
               expect(denied.detail).to include('EACCES')
               expect(absent.code).to eq(:engine_unavailable)
               expect(absent.message).to include('not installed')
-              # AND IT MUST NOT ENUMERATE THE CAUSE, because two enumerations were each
-              # measured false: "the engine is present" (`EACCES` also arrives for a MISSING
-              # file under an unsearchable parent) and "either not executable, or in a
-              # directory Redmine may not enter" (a `noexec` mount gives `EACCES` with the
-              # execute bit set and every parent searchable). `\bpresent\b` and not a bare
-              # substring, so the guard cannot be satisfied by "represents".
+              # THE WHOLE SENTENCE, and a review is why. Three keyword guards
+              # (`refused permission to execute`, `noexec`, no `present`) all passed against a
+              # sentence that named `noexec` as THE cause — a third confident enumeration,
+              # false for the two cases the first two drafts were killed for. A message this
+              # file has now been wrong about three times is pinned as a whole, so the next
+              # rewording is a deliberate act with a failing test in front of it.
+              expect(denied.message).to eq(
+                'permission to execute the render engine at the configured path was refused ' \
+                '— check its execute bit, the directories above it, and whether that ' \
+                'filesystem is mounted noexec'
+              )
+              # AND IT STILL MUST NOT CLAIM A CAUSE. `because` is how every one of the three
+              # drafts smuggled one in, and `\bpresent\b` rather than a bare substring so the
+              # guard cannot be satisfied by "represents".
               expect(denied.message).not_to match(/\bpresent\b/)
-              expect(denied.message).to include('noexec')
+              expect(denied.message).not_to match(/\bbecause\b/)
+            end
+          end
+
+          # THE ONE CAUSE OF `EACCES` THIS SIDE CAN ESTABLISH, and a review found it by
+          # pointing `RRD_WKHTMLTOPDF_BINARY` at a directory: `execve` answers `EACCES`, and
+          # all three things the general sentence tells an operator to check come back clean.
+          # `File.directory?` settles it, so this one gets a sentence that names the fault
+          # instead of a checklist — the project's own rule, discriminate where you can.
+          it 'names a path that points at a directory rather than listing permissions' do
+            Dir.mktmpdir do |dir|
+              result = described_class.new(binary: dir).render(request)
+
+              expect(result.code).to eq(:engine_misconfigured)
+              expect(result.message).to include('names a directory')
+              expect(result.message).not_to include('execute bit')
+              expect(result.detail).to include('EACCES')
             end
           end
 

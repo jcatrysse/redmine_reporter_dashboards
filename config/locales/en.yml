@@ -50,7 +50,7 @@ en:
   label_reporter_preflight_check_gotenberg_credential: "The render service enforces its credential"
   label_reporter_preflight_check_gotenberg_version: "The render service is Gotenberg 8 or later"
   label_reporter_preflight_check_gotenberg_javascript: "The render service has JavaScript enabled, so charts can draw"
-  label_reporter_preflight_check_engine_not_selected: "The render engine needs a service, and this install has not chosen it"
+  label_reporter_preflight_check_engine_not_selected: "The render engine needs a service and it is not this installation's selected engine"
   label_reporter_preflight_check_engine_configuration: "The engine could be asked about its configuration"
   label_reporter_preflight_check_engine: "The render engine produced a document"
   label_reporter_preflight_check_degradations: "Nothing was silently degraded"

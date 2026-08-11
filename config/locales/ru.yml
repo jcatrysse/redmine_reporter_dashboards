@@ -50,7 +50,7 @@ ru:
   label_reporter_preflight_check_gotenberg_credential: "Служба рендеринга требует свои учётные данные"
   label_reporter_preflight_check_gotenberg_version: "Служба рендеринга — Gotenberg 8 или новее"
   label_reporter_preflight_check_gotenberg_javascript: "В службе рендеринга включён JavaScript, поэтому диаграммы могут отрисовываться"
-  label_reporter_preflight_check_engine_not_selected: "Механизму рендеринга нужна служба, и эта установка её не выбрала"
+  label_reporter_preflight_check_engine_not_selected: "Механизму рендеринга нужна служба, и он не является выбранным механизмом этой установки"
   label_reporter_preflight_check_engine_configuration: "У механизма удалось запросить его конфигурацию"
   label_reporter_preflight_check_engine: "Механизм рендеринга создал документ"
   label_reporter_preflight_check_degradations: "Ничего не было незаметно отключено"

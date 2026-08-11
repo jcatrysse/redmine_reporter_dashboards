@@ -12,8 +12,14 @@
 
   `Diagnostic#detail` — the raw exception text. §7b.3: the old failure leaked SQL
   fragments, role ids and project ids to whoever the report reached. `Diagnostic#to_h`
-  cannot carry it either, so no future serialiser picks it up by accident. It is in the
-  application log, where the person who can read a stack trace is.
+  cannot carry it either, so no future serialiser picks it up by accident.
+
+  AND IT IS NOT IN THE APPLICATION LOG, which this comment claimed until a review measured
+  it (§Findings E-33): nothing writes `Diagnostic#detail` anywhere. Its only readers are the
+  two delivery `restamp` sites, so today it is diagnostic data carried on the object and
+  printed by nobody. That is worth knowing before writing a remedy into it, which one commit
+  did — the log lines an operator actually gets come from the component that found the fault,
+  not from this field.
 %>
 <div class="flash error" id="reporter-report-diagnostic">
   <p><strong><%= reporter_diagnostic_headline(diagnostic) %></strong></p>
