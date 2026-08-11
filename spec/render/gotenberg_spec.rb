@@ -1502,7 +1502,7 @@ module RedmineReporterDashboards
 
             # THE DOUBLE'S OWN PREMISE, ASSERTED. An independent review demonstrated that
             # `locked` can be quietly made friendly again — answering an unauthenticated
-            # `/version` 200-with-the-version, as no locked Gotenberg does — and all twelve
+            # `/version` 200-with-the-version, as no locked Gotenberg does — and all thirteen
             # rows below still pass, against a service that cannot exist. The comment above
             # was the only thing holding it, and a comment is not a control (CLAUDE.md §3).
             #
@@ -1530,15 +1530,18 @@ module RedmineReporterDashboards
                 [:engine_misconfigured, %w[user pass], :answers_without_credential],
               'JavaScript is disabled, which is the VERDICT' =>
                 [:engine_misconfigured, %w[user pass], :javascript_off],
-              # And the three that must NOT move. Each is one status code away from a row
+              # And the four that must NOT move. Each is one status code away from a row
               # above it, and each is a question this adapter cannot answer from here.
               'nothing is at the address' =>
                 [:engine_unavailable, %w[user pass], :nothing_there],
-              # THE ONE REACHABILITY FAULT WHOSE REMEDY IS UNAMBIGUOUS (E-29's own
-              # recommendation, taken): a host that does not resolve cannot be fixed by
-              # starting anything.
+              # A NAME THAT DOES NOT RESOLVE BELONGS IN THIS GROUP, and the first draft of
+              # this row put it in the group above. `SocketError` is every `getaddrinfo`
+              # failure, EAI_AGAIN included — a resolver that is temporarily unreachable with
+              # the address spelled correctly — so it is one more question this side cannot
+              # answer, and a retry can fix it. What DOES move is the sentence, which the
+              # example below this table pins separately.
               'the configured name does not resolve' =>
-                [:engine_misconfigured, %w[user pass], :name_does_not_resolve],
+                [:engine_unavailable, %w[user pass], :name_does_not_resolve],
               'nothing answers in time' =>
                 [:engine_unavailable, %w[user pass], :identity_timed_out],
               'something answers and is not a Gotenberg' =>
@@ -1546,7 +1549,8 @@ module RedmineReporterDashboards
               # FIVE OF THESE ROWS EXIST BECAUSE AN INDEPENDENT REVIEW MOVED THEIR ARMS AND
               # THE WHOLE SUITE STAYED GREEN — 2569 examples, 0 failures, with all five
               # mutants applied at once. The block's own header claims moving any one of them
-              # is the defect it exists to catch, and it pinned seven arms out of twelve.
+              # is the defect it exists to catch, and it pinned seven arms out of the twelve
+              # there were then; the table is thirteen rows now.
               'the endpoint answered /version with something that is not a version' =>
                 [:engine_unavailable, %w[user pass], :version_not_a_version],
               'the conversion route answers something that is not about authentication' =>
@@ -1625,29 +1629,64 @@ module RedmineReporterDashboards
               end
             end
 
-            # AND THE TWO SENTENCES ARE DIFFERENT, which is the half a code alone cannot
-            # carry: before this, a name that does not resolve and a socket that refuses both
-            # said "nothing answered at …, Confirm the container is running" — the INV-4
-            # misdiagnosis shape, with the discriminator sitting unused in `detail`.
+            # THE SENTENCES ARE WHERE THIS SPLIT LIVES, and the table above deliberately gives
+            # both faults the same CODE. Before the split, a name that does not resolve and a
+            # socket that refuses both said "nothing answered at …, Confirm the container is
+            # running" — one sentence sending an operator to `docker ps` for a fault no restart
+            # can fix, with the discriminator sitting unused in `detail`.
+            #
+            # A LAMBDA AND NOT A `def`: a `def` inside an example lands on the example-group
+            # class rather than the example, which an independent review measured as harmless
+            # here (a sibling example does not see it — RSpec gives each its own instance) and
+            # is still one reader's double-take for no benefit.
             it 'tells a name that does not resolve apart from a socket that refuses' do
-              def result_for(scenario_name)
+              result_for = lambda do |scenario_name|
                 http = recording_http(&locked(scenario(scenario_name)))
                 described_class.new(endpoint: 'http://gotenberg.test:3000',
                                     credential: %w[user pass], http: http.to_proc).preflight
               end
 
-              unresolvable = result_for(:name_does_not_resolve)
-              refused = result_for(:nothing_there)
+              unresolvable = result_for.call(:name_does_not_resolve)
+              refused = result_for.call(:nothing_there)
 
-              expect(unresolvable.message).to include('does not resolve')
+              expect(unresolvable.message).to include('did not resolve')
               expect(unresolvable.message).to include('RRD_GOTENBERG_URL')
-              expect(unresolvable.message).not_to include('is running')
+              expect(unresolvable.message).to include('gotenberg.test')
+              expect(unresolvable.message).not_to include('Confirm the container is running')
               expect(refused.message).to include('nothing answered at')
-              expect(refused.message).not_to include('does not resolve')
+              expect(refused.message).not_to include('did not resolve')
+              # BOTH REMEDIES, because the code does not choose between them (§Findings E-30):
+              # a resolver that is temporarily unreachable is the same `SocketError` as a
+              # misspelt host, and the sentence has to say so or it is a confident wrong
+              # remediation with a retry that would have worked.
+              expect(unresolvable.message).to match(/spelling/i)
+              expect(unresolvable.message).to match(/resolver/i)
               # The class stays in the detail and out of the user-facing sentence, as every
               # other transport failure in this adapter does.
               expect(unresolvable.detail).to include('SocketError')
               expect(unresolvable.message).not_to include('SocketError')
+            end
+
+            # THE ARM MEETS WHAT PRODUCTION ACTUALLY THROWS, not only its parent class. The
+            # scenario above raises a bare `SocketError`; a real unresolvable host raises
+            # `Socket::ResolutionError`, which exists from Ruby 3.3 and is a `SocketError`
+            # subclass — measured on 3.3.6, where `Net::HTTP` to an unresolvable name raises it
+            # with `error_code` −2. Two of CI's four cells run 3.3+, so on those this example
+            # exercises the real class and on the others it is skipped with a reason rather
+            # than silently proving nothing.
+            it 'catches the class a real unresolvable host raises, not just its parent' do
+              unless defined?(::Socket::ResolutionError)
+                skip "Socket::ResolutionError is Ruby 3.3+; this is #{RUBY_VERSION}"
+              end
+
+              real = ->(_r) { raise ::Socket::ResolutionError, 'getaddrinfo: Name or service not known' }
+              http = recording_http(&locked({ identity: real }))
+              result = described_class.new(endpoint: 'http://gotenberg.test:3000',
+                                          credential: %w[user pass], http: http.to_proc).preflight
+
+              expect(result.code).to eq(:engine_unavailable)
+              expect(result.message).to include('did not resolve')
+              expect(result.detail).to include('Socket::ResolutionError')
             end
 
             # An unconfigured install: no endpoint at all. This is the one an operator of

@@ -324,12 +324,15 @@ All notable changes to this plugin are documented in this file.
   refusing the configured password now says so with its own code, and the diagnostics panel,
   the failure mail and the failure PDF all carry it.
 
-  Three more faults were sharing a sentence with something else and now have their own:
-  **an address whose host does not resolve** ("check the spelling, and that Redmine is on the
-  same network as the container") no longer reads as a service that is down; **a render
-  binary that is present and not executable** no longer reads as one that is not installed;
-  and **an installation with no render engine at all** is reported as something to fix rather
-  than as an engine that happens to be away.
+  Three more faults were sharing a sentence with something else and now have their own.
+  **An address whose host does not resolve** now says so, and names all three things that
+  cause it — a misspelt address, a container on another network, or a name server that is
+  temporarily unreachable — instead of telling an administrator to check whether the service
+  is running. **A render binary that is present and not executable** no longer reads as one
+  that is not installed. And an installation that produces no PDF is now told which of two
+  things is wrong: **no render engine at all**, or **every engine it has needs a separate
+  service and none has been chosen** — the second names the setting that fixes it, and used
+  to claim no engine was installed when one was.
 
 - **The engine support matrix now covers wkhtmltopdf, with real results instead of
   "not verified".**

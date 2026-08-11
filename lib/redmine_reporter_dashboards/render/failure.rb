@@ -53,19 +53,23 @@ module RedmineReporterDashboards
       # old collapse defensible in the first place:
       #
       #   * reachability and transport — "nothing answered", "answered 502 and does not
-      #     look like a Gotenberg", a dead socket. Identity before verdict (HANDOVER §1):
-      #     a service that is down, one behind a wrong `--api-root-path` and one that is
-      #     something else entirely are not distinguishable from here, so the message names
-      #     more than one remedy and the code does not pretend to have chosen.
+      #     look like a Gotenberg", a dead socket, a name that does not resolve. Identity
+      #     before verdict (HANDOVER §1): a service that is down, one behind a wrong
+      #     `--api-root-path` and one that is something else entirely are not distinguishable
+      #     from here, so the message names more than one remedy and the code does not pretend
+      #     to have chosen. `technical-spec.md` §5 states this ONCE and normatively, and this
+      #     paragraph is the same words rather than a second statement of them.
       #
-      #     ONE EXCEPTION, AND IT IS THE RULE WORKING RATHER THAN BENDING (§Findings E-29):
-      #     a host that does not RESOLVE is `SocketError`, is unambiguous — no retry and no
-      #     restart can help, and a spelling or a network can — so it has its own arm, its
-      #     own sentence and `:engine_misconfigured`. The bullet used to say we deliberately
-      #     did not split on it; a UX pass measured both faults arriving under one identical
-      #     sentence with the discriminator sitting unused in `detail`, and splitting the ARM
-      #     is what that asked for. `Errno::ECONNREFUSED` is not a `SocketError`, which is
-      #     what keeps the refused socket on this side of the line.
+      #     A SENTENCE MAY SPLIT WHERE THE CODE MAY NOT, and §Findings E-29 is the worked
+      #     example. `SocketError` gets its own ARM and its own sentence in `gotenberg.rb`,
+      #     because "nothing answered, confirm the container is running" sends an operator to
+      #     `docker ps` for a fault no restart can fix. It does NOT get its own code: a
+      #     review measured EAI_AGAIN — an unreachable resolver, spelling and network both
+      #     correct — arriving as the same `SocketError`, and a retry is what fixes that one,
+      #     which is precisely what `:engine_misconfigured` promises can never help. So the
+      #     arm's sentence names both remedies and its code stays the one that has not chosen.
+      #     `Errno::ECONNREFUSED` is not a `SocketError`, which is what keeps the refused
+      #     socket on the generic arm.
       #   * a probe that could not be COMPLETED. "The JavaScript check answered 503" is
       #     not a verdict about JavaScript, and it must not read as one.
       #   * a MISSING binary. `wkhtmltopdf.rb` reads `RRD_WKHTMLTOPDF_BINARY`, an
@@ -74,14 +78,19 @@ module RedmineReporterDashboards
       #     `:engine_unavailable`. `Errno::EACCES` is the twin that DOES get the new code: the
       #     file is there and is not executable, which is one fault with one remedy.
       #
-      # WHO PRODUCES IT. The Gotenberg adapter (seven arms), the wkhtmltopdf adapter's
-      # `EACCES` arm, and `Reporting::ReportRun#no_engine_diagnostic` — an install with no
-      # engine registered at all, which is not an engine that is missing. The last two were
-      # recorded as candidates when this code was introduced and moved on 2026-08-11, in
-      # their own change with their own tests, because a vocabulary addition and a
-      # re-classification of two unrelated call sites are two reviews rather than one
-      # (§Findings E-29). A code with three producers is healthy; a code with none is dead
-      # vocabulary, and this file has a precedent for deleting those.
+      # WHO PRODUCES IT. Six arms in the Gotenberg adapter, and the wkhtmltopdf adapter's
+      # `EACCES` arm — a binary that is there and is not executable, one fault with one
+      # remedy. Both are `Render::Failure`s, which is what this file's `CODES` governs.
+      #
+      # ONE MORE PRODUCER LIVES OUTSIDE THIS TYPE, and saying so is the point of naming it
+      # here: `Reporting::ReportRun#no_engine_diagnostic` mints a `Reporting::Diagnostic`,
+      # legal only through `Diagnostic.codes`' union with this set, for an installation whose
+      # every registered engine needs a service and which has selected none. That call site
+      # ALSO answers `:engine_unavailable`, for the neighbouring state where no engine is
+      # registered at all — one method, two states, two codes, because a review measured the
+      # single sentence they used to share as false in the second. A code with three producers
+      # is healthy; a code with none is dead vocabulary, and this file has a precedent for
+      # deleting those.
       CODES = %i[
         engine_unavailable engine_misconfigured engine_version_unsupported timeout
         readiness_timeout resource_limit asset_unresolved capability_unsupported

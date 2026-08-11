@@ -280,7 +280,12 @@ module RedmineReporterDashboards
             Dir.mktmpdir do |dir|
               present = File.join(dir, 'wkhtmltopdf')
               File.write(present, "#!/bin/sh\nexit 0\n")
-              File.chmod(0o000, present)
+              # `0o644` AND NOT `0o000`, which a review measured as the weaker fixture: as
+              # root `File.readable?` is true even at `0o000`, so that mode leaves "could not
+              # read it" and "may not execute it" tangled together. `0o644` isolates the
+              # missing exec bit — and it is the realistic mistake, a binary somebody
+              # downloaded and never `chmod +x`'d.
+              File.chmod(0o644, present)
 
               denied = described_class.new(binary: present).render(request)
               absent = described_class.new(binary: File.join(dir, 'nope')).render(request)

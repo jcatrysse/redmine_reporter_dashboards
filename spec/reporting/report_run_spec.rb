@@ -446,11 +446,19 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
         outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
 
         expect(outcome).not_to be_ok
-        # `:engine_misconfigured` since 2026-08-11 (§Findings E-29): auto-detection found
-        # nothing it may select, so this install has NO engine — which is not an engine that
-        # is missing, and `render/failure.rb`'s tie-break is whether this side can tell whose
-        # problem it is. Here it can.
+        # `:engine_misconfigured` since 2026-08-11 (§Findings E-29): the engines ARE here and
+        # every one of them needs a service this installation has not selected, so the remedy
+        # is an operator's and it has a page to point at.
         expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
+        # AND THE SENTENCE, which is the half the code cannot carry (§Findings E-30). A
+        # review mutated this message to nonsense and the FULL suite stayed green — 2670
+        # examples, 0 failures — while the message it shipped said "no render engine is
+        # registered" three lines under an assertion that one is. It is printed by the
+        # diagnostics panel, the failure mail and the failure PDF.
+        expect(outcome.diagnostic.message).to include('needs a separate service')
+        expect(outcome.diagnostic.message).to include('Administration')
+        expect(outcome.diagnostic.message).not_to include('no render engine is registered')
+        expect(outcome.diagnostic.detail).to include('gotenberg')
       end
 
       it 'passes over it for one that needs nothing, even though it sorts first' do
@@ -581,6 +589,10 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
         expect(refused).not_to be_ok
         expect(refused.diagnostic.code).to eq(:engine_misconfigured)
+        # The refusal must name the control that would fix it — this example is the pair
+        # "auto-detection refuses / a selection is honoured", so the refusal half is exactly
+        # where an operator needs pointing at the setting (§Findings E-30).
+        expect(refused.diagnostic.message).to include('Administration')
         expect(chosen).to be_ok
         expect(chosen.engine_id).to eq('picked-gotenberg')
       end
@@ -646,10 +658,18 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
     it 'reports an absent engine instead of quietly returning the HTML' do
       # §9b.2: "a preview that only proves the easy path is a false signal". With no
       # engine there is no PDF, and the one thing this must not do is say nothing.
+      expect(RedmineReporterDashboards::Render::Registry.ids).to eq([])
+
       outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1)).call(pdf: true)
 
       expect(outcome).not_to be_ok
-      expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
+      # THE OTHER STATE OF THE SAME METHOD, and the one that keeps `:engine_unavailable`
+      # (§Findings E-30): nothing is registered, so nothing is THERE, and what fixes it is an
+      # install rather than a setting. The sibling example above is the registry-not-empty
+      # half. Asserting `ids == []` first is what stops the two examples silently becoming
+      # one case if registration leaks between them.
+      expect(outcome.diagnostic.code).to eq(:engine_unavailable)
+      expect(outcome.diagnostic.message).to include('no render engine is registered')
       expect(outcome).to be_pdf_attempted
     end
 

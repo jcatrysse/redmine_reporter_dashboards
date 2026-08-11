@@ -800,26 +800,49 @@ module RedmineReporterDashboards
             'credential.',
             detail: "GET #{VERSION_PATH} answered #{response.code}: #{body_excerpt(response)}"
           )
-        # THE ONE FAULT HERE WHOSE REMEDY IS UNAMBIGUOUS, and §Findings E-29 recorded it as a
-        # recommendation before it was taken. A UX pass measured a name that does not resolve
-        # and a socket that refuses arriving under ONE sentence and one code — *"nothing
-        # answered at …, Confirm the container is running"* — with the discriminator sitting
-        # unused in `detail`. A host that does not resolve cannot be fixed by starting
-        # anything, and it is not a service that is down: it is a spelling or a network the
-        # container is not on. So it gets its own sentence and `:engine_misconfigured`, and
-        # everything else keeps the two-remedy sentence and `:engine_unavailable`.
+        # ITS OWN SENTENCE, AND DELIBERATELY NOT ITS OWN CODE — which is E-29 row 2's
+        # recommendation as written ("a diagnostic-message change rather than a code change")
+        # and not the wider thing the first draft of this arm did.
         #
-        # `SocketError` AND NOT `Socket::ResolutionError`: the latter is Ruby 3.3+ and this
-        # plugin's floor is 2.7. It is a subclass, so one rescue covers both — and
-        # `Errno::ECONNREFUSED` is deliberately NOT a `SocketError`, which is what keeps the
-        # refused-socket case on the other side of the line.
+        # What the UX pass measured is real: a name that does not resolve and a socket that
+        # refuses were arriving under ONE sentence — *"nothing answered at …, Confirm the
+        # container is running"* — which sends an operator to `docker ps` for a fault no
+        # restart can fix, with the discriminator sitting unused in `detail`. Splitting the
+        # ARM fixes that. The first draft also moved the CODE to `:engine_misconfigured`, and
+        # an independent review refuted that by measurement, twice over:
+        #
+        #   * `technical-spec.md` §5 states this rule ONCE, on purpose — "two normative
+        #     statements of one rule is how a vocabulary acquires two meanings" — and what it
+        #     states is that reachability and transport are THEREFORE `:engine_unavailable`.
+        #     A code change here contradicts the contract; a message change does not.
+        #   * `SocketError` is not "the name is wrong". It is every `getaddrinfo` failure,
+        #     EAI_AGAIN included — a resolver that is temporarily unreachable, measured
+        #     against a bind-mounted unreachable `nameserver` with the address spelled
+        #     correctly. `:engine_misconfigured` promises "no retry will ever produce a
+        #     different answer", and a retry is exactly what fixes that one. So the code that
+        #     has NOT chosen between remedies is the correct code, and the sentence names both
+        #     of them.
+        #
+        # `Socket::ResolutionError#error_code` would discriminate EAI_AGAIN from EAI_NONAME,
+        # but only on Ruby 3.3+ — below it there is nothing but the message — so the split
+        # would hold on two of the four supported cells and guess on the others. One sentence
+        # naming both remedies is honest on all four.
+        #
+        # `SocketError` AND NOT `Socket::ResolutionError` as the arm's class: the latter is
+        # Ruby 3.3+ and this plugin's floor is 2.7 (§8 raises it to 3.1, still below 3.3), so
+        # naming it directly would break Redmine 5.1's Ruby 3.2 cell. It is a subclass, so one
+        # rescue covers both — measured on 3.3.6, where a real unresolvable host raises it —
+        # and `Errno::ECONNREFUSED` is NOT a `SocketError`, which is what keeps the refused
+        # socket on the generic arm below.
         rescue SocketError => e
           preflight_failure(
-            started, 'the address configured for the Gotenberg render service does not resolve',
-            'Check the spelling of RRD_GOTENBERG_URL, and that Redmine is on the same ' \
-            'network as the container — with `internal: true` in the example compose file a ' \
-            "container's name resolves only for services on that network.",
-            detail: "#{e.class}: #{e.message}", code: :engine_misconfigured
+            started, "the name in #{@endpoint} did not resolve from Redmine",
+            'Check the spelling of RRD_GOTENBERG_URL and that Redmine is on the same network ' \
+            'as the container — with `internal: true` in the example compose file a ' \
+            "container's name resolves only for services on that network. If both are right, " \
+            'the resolver itself may be temporarily unreachable, and then this clears on ' \
+            'its own.',
+            detail: "#{e.class}: #{e.message}"
           )
         rescue StandardError => e
           preflight_failure(

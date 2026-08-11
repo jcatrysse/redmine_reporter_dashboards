@@ -31,6 +31,20 @@ the intended tree BEFORE launching review agents and diff the whole thing agains
 snapshot, never spot-check lines. And if a commit genuinely cannot wait, stage EXPLICIT PATHS
 the agents do not touch (docs, locales) rather than everything.
 
+**A SUITE RUN FROM A COPY WITH NO `.git` SILENTLY SKIPS GATE G7, AND THE PENDING COUNT IS THE
+ONLY PLACE IT SHOWS.** The ten `spec/golden` byte-identity examples (`RrdGolden::Baseline`,
+`RrdGolden::KernelException`) resolve the `v0.5.0` baseline **through git**, so in a `git archive`
+extract — or any copy made with `rsync --exclude .git/`, which is the isolation recipe §3
+recommends and which most measurement in this project uses — they skip with a reason and the run
+still says *0 failures*. That is **G7, the byte-identity gate**, the one irreversible thing in this
+plan. Measured 2026-08-11 on the same tree: the real working directory gives `2671 examples, 0
+failures, 127 pending` and a `git archive` extract gives `2670 examples, 0 failures, 137 pending`,
+differing by exactly those ten. **A `137 pending` number in this file or in a session log is a run
+that did not check G7** — several earlier ones are exactly that. Two rules. Report G7 from a run in
+a directory with `.git` present (`rspec spec/golden` is 71 examples and takes 0.2 s, so there is no
+excuse), and when a pending count moves, diff the pending LISTS before attributing it to your
+change — that is how this was found, after first assuming the change had caused it.
+
 **A PLANTED LOCALE KEY LOSES TO A SHIPPED ONE, AND IT HAS NOW COST TWO ROUNDS IN ONE TASK.**
 `I18n.backend.store_translations` over a key this plugin already ships gives back the SHIPPED
 value, so an example asserting the plant fails against a sentence nobody in the test wrote —
@@ -1544,6 +1558,18 @@ regression.
 The 4 skips in every standalone run are the two report widgets' functional tests. They
 need the private reporter plugin, they carry a reason, and they are the accepted cost
 of a CI that runs on fork pull requests.
+
+**2026-08-11, the E-30 round** (a fourth review of the E-29 follow-ups, which rejected them).
+Executed in this container: `rspec` **2671 / 0 failures / 127 pending in the real working
+directory** — read the G7 trap at the top of §1 before comparing that pending count with any
+older one — `rake redmine:plugins:test` **920 runs / 0 failures / 0 errors / 4 skips** on
+PostgreSQL, the eight `script/gates/*.sh` all OK, the three-engine conformance corpus green
+against the real containers (`chromium_cdp` 20/0/0, `gotenberg` 19/0/1, `wkhtmltopdf` 18/0/2),
+and **G9 measured rather than assumed**: regenerated with `RRD_MATRIX_WRITE=1` from that run and
+`diff`ed against the committed file — identical. 14 mutations against the round's own guards, 14
+killed. Not run here, and therefore UNVERIFIED for this round: `migrate-updown` (G11) and
+`render-smoke` (G12), neither of which this change reaches — no migration, no capability
+declaration, no matrix cell.
 
 ---
 

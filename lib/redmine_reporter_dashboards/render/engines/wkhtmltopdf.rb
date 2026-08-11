@@ -120,6 +120,11 @@ module RedmineReporterDashboards
 
           out, _err, status = Open3.capture3(@binary, '--version')
           @version = status.success? ? out.strip.split("\n").first : 'unavailable'
+        # THE PAIR STAYS MERGED HERE, and `#render` below splits it — which a review flagged
+        # as the kind of near-miss the next reader stops on. There is no code to choose
+        # between: this method answers a version STRING, both errno's mean there is no version
+        # to be had, and the class is already in the string. `#render` splits them because it
+        # answers a typed `Failure` and the two faults have different remedies.
         rescue Errno::ENOENT, Errno::EACCES => e
           @version = "unavailable (#{e.class})"
         end
@@ -237,6 +242,12 @@ module RedmineReporterDashboards
         # `:engine_unavailable` with a sentence naming both. `EACCES` means the file IS there
         # and is not executable — one fault, one remedy, and no retry will ever help — which
         # is `:engine_misconfigured` by the rule in `render/failure.rb`.
+        #
+        # "PRESENT" IS ESTABLISHED AND NOT ASSUMED, which a review asked about: nothing here
+        # stats the path, but `execve` is what answers, and its errno for a path that holds
+        # nothing is `ENOENT`. Reaching `EACCES` therefore means something IS at that path —
+        # a non-executable file, a file in a directory the Redmine user may not traverse, or
+        # a DIRECTORY, all of which are present and none of which will run.
         rescue Errno::EACCES => e
           [nil, failure(request, :engine_misconfigured,
                         'the render engine is present and cannot be executed',

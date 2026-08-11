@@ -759,20 +759,60 @@ module RedmineReporterDashboards
         )
       end
 
-      # `:engine_misconfigured` SINCE 2026-08-11, and §Findings E-29 is where the argument
-      # is: this is not an engine that is missing, it is an INSTALL with no engine at all.
-      # `render/failure.rb`'s tie-break is whether this side can tell whose problem it is,
-      # and here it can — `Registry.ids` is empty, nothing is ambiguous, no retry will ever
-      # change it, and what fixes it is something an operator does. `PreflightCommand`
-      # already reports the same state as `NOTHING_TO_RUN` rather than as a failure, which
-      # is the same judgement one surface over.
+      # TWO STATES, AND THEY SPENT THIS PLUGIN'S WHOLE HISTORY SHARING ONE FALSE SENTENCE.
+      #
+      # `resolve_engine` answers nil for two different installations, and *"no render engine
+      # is registered"* was told to both. An independent review measured the second one and
+      # the sentence is simply untrue there — `spec/reporting/report_run_spec.rb` asserts
+      # `Registry.ids == [:gotenberg]` three lines above the expectation, so an engine IS
+      # registered while the operator is told none is. That predates the code change it was
+      # found under; it is fixed here rather than recorded, because `message` is what the
+      # diagnostics panel, the failure mail and the failure PDF all print.
+      #
+      #   nothing registered      no adapter at all. Nothing is there, and what would fix it
+      #                           is an install — `:engine_unavailable`, which is where this
+      #                           has always been and where `render/failure.rb`'s rule keeps
+      #                           it.
+      #   registered, none usable every registered adapter is one the catalogue SAYS needs a
+      #                           separate service (that is the only thing `auto_selectable?`
+      #                           refuses on), and this installation has not selected one.
+      #                           The engines ARE there, the remedy is an operator's and it
+      #                           is nameable — FR-50 put the control on a page this sentence
+      #                           can point at — so this one is `:engine_misconfigured`.
+      #
+      # WHAT THIS DOES NOT CLAIM. `PreflightCommand` answers exit 0 and *"OK so far"* for the
+      # second state, so one surface calls it fine while this one calls it a misconfiguration.
+      # That disagreement is §Findings E-29 row 7, it is OPEN and awaiting a curator decision,
+      # and it is NOT resolved here — the first draft of this comment cited preflight as
+      # agreeing with it, which a review measured as inverted. Naming the disagreement is the
+      # honest state; picking a side for the operator's exit code is the curator's.
       def no_engine_diagnostic(sections)
+        registry = ::RedmineReporterDashboards::Render::Registry
+        ids = registry.ids
+        correlation_id = sections.first&.job&.correlation_id || mint_id
+        return no_engine_registered_diagnostic(correlation_id) if ids.empty?
+
         Diagnostic.new(
           origin: :engine,
           code: :engine_misconfigured,
           template_name: template.name,
-          message: 'no render engine is registered, so no PDF could be produced',
-          correlation_id: sections.first&.job&.correlation_id || mint_id,
+          message: 'every render engine on this installation needs a separate service, and ' \
+                   'none has been selected — choose one under Administration → Plugins, or ' \
+                   'install an engine that needs no service',
+          correlation_id: correlation_id,
+          detail: "registered=#{ids.map(&:to_s).sort.join(',')} none auto-selectable and " \
+                  'none selected'
+        )
+      end
+
+      def no_engine_registered_diagnostic(correlation_id)
+        Diagnostic.new(
+          origin: :engine,
+          code: :engine_unavailable,
+          template_name: template.name,
+          message: 'no render engine is registered on this installation, so no PDF could ' \
+                   'be produced',
+          correlation_id: correlation_id,
           detail: 'Render::Registry.ids is empty'
         )
       end
