@@ -86,6 +86,42 @@ class RenderPreflightRakeTest < ActiveSupport::TestCase
     assert_equal Render::PreflightCommand::OK, status
   end
 
+  # FR-50 — THE INSTALLATION'S SELECTED ENGINE REACHES THE COMMAND FROM THIS FILE, and an
+  # independent review found the line carrying it asserted by nothing.
+  #
+  # This file's own header says why that matters: what no spec can reach is the glue here,
+  # and "every one of those produces a green rspec run and a rake task that does not work".
+  # The new line is exactly that class — and it is the line the README and the CHANGELOG
+  # both advertise, because a selected engine makes this task start failing when the
+  # container it names is down.
+  #
+  # Asserted on the CONSTRUCTOR and in BOTH directions, because `expects` with a matcher
+  # also passes against a task that constructs nothing at all.
+  def test_the_installations_selected_engine_reaches_the_command
+    original = Setting.send(:plugin_redmine_reporter_dashboards)
+    Setting.send(:plugin_redmine_reporter_dashboards=,
+                 original.merge('render_engine' => 'passing'))
+    command = mock('command')
+    command.stubs(:call).returns(Render::PreflightCommand::OK)
+    Render::PreflightCommand.expects(:new)
+                            .with { |args| args[:selected_engine_id] == 'passing' }
+                            .returns(command)
+
+    with_passing_engine { capture_task { |_code| nil } }
+  ensure
+    Setting.send(:plugin_redmine_reporter_dashboards=, original)
+  end
+
+  def test_no_selection_reaches_the_command_as_nothing
+    command = mock('command')
+    command.stubs(:call).returns(Render::PreflightCommand::OK)
+    Render::PreflightCommand.expects(:new)
+                            .with { |args| args[:selected_engine_id].nil? }
+                            .returns(command)
+
+    with_passing_engine { capture_task { |_code| nil } }
+  end
+
   # The env vars are the task's only interface, so they are asserted through it rather
   # than through the class that already has its own spec for them.
   def test_rrd_format_json_produces_parseable_json

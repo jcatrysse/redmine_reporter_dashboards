@@ -694,8 +694,12 @@ module RedmineReporterDashboards
         nil
       end
 
-      # `FROM_SETTINGS` is resolved LAZILY, once, and only on the path that needs it: a run
-      # given an explicit `engine:` never reads a setting at all.
+      # `FROM_SETTINGS` is resolved LAZILY and only on the path that needs it: a run given an
+      # explicit `engine:` never reads a setting at all. NOT MEMOISED, and the word "once" was
+      # in this comment until an independent review pointed out that it claimed a memo that
+      # does not exist — it happens once per run because `resolve_engine` is called once, and
+      # the boot file argues against memoising the read itself (an administrator who switches
+      # away from a container must not keep POSTing to it until a restart).
       def engine_preference
         return @engine_preference unless @engine_preference == FROM_SETTINGS
 

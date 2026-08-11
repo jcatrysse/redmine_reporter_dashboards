@@ -131,8 +131,26 @@ RSpec.describe RedmineReporterDashboards::Render::EnginePreference do
 
       expect(preference.selected_id).to be_nil
       expect(preference.dropped.length).to eq(1)
+      expect(preference).to be_dropped
       expect(preference.dropped.first[:reason]).to include('alpha, beta, gamma')
       expect(logger.lines.join).to include('render setting render_engine="chromium_cpd" dropped')
+    end
+
+    # AT THE LIMIT AND ONE PAST IT (CLAUDE.md §3), which pins the comparison as `>` rather
+    # than `>=`: 64 characters is refused by the REGISTRY (it is not an engine id) and 65 is
+    # refused by the LENGTH, and the two reasons are different sentences.
+    it 'accepts the length AT the limit, and refuses it for the right reason' do
+      preference = build('a' * described_class::MAX_LENGTH)
+
+      expect(preference.selected_id).to be_nil
+      expect(preference.dropped.first[:reason]).to include('no render engine is registered')
+      expect(preference.dropped.first[:reason]).not_to include('longer than')
+    end
+
+    it 'refuses ONE PAST the limit, on the length' do
+      preference = build('a' * (described_class::MAX_LENGTH + 1))
+
+      expect(preference.dropped.first[:reason]).to include('longer than')
     end
 
     # THE BOUND FR-15 ASKS FOR, and the reason it is on the VALUE rather than on the id: a
@@ -223,8 +241,12 @@ RSpec.describe RedmineReporterDashboards::Render::EnginePreference do
       offer = build(nil).offers.find { |o| o.id == 'alpha' }
       all = RedmineReporterDashboards::Render::Capabilities::ALL
 
+      # THE THREE ASSET NAMES ARE LITERALS HERE, and an independent review is why: both
+      # sides of this expectation used to read `ASSET_CAPABILITIES`, so `%i[]` satisfied it
+      # and the whole suite stayed green. A control whose expected value is computed from the
+      # thing under test cannot fail.
       expect(offer.missing_capabilities)
-        .to eq(all - %i[javascript timeout] - described_class::ASSET_CAPABILITIES)
+        .to eq(all - %i[javascript timeout asset_inline asset_upload asset_http])
       expect(offer.missing_capabilities).not_to include(:javascript)
     end
 
@@ -237,9 +259,12 @@ RSpec.describe RedmineReporterDashboards::Render::EnginePreference do
       offer = build(nil).offers.find { |o| o.id == 'alpha' }
 
       expect(offer.asset_models).to eq(['inline'])
-      described_class::ASSET_CAPABILITIES.each do |capability|
-        expect(offer.missing_capabilities).not_to include(capability)
-      end
+      # LITERALS AGAIN, for the same reason, and `include` takes all three at once so an
+      # empty constant cannot make the loop vacuous.
+      expect(offer.missing_capabilities)
+        .not_to include(:asset_inline, :asset_upload, :asset_http)
+      expect(described_class::ASSET_CAPABILITIES)
+        .to eq(%i[asset_inline asset_upload asset_http])
     end
 
     it 'claims no asset model for an engine the catalogue does not describe' do

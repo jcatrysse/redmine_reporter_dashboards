@@ -150,8 +150,9 @@ module RedmineReporterDashboards
             # by a template that names it" stopped being true the moment an installation
             # could choose one.
             detail: "run with RRD_ENGINE=#{id} to check it deliberately, including its " \
-                    'credential. Or pick it in the engine selector on this page, or as ' \
-                    "this installation's engine in Administration → Plugins. #{id} needs " \
+                    'credential. Or pick it in the engine selector on the admin preflight ' \
+                    "page, or as this installation's engine in Administration → Plugins. " \
+                    "#{id} needs " \
                     'a service, so nothing selects it for you.',
             duration_ms: 0
           )]

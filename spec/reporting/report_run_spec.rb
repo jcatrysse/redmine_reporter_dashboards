@@ -581,6 +581,26 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
         expect(chosen.engine_id).to eq('picked-gotenberg')
       end
 
+      # THE BLANK GUARD'S OBSERVABLE IS THE LOG LINE, and an independent review measured that
+      # nothing in the tree covered it. `engine_preference: ''` cannot arrive through
+      # `FROM_SETTINGS` — `EnginePreference` coerces blank to nil — but the port is public, and
+      # without the guard every render of such a run writes *this installation selects render
+      # engine ""* into the log, which an operator reads as an install that selected an engine
+      # called nothing.
+      it 'says nothing at all about an empty selection, rather than naming ""' do
+        RedmineReporterDashboards::Render::Registry.register(
+          :chromium_cdp, ReportRunSpecSupport.named_adapter('picked-chromium')
+        )
+        logger = ReportRunSpecSupport::Recorder.new
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      engine_preference: '  ', logger: logger).call(pdf: true)
+
+        expect(outcome).to be_ok
+        expect(outcome.engine_id).to eq('picked-chromium')
+        expect(logger.lines.join).not_to include('this installation selects')
+      end
+
       # §7 rule 5's routine case: a value stored on a host that had the engine, read on a host
       # that does not. It must degrade to the default with a line in the log, never raise —
       # `Registry.fetch` raises `UnknownEngine`, and that would 500 every report on the

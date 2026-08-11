@@ -50,8 +50,13 @@ class RenderEngineSettingsTest < ActionController::TestCase
   def test_the_declared_default_is_no_preference
     defaults = Redmine::Plugin.find(PLUGIN_ID).settings[:default]
 
-    assert_equal Render::EnginePreference::NO_PREFERENCE, defaults['render_engine'],
+    # THE LITERAL, not the constant on both sides: `init.rb` sets this field FROM
+    # `NO_PREFERENCE`, so comparing the two reads the same constant twice and no value of it
+    # can fail (measured by an independent review — `NO_PREFERENCE = 'none'` survived).
+    assert_equal '', defaults['render_engine'],
                  'a fresh install must have chosen nothing, so the declared default renders'
+    assert_equal '', Render::EnginePreference::NO_PREFERENCE,
+                 'and the blank option a <select> posts is what "nothing" has to be'
   end
 
   def test_a_fresh_install_renders_with_the_declared_default
@@ -92,7 +97,18 @@ class RenderEngineSettingsTest < ActionController::TestCase
     assert_includes response.body, ERB::Util.html_escape(catalogue['wkhtmltopdf'].label)
     # THE TRADE SENTENCE, which clause 4 names in as many words and the first version of
     # this view carried on the object and rendered nowhere.
+    #
+    # `chromium_cdp`'s AND NOT `wkhtmltopdf`'s, because an independent review measured which
+    # catalogue values `html_escape` actually changes: only these two `trade` sentences carry
+    # quotes, so wrapping any other value made the escaping wrapper decorative. Catalogue
+    # text is the one input on this screen that comes from an editable file rather than from
+    # the closed registry, so this is the assertion that has to be a real control.
     assert_includes response.body, ERB::Util.html_escape(catalogue['wkhtmltopdf'].trade)
+    trade = catalogue['chromium_cdp'].trade
+    assert_not_equal trade, ERB::Util.html_escape(trade),
+                     'this control needs a value escaping actually changes'
+    assert_includes response.body, ERB::Util.html_escape(trade)
+    assert_not_includes response.body, trade
     # What it cannot do, computed from the closed vocabulary rather than written down — and
     # NOT the three asset capabilities, which are reported as a model instead: telling an
     # administrator the recommended engine "cannot do :asset_http" reads as a deficiency

@@ -279,8 +279,10 @@ namespace :reporter_dashboards do
       require File.expand_path('../redmine_reporter_dashboards/render/preflight_command', __dir__)
       RedmineReporterDashboards::Render::PreflightCommand.load_engines!
 
-      # The port `render/**` may not reach for itself: this is the one line that knows
-      # Redmine has a Setting table. See PreflightCommand's note on mechanism E5.
+      # The two ports `render/**` may not reach for itself: these are the ONLY lines in this
+      # task that know Redmine has a Setting table — the base URL below, and FR-50's selected
+      # engine after it. See PreflightCommand's note on mechanism E5. (This comment said "the
+      # one line" until FR-50 added the second; an independent review caught it.)
       base_url = Setting.host_name.present? ? "#{Setting.protocol}://#{Setting.host_name}" : nil
 
       exit RedmineReporterDashboards::Render::PreflightCommand.new(
