@@ -44,10 +44,15 @@
   raw_domains = raw['mail_external_domains'] || raw[:mail_external_domains] ||
                 mail_policy.domains.join("\n")
 %>
-<%# NO WRAPPER. Redmine already renders this partial inside `<div class="box tabular settings">`
-    (`app/views/settings/plugin.html.erb`, identical on 5.1 through master), so a second box
-    draws a redundant bordered panel inset inside the first, with doubled padding on all four
-    sides. Redmine's own settings partials are bare `<p>` rows for exactly this reason. %>
+<%# NO WRAPPER AROUND THE WHOLE PARTIAL. Redmine already renders it inside
+    `<div class="box tabular settings">` (`app/views/settings/plugin.html.erb`, identical on
+    5.1 through master), so wrapping everything in a second box draws a redundant bordered
+    panel inset inside the first, with doubled padding on all four sides.
+
+    A `fieldset.box` per SECTION is a different thing and is Redmine's own settings idiom —
+    core uses it in `_issues`, `_notifications`, `_projects` and `_authentication`. The one
+    difference, worth knowing: core places those fieldsets as siblings AFTER the settings
+    div, which a plugin partial cannot do, so ours nest one level deeper. %>
   <p>
     <label for="settings_asset_policy"><%= l(:label_reporter_asset_policy) %></label>
     <%= select_tag('settings[asset_policy]',
@@ -82,7 +87,7 @@
     <em class="info"><%= l(:text_reporter_asset_max_bytes_info) %></em>
   </p>
 
-<%# --- FR-50 / technical-spec.md §5.2 clause 4 — WHICH ENGINE THIS INSTALLATION USES ---
+<%# --- §5.2 clause 4 / §9b.3 — WHICH ENGINE THIS INSTALLATION USES ---------------------
 
     Until this fieldset existed, the only way to reach `:gotenberg` was a template's
     `engine_hint`, and there is no form field for that either: the documented route was to
@@ -100,6 +105,16 @@
     translated: they are the same tokens `RRD_ENGINE=` takes, the preflight page's selector
     offers and the report headings print. A localised alias would be a second name for a
     thing that has exactly one name everywhere else.
+
+    A TABLE, NOT A LIST, and a UX review is why. §9b.3 asks for "an engine comparison table
+    generated from capabilities.yml"; the first version was a `<ul>` whose field names were
+    lowercase labels joined to values with punctuation written in the MARKUP — which
+    rendered as `… over CDP. benötigt einen Dienst: Nein.` in German (a sentence beginning
+    lowercase), put ASCII colons and stops inside Chinese text, dropped a full stop before
+    the next field in every locale, and hung ~180px left of its own introduction because
+    `.tabular p` indents a paragraph and a bare `<ul>` gets no indent. `table.list` is
+    Redmine's own chrome, needs no CSS of ours, and puts every field name in a `<th>` where
+    a capitalised noun phrase is correct and nothing is glued together.
 %>
 <fieldset class="box">
   <legend><%= l(:label_reporter_render_settings) %></legend>
@@ -121,53 +136,89 @@
     <em class="info"><%= l(:text_reporter_render_engine_info) %></em>
   </p>
 
-  <%# ONE LINE PER ENGINE, GENERATED — §5.2 clause 4 in its own words: "what it needs
-      installed, whether it needs a service, whether it can render offline, and which
-      capabilities it lacks — generated from capabilities.yml, never hand-written".
+<% unless engine_pref.catalogue_readable? %>
+  <%# THE DEGRADED STATE, SAID OUT LOUD. `EnginePreference` survives an unreadable
+      catalogue on purpose — an operator's explicit choice must keep rendering — and the
+      first version of this view then printed the sentence below promising a comparison,
+      followed by three bare ids and NO service warning, because `needs_service?` cannot
+      know. That is the "looks like it worked when it did not" failure the asset half of
+      this page already guards against, and `catalogue_readable?` existed for it and was
+      not called. Measured by a UX review. %>
+  <div class="warning"><%= l(:text_reporter_render_engine_catalogue_unreadable) %></div>
+<% end %>
 
-      `install`, the label and the trade sentence are the CATALOGUE's own English text and
-      are not translated, for the same reason `Check#detail` is not on the preflight page
+<% if engine_pref.offers.empty? %>
+  <%# An empty registry is a real answer and the most alarming one — nothing can render at
+      all. The preflight page says so rather than drawing a blank; so does this. %>
+  <p class="nodata"><%= l(:text_reporter_render_engine_none) %></p>
+<% else %>
+  <p><em class="info"><%= l(:text_reporter_render_engine_comparison) %></em></p>
+  <%# ONE ROW PER ENGINE, GENERATED — §5.2 clause 4's own list: "what it needs installed,
+      whether it needs a service, whether it can render offline, and which capabilities it
+      lacks". The trade sentence is in the first cell because clause 4 says "states the
+      trade in one line per engine" and it is the only text here that helps somebody
+      decide; the first version carried it on the `Offer` and rendered it nowhere.
+
+      `install`, the label and the trade are the CATALOGUE's own English text and are not
+      translated, for the same reason `Check#detail` is not on the preflight page
       (`ReporterPreflightHelper`'s note): they are values reported by configuration rather
       than sentences this product wrote, and nine copies of a sentence that must not drift
-      from the file it is generated from is how the file stops being the single source. What
-      the PRODUCT says here — every field name, every yes and no, every marker — is keyed,
-      and `general_text_Yes`/`general_text_No` are Redmine's own.
-  %>
-  <p><em class="info"><%= l(:text_reporter_render_engine_comparison) %></em></p>
-  <ul>
-    <% engine_pref.offers.each do |offer| %>
-      <li>
-        <strong><%= offer.id %></strong>
-        <% if offer.known %>
-          — <%= offer.label %>.
-          <%= l(:label_reporter_render_engine_needs_service) %>:
-          <%= l(offer.needs_service ? :general_text_Yes : :general_text_No) %>.
-          <%= l(:label_reporter_render_engine_renders_offline) %>:
-          <%= l(offer.renders_offline ? :general_text_Yes : :general_text_No) %>.
-          <%= l(:label_reporter_render_engine_install) %>: <%= offer.install %>
-          <% if offer.missing_capabilities.any? %>
-            <%= l(:label_reporter_render_engine_lacks) %>:
-            <%= offer.missing_capabilities.map { |capability| ":#{capability}" }.join(', ') %>.
-          <% end %>
-          <%# TWO MARKERS THAT ARE NOT IN §5.2's LIST AND BELONG ON THIS SCREEN ANYWAY.
-              An operator choosing an engine must not have to read the support matrix to
-              discover that it is on its way out (wkhtmltopdf ships `deprecated: true`) or
-              that nobody has ever run its corpus — INV-7 is this project's record of what
-              an unverified claim costs, and this is the screen where the claim is acted on.
+      from the file it is generated from is how the file stops being the single source.
+      Every field name, every yes and no, and every marker IS keyed —
+      `general_text_Yes`/`No` are Redmine's own. §Findings E-29 records the cost of that
+      trade as a UX pass measured it, and the alternative it recommends.
 
-              Marked with a bare `<em>` and no class: CLAUDE.md §4 forbids plugin-local
-              design tokens in chrome, and Redmine's `.warning` is a block-level box that
-              draws a panel inside a list item. %>
-          <% if offer.deprecated %>
-            <em>(<%= l(:label_reporter_render_engine_deprecated) %>)</em>
-          <% end %>
-          <% unless offer.verification == 'corpus' %>
-            <em>(<%= l(:label_reporter_render_engine_unverified) %>)</em>
-          <% end %>
-        <% end %>
-      </li>
-    <% end %>
-  </ul>
+      A `—` where an engine is not in the catalogue, never a guess: an adapter another
+      plugin registered is offered by id and described as undescribed. %>
+  <table class="list">
+    <thead>
+      <tr>
+        <th><%= l(:label_reporter_render_engine) %></th>
+        <th><%= l(:label_reporter_render_engine_needs_service) %></th>
+        <th><%= l(:label_reporter_render_engine_renders_offline) %></th>
+        <th><%= l(:label_reporter_render_engine_assets) %></th>
+        <th><%= l(:label_reporter_render_engine_install) %></th>
+        <th><%= l(:label_reporter_render_engine_lacks) %></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% engine_pref.offers.each do |offer| %>
+        <tr>
+          <td>
+            <strong><%= offer.id %></strong>
+            <% if offer.deprecated %>
+              <em>(<%= l(:label_reporter_render_engine_deprecated) %>)</em>
+            <% end %>
+            <%# OUTSIDE `if offer.known`, deliberately: an engine the catalogue cannot
+                describe is not a verified one, and the first version suppressed this
+                marker in exactly the state where nothing had been verified (INV-7
+                inverted). %>
+            <% unless offer.verification == 'corpus' %>
+              <em>(<%= l(:label_reporter_render_engine_unverified) %>)</em>
+            <% end %>
+            <% if offer.known %>
+              <br /><%= offer.label %>
+              <br /><em class="info"><%= offer.trade %></em>
+            <% else %>
+              <br /><em><%= l(:label_reporter_render_engine_undescribed) %></em>
+            <% end %>
+          </td>
+          <td><%= offer.known ? l(offer.needs_service ? :general_text_Yes : :general_text_No) : '—' %></td>
+          <td><%= offer.known ? l(offer.renders_offline ? :general_text_Yes : :general_text_No) : '—' %></td>
+          <td><%= offer.asset_models.any? ? offer.asset_models.join(', ') : '—' %></td>
+          <td><%= offer.known ? offer.install : '—' %></td>
+          <td>
+            <% if offer.missing_capabilities.any? %>
+              <%= offer.missing_capabilities.map { |capability| ":#{capability}" }.join(', ') %>
+            <% else %>
+              —
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
 
   <% if engine_pref.needs_service? %>
     <%# THE CHOICE, SAID OUT LOUD. T-34's rule is that an engine needing a service is never
@@ -182,9 +233,12 @@
   <% end %>
 
   <% if engine_pref.dropped? %>
-    <%# A REFUSED VALUE IS NOT A SAVED VALUE, and the dropdown showing the default would
-        otherwise read as "your choice was stored". Same sentence as the asset and mail
-        halves of this page use, deliberately: one page, one way of saying it. %>
+    <%# A REFUSED VALUE IS NOT A VALUE IN USE, and the dropdown showing the default would
+        otherwise read as "your choice took effect". Redmine stores whatever was posted and
+        hands it back on the next GET, which is why this warning correctly reappears until
+        the field is corrected. Same sentence as the asset and mail halves of this page use,
+        deliberately: one page, one way of saying it. §Findings E-29 records that a dropped
+        REASON cannot be localised today, and what that needs. %>
     <div class="warning">
       <p><%= l(:text_reporter_asset_settings_dropped) %></p>
       <ul>

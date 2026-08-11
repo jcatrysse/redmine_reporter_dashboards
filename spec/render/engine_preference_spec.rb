@@ -19,7 +19,8 @@ module EnginePreferenceSpecSupport
   # `pending` verification and `deprecated` both need one, and the shipped file has neither
   # any more (all three engines were promoted to `corpus` on 2026-08-11).
   Entry = Struct.new(:id, :label, :needs_service, :renders_offline, :install, :trade,
-                     :verification, :deprecated, :capabilities, keyword_init: true) do
+                     :verification, :deprecated, :asset_models, :capabilities,
+                     keyword_init: true) do
     def deprecated?
       deprecated ? true : false
     end
@@ -45,7 +46,7 @@ module EnginePreferenceSpecSupport
   def self.entry(id, **overrides)
     Entry.new({ id: id, label: "#{id} label", needs_service: false, renders_offline: true,
                 install: "install #{id}", trade: "trade #{id}", verification: 'corpus',
-                deprecated: false,
+                deprecated: false, asset_models: ['inline'],
                 capabilities: %i[javascript timeout] }.merge(overrides))
   end
 
@@ -222,8 +223,27 @@ RSpec.describe RedmineReporterDashboards::Render::EnginePreference do
       offer = build(nil).offers.find { |o| o.id == 'alpha' }
       all = RedmineReporterDashboards::Render::Capabilities::ALL
 
-      expect(offer.missing_capabilities).to eq(all - %i[javascript timeout])
+      expect(offer.missing_capabilities)
+        .to eq(all - %i[javascript timeout] - described_class::ASSET_CAPABILITIES)
       expect(offer.missing_capabilities).not_to include(:javascript)
+    end
+
+    # THE ASSET MODEL IS AN ANSWER, NOT AN ABSENCE. A UX pass measured what the alternative
+    # reads as: the reference engine listed as unable to do `:asset_http` — the capability
+    # INV-8 exists to keep it from having — and gotenberg listed as unable to do
+    # `:asset_inline` one screen from a README paragraph saying its upload model changes
+    # nothing for a template author.
+    it 'reports the asset model rather than three absences' do
+      offer = build(nil).offers.find { |o| o.id == 'alpha' }
+
+      expect(offer.asset_models).to eq(['inline'])
+      described_class::ASSET_CAPABILITIES.each do |capability|
+        expect(offer.missing_capabilities).not_to include(capability)
+      end
+    end
+
+    it 'claims no asset model for an engine the catalogue does not describe' do
+      expect(build(nil, ids: %w[alpha zeta]).offer_for('zeta').asset_models).to be_empty
     end
 
     it 'reports deprecation and an unverified engine, which is what INV-7 is about' do

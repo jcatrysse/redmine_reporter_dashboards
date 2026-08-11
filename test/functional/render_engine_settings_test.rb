@@ -83,12 +83,38 @@ class RenderEngineSettingsTest < ActionController::TestCase
 
     assert_response :success
     catalogue = Render::EngineCatalogue.load
-    # GENERATED, NOT HAND-LISTED (§5.2 clause 4). The install sentence is the catalogue's
-    # own text, so if the file changes the page changes and this assertion follows it.
+    # A TABLE, one row per engine — §9b.3's words, and the shape a UX review asked for after
+    # measuring what a punctuation-in-the-markup list rendered as in German and Chinese.
+    assert_select 'fieldset table.list tbody tr', count: Render::Registry.ids.length
+    # GENERATED, NOT HAND-LISTED (§5.2 clause 4). Each of these is the catalogue's own text,
+    # so if the file changes the page changes and this assertion follows it.
     assert_includes response.body, ERB::Util.html_escape(catalogue['gotenberg'].install)
     assert_includes response.body, ERB::Util.html_escape(catalogue['wkhtmltopdf'].label)
-    # And what it CANNOT do, computed from the closed vocabulary rather than written down.
-    assert_includes response.body, ':asset_upload'
+    # THE TRADE SENTENCE, which clause 4 names in as many words and the first version of
+    # this view carried on the object and rendered nowhere.
+    assert_includes response.body, ERB::Util.html_escape(catalogue['wkhtmltopdf'].trade)
+    # What it cannot do, computed from the closed vocabulary rather than written down — and
+    # NOT the three asset capabilities, which are reported as a model instead: telling an
+    # administrator the recommended engine "cannot do :asset_http" reads as a deficiency
+    # where INV-8 means it is the point.
+    assert_includes response.body, ':modern_javascript'
+    assert_not_includes response.body, ':asset_http'
+    assert_select 'fieldset table.list tbody tr td', text: 'upload'
+  end
+
+  # THE DEGRADED STATE. `EnginePreference` survives an unreadable catalogue so that an
+  # operator's explicit choice keeps rendering; the page must then say that it knows nothing
+  # rather than printing a promise followed by three bare ids and no service warning.
+  def test_the_page_says_so_when_the_catalogue_cannot_be_read
+    Setting.send(:"plugin_#{PLUGIN_ID}=", @original.merge('render_engine' => 'gotenberg'))
+    Render::EngineCatalogue.stubs(:load).raises(Render::EngineCatalogue::InvalidCatalogue, 'broken')
+
+    get :plugin, params: { id: PLUGIN_ID }
+
+    assert_response :success
+    assert_select 'div.warning', text: /capabilities\.yml/
+    # And the selection is still shown as chosen, because it still governs the render path.
+    assert_select 'select#settings_render_engine option[selected][value=?]', 'gotenberg'
   end
 
   def test_the_partial_uses_locale_keys_and_not_hardcoded_english
@@ -144,6 +170,37 @@ class RenderEngineSettingsTest < ActionController::TestCase
     # LISTED, because the dropdown will show the default and an operator would otherwise
     # conclude their choice was saved.
     assert_select 'div.warning li', text: /render_engine/
+  end
+
+  # AN EMPTY REGISTRY IS A REAL ANSWER AND THE MOST ALARMING ONE — nothing can render at
+  # all. The preflight page says so; before a UX review measured it, this page printed an
+  # introduction promising a comparison and then an empty list.
+  def test_the_page_says_so_when_no_engine_is_registered
+    Render::Registry.stubs(:ids).returns([])
+
+    get :plugin, params: { id: PLUGIN_ID }
+
+    assert_response :success
+    assert_select 'p.nodata', text: l(:text_reporter_render_engine_none)
+    assert_select 'table.list', count: 0
+    # The dropdown still offers the declared default and nothing else.
+    assert_select 'select#settings_render_engine option', count: 1
+  end
+
+  # AN ADAPTER ANOTHER PLUGIN REGISTERED. It is offered — being unknown to the catalogue is
+  # not evidence of anything — and nothing is invented about it. Both markers are asserted
+  # because the first version nested the unverified one inside "is it known", suppressing it
+  # in exactly the state where nothing has been verified.
+  def test_an_engine_the_catalogue_does_not_describe_is_offered_and_says_so
+    Render::Registry.stubs(:ids).returns([:weasyprint])
+
+    get :plugin, params: { id: PLUGIN_ID }
+
+    assert_response :success
+    assert_select 'select#settings_render_engine option[value=?]', 'weasyprint'
+    assert_select 'table.list tbody tr td', text: /weasyprint/
+    assert_includes response.body, l(:label_reporter_render_engine_undescribed)
+    assert_includes response.body, l(:label_reporter_render_engine_unverified)
   end
 
   # THE OTHER END OF THE ROUND TRIP, and the only place it can be driven.

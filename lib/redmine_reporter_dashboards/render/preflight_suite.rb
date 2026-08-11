@@ -145,10 +145,14 @@ module RedmineReporterDashboards
             # actionable words started at index 120 — thirty past the cut. The example
             # that "proved" the remediation asserted on the Check object and never on
             # rendered output, which is the same shape as the blocker this commit fixes.
+            # `RRD_ENGINE=…` STILL COMES FIRST (the text surface cuts a detail at 90
+            # characters), and the last clause had to change when FR-50 landed: "used only
+            # by a template that names it" stopped being true the moment an installation
+            # could choose one.
             detail: "run with RRD_ENGINE=#{id} to check it deliberately, including its " \
-                    'credential. Or pick it in the engine selector on the admin ' \
-                    "preflight page. #{id} needs a service, so it is used only by a " \
-                    'template that names it.',
+                    'credential. Or pick it in the engine selector on this page, or as ' \
+                    "this installation's engine in Administration → Plugins. #{id} needs " \
+                    'a service, so nothing selects it for you.',
             duration_ms: 0
           )]
         )

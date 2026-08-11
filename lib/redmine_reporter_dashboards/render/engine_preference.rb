@@ -72,6 +72,9 @@ module RedmineReporterDashboards
       # the log or the page, and FR-15 asks for bounded.
       MAX_LENGTH = 64
 
+      # Reported as the ASSET MODEL rather than as three absences — see `#offer`.
+      ASSET_CAPABILITIES = %i[asset_inline asset_upload asset_http].freeze
+
       # What an operator needs in order to choose, per engine, GENERATED — §5.2 clause 4's
       # own list: "what it needs installed, whether it needs a service, whether it can
       # render offline, and which capabilities it lacks".
@@ -80,8 +83,8 @@ module RedmineReporterDashboards
       # view then offers the id and says nothing about it, which is the honest rendering:
       # inventing facts about somebody else's adapter would be worse than a blank line.
       Offer = Struct.new(:id, :known, :label, :needs_service, :renders_offline, :install,
-                         :trade, :verification, :deprecated, :missing_capabilities,
-                         keyword_init: true)
+                         :trade, :verification, :deprecated, :asset_models,
+                         :missing_capabilities, keyword_init: true)
 
       attr_reader :selected_id, :default_id, :offers, :dropped
 
@@ -230,17 +233,28 @@ module RedmineReporterDashboards
       end
 
       def offer(id, entry)
-        return Offer.new(id: id, known: false, missing_capabilities: [].freeze).freeze if entry.nil?
+        if entry.nil?
+          return Offer.new(id: id, known: false, asset_models: [].freeze,
+                           missing_capabilities: [].freeze).freeze
+        end
 
         Offer.new(
           id: id, known: true, label: entry.label, needs_service: entry.needs_service,
           renders_offline: entry.renders_offline, install: entry.install,
           trade: entry.trade, verification: entry.verification,
           deprecated: entry.deprecated?,
+          # THE ASSET MODEL IS ITS OWN ANSWER, NOT AN ABSENCE. A UX review measured what
+          # putting it in the "cannot do" list reads as: the reference engine shown lacking
+          # `:asset_http` — the capability INV-8 exists to keep it from having — and
+          # gotenberg shown unable to do `:asset_inline` one screen away from a README
+          # paragraph saying its upload model "changes nothing about how you write a
+          # template". So the three `asset_*` capabilities are reported as a MODEL here and
+          # excluded from the absence list below.
+          asset_models: Array(entry.asset_models).map(&:to_s).freeze,
           # "which capabilities it lacks" — COMPUTED from the closed vocabulary, so a
           # capability added to `Capabilities::ALL` appears here without anybody editing a
           # view, and an engine cannot look more capable than it is by omission.
-          missing_capabilities: (Capabilities::ALL - entry.capabilities).freeze
+          missing_capabilities: (Capabilities::ALL - entry.capabilities - ASSET_CAPABILITIES).freeze
         ).freeze
       end
     end

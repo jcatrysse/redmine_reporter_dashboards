@@ -416,8 +416,10 @@ RRD_GOTENBERG_USERNAME=reporter
 RRD_GOTENBERG_PASSWORD=…            # the same pair the container was started with
 ```
 
-The credential lives in the environment rather than in the plugin settings form on purpose:
-it is a deployment secret, not a preference, and the settings table is neither encrypted nor
+The credential lives in the environment rather than in the plugin settings form on purpose,
+and the line between the two is worth stating now that the form carries an engine field: the
+engine's **name** is a preference and belongs in the settings form; its **address and
+credential** are deployment secrets and do not. The settings table is neither encrypted nor
 hidden from anyone who can read the administration page.
 
 ### Check it before you rely on it
@@ -459,6 +461,13 @@ embedded in it. Nothing about how you write a template changes.
 ## Where a report's images and stylesheets come from
 
 **Administration → Plugins → Redmine Reporter Dashboards.**
+
+**The same page carries the render-engine selection** — which engine draws every PDF on this
+installation, with one generated line per engine saying what it needs and what it cannot do.
+It governs all three engines, not just the containerised one; the ordering rules and what a
+template's own `engine_hint` does to them are under
+[*Rendering in a container instead*](#rendering-in-a-container-instead-gotenberg), because
+that is where an operator first meets the question.
 
 A PDF is produced by handing a document to a rendering engine. Something has to obtain the
 images, stylesheets, fonts and scripts that document points at, and there are only three ways

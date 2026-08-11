@@ -295,8 +295,10 @@ All notable changes to this plugin are documented in this file.
     pick one, the page says so and points at *Administration → Render preflight*, and the
     preflight stops deferring it — so `rake reporter_dashboards:render:preflight` starts
     failing when your container is down. That is the point of choosing it.
-  - **A value that names no installed engine is refused rather than stored**, listed on the
-    page with the reason, and the declared default keeps rendering. The engine's address and
+  - **A value that names no installed engine is refused rather than used**, listed on the
+    page with the reason, and the declared default keeps rendering. (Redmine stores whatever
+    the form posted and hands it back on the next visit, which is why the warning stays
+    there until you correct the field.) The engine's address and
     credential are still environment variables, not fields on this page: they are deployment
     secrets, and the settings table is neither encrypted nor hidden from anyone who can read
     the administration page.
