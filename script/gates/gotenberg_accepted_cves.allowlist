@@ -75,5 +75,10 @@ CVE-2026-19155 | 2026-09-09 | chromium/chromium-common 151.0.7922.71: sandbox es
 # mitigation and NOT an argument that the finding is wrong: Trivy scans the image, and an
 # operator who drops that flag gets the exposure back.
 CVE-2026-46602 | 2026-09-09 | pdfcpu / golang.org/x/image v0.41.0: unbounded allocation decoding a TIFF; fixed in 0.43.0. Unreachable with --pdfengines-disable-routes.
-CVE-2026-46604 | 2026-09-09 | pdfcpu / golang.org/x/image v0.41.0: panic decoding an invalid TIFF; fixed in 0.43.0. Unreachable with --pdfengines-disable-routes.
+# CVE-2026-46604 (x/image: panic decoding an invalid TIFF) was accepted alongside the two
+# entries around it on 2026-08-10 and DELETED on 2026-08-11, when the stale arm fired on
+# run 31468632140: the scan of the SAME digest no longer reports it, so the acceptance
+# exempted nothing. The image did not change — the vulnerability database did. This
+# comment is not an exemption; it exists so the next scan that reports the id again reads
+# as "the database re-listed it" rather than as a new finding nobody has seen.
 CVE-2026-56852 | 2026-09-09 | pdfcpu / golang.org/x/text v0.37.0: denial of service on invalid UTF-8 input; fixed in 0.39.0. Unreachable with --pdfengines-disable-routes.

@@ -193,6 +193,11 @@ it is the detector and wherever the person seeing it can act. **Curator may reve
    compose file's containment (`internal: true`, non-root with Chromium's sandbox left ON,
    read-only root, `cap_drop: ALL`, `no-new-privileges`). Recommendation: **accept to
    2026-09-09**, which is what is committed, and re-decide when it expires.
+   *2026-08-11: the stale arm fired on its second real run (31468632140) — the scan of the
+   SAME digest no longer reports `CVE-2026-46604` (x/image TIFF panic), so the database
+   changed under an unchanged image and that acceptance exempted nothing. Deleted per the
+   arm's own remediation; **three acceptances remain**, and a dated comment in the
+   allowlist says why the fourth is gone so a re-listing reads as the DB's doing.*
 2. **`gotenberg/gotenberg:8.35.0-chromium` is a distinct, smaller image**
    (`sha256:d2aa8428406e…`) carrying only the Chromium module — no `pdftk-all.jar`, no
    `pdfcpu`, so **3 of the 4 advisories are not in it at all**, and it matches what the
