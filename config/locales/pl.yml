@@ -348,3 +348,18 @@ pl:
   error_reporter_adhoc_partial_delivery: "Część odbiorców otrzymała raport, zanim wysyłka się nie powiodła. Sprawdź dziennik poczty przed ponownym wysłaniem."
   error_reporter_adhoc_render_failed: "Nie udało się utworzyć raportu, więc nic nie zostało wysłane. Szczegóły znajdują się poniżej."
   error_reporter_adhoc_recipients_not_permitted: "Co najmniej jeden odbiorca nie ma prawa oglądać raportów w tym projekcie, więc nic nie zostało wysłane."
+
+  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  label_reporter_render_settings: "Renderowanie raportów"
+  label_reporter_render_engine: "Silnik renderujący"
+  label_reporter_render_engine_default: "Domyślny dla tej instalacji (%{engine})"
+  label_reporter_render_engine_no_default: "Wybierany przez wtyczkę"
+  text_reporter_render_engine_info: "Który silnik tworzy plik PDF każdego raportu w tej instalacji. Szablon, który sam wskazuje silnik, zachowuje ten silnik: wymaganie samego dokumentu ma pierwszeństwo przed tym ustawieniem, więc istniejące szablony renderują się dokładnie tak jak dotąd. Silnik wymagający usługi nigdy nie jest wybierany za Ciebie — wybranie go tutaj jest właśnie tym wyborem."
+  text_reporter_render_engine_comparison: "Czego wymaga każdy silnik i czego nie potrafi. Wygenerowane z config/capabilities.yml, nie pisane ręcznie:"
+  label_reporter_render_engine_needs_service: "wymaga usługi"
+  label_reporter_render_engine_renders_offline: "renderuje bez sieci"
+  label_reporter_render_engine_install: "instalacja"
+  label_reporter_render_engine_lacks: "nie potrafi"
+  label_reporter_render_engine_deprecated: "przestarzały"
+  label_reporter_render_engine_unverified: "niepotwierdzony przez przebieg testów"
+  text_reporter_render_engine_service_warning: "%{engine} wymaga usługi, której ta wtyczka nigdy nie uruchamia. Sprawdź ją w Administracja → %{preflight}, zanim na niej polegniesz. Jej adres i dane uwierzytelniające znajdują się w środowisku Redmine, a nie na tej stronie, ponieważ tabela ustawień nie jest ani zaszyfrowana, ani ukryta przed nikim, kto może ją odczytać."

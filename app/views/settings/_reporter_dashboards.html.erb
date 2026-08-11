@@ -36,6 +36,10 @@
   raw_allowlist = raw['asset_allowlist'] || raw[:asset_allowlist] || policy.allowlist.join("\n")
 
   # T-32 — the ad-hoc mail policy, built from the same posted Hash and for the same reason.
+  # FR-50 — built from the POSTED hash for the same reason `policy` is: after a save that
+  # dropped a value, an administrator has to see what they sent rather than what was stored.
+  engine_pref = RedmineReporterDashboards::Render::EnginePreference.from_settings(raw)
+
   mail_policy = RedmineReporterDashboards::Reporting::MailPolicy.from_settings(raw)
   raw_domains = raw['mail_external_domains'] || raw[:mail_external_domains] ||
                 mail_policy.domains.join("\n")
@@ -77,6 +81,120 @@
                        size: 12, id: 'settings_asset_max_bytes') %>
     <em class="info"><%= l(:text_reporter_asset_max_bytes_info) %></em>
   </p>
+
+<%# --- FR-50 / technical-spec.md §5.2 clause 4 — WHICH ENGINE THIS INSTALLATION USES ---
+
+    Until this fieldset existed, the only way to reach `:gotenberg` was a template's
+    `engine_hint`, and there is no form field for that either: the documented route was to
+    EXPORT a template, add a line and import it again (§Findings E-27 row 2). The engine is
+    a property of the deployment, so it belongs here.
+
+    NO HELPER, AND THAT IS NOT AN OVERSIGHT. Redmine sets `include_all_helpers = false`
+    (`config/application.rb`), and this partial is rendered by Redmine's OWN
+    `SettingsController` — which sees its own helper and `ApplicationHelper`, and nothing
+    this plugin could add. A `reporter_engine_options` helper would resolve in a controller
+    test and 500 on the real page, which is HANDOVER §1's `sprite_icon` entry exactly. So
+    the options are built here, off the same object the render path reads.
+
+    THE OPTIONS COME OFF THE REGISTRY, NEVER OFF INPUT, and the ids are deliberately NOT
+    translated: they are the same tokens `RRD_ENGINE=` takes, the preflight page's selector
+    offers and the report headings print. A localised alias would be a second name for a
+    thing that has exactly one name everywhere else.
+%>
+<fieldset class="box">
+  <legend><%= l(:label_reporter_render_settings) %></legend>
+
+  <p>
+    <label for="settings_render_engine"><%= l(:label_reporter_render_engine) %></label>
+    <%= select_tag('settings[render_engine]',
+                   options_for_select(
+                     [[(if engine_pref.default_id
+                          l(:label_reporter_render_engine_default, engine: engine_pref.default_id)
+                        else
+                          l(:label_reporter_render_engine_no_default)
+                        end),
+                       RedmineReporterDashboards::Render::EnginePreference::NO_PREFERENCE]] +
+                       engine_pref.offers.map { |offer| [offer.id, offer.id] },
+                     engine_pref.selected_id.to_s
+                   ),
+                   id: 'settings_render_engine') %>
+    <em class="info"><%= l(:text_reporter_render_engine_info) %></em>
+  </p>
+
+  <%# ONE LINE PER ENGINE, GENERATED — §5.2 clause 4 in its own words: "what it needs
+      installed, whether it needs a service, whether it can render offline, and which
+      capabilities it lacks — generated from capabilities.yml, never hand-written".
+
+      `install`, the label and the trade sentence are the CATALOGUE's own English text and
+      are not translated, for the same reason `Check#detail` is not on the preflight page
+      (`ReporterPreflightHelper`'s note): they are values reported by configuration rather
+      than sentences this product wrote, and nine copies of a sentence that must not drift
+      from the file it is generated from is how the file stops being the single source. What
+      the PRODUCT says here — every field name, every yes and no, every marker — is keyed,
+      and `general_text_Yes`/`general_text_No` are Redmine's own.
+  %>
+  <p><em class="info"><%= l(:text_reporter_render_engine_comparison) %></em></p>
+  <ul>
+    <% engine_pref.offers.each do |offer| %>
+      <li>
+        <strong><%= offer.id %></strong>
+        <% if offer.known %>
+          — <%= offer.label %>.
+          <%= l(:label_reporter_render_engine_needs_service) %>:
+          <%= l(offer.needs_service ? :general_text_Yes : :general_text_No) %>.
+          <%= l(:label_reporter_render_engine_renders_offline) %>:
+          <%= l(offer.renders_offline ? :general_text_Yes : :general_text_No) %>.
+          <%= l(:label_reporter_render_engine_install) %>: <%= offer.install %>
+          <% if offer.missing_capabilities.any? %>
+            <%= l(:label_reporter_render_engine_lacks) %>:
+            <%= offer.missing_capabilities.map { |capability| ":#{capability}" }.join(', ') %>.
+          <% end %>
+          <%# TWO MARKERS THAT ARE NOT IN §5.2's LIST AND BELONG ON THIS SCREEN ANYWAY.
+              An operator choosing an engine must not have to read the support matrix to
+              discover that it is on its way out (wkhtmltopdf ships `deprecated: true`) or
+              that nobody has ever run its corpus — INV-7 is this project's record of what
+              an unverified claim costs, and this is the screen where the claim is acted on.
+
+              Marked with a bare `<em>` and no class: CLAUDE.md §4 forbids plugin-local
+              design tokens in chrome, and Redmine's `.warning` is a block-level box that
+              draws a panel inside a list item. %>
+          <% if offer.deprecated %>
+            <em>(<%= l(:label_reporter_render_engine_deprecated) %>)</em>
+          <% end %>
+          <% unless offer.verification == 'corpus' %>
+            <em>(<%= l(:label_reporter_render_engine_unverified) %>)</em>
+          <% end %>
+        <% end %>
+      </li>
+    <% end %>
+  </ul>
+
+  <% if engine_pref.needs_service? %>
+    <%# THE CHOICE, SAID OUT LOUD. T-34's rule is that an engine needing a service is never
+        chosen FOR an operator; the other half of that rule is that an operator who chooses
+        one deliberately is told what they have taken on, where they took it on. The
+        credential deliberately is NOT a field on this page — the README says why and so
+        does this sentence. %>
+    <div class="warning">
+      <%= l(:text_reporter_render_engine_service_warning,
+            engine: engine_pref.effective_id, preflight: l(:label_reporter_preflight)) %>
+    </div>
+  <% end %>
+
+  <% if engine_pref.dropped? %>
+    <%# A REFUSED VALUE IS NOT A SAVED VALUE, and the dropdown showing the default would
+        otherwise read as "your choice was stored". Same sentence as the asset and mail
+        halves of this page use, deliberately: one page, one way of saying it. %>
+    <div class="warning">
+      <p><%= l(:text_reporter_asset_settings_dropped) %></p>
+      <ul>
+        <% engine_pref.dropped.each do |entry| %>
+          <li><%= "#{entry[:key]}: #{entry[:value].inspect} — #{entry[:reason]}" %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+</fieldset>
 
 <%# T-32 / FR-61 — ad-hoc report mail. A second fieldset legend rather than four more rows
     on the asset one: these govern who this installation will put a report in front of,

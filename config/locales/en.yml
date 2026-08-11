@@ -347,3 +347,18 @@ en:
   error_reporter_adhoc_partial_delivery: "Some recipients received the report before delivery failed. Check the mail log before sending it again."
   error_reporter_adhoc_render_failed: "The report could not be produced, so nothing was sent. The details are below."
   error_reporter_adhoc_recipients_not_permitted: "One or more recipients are not allowed to see reports in this project, so nothing was sent."
+
+  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  label_reporter_render_settings: "Report rendering"
+  label_reporter_render_engine: "Render engine"
+  label_reporter_render_engine_default: "This installation's default (%{engine})"
+  label_reporter_render_engine_no_default: "Chosen by the plugin"
+  text_reporter_render_engine_info: "Which engine draws the PDF for every report on this installation. A template that names an engine itself keeps that engine: a document's own requirement outranks this setting, so existing templates render exactly as they did. An engine that needs a service is never chosen for you — choosing it here is how it gets chosen."
+  text_reporter_render_engine_comparison: "What each engine needs, and what it cannot do. Generated from config/capabilities.yml rather than written by hand:"
+  label_reporter_render_engine_needs_service: "needs a service"
+  label_reporter_render_engine_renders_offline: "renders offline"
+  label_reporter_render_engine_install: "install"
+  label_reporter_render_engine_lacks: "cannot do"
+  label_reporter_render_engine_deprecated: "deprecated"
+  label_reporter_render_engine_unverified: "not verified by the test run"
+  text_reporter_render_engine_service_warning: "%{engine} needs a service that this plugin never starts. Check it under Administration → %{preflight} before relying on it. Its address and credential live in Redmine's environment rather than on this page, because the settings table is neither encrypted nor hidden from anyone who can read it."

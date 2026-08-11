@@ -47,7 +47,11 @@ module RedmineReporterDashboards
           [DEFERRED_CHECK_ID] + adapter_ids).uniq
       end
 
-      def initialize(engine_ids: nil, redmine_base_url: nil, logger: nil)
+      # `selected_engine_id` IS A PORT, for the same reason `redmine_base_url` is one: it
+      # comes from `Setting.plugin_redmine_reporter_dashboards`, and `render/**` may not read
+      # a Setting (mechanism E5). The rake task and the admin controller fill it.
+      def initialize(engine_ids: nil, redmine_base_url: nil, logger: nil,
+                     selected_engine_id: nil)
         @engine_ids = normalise_ids(engine_ids)
         # A SELECTION THAT WAS GIVEN AND PARSES TO NOTHING IS THE TYPO CASE, NOT THE
         # DEFAULT SET (E-27 row 8). `RRD_ENGINE='  '` and `RRD_ENGINE=','` normalised to
@@ -63,9 +67,11 @@ module RedmineReporterDashboards
           engine_ids.inspect
         @redmine_base_url = redmine_base_url
         @logger = logger
+        selected = selected_engine_id.to_s.strip
+        @selected_engine_id = selected.empty? ? nil : selected
       end
 
-      attr_reader :engine_ids, :redmine_base_url, :logger
+      attr_reader :engine_ids, :redmine_base_url, :logger, :selected_engine_id
 
       # Raises `Registry::UnknownEngine` when the caller named an id the registry does
       # not have. A TYPO MUST NOT LOOK LIKE A CLEAN RUN — `RRD_ENGINE=chromium_cpd`
@@ -94,12 +100,29 @@ module RedmineReporterDashboards
       #
       # NAMING AN ENGINE OVERRIDES THIS ENTIRELY. `RRD_ENGINE=gotenberg` is how you ask,
       # and asking is a decision — so it runs the real checks, including the credential one.
+      #
+      # FR-50 — AND THE INSTALL'S OWN CHOICE IS NOT A DEFERRAL CASE. This is the THIRD place
+      # the same rule has had to be written, and E-27 said so in as many words: "a rule about
+      # 'an install has not chosen this' belongs everywhere an engine is chosen FOR the
+      # operator, and there were two such places". FR-50 gives an install a way to choose, so
+      # without this the skip's own sentence — "the render engine needs a service, and this
+      # install has not chosen it" — would be FALSE on exactly the installs that chose one,
+      # and the one diagnostic that exists to check the render path would refuse to check the
+      # engine it renders with. Naming an engine explicitly still overrides all of it.
       def default_ids
-        Registry.ids.reject { |id| service_engine?(id) }
+        Registry.ids.reject { |id| deferred?(id) }
       end
 
       def deferred_ids
-        Registry.ids.select { |id| service_engine?(id) }
+        Registry.ids.select { |id| deferred?(id) }
+      end
+
+      def deferred?(id)
+        service_engine?(id) && !selected?(id)
+      end
+
+      def selected?(id)
+        !selected_engine_id.nil? && id.to_s == selected_engine_id
       end
 
       def service_engine?(id)

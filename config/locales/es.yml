@@ -347,3 +347,18 @@ es:
   error_reporter_adhoc_partial_delivery: "Algunos destinatarios recibieron el informe antes de que fallara el envío. Revise el registro de correo antes de volver a enviarlo."
   error_reporter_adhoc_render_failed: "No se pudo generar el informe, por lo que no se envió nada. Los detalles están más abajo."
   error_reporter_adhoc_recipients_not_permitted: "Uno o más destinatarios no tienen permiso para ver informes en este proyecto, por lo que no se envió nada."
+
+  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  label_reporter_render_settings: "Renderizado de informes"
+  label_reporter_render_engine: "Motor de renderizado"
+  label_reporter_render_engine_default: "Predeterminado de esta instalación (%{engine})"
+  label_reporter_render_engine_no_default: "Elegido por el plugin"
+  text_reporter_render_engine_info: "Qué motor genera el PDF de todos los informes de esta instalación. Una plantilla que nombra un motor conserva ese motor: el requisito del propio documento prevalece sobre esta opción, así que las plantillas existentes se renderizan igual que antes. Un motor que necesita un servicio nunca se elige por usted; elegirlo aquí es la forma de elegirlo."
+  text_reporter_render_engine_comparison: "Qué necesita cada motor y qué no puede hacer. Generado a partir de config/capabilities.yml, no escrito a mano:"
+  label_reporter_render_engine_needs_service: "necesita un servicio"
+  label_reporter_render_engine_renders_offline: "renderiza sin red"
+  label_reporter_render_engine_install: "instalación"
+  label_reporter_render_engine_lacks: "no puede"
+  label_reporter_render_engine_deprecated: "obsoleto"
+  label_reporter_render_engine_unverified: "no verificado por la ejecución de pruebas"
+  text_reporter_render_engine_service_warning: "%{engine} necesita un servicio que este plugin nunca arranca. Compruébelo en Administración → %{preflight} antes de confiar en él. Su dirección y sus credenciales están en el entorno de Redmine y no en esta página, porque la tabla de configuración no está cifrada ni oculta para quien pueda leerla."

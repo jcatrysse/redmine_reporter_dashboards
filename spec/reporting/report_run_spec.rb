@@ -157,6 +157,21 @@ module ReportRunSpecSupport
   # A stand-in that STAMPS ITS OWN NAME into the Success it returns, so an example can
   # tell WHICH adapter ran. `FakeAdapter.behaviour` deliberately cannot: it is one shared
   # lambda, which is exactly what makes it a convenient lever and a useless witness.
+  # A LOGGER THAT RECORDS. FR-50's "an unregistered selection is ignored" is a behaviour whose
+  # only observable half is the log line, so the line is part of the assertion rather than a
+  # side effect somebody hopes happened.
+  class Recorder
+    attr_reader :lines
+
+    def initialize
+      @lines = []
+    end
+
+    def warn(line)
+      @lines << line
+    end
+  end
+
   def self.named_adapter(name)
     Class.new do
       define_method(:capabilities) { [] }
@@ -232,9 +247,17 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
     )
   end
 
+  # `engine_preference: nil` — "this installation has selected no engine" — UNLESS an example
+  # says otherwise, and the axis is stated here rather than inherited. FR-50's resolution goes
+  # through `RedmineReporterDashboards.render_engine_id`, which lives in the boot file and
+  # cannot be loaded in this suite (the same reason `asset_resolver` is injected), so the
+  # default sentinel would make five examples about something else fail with a
+  # `NoMethodError` — measured, not guessed. CLAUDE.md §6 applied to a setting: set it in the
+  # test, do not inherit it.
   def run(scope:, renderer: ReportRunSpecSupport::CountingRenderer.new, **overrides)
     described_class.new(**{ template: template, actor: actor, scope: scope,
                             guard: guard, template_renderer: renderer,
+                            engine_preference: nil,
                             asset_resolver: ReportRunSpecSupport.resolver }.merge(overrides))
   end
 
@@ -477,6 +500,104 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
         expect(outcome).to be_ok
         expect(outcome.engine_id).to eq('picked-chromium')
+      end
+
+      # ------------------------------------------------------------------
+      # FR-50 — THIS INSTALLATION'S OWN CHOICE, and the four things about it that can break.
+      #
+      # Every example here is written against a DISCRIMINATOR, because the whole hazard in a
+      # precedence chain is that a step which does nothing looks exactly like a step that
+      # works: `:athena` sorts before `chromium_cdp` and is auto-selectable, `chromium_cdp` is
+      # the declared default, and each stand-in stamps its OWN name into the Success — the
+      # lesson three examples above this one, where two adapters shared a lambda and the
+      # assertion could not have failed.
+      it "renders with the engine the INSTALLATION selected, over the declared default" do
+        RedmineReporterDashboards::Render::Registry.register(
+          :athena, ReportRunSpecSupport.named_adapter('picked-athena')
+        )
+        RedmineReporterDashboards::Render::Registry.register(
+          :chromium_cdp, ReportRunSpecSupport.named_adapter('picked-chromium')
+        )
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      engine_preference: 'athena').call(pdf: true)
+
+        expect(outcome).to be_ok
+        expect(outcome.engine_id).to eq('picked-athena')
+      end
+
+      # THE CONTROL FOR THE EXAMPLE ABOVE. Without it, "the setting was honoured" could mean
+      # "athena was going to be chosen anyway" — which is precisely what the old
+      # `Registry.ids.first` fallback would have done.
+      it 'and the same registry answers the declared default when nothing is selected' do
+        RedmineReporterDashboards::Render::Registry.register(
+          :athena, ReportRunSpecSupport.named_adapter('picked-athena')
+        )
+        RedmineReporterDashboards::Render::Registry.register(
+          :chromium_cdp, ReportRunSpecSupport.named_adapter('picked-chromium')
+        )
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      engine_preference: nil).call(pdf: true)
+
+        expect(outcome.engine_id).to eq('picked-chromium')
+      end
+
+      # A HINT OUTRANKS THE SETTING, which is what keeps a template portable: changing the
+      # installation's engine must not change what an existing document looks like.
+      it 'loses to a template that names an engine itself' do
+        RedmineReporterDashboards::Render::Registry.register(
+          :athena, ReportRunSpecSupport.named_adapter('picked-athena')
+        )
+        RedmineReporterDashboards::Render::Registry.register(
+          :chromium_cdp, ReportRunSpecSupport.named_adapter('picked-chromium')
+        )
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      engine_preference: 'athena',
+                      template: template(engine_hint: 'chromium_cdp')).call(pdf: true)
+
+        expect(outcome.engine_id).to eq('picked-chromium')
+      end
+
+      # THE POINT OF THE WHOLE FEATURE (§Findings E-27 row 2). Auto-detection refuses a
+      # service-backed engine — the example at the top of this block proves it still does —
+      # and an installation that SELECTS one gets it. Same registry, same catalogue entry,
+      # opposite outcome, and the only difference is the setting.
+      it 'MAY select an engine that needs a service, which auto-detection may not' do
+        RedmineReporterDashboards::Render::Registry.register(
+          :gotenberg, ReportRunSpecSupport.named_adapter('picked-gotenberg')
+        )
+        expect(RedmineReporterDashboards::Render::Registry.ids).to eq([:gotenberg])
+
+        refused = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      engine_preference: nil).call(pdf: true)
+        chosen = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                     engine_preference: 'gotenberg').call(pdf: true)
+
+        expect(refused).not_to be_ok
+        expect(refused.diagnostic.code).to eq(:engine_unavailable)
+        expect(chosen).to be_ok
+        expect(chosen.engine_id).to eq('picked-gotenberg')
+      end
+
+      # §7 rule 5's routine case: a value stored on a host that had the engine, read on a host
+      # that does not. It must degrade to the default with a line in the log, never raise —
+      # `Registry.fetch` raises `UnknownEngine`, and that would 500 every report on the
+      # install rather than the one template.
+      it 'ignores a selection this host has no adapter for, and says so in the log' do
+        RedmineReporterDashboards::Render::Registry.register(
+          :chromium_cdp, ReportRunSpecSupport.named_adapter('picked-chromium')
+        )
+        logger = ReportRunSpecSupport::Recorder.new
+
+        outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                      engine_preference: 'gotenberg', logger: logger).call(pdf: true)
+
+        expect(outcome).to be_ok
+        expect(outcome.engine_id).to eq('picked-chromium')
+        expect(logger.lines.join)
+          .to include('this installation selects render engine "gotenberg"')
       end
 
       # A template may still ASK for it by name — that is what an engine hint is for, and

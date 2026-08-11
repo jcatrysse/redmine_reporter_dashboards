@@ -348,3 +348,18 @@ ru:
   error_reporter_adhoc_partial_delivery: "Часть получателей получила отчёт до того, как отправка завершилась ошибкой. Проверьте почтовый журнал, прежде чем отправлять снова."
   error_reporter_adhoc_render_failed: "Отчёт не удалось построить, поэтому ничего не отправлено. Подробности приведены ниже."
   error_reporter_adhoc_recipients_not_permitted: "Один или несколько получателей не имеют права просматривать отчёты в этом проекте, поэтому ничего не отправлено."
+
+  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  label_reporter_render_settings: "Формирование отчётов"
+  label_reporter_render_engine: "Механизм рендеринга"
+  label_reporter_render_engine_default: "По умолчанию для этой установки (%{engine})"
+  label_reporter_render_engine_no_default: "Выбирает плагин"
+  text_reporter_render_engine_info: "Каким механизмом создаётся PDF для всех отчётов этой установки. Шаблон, который сам называет механизм, сохраняет его: требование самого документа важнее этой настройки, поэтому существующие шаблоны формируются точно так же, как раньше. Механизм, которому нужна служба, никогда не выбирается за вас — выбор здесь и есть этот выбор."
+  text_reporter_render_engine_comparison: "Что нужно каждому механизму и чего он не умеет. Сформировано из config/capabilities.yml, а не написано вручную:"
+  label_reporter_render_engine_needs_service: "нужна служба"
+  label_reporter_render_engine_renders_offline: "работает без сети"
+  label_reporter_render_engine_install: "установка"
+  label_reporter_render_engine_lacks: "не умеет"
+  label_reporter_render_engine_deprecated: "устарел"
+  label_reporter_render_engine_unverified: "не подтверждён тестовым прогоном"
+  text_reporter_render_engine_service_warning: "Механизму %{engine} нужна служба, которую этот плагин никогда не запускает. Проверьте её в разделе «Администрирование → %{preflight}», прежде чем полагаться на неё. Её адрес и учётные данные находятся в окружении Redmine, а не на этой странице, потому что таблица настроек не зашифрована и не скрыта от того, кто может её прочитать."

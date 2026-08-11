@@ -347,3 +347,18 @@ hu:
   error_reporter_adhoc_partial_delivery: "Néhány címzett megkapta a jelentést, mielőtt a küldés meghiúsult. Ellenőrizze a levelezési naplót, mielőtt újra küldi."
   error_reporter_adhoc_render_failed: "A jelentést nem sikerült előállítani, ezért semmi sem került elküldésre. A részletek alább olvashatók."
   error_reporter_adhoc_recipients_not_permitted: "Legalább egy címzett nem láthat jelentéseket ebben a projektben, ezért semmi sem került elküldésre."
+
+  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  label_reporter_render_settings: "Jelentések renderelése"
+  label_reporter_render_engine: "Renderelő motor"
+  label_reporter_render_engine_default: "Ennek a telepítésnek az alapértelmezése (%{engine})"
+  label_reporter_render_engine_no_default: "A plugin választja"
+  text_reporter_render_engine_info: "Melyik motor készíti el a PDF-et ezen a telepítésen minden jelentéshez. Az a sablon, amely maga nevez meg egy motort, megtartja azt: a dokumentum saját igénye erősebb ennél a beállításnál, így a meglévő sablonok pontosan úgy renderelődnek, mint eddig. Az a motor, amelyhez szolgáltatás kell, soha nem választódik ki automatikusan — itt lehet kiválasztani."
+  text_reporter_render_engine_comparison: "Mire van szüksége az egyes motoroknak, és mit nem tudnak. A config/capabilities.yml alapján generálva, nem kézzel írva:"
+  label_reporter_render_engine_needs_service: "szolgáltatás kell hozzá"
+  label_reporter_render_engine_renders_offline: "hálózat nélkül is renderel"
+  label_reporter_render_engine_install: "telepítés"
+  label_reporter_render_engine_lacks: "nem tudja"
+  label_reporter_render_engine_deprecated: "elavult"
+  label_reporter_render_engine_unverified: "a tesztfutás nem igazolta"
+  text_reporter_render_engine_service_warning: "A(z) %{engine} olyan szolgáltatást igényel, amelyet ez a plugin soha nem indít el. Ellenőrizze az Adminisztráció → %{preflight} oldalon, mielőtt támaszkodik rá. A címe és a hitelesítő adatai a Redmine környezetében vannak, nem ezen az oldalon, mert a beállítási tábla nincs titkosítva és nincs elrejtve senki elől, aki el tudja olvasni."

@@ -112,6 +112,19 @@ module RedmineReporterDashboards
       # so without implicating the engine.
       MAX_RUN_ASSET_BYTES = 128 * 1024 * 1024
 
+      # FR-50 — "resolve the install-wide engine choice from the plugin settings", as a value
+      # that is DISTINCT from "there is no choice".
+      #
+      # THE SENTINEL EXISTS BECAUSE `nil` ALREADY MEANS SOMETHING, and §Findings E-27 records
+      # what happens without one: the Gotenberg adapter's `credential: nil` fell through to
+      # the environment, so `Gotenberg.new(credential: nil)` — the exact subject of every
+      # security example — silently picked up `RRD_GOTENBERG_USERNAME`. Green on a clean
+      # laptop, red in the one CI job that exports it, and there was no way to express
+      # "explicitly no credential" at all. That was fixed with a `FROM_ENV` sentinel; this is
+      # the same shape one layer up, so a DB-less example can say `engine_preference: nil` and
+      # mean it.
+      FROM_SETTINGS = :from_settings
+
       # One document to produce. `record` is nil for a combined report and the one row for
       # a per-record one — an Issue or a TimeEntry, which is why T-31 renamed it from
       # `issue`: a field whose name says issue while holding a time entry is how the next
@@ -176,9 +189,15 @@ module RedmineReporterDashboards
       #         and the plugin settings, and because the interesting branches — a
       #         third-party URL refused under `:bundled`, a same-origin one inlined off
       #         disk — are properties of the RESOLVER's answer rather than of a render.
+      # engine_preference
+      #         the engine id this INSTALLATION selected (FR-50), `nil` for "it selected
+      #         nothing", or `FROM_SETTINGS` — the default — for "read the plugin settings".
+      #         A port for the same reason `asset_resolver` is one: resolving it reads
+      #         `Setting.plugin_redmine_reporter_dashboards`, which does not exist in the
+      #         DB-less suite, and the branches worth driving here are the PRECEDENCE ones.
       def initialize(template:, actor:, scope:, guard:, query: nil, output_class: :report,
                      limit: nil, engine: nil, logger: nil, template_renderer: nil,
-                     asset_resolver: nil)
+                     asset_resolver: nil, engine_preference: FROM_SETTINGS)
         unless OUTPUT_CLASSES.include?(output_class)
           raise ArgumentError, "#{output_class.inspect} is not a report output class"
         end
@@ -195,6 +214,7 @@ module RedmineReporterDashboards
         @logger = logger
         @template_renderer = template_renderer
         @asset_resolver = asset_resolver
+        @engine_preference = engine_preference
       end
 
       # ONE DIAGNOSTICS COLLECTOR FOR THE WHOLE RUN, and it was one per job — which meant
@@ -221,11 +241,12 @@ module RedmineReporterDashboards
       # did the preview specs failed outright. A constructor port that one of the two
       # entry points drops is a port that only half the callers have.
       def self.preview(template:, actor:, scope:, guard:, query: nil, engine: nil,
-                       logger: nil, template_renderer: nil, asset_resolver: nil)
+                       logger: nil, template_renderer: nil, asset_resolver: nil,
+                       engine_preference: FROM_SETTINGS)
         new(template: template, actor: actor, scope: scope, guard: guard, query: query,
             output_class: :preview, limit: PREVIEW_MAX_ISSUES, engine: engine,
             logger: logger, template_renderer: template_renderer,
-            asset_resolver: asset_resolver)
+            asset_resolver: asset_resolver, engine_preference: engine_preference)
       end
 
       # `pdf: false` renders HTML only — the report view, and the fast half of a preview.
@@ -625,6 +646,14 @@ module RedmineReporterDashboards
       # than being an error: the template was authored somewhere that had the engine, and
       # refusing to render it here would make a portable template unportable. The
       # configured default draws it instead, and the degradation is visible in the run.
+      #
+      # FR-50 ADDS A SECOND STEP, AND THE HINT STILL WINS. The order is: the template's hint,
+      # then this INSTALLATION's selection, then the declared default, then any engine that
+      # needs no service. A hint outranks the setting because a hint is a claim about a
+      # DOCUMENT — "this report needs a modern JavaScript engine" — and the setting is a claim
+      # about the installation; the narrower claim wins. That is also what keeps a template
+      # portable: changing the installation's engine cannot silently change what an existing
+      # document looks like.
       def resolve_engine
         return @engine if @engine
 
@@ -635,11 +664,42 @@ module RedmineReporterDashboards
 
         if named
           warn_line("[reporting] template #{template.id} asks for engine #{hint.inspect}, " \
-                    "which is not registered; using the configured default")
+                    "which is not registered; using this installation's engine")
         end
 
-        id = auto_detected_engine_id(registry)
+        id = selected_engine_id(registry) || auto_detected_engine_id(registry)
         id && registry.fetch(id)
+      end
+
+      # FR-50 — the id an administrator chose in *Administration → Plugins*.
+      #
+      # AN ENGINE THAT `needs_service` IS DELIBERATELY ALLOWED HERE, and that is not a hole in
+      # T-34's rule: that rule is "auto-detection never picks a service-backed engine FOR an
+      # install", because an install with no container has not chosen — and this method is the
+      # place where it HAS. `EngineCatalogue#auto_selectable?` still governs the fallback
+      # below, which is the path the rule is about.
+      #
+      # AN UNREGISTERED SELECTION IS IGNORED WITH A LOG LINE rather than raising, for exactly
+      # the reason a stale `engine_hint` is: a value stored on a host that had the engine must
+      # not 500 every report on a host that does not. `EnginePreference` refuses such a value
+      # at the settings boundary, so reaching this branch means the registry changed under a
+      # stored value — §7 rule 5's routine case, an install one minor behind.
+      def selected_engine_id(registry)
+        id = engine_preference
+        return nil if id.nil? || id.to_s.strip.empty?
+        return id.to_s if registry.registered?(id)
+
+        warn_line("[reporting] this installation selects render engine #{id.to_s.inspect}, " \
+                  'which is not registered here; using the configured default')
+        nil
+      end
+
+      # `FROM_SETTINGS` is resolved LAZILY, once, and only on the path that needs it: a run
+      # given an explicit `engine:` never reads a setting at all.
+      def engine_preference
+        return @engine_preference unless @engine_preference == FROM_SETTINGS
+
+        ::RedmineReporterDashboards.render_engine_id(logger: logger)
       end
 
       # THE FALLBACK USED TO BE `registry.ids.first`, WHICH IS ALPHABETICAL ORDER.

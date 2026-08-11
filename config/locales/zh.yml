@@ -346,3 +346,18 @@ zh:
   error_reporter_adhoc_partial_delivery: "部分收件人在发送失败前已收到报表。再次发送前请检查邮件日志。"
   error_reporter_adhoc_render_failed: "无法生成此报表，因此未发送任何内容。详细信息见下方。"
   error_reporter_adhoc_recipients_not_permitted: "有一位或多位收件人无权查看本项目的报表，因此未发送任何内容。"
+
+  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  label_reporter_render_settings: "报表渲染"
+  label_reporter_render_engine: "渲染引擎"
+  label_reporter_render_engine_default: "本安装的默认引擎（%{engine}）"
+  label_reporter_render_engine_no_default: "由插件选择"
+  text_reporter_render_engine_info: "本安装中所有报表由哪个引擎生成 PDF。自行指定引擎的模板仍使用该引擎：文档自身的要求优先于此设置，因此现有模板的渲染结果与以前完全相同。需要外部服务的引擎绝不会被自动选择——在此选择它，就是作出该选择。"
+  text_reporter_render_engine_comparison: "每个引擎需要什么，以及它做不到什么。由 config/capabilities.yml 生成，而非手工编写："
+  label_reporter_render_engine_needs_service: "需要外部服务"
+  label_reporter_render_engine_renders_offline: "可离线渲染"
+  label_reporter_render_engine_install: "安装方式"
+  label_reporter_render_engine_lacks: "不支持"
+  label_reporter_render_engine_deprecated: "已弃用"
+  label_reporter_render_engine_unverified: "未经测试运行验证"
+  text_reporter_render_engine_service_warning: "%{engine} 需要一项本插件从不启动的服务。在依赖它之前，请在“管理 → %{preflight}”中检查它。它的地址和凭据保存在 Redmine 的环境变量中，而不在本页面上，因为设置表既未加密，也不会对任何能读取它的人隐藏。"

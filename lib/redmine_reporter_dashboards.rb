@@ -33,6 +33,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/minimal_pd
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/pdf_inspector'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight_suite'
+# FR-50 — the install-wide engine choice. Required at boot with the rest of render/ for
+# the same reason: a LoadError has to surface on the branch that broke it rather than on
+# the first settings page an administrator opens.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engine_preference'
 # The adapters. Requiring them REGISTERS them; it does not start a browser or run a
 # binary, so a host without either boots exactly as before and finds out at preflight.
 #
@@ -156,6 +160,27 @@ module RedmineReporterDashboards
   # direction for a security setting to be slow in.
   def asset_policy(logger: nil)
     Assets::Policy.from_settings(plugin_settings, logger: logger || safe_logger)
+  end
+
+  # --- FR-50: which engine this installation renders with -----------------------------
+  #
+  # The ONE Redmine read for the engine choice, here rather than in `render/` for exactly the
+  # reason `asset_policy` is here: `EnginePreference` takes a Hash and must not know that a
+  # `Setting` table exists (mechanism E5, and `layer_purity.sh` enforces it for `render/**`).
+  #
+  # NOT MEMOISED, deliberately and for the same reason as `asset_policy`: `Setting` is already
+  # cached by Redmine, and a memo here would keep rendering through the old engine until a
+  # restart — so an administrator who switches away from a container they are about to shut
+  # down would keep POSTing to it.
+  def render_engine_preference(logger: nil)
+    Render::EnginePreference.from_settings(plugin_settings, logger: logger || safe_logger)
+  end
+
+  # The id alone, which is what the render path and the preflight surfaces want. Nil means
+  # "this installation has selected nothing", which is a different answer from "it selected
+  # something unusable" — that one is nil AND a `dropped` entry on the object above.
+  def render_engine_id(logger: nil)
+    render_engine_preference(logger: logger).selected_id
   end
 
   # `Setting.protocol` + `Setting.host_name` — Redmine's own answer to "what is our base

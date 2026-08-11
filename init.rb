@@ -66,7 +66,21 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
              'mail_external_addresses' => false,
              'mail_external_domains' => '',
              'mail_rate_limit' => RedmineReporterDashboards::Reporting::MailPolicy::DEFAULT_RATE_LIMIT.to_s,
-             'mail_rate_window_minutes' => RedmineReporterDashboards::Reporting::MailPolicy::DEFAULT_RATE_WINDOW_MINUTES.to_s
+             'mail_rate_window_minutes' => RedmineReporterDashboards::Reporting::MailPolicy::DEFAULT_RATE_WINDOW_MINUTES.to_s,
+             # --- FR-50 / technical-spec.md §5.2 clause 4: the engine this install uses ---
+             #
+             # EMPTY IS THE DEFAULT, and it means "the engine `config/capabilities.yml`
+             # declares as the default" rather than "no engine". A fresh install and an
+             # install that deliberately chose the default are therefore ONE state, which is
+             # what lets the dropdown's blank option be honest.
+             #
+             # As with the asset settings above, nothing here is enforcement: the value is
+             # coerced on the way OUT, in `Render::EnginePreference.from_settings`, which
+             # drops an id no engine is registered under with a log line rather than letting
+             # it select anything (FR-15). An engine that needs a service IS selectable here
+             # — T-34's rule is that auto-detection never picks one FOR an install, and
+             # choosing one deliberately is the decision that rule was waiting for.
+             'render_engine' => RedmineReporterDashboards::Render::EnginePreference::NO_PREFERENCE
            },
            partial: 'settings/reporter_dashboards'
 

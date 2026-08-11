@@ -347,3 +347,18 @@ de:
   error_reporter_adhoc_partial_delivery: "Einige Empfänger haben den Bericht erhalten, bevor der Versand fehlschlug. Prüfen Sie das Mail-Protokoll, bevor Sie erneut senden."
   error_reporter_adhoc_render_failed: "Der Bericht konnte nicht erstellt werden, daher wurde nichts gesendet. Die Einzelheiten stehen unten."
   error_reporter_adhoc_recipients_not_permitted: "Ein oder mehrere Empfänger dürfen in diesem Projekt keine Berichte sehen, daher wurde nichts gesendet."
+
+  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  label_reporter_render_settings: "Berichts-Rendering"
+  label_reporter_render_engine: "Render-Engine"
+  label_reporter_render_engine_default: "Standard dieser Installation (%{engine})"
+  label_reporter_render_engine_no_default: "Vom Plugin gewählt"
+  text_reporter_render_engine_info: "Welche Engine das PDF jedes Berichts dieser Installation erzeugt. Eine Vorlage, die selbst eine Engine nennt, behält diese: die Anforderung des Dokuments hat Vorrang vor dieser Einstellung, bestehende Vorlagen werden also genau wie bisher gerendert. Eine Engine, die einen eigenen Dienst benötigt, wird niemals automatisch gewählt — hier wird sie gewählt."
+  text_reporter_render_engine_comparison: "Was jede Engine benötigt und was sie nicht kann. Aus config/capabilities.yml erzeugt, nicht von Hand geschrieben:"
+  label_reporter_render_engine_needs_service: "benötigt einen Dienst"
+  label_reporter_render_engine_renders_offline: "rendert offline"
+  label_reporter_render_engine_install: "Installation"
+  label_reporter_render_engine_lacks: "kann nicht"
+  label_reporter_render_engine_deprecated: "veraltet"
+  label_reporter_render_engine_unverified: "vom Testlauf nicht bestätigt"
+  text_reporter_render_engine_service_warning: "%{engine} benötigt einen Dienst, den dieses Plugin nie selbst startet. Prüfen Sie ihn unter Administration → %{preflight}, bevor Sie sich darauf verlassen. Adresse und Zugangsdaten stehen in der Umgebung von Redmine und nicht auf dieser Seite, denn die Einstellungstabelle ist weder verschlüsselt noch für Lesende verborgen."

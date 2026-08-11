@@ -56,9 +56,12 @@ module RedmineReporterDashboards
       FORMATS = %i[text json].freeze
 
       def initialize(engine_ids: nil, redmine_base_url: nil, format: :text,
-                     out: $stdout, logger: nil)
+                     out: $stdout, logger: nil, selected_engine_id: nil)
+        # FR-50 — forwarded, not resolved here: this class has no more business reading a
+        # Setting than the suite does, and the rake task is what knows one exists.
         @suite = PreflightSuite.new(engine_ids: engine_ids,
-                                    redmine_base_url: redmine_base_url, logger: logger)
+                                    redmine_base_url: redmine_base_url, logger: logger,
+                                    selected_engine_id: selected_engine_id)
         @format = format.to_sym
         @out = out
         return if FORMATS.include?(@format)

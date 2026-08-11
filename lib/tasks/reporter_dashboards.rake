@@ -286,6 +286,9 @@ namespace :reporter_dashboards do
       exit RedmineReporterDashboards::Render::PreflightCommand.new(
         engine_ids: ENV['RRD_ENGINE'],
         redmine_base_url: base_url,
+        # FR-50. The engine this installation SELECTED is checked by the default run even
+        # when it needs a service — choosing it is the decision the deferral was waiting for.
+        selected_engine_id: RedmineReporterDashboards.render_engine_id(logger: Rails.logger),
         format: (ENV['RRD_FORMAT'] || 'text').to_sym,
         logger: Rails.logger
       ).call
