@@ -4453,8 +4453,70 @@ Slavic locales, no `one` for Chinese. No key is missing anywhere.
 **My-page widgets: DONE 2026-08-12** — and it was not the cosmetic clause it looked like. See
 §Findings **E-39**: the widget 500'd `/my/page` on two configurations, one of them the curator's own.
 
-**Still owed by T-26:** only the CI flip to strict, which stays blocked on the twelve files above.
-T-27 depends on T-26 and is therefore still blocked.
+**T-26a · THE OWNED REPORT WIDGETS — the keystone, and the thing that unblocks the rest.**
+*(Scoped 2026-08-12 after the curator corrected the goal. Deps: T-30..T-32 (landed), T-23 (landed).)*
+
+**The curator's correction, in their words:** *"the whole point of this exercise is to combine the
+functionality of the original redmine_reporter and my plugin into one (my own) plugin, so we can drop
+the obsolete and legacy redmineup plugin. This means that we should no longer have the
+redmine_reporter installed, and all functionality should be in redmine_reporter_dashboards, and if
+that doesn't work, we should fix it in redmine_reporter_dashboards. I don't care about the original
+legacy plugin anymore."*
+
+That is **FR-01** — *"serves every dashboard feature with the base plugin absent"* — and the two
+Report widgets are the last thing violating it. The preceding session read "yes, we run Reporter" as
+"the integration must keep working" and prioritised accordingly. Wrong frame: Reporter is installed
+*today* and is meant to be **uninstalled**.
+
+**Everything this needs already exists and is owned. Verified, not assumed:**
+
+| Piece | Where | State |
+|---|---|---|
+| render a template as the viewer | `Reporting::ReportRun#call(pdf: false)` → `outcome.sections` | owned, used by preview |
+| the `:widget` resource-limit class | `Liquid::ExecutionPolicy::OUTPUT_CLASSES` — *"Small, many per page, rendered while somebody waits"* | **defined, wired through `ReportRun(output_class:)`, and NEVER passed by production code** |
+| sandboxed HTML embed | `templates_helper.rb:281` `reporter_report_frame` — `srcdoc` + `sandbox` + CSP | owned |
+| visibility-scoped template finder | `Template.visible(user)`, `belongs_to :project, optional: true`, `SOURCES = %w[issues time_entries]` | owned |
+| the settings form | `reporter_project_pages/_report_settings` already takes `report_templates:` as a LOCAL | owned, parameterised |
+
+So this is assembly, not new machinery. The unused `:widget` limit class is the clearest signal that
+the design always intended this.
+
+**What actually changes.** In both dashboard partials
+(`blocks/optional/_report_by_{issues,spent_time}.erb`) and on my-page, the ONLY base-plugin
+dependency is the template lookup — the queries are core Redmine already:
+
+    IssueListReportTemplate.in_project_and_global(project)          # base plugin
+    -> Template.visible(User.current)                               # ours, and INV-1-correct:
+         .where(project_id: [nil, project.id], source: 'issues')    # the base plugin's scope
+                                                                    # enforced no visibility
+
+and `reporter_project_pages/_report.erb`, which today iframes the base plugin's
+`report_content_report_template_path`, is replaced by `ReportRun` + `reporter_report_frame`. Then both
+blocks move out of `OPTIONAL_BLOCKS` into the always-available set and `requires_plugin` goes.
+
+**THE ONE REAL DESIGN DECISION, and it is the trap §Findings E-39 just cost a round on.**
+`include_all_helpers = false`, so a my-page render cannot see `reporter_report_frame` — and neither
+can a shared *partial*, because a partial renders in the calling controller's view context. Two
+options, and this needs a deliberate choice rather than whichever is discovered first:
+  * **declare the helper on `MyController`** (`MyController.helper …` in a `to_prepare`) — one line,
+    a normal Redmine plugin technique, but it is a core-controller patch and this plugin has no
+    precedent for one in `patches/`;
+  * **build the frame markup in a module** (`ActionController::Base.helpers.content_tag`) so both
+    surfaces call the same owned object — no core patch, but a second construction site for markup
+    whose entire point is that the CSP and the body cannot be separated (`templates_helper.rb:289`
+    says so in as many words).
+
+**Migration.** Existing widget settings hold the base plugin's `report_template_id`. FR-46 requires
+dashboards to survive. An id that resolves to nothing must fall through to the settings form — which
+is already the partial's own empty state — rather than erroring. The importer (T-02/T-24) is what maps
+the old templates to ours; the widget only has to degrade gracefully while that has not been run.
+
+**What it unblocks.** Once nothing renders a base-plugin template, no install takes
+`ScopeBinding#legacy_bind`, so T-26's two blocked deletions and the strict flip stop being blocked —
+and T-27 with them. That is the whole reason this is the keystone rather than one more widget.
+
+**Still owed by T-26 after T-26a:** the CI flip to strict, which stays blocked on the twelve files
+until T-26a lands. T-27 depends on T-26 and is therefore still blocked.
 
 **T-33 · The asset-resolution triple + `asset_policy`** *(deps: T-12; blocks nothing after T-13)*
 **DONE 2026-08-06.** *Touches (as built, and the address moved — findings F-13/F-13b):*
