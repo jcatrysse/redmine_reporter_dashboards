@@ -13,6 +13,9 @@ ru:
   error_reporter_dashboard_save_failed: Не удалось сохранить панель.
   error_reporter_widget_render_failed: Не удалось отобразить этот виджет. Подробности см. в журнале приложения.
   text_reporter_widget_requires_plugin: Для этого виджета требуется плагин %{plugin}, который не установлен.
+  label_reporter_widget_report_by_issues: "Отчёт по задачам"
+  label_reporter_widget_report_by_spent_time: "Отчёт по трудозатратам"
+  text_reporter_widget_no_templates: "Пока нет ни одного шаблона отчёта, который может использовать этот виджет. Сводные шаблоны отчётов создаются в разделе «Отчёты», а для проекта должен быть включён модуль «Отчёты»."
   label_move_left: Переместить влево
   label_move_right: Переместить вправо
   label_move_up: Переместить вверх

@@ -13,6 +13,9 @@ zh:
   error_reporter_dashboard_save_failed: 无法保存仪表板。
   error_reporter_widget_render_failed: 无法显示此小部件。详情请查看应用程序日志。
   text_reporter_widget_requires_plugin: 此小部件需要 %{plugin} 插件，但该插件未安装。
+  label_reporter_widget_report_by_issues: "问题报告"
+  label_reporter_widget_report_by_spent_time: "耗时报告"
+  text_reporter_widget_no_templates: "目前还没有此小部件可以使用的报告模板。合并式报告模板在“报表”中创建，并且本项目需要启用“报表”模块。"
   label_move_left: 向左移动
   label_move_right: 向右移动
   label_move_up: 向上移动

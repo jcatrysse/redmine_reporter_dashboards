@@ -1,0 +1,40 @@
+<%#
+  T-26a — THE OWNED ISSUE REPORT WIDGET (FR-01).
+
+  What used to be here resolved `IssueListReportTemplate.in_project_and_global(project)`
+  — a base-plugin class that enforced NO visibility — and then rendered a partial that
+  iframed the base plugin's own `report_content_report_template_path`. Both are gone. The
+  lookup is `WidgetReport`, which starts from `Template.visible(actor)`, and the render is
+  `Reporting::ReportRun`, which is the same producer the template editor's preview uses.
+
+  THE QUERY IS NO LONGER REQUIRED. The old branch was `if query && report_template`, so a
+  widget with a template and no saved query rendered its settings form for ever.
+  `Reporting::ReportScope` answers "this project's visible issues" for a nil query id and
+  the project's subtree for a real one, so the honest condition is the template alone.
+
+  `user` rather than `User.current`: the helper passes the actor explicitly and
+  `WidgetReport` requires one (INV-1). Nothing here reads the current user ambiently.
+%>
+<%
+  block ||= 'report_by_issues'
+  settings ||= tab.block_settings(block)
+  widget = RedmineReporterDashboards::WidgetReport.render(
+    project: project, actor: user, block: block, settings: settings, logger: Rails.logger
+  )
+%>
+
+<% if widget %>
+  <%= render partial: 'reporter_project_pages/report',
+             locals: { block: block, widget: widget, user: user,
+                       project: project, tab: tab } %>
+<% elsif editable %>
+  <%= render partial: 'reporter_project_pages/report_settings',
+             locals: { block: block, settings: settings, report_type: :issues,
+                       queries: IssueQuery.visible.where(project_id: [nil, project.id]).sorted,
+                       report_templates: RedmineReporterDashboards::WidgetReport.templates_for(
+                         project: project, actor: user, source: 'issues'
+                       ),
+                       project: project, tab: tab } %>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>

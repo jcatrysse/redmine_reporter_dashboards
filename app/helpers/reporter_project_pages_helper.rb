@@ -145,13 +145,6 @@ module ReporterProjectPagesHelper
       return
     end
 
-    # Checked BEFORE the partial is rendered, not rescued afterwards. The widget is
-    # not broken and nothing failed: the plugin it needs is simply not installed, and
-    # saying so plainly is a different message from "could not be rendered — see the
-    # log". Rendering it first and catching the NameError would also make an ordinary,
-    # supported configuration produce an error-level log line on every page view.
-    return reporter_project_block_unavailable(block, project, block_definition) if block_definition[:degraded]
-
     settings = tab.block_settings(block)
     partial = block_definition[:partial]
     if partial
@@ -188,32 +181,17 @@ module ReporterProjectPagesHelper
   # plugin has never seen raising an exception is a first-class scenario rather than an
   # edge case. Without this, one such widget 500s the whole dashboard for every viewer.
   #
-  # Redmine 7.0 is the concrete instance: redmine_reporter's ReportTemplate cannot be
-  # loaded under Rails 8.1, so both report widgets raise the moment they are rendered.
-  # That is the dependency's problem to fix, but taking the entire page down over it is
-  # ours.
+  # It used to have a second, concrete instance of its own: the two report widgets named
+  # the base plugin's `ReportTemplate`, which cannot be loaded under Rails 8.1, so both
+  # raised the moment they were rendered on Redmine 7.0. T-26a removed that — the report
+  # widgets are this plugin's own now — and the rescue stays for the case it was actually
+  # written for, which is a partial this plugin has never seen.
   #
   # A visible placeholder, not nil: a widget that renders as nothing disappears from the
   # page together with its contextual controls, so nobody can remove it from the layout
   # any more. The placeholder keeps the box — and therefore the close button — so a
   # broken widget can still be taken off the dashboard. The reason goes to the log, not
   # to the page.
-  # A widget whose optional plugin is not installed.
-  #
-  # 200 with a labelled cell, never a 500, and never nothing: the box has to stay so
-  # its close button stays with it, or a dashboard could keep a widget it can no longer
-  # render AND no longer remove. Logged at INFO, once per render — this is a supported
-  # configuration, not an error, and warning about it would train operators to ignore
-  # the log.
-  def reporter_project_block_unavailable(block, project, block_definition)
-    required = block_definition[:requires_plugin]
-    Rails.logger.info(
-      "[reporter_dashboards] widget #{block.inspect} in project #{project.identifier} " \
-      "(id=#{project.id}) is unavailable: it needs the #{required} plugin, which is not installed"
-    )
-    content_tag('p', l(:text_reporter_widget_requires_plugin, plugin: required.to_s), class: 'nodata')
-  end
-
   def reporter_project_block_error(block, project, error)
     Rails.logger.error(
       "[reporter_dashboards] widget #{block.inspect} in project #{project.identifier} " \

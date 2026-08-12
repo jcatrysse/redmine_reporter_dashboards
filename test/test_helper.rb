@@ -47,22 +47,15 @@ rescue StandardError, ScriptError => e
   e
 end
 
-def skip_unless_reporter_report_templates_load
-  error = reporter_report_template_load_error
-  return if error.nil?
-
-  # Two different reasons land here, and conflating them made the message wrong the
-  # moment redmine_reporter became optional. Absence is now a NORMAL, supported
-  # configuration; a load failure while it IS installed is a defect in reporter.
-  unless RedmineReporterDashboards.reporter_present?
-    skip 'redmine_reporter is not installed — the two report widgets are the only ' \
-         'part of this plugin that needs it, so they are out of scope for this run. ' \
-         'This is the standalone configuration, not a failure.'
-  end
-
-  skip "redmine_reporter is installed but its report template classes do not load on " \
-       "Redmine #{Redmine::VERSION}: #{error.class}: #{error.message}. Reporter's " \
-       'ReportTemplate uses the keyword form of `enum`, removed in Rails 8.0 — ' \
-       'it needs `enum :name, values` instead. The report widgets are unavailable ' \
-       'on this Redmine until that is fixed in reporter.'
-end
+# `skip_unless_reporter_report_templates_load` USED TO LIVE HERE AND IS GONE (T-26a).
+#
+# It guarded four project-dashboard tests whose subject was the report widgets, back when
+# those resolved the base plugin's `IssueListReportTemplate`. They no longer do — the
+# widgets are this plugin's own — so those four tests run on every branch of the matrix
+# instead of skipping on exactly the standalone configuration FR-01 is about, and the
+# skip inventory (G10) shrank by four rather than being rewritten.
+#
+# `reporter_report_template_load_error` above STAYS: the my-page block is still the base
+# plugin's, and `test/integration/reporter_dashboards_my_page_block_test.rb` uses it for
+# the mirror-image question — "is the base plugin really loadable here?" — before planting
+# a stand-in for it.

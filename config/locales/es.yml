@@ -13,6 +13,9 @@ es:
   error_reporter_dashboard_save_failed: No se pudo guardar el panel.
   error_reporter_widget_render_failed: No se pudo mostrar este widget. Consulte el registro de la aplicación para más detalles.
   text_reporter_widget_requires_plugin: Este widget necesita el plugin %{plugin}, que no está instalado.
+  label_reporter_widget_report_by_issues: "Informe de peticiones"
+  label_reporter_widget_report_by_spent_time: "Informe de tiempo dedicado"
+  text_reporter_widget_no_templates: "Todavía no hay ninguna plantilla de informe que este widget pueda usar. Las plantillas de informe combinadas se crean en «Informes», y este proyecto necesita el módulo «Informes» activado."
   label_move_left: Mover a la izquierda
   label_move_right: Mover a la derecha
   label_move_up: Mover hacia arriba

@@ -13,6 +13,9 @@ hu:
   error_reporter_dashboard_save_failed: Az irányítópult nem menthető.
   error_reporter_widget_render_failed: Ezt a widgetet nem lehetett megjeleníteni. A részleteket lásd az alkalmazás naplójában.
   text_reporter_widget_requires_plugin: Ehhez a modulhoz a %{plugin} plugin szükséges, amely nincs telepítve.
+  label_reporter_widget_report_by_issues: "Feladatjelentés"
+  label_reporter_widget_report_by_spent_time: "Ráfordított idő jelentés"
+  text_reporter_widget_no_templates: "Még nincs olyan jelentéssablon, amelyet ez a widget használni tudna. Az összevont jelentéssablonok a „Jelentések” alatt hozhatók létre, és ehhez a projekthez engedélyezni kell a „Jelentések” modult."
   label_move_left: Mozgatás balra
   label_move_right: Mozgatás jobbra
   label_move_up: Mozgatás felfelé

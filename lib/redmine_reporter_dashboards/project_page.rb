@@ -19,62 +19,50 @@ module RedmineReporterDashboards
       'activity' => { label: :label_activity }
     }.freeze
 
-    # Widgets that need an OPTIONAL plugin to render.
+    # THE TWO REPORT WIDGETS, WHICH THIS PLUGIN NOW OWNS OUTRIGHT (T-26a, FR-01).
     #
-    # Their partials deliberately live in blocks/optional/ rather than blocks/, so
-    # `additional_blocks`'s glob cannot pick them up: on a Redmine without
-    # redmine_reporter they must not merely fail politely, they must never be
-    # offerable in the first place. A picker entry for a widget that can only ever
-    # render an apology is a worse experience than no entry at all.
-    OPTIONAL_BLOCKS = {
+    # They used to be `OPTIONAL_BLOCKS`, declared with a `requires_plugin:` naming the base
+    # plugin and hidden from the picker wherever it was absent, because their partials
+    # named its classes and iframed its routes. Nothing here does any more: the lookup is
+    # `WidgetReport`/`Template.visible` and the render is `Reporting::ReportRun`, so there
+    # is no configuration in which these two widgets cannot render and no reason to offer
+    # them conditionally. The optional-widget machinery went with them rather than being
+    # left behind with no entries — an unreachable mechanism is a comment, and this file
+    # already carries the argument for that in `zero_reporter.allowlist`.
+    #
+    # THEY ARE REGISTERED HERE RATHER THAN DISCOVERED BY `additional_blocks`'s GLOB, and
+    # the reason is the LABEL. The glob derives one from the filename, so a globbed
+    # `report_by_issues` would look up a bare `report_by_issues` locale key — an
+    # un-namespaced name the base plugin also defines, in the one configuration where both
+    # plugins are installed and one of the two wins by load order. CLAUDE.md §10 asks for
+    # namespaced keys; an explicit entry is how these get one. Their partials therefore
+    # live in `report_blocks/`, which the glob (`blocks/_*.erb`, non-recursive) cannot see.
+    #
+    # The block NAMES are a stored contract — they are the keys in every existing
+    # dashboard's layout and settings — so they are unchanged even though nothing behind
+    # them is.
+    REPORT_BLOCKS = {
       'report_by_issues' => {
-        label: :report_by_issues,
-        partial: 'reporter_project_pages/blocks/optional/report_by_issues',
-        requires_plugin: :redmine_reporter
+        label: :label_reporter_widget_report_by_issues,
+        partial: 'reporter_project_pages/report_blocks/report_by_issues'
       },
       'report_by_spent_time' => {
-        label: :report_by_spent_time,
-        partial: 'reporter_project_pages/blocks/optional/report_by_spent_time',
-        requires_plugin: :redmine_reporter
+        label: :label_reporter_widget_report_by_spent_time,
+        partial: 'reporter_project_pages/report_blocks/report_by_spent_time'
       }
     }.freeze
 
-    # What the picker may offer: unavailable optional widgets are absent.
-    def self.blocks
-      CORE_BLOCKS.merge(additional_blocks).merge(available_optional_blocks).freeze
-    end
-
-    # Everything this plugin knows how to name, available or not.
+    # Everything this plugin knows how to name — which is also everything the picker may
+    # offer, now that no widget depends on a plugin that may not be there.
     #
-    # find_block resolves against THIS, not `blocks`, so a widget already sitting on
-    # somebody's dashboard when its plugin is uninstalled is still recognised. Letting
-    # it resolve to nil instead would make it render as nothing — and a widget that
-    # renders as nothing loses its own contextual controls, so nobody could remove it
-    # from the layout again.
-    def self.all_known_blocks
-      CORE_BLOCKS.merge(additional_blocks).merge(OPTIONAL_BLOCKS).freeze
-    end
-
-    def self.available_optional_blocks
-      OPTIONAL_BLOCKS.select { |_name, definition| optional_block_available?(definition) }
-    end
-
-    def self.optional_block_available?(definition)
-      required = definition[:requires_plugin]
-      return true if required.nil?
-
-      case required
-      when :redmine_reporter then RedmineReporterDashboards.reporter_present?
-      else false
-      end
-    end
-
-    # True when the named block is known but its plugin is not installed.
-    def self.block_degraded?(name)
-      definition = OPTIONAL_BLOCKS[name]
-      return false if definition.nil?
-
-      !optional_block_available?(definition)
+    # `find_block` resolves against this too. A widget contributed by a plugin that has
+    # since been uninstalled resolves to nil and renders as nothing, which loses its own
+    # contextual controls — the hazard the old `all_known_blocks` guarded against for the
+    # two report widgets. That case is now only reachable for a THIRD-PARTY widget, whose
+    # partial has left the glob with it, and there is nothing this plugin can render in
+    # its place.
+    def self.blocks
+      CORE_BLOCKS.merge(additional_blocks).merge(REPORT_BLOCKS).freeze
     end
 
     def self.block_options(blocks_in_use = [])
@@ -103,10 +91,10 @@ module RedmineReporterDashboards
     def self.find_block(block)
       block.to_s =~ /\A(.*?)(__\d+)?\z/
       name = Regexp.last_match(1)
-      known = all_known_blocks
+      known = blocks
       return nil unless known.key?(name)
 
-      known[name].merge(name: name, degraded: block_degraded?(name))
+      known[name].merge(name: name)
     end
 
     def self.additional_blocks

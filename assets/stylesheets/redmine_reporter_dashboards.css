@@ -85,3 +85,12 @@
   background: #fff;
   resize: vertical;
 }
+
+/* T-26a - the same frame in a dashboard box, where 40em is most of a screen and there
+   are several of them. Only the height differs; every security token is on the element
+   itself and comes from ReportFrame, which a CSS class cannot reach. `resize: vertical`
+   is inherited from the rule above, so a reader whose report is taller can drag it -
+   which is the escape hatch that makes a fixed height acceptable at all. */
+.reporter-report-frame--widget {
+  min-height: 20em;
+}

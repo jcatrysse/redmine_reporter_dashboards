@@ -46,9 +46,25 @@ module RedmineReporterDashboards
     # treated the opposite way — `BatchGuard` keeps what is finished, because there the
     # documents that exist are correct.
     class ReportRun
+      # THE POLICY'S OWN LIST, NOT A SECOND COPY OF IT — and the copy had already drifted.
+      #
+      # This used to be `%i[report preview]` while
+      # `Liquid::ExecutionPolicy::OUTPUT_CLASSES` has carried `:widget` since T-17. The two
+      # are checked at different moments — this constructor refuses an unknown class before
+      # anything is counted, the policy refuses one when the renderer is built — so nothing
+      # ever compared them, and T-26a's `WidgetReport.render` raised
+      # `ArgumentError: :widget is not a report output class` for every template that
+      # actually resolved. Measured 2026-08-12 in a booted Redmine 7.0. The commit that
+      # introduced that caller reported "OUTPUT_CLASSES accepts :widget" as evidence, which
+      # was true of the policy's constant and not of this one.
+      #
       # `preview` gets the widget's resource limits deliberately (see `ExecutionPolicy`):
       # an author should feel the limit at the keyboard, not at 06:00 in a scheduled run.
-      OUTPUT_CLASSES = %i[report preview].freeze
+      #
+      # Pointing at the policy rather than restating it means the early refusal and the
+      # limits it selects cannot disagree again — there is one closed set, and a spec
+      # asserts it is the SAME OBJECT rather than two lists that happen to match.
+      OUTPUT_CLASSES = ::RedmineReporterDashboards::Liquid::ExecutionPolicy::OUTPUT_CLASSES
 
       # T-31. What each source is called in a template, and what one record of it is
       # called — the two assign names, so the branch below is a lookup rather than an `if`.

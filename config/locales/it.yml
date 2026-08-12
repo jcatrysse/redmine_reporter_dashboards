@@ -13,6 +13,9 @@ it:
   error_reporter_dashboard_save_failed: Impossibile salvare il dashboard.
   error_reporter_widget_render_failed: Impossibile visualizzare questo widget. Consulta il log dell'applicazione per i dettagli.
   text_reporter_widget_requires_plugin: Questo widget richiede il plugin %{plugin}, che non è installato.
+  label_reporter_widget_report_by_issues: "Report delle segnalazioni"
+  label_reporter_widget_report_by_spent_time: "Report del tempo dedicato"
+  text_reporter_widget_no_templates: "Non esiste ancora un modello di report utilizzabile da questo widget. I modelli di report combinati si creano in «Report» e questo progetto deve avere il modulo «Report» attivo."
   label_move_left: Sposta a sinistra
   label_move_right: Sposta a destra
   label_move_up: Sposta su

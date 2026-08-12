@@ -1119,11 +1119,28 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
         .to raise_error(ArgumentError, /actor/)
     end
 
+    # THIS EXAMPLE USED `:widget` AS ITS UNKNOWN CLASS, and that is how the defect T-26a
+    # tripped over got here: `:widget` has been a real class in `ExecutionPolicy` since
+    # T-17, this list was a second copy that never grew it, and the copy was pinned by an
+    # example asserting the divergence. The two are one object now, so an unknown class
+    # has to be one that is genuinely absent from both.
     it 'refuses an output class it has no limits for' do
       expect do
         described_class.new(template: template, actor: actor, scope: nil, guard: guard,
-                            output_class: :widget)
+                            output_class: :banner)
       end.to raise_error(ArgumentError, /output class/)
+    end
+
+    it 'accepts every output class the execution policy has limits for' do
+      expect(described_class::OUTPUT_CLASSES)
+        .to be(::RedmineReporterDashboards::Liquid::ExecutionPolicy::OUTPUT_CLASSES)
+
+      described_class::OUTPUT_CLASSES.each do |output_class|
+        expect do
+          described_class.new(template: template, actor: actor, scope: nil, guard: guard,
+                              output_class: output_class)
+        end.not_to raise_error
+      end
     end
 
     it 'refuses a per-record run with no scope rather than answering "combined"' do

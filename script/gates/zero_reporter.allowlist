@@ -29,13 +29,14 @@
 lib/redmine_reporter_dashboards/reporter_presence.rb   owns the detection; PLUGIN_ID names the plugin being looked for
 lib/redmine_reporter_dashboards.rb                     routes the reporter-only patch list behind reporter_present?
 init.rb                                                logs which mode the plugin booted in; documents that reporter is optional
-lib/redmine_reporter_dashboards/project_page.rb        OPTIONAL_BLOCKS declares which plugin each optional widget needs
 
 # --- The integration surface itself: code that only runs when reporter is present.
-# --- Goes away with Phase 4, when the reporting surface is owned (T-30..T-35).
+# --- T-26a (2026-08-12) removed the PROJECT DASHBOARD half of this section: the two report
+# --- widgets, their PDF export and the optional-widget machinery are now this plugin's own
+# --- (WidgetReport + Reporting::ReportRun), so `project_page.rb`, the dashboard controller
+# --- and its helper came off this list rather than having their reasons reworded. What is
+# --- left is the MY-PAGE half plus the PDF patch, which T-26a's next increment owns.
 lib/redmine_reporter_dashboards/patches/report_patch.rb          patches reporter's Report#to_pdf
-app/controllers/reporter_project_pages_controller.rb            report_pdf declines when the plugin is absent
-app/helpers/reporter_project_pages_helper.rb                    comment explaining the widget degradation path
 app/views/my/_report.erb                                        renders a reporter report template
 app/views/my/blocks/_report_by_issues.erb                       renders a reporter report template
 

@@ -282,9 +282,13 @@ module ReporterDashboards
     CONTENT_SECURITY_POLICY = ::RedmineReporterDashboards::ReportFrame::CONTENT_SECURITY_POLICY
     SANDBOX = ::RedmineReporterDashboards::ReportFrame::SANDBOX
 
-    def reporter_report_frame(section)
+    # `css_class:` is forwarded rather than fixed here because the two surfaces need
+    # different HEIGHTS and nothing else: a preview owns the page, a dashboard widget is
+    # one box among several. The security tokens stay in `ReportFrame` where a caller
+    # cannot reach them — this argument only ever reaches the `class` attribute.
+    def reporter_report_frame(section, css_class: 'reporter-report-frame')
       ::RedmineReporterDashboards::ReportFrame.frame(
-        section.body, title: l(:label_reporter_report_frame)
+        section.body, title: l(:label_reporter_report_frame), css_class: css_class
       )
     end
 

@@ -16,6 +16,13 @@ class ReporterProjectPagesController < ApplicationController
   helper :my
   helper :activities
   helper :reporter_project_pages
+  # `include_all_helpers = false` (Redmine's `config/application.rb`), so a controller sees
+  # its OWN helper and nothing else — HANDOVER §1 records a T-23 view that 500'd in
+  # production for exactly this. The report widget renders through the same three helpers
+  # the template editor's preview does (`reporter_report_frame`, `reporter_degradation_text`,
+  # `reporter_time_entry_visibility_notice`) and shares its `_degradations` partial, so it
+  # declares that helper rather than growing a second copy of any of them.
+  helper 'reporter_dashboards/templates'
 
   def show
     @rows = @tab.block_rows
@@ -69,59 +76,93 @@ class ReporterProjectPagesController < ApplicationController
     redirect_to project_reporter_page_path(@project, tab: @tab.id)
   end
 
-  # Render the same report a dashboard widget shows, as a PDF, reusing the
-  # Reporter plugin's own generation (generate_reports + Report#to_pdf) and the
-  # 'reports' PDF layout. Tied to the configured widget (tab + block) rather than
-  # arbitrary query/template ids, so it exposes nothing the widget doesn't.
+  # The widget's own report, as a PDF — this plugin's render path, not the base plugin's.
+  #
+  # It used to call `IssueListReportTemplate#generate_reports` and `Report#to_pdf`, both
+  # owned by the base plugin, through a `reporter_report_for` that resolved the template a
+  # SECOND time and had already drifted once (its own comment recorded the fix). There is
+  # one resolution now, `WidgetReport`, and the export differs from the widget in exactly
+  # one argument: `pdf: true`. Tied to the configured widget (tab + block) rather than to
+  # arbitrary query/template ids, so it still exposes nothing the widget does not.
+  #
+  # `WidgetReport.render` is what enforces visibility here — `Template.visible(actor)` —
+  # which the base plugin's `in_project_and_global` never did. `before_action :authorize`
+  # has already established that this actor may view this project's dashboard; the
+  # template scope is what decides which report they may export.
   def report_pdf
     tab   = @tabs.find_by(id: params[:tab])
     block = params[:block].to_s
-    definition = RedmineReporterDashboards::ProjectPage.find_block(block)
-    return render_404 unless tab && definition
+    return render_404 unless tab && RedmineReporterDashboards::ProjectPage.find_block(block)
+    return render_404 unless report_block_permitted?(block)
 
-    # 404, not 500. A 500 in a monitored install is an alert about something broken;
-    # this is a correct statement about a capability that was never installed. The
-    # widget's PDF export exists only while redmine_reporter does.
-    if definition[:degraded]
-      Rails.logger.info(
-        "[reporter_dashboards] report_pdf for #{block.inspect} in project #{@project.id} " \
-        "declined: it needs the #{definition[:requires_plugin]} plugin, which is not installed"
-      )
-      return render_404
-    end
+    widget = RedmineReporterDashboards::WidgetReport.render(
+      project: @project, actor: User.current, block: block,
+      settings: tab.block_settings(block), pdf: true, logger: Rails.logger
+    )
+    # NOT CONFIGURED IS NOT AN ERROR. A widget whose settings name no resolvable template
+    # has nothing to export, and the page it sits on offers the settings form instead.
+    return render_404 if widget.nil?
 
-    # Resolving the widget means touching reporter's report template classes, which on
-    # Redmine 7.0 (Rails 8.1) cannot be loaded at all — see the note in the README. A
-    # dependency that will not load should produce the same clean error as a
-    # wkhtmltopdf failure, not a stack trace.
-    begin
-      query, report_template, collection = reporter_report_for(block, tab.block_settings(block))
-    rescue StandardError => e
-      Rails.logger.error("[reporter_dashboards] could not resolve the report widget " \
-                         "#{block.inspect} in project #{@project.id}: #{e.class}: #{e.message}")
-      return render_error(message: l(:error_reporter_pdf_generation_failed), status: 500)
-    end
-
-    return render_404 unless query && report_template
-
-    report = report_template.generate_reports(collection, query.id).first
-    return render_404 unless report
-
-    apply_layout!(report.content, 'reports')
-    # PDF chart rendering (polyfills) + wait-for-charts delay are handled centrally
-    # in Report#to_pdf (report_patch), so every Reporter PDF path benefits.
-    pdf = report.to_pdf
-    # to_pdf returns nil when wkhtmltopdf fails (missing binary, render error);
-    # send_data would raise on nil, so surface a clean error instead of a 500.
-    return render_error(message: l(:error_reporter_pdf_generation_failed), status: 500) if pdf.blank?
-
-    send_data pdf,
-              type: 'application/pdf',
-              filename: report.filename,
-              disposition: params[:download].present? ? 'attachment' : 'inline'
+    send_report_pdf(widget)
   end
 
   private
+
+  # A PDF export is a document, so the two states that are a PANEL on a page have to
+  # become an HTTP answer here — and neither of them may become the document itself
+  # (INV-5: the base plugin returned the exception message AS the PDF bytes).
+  #
+  # 422 for a refusal and 500 for a failure, the same split
+  # `ReporterDashboards::TemplatesController#outcome_status` makes, because a cap refusal
+  # is a correct answer to an unreasonable request and paging an operator for it is what
+  # T-15 exists to stop.
+  REPORT_PDF_REFUSAL_ORIGINS = %i[batch assets].freeze
+
+  def send_report_pdf(widget)
+    outcome = widget.outcome
+    diagnostic = outcome.diagnostic
+
+    if diagnostic
+      Rails.logger.error(
+        "[reporter_dashboards] the report PDF for template #{widget.template.id} in " \
+        "project #{@project.id} failed: #{diagnostic.origin}/#{diagnostic.code} " \
+        "correlation_id=#{diagnostic.correlation_id}"
+      )
+      status = REPORT_PDF_REFUSAL_ORIGINS.include?(diagnostic.origin) ? 422 : 500
+      return render_error(message: l(:error_reporter_pdf_generation_failed), status: status)
+    end
+
+    document = outcome.documents.first
+    # ZERO DOCUMENTS IS NOT A FILE, and `documents.first.bytes` on an empty batch is a
+    # NoMethodError — a 500 for a request that merely had nothing to draw.
+    return render_404 if document.nil?
+
+    send_data document.bytes,
+              type: 'application/pdf',
+              filename: report_pdf_filename(widget.template),
+              disposition: params[:download].present? ? 'attachment' : 'inline'
+  end
+
+  # The same rule the dashboard applies before rendering the widget (`M1` in
+  # `ReporterProjectPagesHelper#render_reporter_project_block`): a spent-time report needs
+  # the time-entries permission, which `authorize` does not cover because it grants the
+  # DASHBOARD. Stated in one place and asked by both, so the export cannot outlive the
+  # widget's own guard.
+  def report_block_permitted?(block)
+    return true unless block.to_s.sub(/__\d+\z/, '') == 'report_by_spent_time'
+
+    User.current.allowed_to?(:view_time_entries, @project, global: true)
+  end
+
+  # Same shape as `TemplatesController#download_filename` and deliberately not shared with
+  # it: that one is a private method of another controller, and reaching across for six
+  # lines would couple two entry points that have no other relationship.
+  def report_pdf_filename(template)
+    stem = template.name.to_s.gsub(/[^0-9A-Za-z._-]+/, '_')[0, 100]
+                        .gsub(/\A[_.]+|[_.]+\z/, '')
+    stem = 'report' if stem.blank?
+    "#{stem}.pdf"
+  end
 
   # flash, not flash.now: the three redirecting actions need it on the next request,
   # and update_page's JS reloads the page so Redmine's own flash renders the message
@@ -135,34 +176,6 @@ class ReporterProjectPagesController < ApplicationController
                       "#{@tab.errors.full_messages.join(', ').presence || 'no error message'}")
     flash[:error] = ([l(:error_reporter_dashboard_save_failed)] + @tab.errors.full_messages)
                     .join(' ')
-  end
-
-  # Resolve the query, report template and AR collection for a report widget,
-  # mirroring the two report block partials (and the helper's permission guard:
-  # spent-time reports require the time-entries permission).
-  #
-  # The report template is scoped to in_project_and_global(@project), the same scope
-  # the settings picker offers and the same one the block partials now resolve
-  # through. The PDF export must not be a way to render a template the widget itself
-  # would refuse — the export exists precisely to show "the same report the widget
-  # shows", so its resolution has to be identical.
-  def reporter_report_for(block, settings)
-    case block.to_s.sub(/__\d+\z/, '')
-    when 'report_by_issues'
-      query = IssueQuery.visible.where(project_id: [nil, @project.id]).find_by(id: settings[:query_id])
-      template = IssueListReportTemplate.in_project_and_global(@project)
-                                        .find_by(id: settings[:report_template_id])
-      [query, template, query&.base_scope]
-    when 'report_by_spent_time'
-      return [nil, nil, nil] unless User.current.allowed_to?(:view_time_entries, @project, global: true)
-
-      query = TimeEntryQuery.visible.where(project_id: [nil, @project.id]).find_by(id: settings[:query_id])
-      template = TimeEntriesReportTemplate.in_project_and_global(@project)
-                                          .find_by(id: settings[:report_template_id])
-      [query, template, query&.results_scope]
-    else
-      [nil, nil, nil]
-    end
   end
 
   def require_dashboard_module

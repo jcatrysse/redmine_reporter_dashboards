@@ -43,6 +43,96 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
                               settings: { report_template_id: 1 })
   end
 
+  # ------------------------------------------------------------------ the run
+
+  # THE REGRESSION THIS FILE EXISTED WITHOUT. `#render` was covered only on its two
+  # early-return paths, so the one line that actually runs a report was never executed —
+  # and `ReportRun::OUTPUT_CLASSES` did not contain `:widget`, so EVERY resolvable
+  # template raised `ArgumentError: :widget is not a report output class`. The commit that
+  # shipped it cited `Liquid::ExecutionPolicy::OUTPUT_CLASSES`, which is a different
+  # constant that did contain it.
+  def test_a_resolvable_template_actually_renders
+    template = Template.create!(project: @project, author: @admin, name: 'Renders',
+                                content: '<p>ISSUES={{ issues.size }}</p>',
+                                source: 'issues', output: 'combined',
+                                visibility: Template::VISIBILITY_PUBLIC)
+
+    widget = Subject.render(project: @project, actor: @admin, block: 'report_by_issues',
+                            settings: { report_template_id: template.id })
+
+    assert_equal template, widget.template
+    assert_nil widget.query, 'no query was named, so the report covers the whole project'
+    assert widget.outcome.ok?, "expected a clean render, got #{widget.outcome.diagnostic.inspect}"
+    assert_equal "<p>ISSUES=#{Issue.visible(@admin).where(project_id: @project.id).count}</p>",
+                 widget.outcome.sections.first.body.strip
+  end
+
+  # THE TWO CLOSED SETS ARE ONE OBJECT, not two lists that happen to agree. Asserted by
+  # identity for the same reason the frame constants below are: matching strings can be
+  # edited apart, and this pair already was.
+  def test_the_run_and_the_execution_policy_share_one_output_class_set
+    assert_same ::RedmineReporterDashboards::Liquid::ExecutionPolicy::OUTPUT_CLASSES,
+                ::RedmineReporterDashboards::Reporting::ReportRun::OUTPUT_CLASSES
+    assert_includes ::RedmineReporterDashboards::Reporting::ReportRun::OUTPUT_CLASSES, :widget
+  end
+
+  # The widget renders under the `:widget` limits — the profile `ExecutionPolicy` has
+  # carried since T-17 with nothing in production passing it — and it is NOT bounded by an
+  # issue limit, because `{% sql_aggregate %}` reads the relation the render context
+  # carries and a limit there produces believable, wrong totals.
+  def test_the_run_is_asked_for_the_widget_limits_over_an_unbounded_scope
+    template = Template.create!(project: @project, author: @admin, name: 'Limits',
+                                content: '<p>x</p>', source: 'issues', output: 'combined',
+                                visibility: Template::VISIBILITY_PUBLIC)
+    captured = nil
+    ::RedmineReporterDashboards::Reporting::ReportRun
+      .expects(:new).with { |kwargs| captured = kwargs }
+      .returns(stub(call: :outcome))
+
+    Subject.render(project: @project, actor: @admin, block: 'report_by_issues',
+                   settings: { report_template_id: template.id })
+
+    assert_equal :widget, captured[:output_class]
+    assert_nil captured[:limit]
+    assert_equal @admin, captured[:actor]
+  end
+
+  # `pdf:` is the ONE argument that separates the dashboard widget from its export, which
+  # is what makes "the export shows the same report the widget shows" true rather than
+  # asserted. A port nothing looks at is a port a caller can drop — this plugin has lost
+  # `asset_resolver:` and `selected_engine_id:` that way — so it is asserted in both
+  # directions.
+  def test_the_pdf_binding_is_forwarded_and_defaults_to_html
+    template = Template.create!(project: @project, author: @admin, name: 'Binding',
+                                content: '<p>x</p>', source: 'issues', output: 'combined',
+                                visibility: Template::VISIBILITY_PUBLIC)
+    run = stub
+    ::RedmineReporterDashboards::Reporting::ReportRun.stubs(:new).returns(run)
+
+    run.expects(:call).with(pdf: false).returns(:html)
+    Subject.render(project: @project, actor: @admin, block: 'report_by_issues',
+                   settings: { report_template_id: template.id })
+
+    run.expects(:call).with(pdf: true).returns(:pdf)
+    Subject.render(project: @project, actor: @admin, block: 'report_by_issues',
+                   settings: { report_template_id: template.id }, pdf: true)
+  end
+
+  # A saved query narrows the report, and the widget's heading links to it — so it has to
+  # come back out of the run rather than being resolved a second time by the view.
+  def test_a_named_query_is_resolved_and_returned
+    template = Template.create!(project: @project, author: @admin, name: 'Queried',
+                                content: '<p>{{ issues.size }}</p>', source: 'issues',
+                                output: 'combined', visibility: Template::VISIBILITY_PUBLIC)
+    query = IssueQuery.create!(project: @project, name: 'Widget query', user: @admin,
+                               filters: {})
+
+    widget = Subject.render(project: @project, actor: @admin, block: 'report_by_issues',
+                            settings: { report_template_id: template.id, query_id: query.id })
+
+    assert_equal query, widget.query
+  end
+
   # ------------------------------------------------------------------ the lookup
 
   # THE GAP THIS CLOSES. The base plugin's `in_project_and_global` enforced no visibility,
@@ -99,6 +189,24 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
     assert_not_includes Subject.templates_for(project: @project, actor: @admin,
                                              source: 'time_entries'),
                         issues_template
+  end
+
+  # A DASHBOARD BOX IS ONE DOCUMENT, so a `per_record` template is refused at the PICKER
+  # rather than bounded at the render — see `WidgetReport::OUTPUT`. Both halves, because
+  # a template absent from the picker but still resolvable from a stored id is precisely
+  # the divergence this module exists to prevent.
+  def test_a_per_record_template_is_neither_offered_nor_resolved
+    per_record = Template.create!(project: @project, author: @admin, name: 'Per record',
+                                  content: '<p>{{ issue.id }}</p>', source: 'issues',
+                                  output: 'per_record')
+
+    assert_not_includes Subject.templates_for(project: @project, actor: @admin,
+                                              source: 'issues'),
+                        per_record
+    assert_nil Subject.template_for(project: @project, actor: @admin, source: 'issues',
+                                    template_id: per_record.id)
+    assert_nil Subject.render(project: @project, actor: @admin, block: 'report_by_issues',
+                              settings: { report_template_id: per_record.id })
   end
 
   # FR-46. Every dashboard carried over from the base plugin holds ITS report_template_id,
