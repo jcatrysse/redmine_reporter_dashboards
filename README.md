@@ -787,6 +787,20 @@ rake reporter_dashboards:migrate_from_reporter:run      # copy the templates acr
 rake reporter_dashboards:migrate_from_reporter:status   # what has drifted since
 ```
 
+**`run` also repoints your dashboards, and this is the part it is easy not to think about.**
+A report widget stores a template *id*. Before this release that id named a row in the old
+plugin's table; it now names one in this plugin's. Both tables number from 1, so a
+carried-over id usually still finds *something* — an unrelated report of yours, rendered
+silently, looking exactly like it worked. So the import translates every report widget's
+stored id to the copy it just made, and prints a **Dashboard report widgets** section saying
+how many it repointed and naming, one by one, any it could not map so you know which to
+re-pick by hand. `plan` predicts all of it and writes nothing. Running `run` twice does not
+repoint anything twice — each widget it touches is marked, and the marker is what a re-run
+checks rather than the numbers happening to line up.
+
+A widget it could not map keeps its stored id and falls back to its own settings form, which
+is the honest answer: the alternative is inventing a mapping.
+
 **It copies. It never adopts, and it never writes to the old plugin's tables.** That is not
 tidiness: uninstalling `redmine_reporter` the documented way runs *its* down-migrations,
 which drop its tables. If this plugin were live on those rows, they would go with it. So

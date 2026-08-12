@@ -3,6 +3,7 @@
 require 'digest'
 
 require_relative 'survey'
+require_relative 'widget_settings'
 require_relative '../reporting/exchange'
 
 module RedmineReporterDashboards
@@ -59,7 +60,16 @@ module RedmineReporterDashboards
       Outcome = Struct.new(:source_id, :name, :status, :template_id, :reason,
                            keyword_init: true)
 
-      Result = Struct.new(:outcomes, :notes, :dry_run, keyword_init: true) do
+      # `widget_changes` — §Findings S-29. What the run did to the report widgets that were
+      # pointing at the base plugin's template ids. A field on the same Result rather than a
+      # second return value, because `import:plan` predicts it and `import:run` performs it
+      # through the same call, and two shapes for one answer is how a plan comes to disagree
+      # with the run it predicts.
+      Result = Struct.new(:outcomes, :notes, :dry_run, :widget_changes, keyword_init: true) do
+        def widget_changes
+          self[:widget_changes] || []
+        end
+
         def counts
           outcomes.group_by(&:status).transform_values(&:length)
         end
@@ -110,7 +120,49 @@ module RedmineReporterDashboards
 
           outcomes = rows.map { |row| import_one(row, actor, dry_run, notes, rewrite) }
 
-          Result.new(outcomes: outcomes, notes: notes, dry_run: dry_run)
+          Result.new(outcomes: outcomes, notes: notes, dry_run: dry_run,
+                     widget_changes: rewrite_widget_settings(outcomes, dry_run))
+        end
+
+        # §Findings S-29 — THE DASHBOARDS ARE PART OF THE MIGRATION, and until now nothing
+        # said so. Copying the templates and leaving every widget pointing at the source's
+        # id is a migration that reports success and leaves the visible half wrong; both
+        # tables number from 1, so the stale id usually resolves to an unrelated report of
+        # ours rather than to nothing.
+        #
+        # It runs INSIDE `import:run` rather than as a task of its own on purpose: a second
+        # task is a second thing an operator has to know exists, and not knowing is exactly
+        # how this defect reaches production. `import:plan` predicts it because `dry_run` is
+        # threaded all the way to the save.
+        #
+        # The mapping is built from THIS RUN'S OUTCOMES, so a widget is only ever pointed at
+        # a template this importer actually produced.
+        #
+        # THE KEY SET IS "WHICH SOURCES HAVE A COPY", AND THE VALUE MAY BE NIL. `:skipped`
+        # is the one outcome that means a source did not migrate (`Result#failed?` says so),
+        # so it is the one excluded; every other status leaves a usable copy. On a DRY RUN
+        # nothing has been written, so `template_id` is nil for a row that would be created
+        # — and keying on the value rather than the key made every plan report zero widget
+        # changes while the real run reported several. `WidgetSettings` reads the key.
+        def rewrite_widget_settings(outcomes, dry_run)
+          mapping = outcomes.each_with_object({}) do |outcome, map|
+            next if outcome.source_id.nil? || outcome.status == :skipped
+
+            map[outcome.source_id.to_i] =
+              outcome.template_id && Template.find_by(id: outcome.template_id)
+          end
+
+          # THE GUARD IS ON `outcomes`, NOT ON `mapping`, and the difference is a run where
+          # every source was SKIPPED. An empty mapping there does not mean "no dashboards to
+          # look at" — it means none of them can be mapped, which is exactly what an
+          # operator needs told. Guarding on the mapping reported nothing at all for that
+          # run. `outcomes.empty?` is the case that genuinely has nothing to say: no source
+          # row was found, so no dashboard is implicated and a section listing every report
+          # widget in the installation would be noise on every install that never had the
+          # base plugin.
+          return [] if outcomes.empty?
+
+          WidgetSettings.apply(mapping, dry_run: dry_run)
         end
 
         # The divergence report, on its own, writing nothing. `import:status` is this.

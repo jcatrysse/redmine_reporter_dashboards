@@ -24,11 +24,16 @@ All notable changes to this plugin are documented in this file.
   report is available on the template's own page.
 
   **An existing widget whose stored template no longer resolves falls back to its settings
-  form** rather than erroring — including a dashboard carried over from `redmine_reporter`,
-  whose stored template id names a row in that plugin's tables. Note the limitation, because
-  it is not yet solved: the id is looked up with no record of where it came from, so it can
-  also collide with one of this plugin's templates and show an unrelated report. Check the
-  widgets on a migrated dashboard.
+  form** rather than erroring.
+
+  **`rake reporter_dashboards:migrate_from_reporter:run` now repoints your dashboards too.**
+  A widget stores a template *id*, and after migrating it would point at the wrong row —
+  both plugins number their templates from 1, so the old id usually still finds *something*
+  and the widget would quietly show an unrelated report. The import now rewrites those ids
+  to the copies it just made, tells you widget by widget what it changed, and lists any it
+  could not map so you know exactly which ones to re-pick by hand.
+  `…:migrate_from_reporter:plan` predicts all of it and writes nothing, and running the
+  import twice does not repoint anything twice.
 
   **If a report cannot be produced, the widget says so inside its own box** — a short line
   with the reference id to quote — and the PDF export answers with an error page and no

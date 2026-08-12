@@ -31,6 +31,33 @@ the intended tree BEFORE launching review agents and diff the whole thing agains
 snapshot, never spot-check lines. And if a commit genuinely cannot wait, stage EXPLICIT PATHS
 the agents do not touch (docs, locales) rather than everything.
 
+**AN ID STORED IN A SETTINGS BLOB SURVIVES THE TABLE IT NAMED, AND BOTH TABLES START AT 1.**
+A dashboard widget stores `report_template_id`. T-26a moved what that names from the base
+plugin's `report_templates` to `reporter_dashboards_templates` — different tables, both
+numbered from 1 — so on a real migration the stale id usually RESOLVES, to an unrelated
+report, rendered silently. "It will simply not resolve" was written in a comment and is the
+UNLIKELY case. §Findings **S-29**, fixed by `Import::WidgetSettings`.
+
+Three things generalise. **When a stored key changes meaning, the rows holding it are part
+of the change** — the importer copied the templates and left every widget pointing at the
+source's id, which is a migration that reports success and leaves the visible half wrong.
+**Idempotence on "the new id is probably not also an old id" is the same reasoning as the
+defect**, so the re-run guard is a written MARKER (`report_template_origin`) and the test
+BUILDS the collision (insert a source row with an explicit id equal to the copy's) rather
+than waiting for one. And **a plan must distinguish an absent key from a nil value**: on a
+dry run the copies have no ids yet, so a mapping keyed on the VALUE made every plan report
+zero widget changes while the real run reported several — a plan that could not predict its
+own run.
+
+**AND `save!` ON AN UNCHANGED RECORD ISSUES NO UPDATE, so `updated_at` is not the observable
+for "did this write?".** Measured: 0 UPDATE statements, `updated_at` unmoved. Two guards
+whose stated claim was "do not write a row we did not change" therefore survived mutation
+against an `updated_at` assertion. What DOES distinguish them here is
+`ReporterProjectTab`'s own `before_validation :clear_unused_block_settings`, which prunes
+the settings of any block the layout does not name: saving a tab the run had no business
+touching deletes somebody else's stored settings as a side effect. Assert on THAT, and on a
+public method's flag directly rather than through a caller for whom it is unobservable.
+
 **TWO CLOSED SETS WITH THE SAME NAME IN TWO CLASSES WILL DRIFT, AND A TEST CAN PIN THE
 DRIFT IN PLACE.** `ReportRun::OUTPUT_CLASSES` was a copy of
 `Liquid::ExecutionPolicy::OUTPUT_CLASSES` minus `:widget`. Both are checked, at different

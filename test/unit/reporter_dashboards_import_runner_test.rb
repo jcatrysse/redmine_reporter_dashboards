@@ -474,4 +474,252 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
   def test_resolve_actor_falls_back_to_an_active_administrator
     assert Runner.resolve_actor(nil)&.admin?
   end
+
+  # ------------------------------------------------------------ S-29, the dashboards
+
+  # THE DEFECT, REPRODUCED END TO END BEFORE THE FIX IS ASSERTED.
+  #
+  # Both tables number from 1, so a widget holding the SOURCE's template id usually still
+  # resolves here — to an unrelated report of ours, rendered silently. The collision is
+  # BUILT rather than hoped for: the source row is inserted with an explicit id equal to
+  # one of our existing templates, which is what a real migration looks like and what makes
+  # the "before" assertion mean anything.
+  def test_a_carried_over_widget_setting_renders_the_wrong_report_until_the_import_fixes_it
+    decoy = rrd_owned_template('DECOY — not what was configured')
+    source_id = seed_source_with_id(decoy.id, name: 'The real one', content: '<p>RIGHT</p>')
+    tab = tab_with_widget(stored_template_id: source_id)
+    assert_equal decoy, resolved_template(tab),
+                 'precondition: the stale id must resolve to the decoy, or this proves nothing'
+
+    result = run_import
+
+    assert_equal 1, result.widget_changes.count { |c| c.status == :rewritten }
+    copy = Template.find_by!(source_template_id: source_id)
+    assert_equal copy, resolved_template(tab.reload),
+                 'after the import the widget must render the copy of what it named'
+    assert_not_equal decoy, resolved_template(tab)
+  end
+
+  # A PLAN THAT DOES NOT PREDICT THE RUN IS WORSE THAN NO PLAN — the runner's own words.
+  # Both halves: the same changes are reported, and the row is untouched.
+  def test_a_dry_run_predicts_the_widget_changes_and_writes_none_of_them
+    source_id = seed_source(name: 'The real one')
+    tab = tab_with_widget(stored_template_id: source_id)
+
+    touched_before = tab.reload.updated_at
+    dry = run_import(dry_run: true)
+    tab.reload
+    stored_after_dry = stored_template_id(tab)
+    # THE ROW, NOT ONLY THE VALUE. On a dry run there is nothing to write into the settings
+    # anyway (the copies have no ids yet), so a version of this test that only checked the
+    # id passed against a `save!` that fired regardless and moved `updated_at` — an
+    # operator's "did the plan change anything?" answered wrongly.
+    assert_equal touched_before, tab.updated_at, 'a dry run must not touch the row at all'
+    real = run_import
+
+    assert_equal source_id.to_i, stored_after_dry, 'a dry run must not write'
+    assert_equal [:rewritten], dry.widget_changes.map(&:status)
+    assert_equal dry.widget_changes.map { |c| [c.block, c.from, c.status] },
+                 real.widget_changes.map { |c| [c.block, c.from, c.status] }
+  end
+
+  # Idempotence rests on the MARKER, not on the arithmetic — a second run must be a no-op
+  # even where the numbers would line up again.
+  def test_a_second_import_does_not_rewrite_a_widget_twice
+    source_id = seed_source(name: 'The real one')
+    tab = tab_with_widget(stored_template_id: source_id)
+
+    run_import
+    first = stored_template_id(tab.reload)
+    second_run = run_import
+
+    assert_equal first, stored_template_id(tab.reload)
+    assert_equal 0, second_run.widget_changes.count { |c| c.status == :rewritten }
+  end
+
+  # A stored id with no imported counterpart is LEFT ALONE and NAMED. Rewriting it would be
+  # inventing a mapping; summarising it away would leave somebody with a widget to re-pick
+  # and no way to know which.
+  def test_an_unmappable_widget_is_left_alone_and_named_in_the_report
+    seed_source(name: 'The real one')
+    tab = tab_with_widget(stored_template_id: 999_999)
+
+    touched_before = tab.reload.updated_at
+    result = run_import
+    tab.reload
+
+    assert_equal 999_999, stored_template_id(tab)
+    # `:unknown` changes nothing, so the row must not be written — `updated_at` moving on a
+    # tab the run did not change is what makes an operator stop trusting the next report.
+    assert_equal touched_before, tab.updated_at
+    assert_equal [:unknown], result.widget_changes.map(&:status)
+    printed = RedmineReporterDashboards::Import::ImportReport.render(result)
+    assert_includes printed, 'COULD NOT BE MAPPED'
+    assert_includes printed, 'widget report_by_issues: stored template 999999'
+  end
+
+  # Only the two report widgets' settings are this module's business. A `news` widget that
+  # happens to hold the same key must not be touched, and neither must the layout.
+  #
+  # `news` IS IN THE LAYOUT, and that is not decoration: `clear_unused_block_settings`
+  # drops the settings of any block the layout does not name, on every save — so a version
+  # of this test that only added the settings would pass against a module that rewrote
+  # `news` too.
+  def test_it_touches_only_the_report_widgets
+    source_id = seed_source(name: 'The real one')
+    tab = ReporterProjectTab.create!(
+      project: @project, title: 'Overview',
+      layout: [['report_by_issues'], ['news']],
+      settings: { 'report_by_issues' => { report_template_id: source_id },
+                  'news' => { report_template_id: source_id } }
+    )
+    assert_equal source_id.to_i, tab.reload.block_settings('news')[:report_template_id],
+                 'precondition: the news setting must survive the layout prune'
+    layout_before = tab.layout
+
+    run_import
+
+    tab.reload
+    assert_equal source_id.to_i, tab.block_settings('news')[:report_template_id]
+    assert_nil tab.block_settings('news')[:report_template_origin]
+    assert_equal layout_before, tab.layout
+  end
+
+  # A dashboard may hold up to MAX_BLOCK_OCCURS copies of a widget, and every one carries
+  # its own stored id. The `__N` instances are the ones a walk over a settings Hash is most
+  # likely to miss — and the one the widget lookup itself got wrong once already.
+  def test_every_instance_of_a_report_widget_is_rewritten
+    issues_id = seed_source(name: 'Issues report')
+    hours_id = seed_source(type: 'TimeEntriesReportTemplate', name: 'Hours report')
+    blocks = %w[report_by_issues report_by_issues__1 report_by_spent_time]
+    stored = { 'report_by_issues' => issues_id, 'report_by_issues__1' => issues_id,
+               'report_by_spent_time' => hours_id }
+    tab = ReporterProjectTab.create!(
+      project: @project, title: 'Overview', layout: blocks.map { |b| [b] },
+      settings: blocks.to_h { |b| [b, { report_template_id: stored[b] }] }
+    )
+
+    result = run_import
+
+    assert_equal 3, result.widget_changes.count { |c| c.status == :rewritten }
+    tab.reload
+    blocks.each do |block|
+      assert_not_equal stored[block].to_i, tab.block_settings(block)[:report_template_id],
+                       "#{block} was left pointing at the source's id"
+      assert_equal 'rrd', tab.block_settings(block)[:report_template_origin]
+    end
+  end
+
+  # THE MARKER IS WHAT MAKES A RE-RUN SAFE, AND ONLY A COLLISION CAN SHOW IT.
+  #
+  # After a rewrite the widget stores the COPY's id. A second run is a no-op simply because
+  # that id is usually not also a source id — which is the probabilistic reasoning S-29 is
+  # about, one level in. This builds the case where it IS: a second source row is inserted
+  # with an explicit id equal to the copy's. Without the marker the widget is rewritten a
+  # second time, to a template nobody named.
+  def test_the_marker_stops_a_second_rewrite_when_the_new_id_collides_with_a_source_id
+    first_source = seed_source(name: 'The real one')
+    tab = tab_with_widget(stored_template_id: first_source)
+    run_import
+    copy_id = stored_template_id(tab.reload)
+    assert_not_equal first_source.to_i, copy_id, 'precondition: the rewrite must have happened'
+
+    # A source row whose id is the id the widget now stores — the collision, built.
+    seed_source_with_id(copy_id, name: 'A DIFFERENT source', content: '<p>OTHER</p>')
+    second = run_import
+
+    assert_equal copy_id, stored_template_id(tab.reload),
+                 'the marker must stop a widget being repointed a second time'
+    assert_equal 0, second.widget_changes.count { |c| c.status == :rewritten }
+  end
+
+  # A SKIPPED SOURCE HAS NO COPY, so a widget naming it must be reported as unmappable
+  # rather than as repointed. Including skipped rows in the mapping makes the report claim
+  # a widget was fixed while its stored id is untouched — the report lying about the one
+  # thing it exists to say.
+  def test_a_skipped_source_is_not_reported_as_a_repointed_widget
+    skipped_id = seed_source(type: 'SomethingReporterNeverShipped', name: 'Unknown type')
+    tab = tab_with_widget(stored_template_id: skipped_id)
+
+    result = run_import
+
+    assert_equal 1, result.count(:skipped), 'precondition: the source must have been skipped'
+    assert_equal [:unknown], result.widget_changes.map(&:status)
+    assert_equal skipped_id.to_i, stored_template_id(tab.reload)
+  end
+
+  # `WidgetSettings.apply` IS A PUBLIC METHOD AND ITS `dry_run:` IS ITS OWN CONTRACT.
+  #
+  # Driven directly rather than through `import:run`, because on that path a dry run has no
+  # template ids to write anyway — so `unless dry_run` is unobservable there, and a
+  # mutation that deleted it survived the whole importer suite. A caller handing this
+  # module a REAL mapping with `dry_run: true` is the case the flag exists for, and it is
+  # one method call away.
+  def test_apply_writes_nothing_on_a_dry_run_even_with_a_real_mapping
+    copy = rrd_owned_template('The copy')
+    tab = tab_with_widget(stored_template_id: 4242)
+    changes = RedmineReporterDashboards::Import::WidgetSettings.apply({ 4242 => copy },
+                                                                     dry_run: true)
+
+    assert_equal [:rewritten], changes.map(&:status), 'the plan must still be computed'
+    assert_equal 4242, stored_template_id(tab.reload), 'a dry run must not write'
+  end
+
+  # A TAB WITH NOTHING TO REWRITE MUST NOT BE SAVED, and the observable is not `updated_at`
+  # — Rails issues no UPDATE for an unchanged record, measured: 0 statements. It is
+  # `clear_unused_block_settings`, which runs `before_validation` and PRUNES the settings of
+  # any block the layout does not name. Saving a tab this run had no business touching would
+  # therefore delete somebody else's stored settings as a side effect of an import.
+  def test_a_tab_whose_widgets_are_all_unmappable_is_not_saved_at_all
+    seed_source(name: 'The real one')
+    tab = tab_with_widget(stored_template_id: 999_999)
+    # Written around the callbacks on purpose: this is the state a tab reaches when a widget
+    # is removed from the layout by an older version, and it is what the prune would eat.
+    tab.update_column(:settings, tab.settings.merge('news' => { limit: 7 }))
+
+    run_import
+
+    assert_equal 7, ReporterProjectTab.find(tab.id).settings['news'][:limit],
+                 'the import saved a tab it had no change for, and the prune ate the settings'
+  end
+
+  private
+
+  def rrd_owned_template(name)
+    Template.create!(project: @project, author: @admin, name: name,
+                     content: '<p>WRONG</p>', source: 'issues', output: 'combined',
+                     visibility: Template::VISIBILITY_PUBLIC)
+  end
+
+  # An explicit id, so the collision S-29 is about can be BUILT rather than waited for.
+  def seed_source_with_id(id, type: 'IssueListReportTemplate', name: 'Weekly',
+                          content: '<p>hi</p>')
+    connection.insert(
+      'INSERT INTO report_templates (id, type, name, project_id, content) VALUES (' \
+      "#{connection.quote(id)}, #{connection.quote(type)}, #{connection.quote(name)}, " \
+      "#{connection.quote(@project.id)}, #{connection.quote(content)})"
+    )
+    id
+  end
+
+  def tab_with_widget(stored_template_id:, block: 'report_by_issues')
+    ReporterProjectTab.create!(project: @project, title: 'Overview',
+                               layout: [[block]],
+                               settings: { block => { report_template_id: stored_template_id } })
+  end
+
+  def stored_template_id(tab, block: 'report_by_issues')
+    settings = tab.block_settings(block)
+    settings[:report_template_id] || settings['report_template_id']
+  end
+
+  # Resolved the way the WIDGET resolves it, not by a bare find — the claim is about what
+  # somebody looking at the dashboard sees.
+  def resolved_template(tab, block: 'report_by_issues')
+    @project.enable_module!(:reporter_dashboards_reports)
+    RedmineReporterDashboards::WidgetReport.template_for(
+      project: @project, actor: @admin, source: 'issues',
+      template_id: stored_template_id(tab, block: block)
+    )
+  end
 end

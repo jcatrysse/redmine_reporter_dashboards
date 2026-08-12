@@ -97,17 +97,23 @@ module RedmineReporterDashboards
       # settings form that is already the partial's empty state, or it COLLIDES with one of
       # ours and renders an unrelated report.
       #
-      # **THIS IS A BARE PRIMARY-KEY LOOKUP WITH NO PROVENANCE CHECK, and the collision is
-      # the likely case rather than the exotic one** — both tables' ids start at 1. An
-      # earlier version of this comment claimed the id "will not resolve here until the
-      # importer has run", which is wrong twice: nothing consults `source_template_id`, and
-      # the importer does not rewrite `reporter_project_tabs.settings` at all, so running it
-      # changes nothing here. Found by the independent review of T-26a and REPORTED RATHER
-      # THAN DECIDED (§Findings S-29): whether a stored id should be read as ours or as the
-      # base plugin's, and whether the importer should rewrite widget settings, is a
-      # migration decision for the curator — every answer this method could pick on its own
-      # is a silent one. Nothing leaks either way: `Template.visible(actor)` still bounds
-      # whatever resolves.
+      # **THIS IS A BARE PRIMARY-KEY LOOKUP WITH NO PROVENANCE CHECK, DELIBERATELY, AND THE
+      # TRANSLATION HAPPENS ONE LAYER UP.** Both tables' ids start at 1, so a carried-over
+      # setting usually still resolves — to an unrelated report of ours. That is §Findings
+      # **S-29**, and the answer is `Import::WidgetSettings`, which repoints every widget
+      # during `import:run` using the `source_template_id` the importer already records.
+      #
+      # It is NOT answered here on purpose: this method is asked on every dashboard render
+      # and cannot tell a stale id from a current one without a provenance rule, while the
+      # importer knows exactly which sources it copied and gets to say so once, reportably,
+      # and to leave a marker. A lookup that guessed would be making a migration decision on
+      # every page view.
+      #
+      # An earlier version of this comment claimed the id "will not resolve here until the
+      # importer has run", which was wrong twice: nothing consulted `source_template_id`,
+      # and the importer did not rewrite `reporter_project_tabs.settings` at all. Found by
+      # the independent review of T-26a. Nothing leaks either way: `Template.visible(actor)`
+      # bounds whatever resolves.
       def template_for(project:, actor:, source:, template_id:)
         return nil if template_id.blank?
 

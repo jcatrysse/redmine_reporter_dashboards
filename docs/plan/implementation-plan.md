@@ -88,6 +88,7 @@ fact that CI has not yet run on this work at all.
 | Curator decisions, 2026-08-11 | **done, and two of the four are deliberately NOT code.** `:gotenberg` promoted to `verification: corpus` with the matrix regenerated from a three-engine run; `:engine_misconfigured` added to the closed `Failure::CODES` set (eight emitting sites — six in the Gotenberg adapter, one in wkhtmltopdf, one in `ReportRun` — four argued non-movers, thirteen-row boundary table). The `gotenberg:8.35.0-chromium` switch is **HELD**: its own module banner lists `pdfcpu` and `pdftk`, so the "3 of 4 advisories are absent" premise the YES rested on is refuted and there is no CVE argument left — and the image REFUSES the compose file's `--libreoffice-disable-routes`. The all-deferred exit code stays the curator's, with a re-measured recommendation. **Three independent reviews (reviewer, adversarial QA, UX) and the first attempt was rejected by all three for the same class of defect** — a control that did not hold the boundary it claimed. §Findings **E-29** |
 | FR-50 / §5.2 clause 4 | **done** — `render/engine_preference.rb`, the `render_engine` setting, the settings partial's generated one-line-per-engine comparison, `ReportRun`'s precedence (hint → this installation → declared default → any engine needing no service), and `PreflightSuite` no longer deferring the engine an install SELECTED. Locale keys ×9, terminology per file. E-27 row 2 CLOSED |
 | T-26a | **increments 1 and 2 done; increment 3 (my-page) open.** Increment 1 (`3a549c4`) built `ReportFrame` and `WidgetReport`. Increment 2 swapped the PROJECT DASHBOARD onto them: both block partials, `_report.html.erb`, `_report_settings.html.erb` and `report_pdf` render through `WidgetReport` + `Reporting::ReportRun` + `ReportFrame`, `OPTIONAL_BLOCKS` and the whole optional-widget machinery are deleted, and three entries came off `zero_reporter.allowlist` (strict: 12 files → 9). **Increment 1 shipped a defect that increment 2 fixes**: `ReportRun::OUTPUT_CLASSES` was a second copy of `ExecutionPolicy::OUTPUT_CLASSES` that lacked `:widget`, so `WidgetReport.render` raised `ArgumentError` for every template that resolved — and a spec used `:widget` as its example of an UNKNOWN class, so a test held the drift in place (§Findings **E-40**). **Its independent review REJECTED it** with one blocker and three majors: `source_for` did not strip the `__N` instance suffix, so every SECOND copy of a report widget on a dashboard was dead while the picker went on offering more (a regression — the partial it replaced never used `block` to resolve); an absolute "no configuration in which these cannot render" claim that was false twice over; an FR-46 comment asserting the importer resolves a carried-over `report_template_id` when nothing consults `source_template_id` and the importer never rewrites tab settings (**S-29**, reported not decided); and a surviving mutant proving the spent-time widget's render path had ZERO coverage. All fixed. 14 mutations across two rounds, 13 killed, 1 recorded equivalent |
+| S-29 | **CLOSED by curator decision (option A), 2026-08-12** — `Import::WidgetSettings`, called from `Runner#call` so `import:plan` predicts it and `import:run` performs it. Repoints every report widget's `report_template_id` from the source's id to the copy's, per-widget reporting, unmappable ones named individually, idempotent on a written marker rather than on arithmetic. 11 mutations, 11 killed — and four of them survived the first round, three for real (the marker's read guard, a skipped source being mapped, the plan's key-vs-value shape) |
 | T-26 remainder, T-27, T-37, T-38 | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -137,7 +138,20 @@ Fixed by making the constant the policy's own object (`assert_same`, not `==`) r
 corrected copy. §Findings **S-29** below is the second finding from the same round.
 
 **S-29 · A WIDGET SETTING CARRIED OVER FROM THE BASE PLUGIN IS A BARE PRIMARY KEY, AND THE
-COLLISION IS THE LIKELY CASE — REPORTED, NOT DECIDED.** 2026-08-12, found by T-26a's
+COLLISION IS THE LIKELY CASE. CLOSED 2026-08-12 by curator decision (option A): the
+IMPORTER repoints the widgets.** `Import::WidgetSettings`, called from `Runner#call`, walks
+`reporter_project_tabs` after the copy and rewrites every report widget's
+`report_template_id` from the source's id to the copy's, using the `source_template_id` the
+importer already records. It is reported per widget in `import:run`'s output, predicted by
+`import:plan` (the plan knows WHICH widgets, not the ids they will get — the copies do not
+have ids yet, and the shape distinguishes an absent key from a nil value for exactly that),
+and idempotent on a MARKER (`report_template_origin: 'rrd'`) rather than on arithmetic — a
+second run must be a no-op even where the numbers line up again, and a test builds that
+collision rather than waiting for it. An id with no imported counterpart is LEFT ALONE and
+named individually, because it is the one line that tells somebody which widget to re-pick.
+11 mutations, 11 killed. The original finding follows.
+
+ 2026-08-12, found by T-26a's
 independent review. `reporter_project_tabs.settings` holds `report_template_id`, which named
 a row in the base plugin's `report_templates`; the widget now resolves it against
 `reporter_dashboards_templates`. Both tables' ids start at 1, so on a real migration the

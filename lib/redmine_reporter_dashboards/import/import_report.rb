@@ -46,6 +46,7 @@ module RedmineReporterDashboards
 
           lines.concat(summary_lines(result))
           lines.concat(detail_lines(result))
+          lines.concat(widget_lines(result))
           lines.concat(note_lines(result))
           lines.concat(verdict_lines(result))
 
@@ -53,6 +54,34 @@ module RedmineReporterDashboards
         end
 
         private
+
+        # §Findings S-29 — THE DASHBOARDS. Printed as its own section rather than folded
+        # into the counts above, because a reader scanning for "did my templates come
+        # across" and a reader asking "are my widgets still pointing at the right report"
+        # are asking different questions, and the second one had no answer at all.
+        #
+        # Every `:unknown` is listed individually and none is summarised away: it is the
+        # only line in this report that names a widget somebody has to go and re-pick by
+        # hand, and a count would tell them how many without telling them which.
+        def widget_lines(result)
+          changes = result.widget_changes
+          return [] if changes.empty?
+
+          rewritten = changes.count { |change| change.status == :rewritten }
+          unknown = changes.select { |change| change.status == :unknown }
+
+          lines = ['Dashboard report widgets']
+          lines << format('  %-28s %d', 'repointed at the copy', rewritten)
+          lines << format('  %-28s %d', 'COULD NOT BE MAPPED', unknown.length) if unknown.any?
+          lines << ''
+          unknown.each do |change|
+            lines << "  project #{change.project_id} tab #{change.tab_id} " \
+                     "widget #{change.block}: stored template #{change.from} was not " \
+                     'imported, so it was left alone — re-pick it in the widget settings'
+          end
+          lines << '' if unknown.any?
+          lines
+        end
 
         def summary_lines(result)
           if result.outcomes.empty?
