@@ -48,8 +48,8 @@ than implied.
    credential, or a judgement the specs leave open (§11).
 6. **Small, reversible, readable, consistent with what is already here.** No half-finished refactor
    left in the tree. No second way of doing something that already has a way.
-7. **Never resolve an open question silently.** `technical-spec.md` §12 lists 13 `[OQ]` items — **7
-   still open** as of 2026-08-06; see §11.1 for which — and
+7. **Never resolve an open question silently.** `technical-spec.md` §12 lists 13 `[OQ]` items — **5
+   still open** as of 2026-08-12; see §11.1 for which — and
    `claims.json` holds the open beliefs with their discriminators. Hitting one is a **report-and-ask**
    event (§11).
 8. **Ordering constraints outrank task attractiveness** (§2).
@@ -260,7 +260,15 @@ PASS.
 
 ## 9. Commit and PR discipline
 
-- One task per branch: `feat/T-07-scope-binding`, `fix/T-00-rails8-enum`.
+- **Work lands on the integration branch this project actually runs in**, currently
+  `claude/plugin-repo-docs-setup-8u9k17`. Do **not** open a per-task branch or a pull request unless
+  the curator asks.
+
+  **This line used to read "One task per branch", and it cost a session.** That session read it
+  literally and told the curator new work needed new branches — which is not how this project runs,
+  and the correction had to come from the curator rather than from the repo. Corrected 2026-08-12 by
+  curator decision. If the working branch changes, change it *here*, because this is the sentence a
+  fresh session obeys.
 - Commit subject carries the task id: `T-07: replace ScopeResolution with ScopeBinding`.
 - The PR body is the task's `Accept:` list as a checklist, plus **which invariants the change
   touches** (INV-1…INV-9) and how each is still held.
@@ -291,14 +299,19 @@ Report and ask — do not decide — when you hit any of these:
    4.x and 5.x, so the five `?` accessors are **live surface** and keeping their aliases is a
    compatibility requirement, not a courtesy.
 
-   **Six are now closed and seven are open. Count them from the table, not from memory — this line
+   **Eight are now closed and five are open. Count them from the table, not from memory — this line
    has been stale before.** Closed: **OQ-A**, **OQ-B** (2026-08-04, both refuted by measurement);
    **OQ-C** (2026-08-06, in T-19 — the filter inventory, measured on both Liquid majors);
    **OQ-I** (2026-08-04, by OQ-4's answer); **OQ-L** (2026-08-06, by measurement — wkhtmltopdf
    cannot parse `||=`); **OQ-F** (2026-08-06, by curator decision — the `template_authoring`
    setting is *deleted*, not defaulted, and replaced by the role-permission model in
-   `technical-spec.md` §4.1; do not reintroduce a global switch over authoring). Still open:
-   **OQ-D**, **OQ-E**, **OQ-G**, **OQ-H** (narrowed, not closed), **OQ-J**, **OQ-K**, **OQ-M**.
+   `technical-spec.md` §4.1; do not reintroduce a global switch over authoring);
+   **OQ-M** (2026-08-12, by measurement — there is no pre-built CodeMirror 6 bundle to vendor at all,
+   so T-37 takes the `<textarea>`-plus-lint-panel fallback and its "findings in the gutter" clause
+   needs rewording); **OQ-E** (2026-08-12, by measurement — Redmine 7.0 ships **Propshaft 1.3.2**, so
+   §6's "neither pipeline is involved" is wrong for 7.0, but the design does not depend on it because
+   the PDF path reads the plugin's own `assets/` directory rather than `public/plugin_assets/`).
+   Still open: **OQ-D**, **OQ-G**, **OQ-H** (narrowed, not closed), **OQ-J**, **OQ-K**.
 2. **A claim in `claims.json` whose discriminator your work just ran.** That is *evidence*, and the
    register must be updated rather than the conclusion assumed. C-014 (the asset fetcher's internal
    reachability) and C-015 (whether the UX design actually closes R9) are the two most likely to be

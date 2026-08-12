@@ -4414,8 +4414,47 @@ Phase 4.)*
    `ff3406c` — but deleting the module deletes the subject the oracle tests, so the two must move
    together and deliberately.
 
-**Still owed by T-26:** the my-page widgets and locales its title names, and the CI flip to strict
-once Phase 4 lands.
+**RE-CHECKED 2026-08-12, and the curator's decision is to LEAVE ALL THREE BLOCKED.** The check was
+asked for because Phase 4 had landed since the last one; the answer is that one *reason* went stale
+while none of the three *blocks* did.
+
+1. **Strict flip — the stated reason is STALE, the clause is still blocked.** "Blocked on T-34 alone"
+   is no longer true: T-34 landed 2026-08-10 and T-35 with it. But strict still exits 1 on **12
+   files**, five of them the integration surface, and none of those five has changed since the
+   2026-08-08 check (`report_patch.rb` 2026-08-06, the controller 2026-08-04, the helper 2026-08-05,
+   both `my/` views 2026-05-31). **The gate's own failure message is stale the same way** — it says
+   "most of the list above goes when T-30..T-32 own the reporting surface" while all three have landed
+   and all 12 remain. Worth knowing about the five: four are now **comment-only** matches, and that is
+   *not* progress the gate can bank, because the gate matches FILES, so removing an entry whose file
+   still matches is itself a failure — and two of those four carry live coupling under names the gate
+   cannot see (`IssueListReportTemplate`, `report_content_report_template_path`). The gate measures
+   name mentions, not coupling; `blocks/optional/_report_by_issues.erb` names a base-plugin constant
+   and is invisible to it.
+2. **`glue/legacy/` — still blocked, verbatim.** T-30/T-31/T-32 added an owned surface *alongside* the
+   base plugin's renderer; they did not remove it, and the tags are registered **globally** on
+   `::Liquid::Template`, so a template authored in the base plugin's own UI renders through *its*
+   `Liquid::Context`, carries no `:rrd_render_context` register, and reaches `legacy_bind` today.
+   Deleting the directory makes `legacy_available?` false, `bind` returns `NONE`, and the tag logs and
+   emits an empty result — no crash, no degradation, no user-visible error. Silently reporting nothing
+   on exactly the installs the integration exists for.
+3. **`scope_resolution.rb` — still blocked, and STRONGER than "same reason as 2".**
+   `test/unit/golden_scope_fixture_test.rb:78-85` **`include`s** the module into its `Host` class, so
+   deletion is not a test failure but a **load failure of the whole file**, taking all twelve test
+   methods with it. Eight of its eleven templates have no counterpart in `ScopeBinding` (six sources
+   versus two), and the F-2 assertion at `:323` — the deliberate record of a path that is *not*
+   visibility-scoped — has no home there at all. `spec/golden/scope/scope.jsonl` is the one artefact in
+   the repository that cannot be regenerated.
+
+**Locales: nothing owed.** Measured across all nine files: de/en/es/hu/it/pt-BR **331** leaf keys, pl
+**332**, ru **332**, zh **330**. Every delta is on one pluralized key
+(`notice_reporter_share_links_revoked`) and every one is the correct CLDR category — `few` for the two
+Slavic locales, no `one` for Chinese. No key is missing anywhere.
+
+**My-page widgets: DONE 2026-08-12** — and it was not the cosmetic clause it looked like. See
+§Findings **E-39**: the widget 500'd `/my/page` on two configurations, one of them the curator's own.
+
+**Still owed by T-26:** only the CI flip to strict, which stays blocked on the twelve files above.
+T-27 depends on T-26 and is therefore still blocked.
 
 **T-33 · The asset-resolution triple + `asset_policy`** *(deps: T-12; blocks nothing after T-13)*
 **DONE 2026-08-06.** *Touches (as built, and the address moved — findings F-13/F-13b):*
@@ -4509,10 +4548,24 @@ trial install is the entire A/B argument for copy-not-adopt.
 **T-37 · The authoring experience** *(deps: T-19 for the linter, T-23 for the editor host; the
 starter gallery additionally needs T-16 and T-35 to render its thumbnails)*
 *Touches:* `app/views/…/templates/`; vendored CodeMirror 6; `render/drop_reference.rb`.
+**`[OQ-M]` IS SETTLED — measured 2026-08-12, the answer is NO, and it changes this task's shape
+before a line of it is written.** There is no pre-built CodeMirror 6 bundle to vendor: `codemirror@6.0.2`
+is a meta-package (`type: module`, no UMD/IIFE/`browser` entry) whose `dist/index.js` is a
+**4,737-byte re-export shim importing 7 bare specifiers**, which no browser resolves without an import
+map. One usable file therefore requires a bundler — the build step §6 forbids — and the result would be
+*our* artefact, so the three-independent-origin byte-identity check in `THIRD_PARTY.md` (which
+`mermaid.min.js` and `chart.umd.js` both pass, because their authors publish single files) could not
+apply to it. **Curator decision, same day: take the fallback.** So the gutter is out and the clause
+below is reworded rather than quietly dropped — `technical-spec.md` §12's OQ-M row carries the
+evidence. Nothing is vendored by this task; the CodeMirror line in `Touches:` is void.
+
 *Accept:* the editor's findings panel is fed by **the same linter object** the rake task calls —
 asserted by a test that runs both over one fixture and compares the finding lists, so the two can
-never diverge; findings carry line and column and are shown in the gutter; the editor degrades to a
-`<textarea>` with server-side lint intact when JS is off; preview renders **HTML and PDF**, is
+never diverge; findings carry **line and column and are listed in a server-rendered panel** beside the
+editor, each one naming its position — **not** shown in a gutter, which a `<textarea>` cannot do and
+which OQ-M closed off (the panel is what satisfies FR-71, and the line/column data is unchanged); the
+editor is a plain `<textarea>` and therefore works with JS off by construction rather than by
+degrading; preview renders **HTML and PDF**, is
 bounded and says *"preview of N of M"* rather than truncating silently; a failed preview shows
 FR-58's diagnostics **in the editor**; the drop reference is **generated from the declared
 surfaces** with a `drop_reference_parity` gate asserting both directions; a starter gallery whose
