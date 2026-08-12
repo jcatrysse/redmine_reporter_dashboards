@@ -241,4 +241,99 @@ class ReporterDashboardsTimeEntryVisibilityTest < ActiveSupport::TestCase
 
     assert_equal :none, Subject.state(@jsmith, @project)
   end
+
+  # ---------------------------------------------- T-26a increment 3: no project to ask about
+
+  # A MY-PAGE HOURS WIDGET SPANS EVERY PROJECT, so `state` is the wrong question there: it
+  # takes a project and answers `:none` for a nil one, which would print "your role does not
+  # let you see spent time IN THIS PROJECT" over a report drawing on several. A false
+  # sentence is worse than the silence S-14 exists to remove.
+  #
+  # jsmith is a member of projects 1, 2 and 5 in Redmine's own fixtures (measured), all with
+  # `@role` or role 2, so setting the roles here decides the whole answer.
+  def test_across_projects_full_visibility_everywhere_needs_no_notice
+    every_role_grants([:view_time_entries], 'all')
+
+    assert_equal :all, Subject.state_across_projects(@jsmith)
+  end
+
+  # THE CASE THE NOTICE EXISTS FOR: one project narrows and another does not, so the report
+  # is a MIX and neither "all" nor "own" describes it on its own.
+  #
+  # PROJECT 2 HAS TIME TRACKING OFF IN REDMINE'S FIXTURES (measured), so the first version of
+  # this test set role 2 to `own` and got `:all` back — role 2's only project contributed
+  # `:none`, and the example was asserting nothing about a mix at all. The module is enabled
+  # here and the mix is asserted before the subject is asked.
+  def test_across_projects_one_own_only_role_makes_the_whole_answer_own
+    Project.find(2).enable_module!(:time_tracking)
+    every_role_grants([:view_time_entries], 'all')
+    Role.find(2).update!(time_entries_visibility: 'own')
+    @jsmith = User.find_by!(login: 'jsmith')
+
+    assert_equal :all, Subject.state(@jsmith, Project.find(1)),
+                 'precondition: one project must be unrestricted'
+    assert_equal :own, Subject.state(@jsmith, Project.find(2)),
+                 'precondition: the other must be restricted, or this is not a mix'
+
+    assert_equal :own, Subject.state_across_projects(@jsmith)
+  end
+
+  def test_across_projects_no_permission_anywhere_is_none
+    every_role_grants([:view_issues], 'all')
+
+    assert_equal :none, Subject.state_across_projects(@jsmith)
+  end
+
+  # A PROJECT WITH TIME TRACKING OFF CONTRIBUTES NOTHING, and this is the claim that used to
+  # be a redundant filter in `state_across_projects`. Core's `allowed_to_condition` adds an
+  # `enabled_modules` clause for EVERYONE, administrators included, so a role in such a
+  # project grants no hours at all — announcing full visibility off it would be false.
+  # `state`'s own module gate is what delivers this; the extra filter above it was removed
+  # after mutation testing showed it could not change any answer.
+  def test_across_projects_a_module_disabled_project_does_not_widen_the_answer
+    Project.find(2).enable_module!(:time_tracking)
+    every_role_grants([:view_time_entries], 'all')
+    Role.find(1).update!(time_entries_visibility: 'own')
+    @jsmith = User.find_by!(login: 'jsmith')
+    assert_equal :own, Subject.state_across_projects(@jsmith),
+                 'precondition: project 2 must be widening the answer to a mix'
+
+    # Take the MODULE off the widening project. Its role still says `all` and the actor is
+    # still a member — core's `allowed_to_condition` adds an `enabled_modules` clause for
+    # everyone, so it grants no hours, and announcing full visibility off it would be false.
+    Project.find(2).disable_module!(:time_tracking)
+    @jsmith = User.find_by!(login: 'jsmith')
+
+    assert_equal :own, Subject.state_across_projects(@jsmith)
+
+    Project.find(1).disable_module!(:time_tracking)
+    @jsmith = User.find_by!(login: 'jsmith')
+
+    assert_equal :none, Subject.state_across_projects(@jsmith),
+                 'with the module off everywhere there is nothing to see and nothing to narrow'
+  end
+
+  # AN ADMINISTRATOR IS `:all` AND MUST NOT BE SHOWN A NARROWING NOTICE, because
+  # `TimeEntry.visible` gives them every entry — the notice would simply be false.
+  def test_across_projects_an_administrator_is_all
+    every_role_grants([:view_time_entries], 'own')
+
+    assert_equal :all, Subject.state_across_projects(User.find_by!(login: 'admin'))
+  end
+
+  def test_across_projects_a_nil_actor_fails_closed
+    assert_equal :none, Subject.state_across_projects(nil)
+  end
+
+  # EXACTLY these permissions on every role jsmith actually holds. Setting only `@role`
+  # leaves role 2 (his membership in project 2) answering whatever the fixture says, which
+  # is the fixture-as-subject problem the helper above already warns about.
+  def every_role_grants(permissions, visibility)
+    [Role.find(1), Role.find(2)].each do |role|
+      role.permissions = permissions.map(&:to_s)
+      role.time_entries_visibility = visibility
+      role.save!
+    end
+    @jsmith = User.find_by!(login: 'jsmith')
+  end
 end

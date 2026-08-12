@@ -2,7 +2,7 @@
 
 Configurable project dashboards for Redmine, plus Liquid tags that replace slow per-issue loops with fast SQL aggregations.
 
-It installs on a plain Redmine and needs no other plugin. One my-page widget still integrates with the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter) plugin when that is installed — see [`redmine_reporter` is optional](#redmine_reporter-is-optional).
+It installs on a plain Redmine and needs no other plugin — every widget, including the report widgets, is its own. See [`redmine_reporter` is optional](#redmine_reporter-is-optional).
 
 ## What does it do?
 
@@ -54,18 +54,22 @@ project dashboards, the tab bar, the `{% sql_aggregate %}` / `{% version_rollup 
 `{% geo_version_map %}` Liquid tags and the statistics endpoint all work on a plain
 Redmine. Installed or not, one line in the log says which mode you are in.
 
-What still needs `redmine_reporter` — and only this:
+**Nothing does any more.** The report widgets — both on a project dashboard and both on
+**My page** — render this plugin's own report templates through its own render path, and the
+dashboard widget's **Export as PDF** link produces the PDF through this plugin's engines. All
+of it works on a Redmine with neither `redmine_reporter` nor the `redmineup` gem installed,
+which is the whole point of the exercise.
 
-- the **my-page** *Report by issues* widget, which renders one of Reporter's own report
-  templates.
+What a report widget needs is a report template *you are allowed to see* — the
+`view_reporter_dashboards_reports` permission in that template's project, the **Reports**
+module enabled there, and the template's own visibility (private / visible to roles /
+public). Its settings form says so plainly when there is nothing to offer. A **My page**
+widget has no project, so it offers every template you can see plus the global ones, and the
+report covers whatever its saved query covers — or, with no query, everything you can see.
 
-**The two PROJECT-DASHBOARD report widgets no longer do.** They render this plugin's own
-report templates through its own render path, and their **Export as PDF** link produces the
-PDF through this plugin's engines — so both work on a Redmine with neither
-`redmine_reporter` nor the `redmineup` gem installed, which is the whole point of the
-exercise. They are offered in the widget picker unconditionally; what they need is a report
-template you can see, in a project with the **Reports** module enabled, and the widget's own
-settings form says so when there is none.
+> This is stricter than the plugin it replaces, deliberately. `redmine_reporter`'s report
+> templates have no visibility rule at all, so its My page picker listed *every* template in
+> the instance to *every* user.
 
 `issue.target_version` and `issue.custom_field_value` used to be on this list. They were
 added by prepending a module into Reporter's own Liquid drop; that prepend is **gone**,
@@ -123,21 +127,21 @@ belief.
 The plugin's own code stays inside Ruby 2.7 syntax, because that is the floor
 Redmine 5.1 allows. `.codex/check_ruby_floor.sh` guards it and runs in CI.
 
-#### Redmine 7.0: everything except the my-page report widget
+#### Redmine 7.0
 
 **On Redmine 7.0 (Rails 8.1) the plugin runs standalone, in full.** Verified on
 `7.0-stable` with no `redmine_reporter` and no `redmineup` gem installed: 2683 plugin
-specs, 254 adapter execution specs against PostgreSQL 16, and 966 full-application tests —
-0 failures. Since reporter is now optional, the Redmine 7 problem below no longer
-affects anything but the one widget that actually needs it.
+specs, 254 adapter execution specs against PostgreSQL 16, and 985 full-application tests —
+0 failures.
 
-**This section used to say "except the two report widgets", and that stopped being true.**
-The project-dashboard `report_by_issues` and `report_by_spent_time` widgets, and their PDF
-export, are this plugin's own and work on Redmine 7.0 whether or not reporter is installed.
-What is left is the **my-page** *Report by issues* widget, which still renders one of
-reporter's report templates — so it cannot work on Redmine 7.0 with reporter installed,
-because it depends on redmine_reporter's `ReportTemplate` and merely referencing that class
-raises on Rails 8.1:
+**This section used to be a list of exceptions.** It said "everything except the two report
+widgets", then "except the my-page report widget". There is no exception left: every widget
+this plugin ships is its own and works on Redmine 7.0 whether or not `redmine_reporter` is
+installed.
+
+The Redmine 7 problem below is therefore only about `redmine_reporter` itself, and is kept
+because an install that still has it will meet it elsewhere. Its `ReportTemplate` cannot be
+referenced at all on Rails 8.1:
 
 ```
 ArgumentError: wrong number of arguments (given 0, expected 1..2)
@@ -156,16 +160,14 @@ The fix belongs in redmine_reporter and is one line — `enum :orientation, {...
 plugin deliberately does not patch it: reporter is a third-party plugin, and carrying a
 patch for it would have to be re-applied at every reporter upgrade.
 
-What this plugin does instead is refuse to fall over. The my-page widget checks whether
-reporter's classes actually resolve before naming one, and rescues anything else its body
-raises, so `/my/page` stays up and the block keeps its own close button — without which a
-user could not remove it. The reason is written to `log/production.log`. The two
-integration tests that need reporter to be genuinely absent **skip** with that explanation
-rather than failing anonymously.
+This plugin no longer references those classes anywhere, so nothing here breaks. The
+my-page widgets still carry their own rescue — Redmine core rescues only a missing template
+when it renders a My page block, so *any* other exception there is a 500 on `/my/page`, the
+one page from which a user could remove the block — but that is now a backstop against an
+unknown defect in this plugin's own code rather than a guard against another plugin's.
 
-So on Redmine 7.0 today: every project-dashboard widget works normally, including both
-report widgets and their PDF export, and the my-page report block degrades to a labelled
-placeholder that can still be removed.
+So on Redmine 7.0 today: every widget works normally, on both surfaces, with or without
+`redmine_reporter`.
 
 #### Fixed: `group_by: age` used to report everything as `(none)` on MariaDB
 

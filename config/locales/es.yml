@@ -171,6 +171,8 @@ es:
   text_reporter_template_no_time_entries: "Este informe no abarca ningún tiempo dedicado, por lo que no ha producido ningún documento. Amplíe la selección o elija otra consulta guardada."
   text_reporter_time_entries_own_only: "Su perfil solo le permite ver su propio tiempo dedicado en este proyecto, por lo que este informe abarca sus horas y no las del proyecto."
   text_reporter_time_entries_not_visible: "Su perfil no le permite ver el tiempo dedicado en este proyecto, por lo que este informe está vacío."
+  text_reporter_time_entries_own_only_across_projects: "Al menos en un proyecto su rol solo le permite ver su propio tiempo dedicado, por lo que este informe mezcla las horas del proyecto con las suyas."
+  text_reporter_time_entries_not_visible_anywhere: "Sus roles no le permiten ver el tiempo dedicado en ningún proyecto, por lo que este informe está vacío."
   text_reporter_failure_document_notice: "Este documento no es el informe. Deja constancia de que el informe no se ha podido producir. Cite el identificador de correlación anterior al pedir a una persona administradora que revise el registro."
   text_reporter_failure_document_value_unavailable: "Este valor no se ha podido mostrar en este documento."
   error_reporter_template_import_no_file: "Elija un archivo para importar."

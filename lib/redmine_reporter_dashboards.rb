@@ -10,9 +10,11 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/report_frame'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'
-# Asked from a my-page partial, which core renders through its OWN helper set
-# (`include_all_helpers = false`), so this cannot live in one of this plugin's helpers.
-require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_report_templates'
+# Called from a my-page partial, which core renders through its OWN helper set
+# (`include_all_helpers = false`), so neither of these can live in one of this plugin's
+# helpers — `TemplatesHelper` delegates to both instead. `reporter_report_templates` used to
+# be required here for the same reason and is gone with the base-plugin widget it guarded.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/degradation_text'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/row_layout'
 
 # The render layer (T-10). Loaded here rather than autoloaded because a plugin's lib/
@@ -319,13 +321,14 @@ module RedmineReporterDashboards
     ReporterPresence.present?
   end
 
-  # BOTH memoised answers about the optional dependency, because clearing one and not
-  # the other leaves a reload holding a stale verdict: `ReporterReportTemplates` caches
-  # whether the base plugin's classes RESOLVE, which is exactly what changes when a
-  # development reload rebuilds the registry.
+  # ONE memoised answer about the optional dependency now.
+  #
+  # This used to clear two, because `ReporterReportTemplates` cached whether the base
+  # plugin's report-template classes RESOLVE — the question the my-page widget had to ask
+  # before naming one. T-26a increment 3 made that widget this plugin's own, so nothing
+  # asks it, and the module went rather than being left memoising an answer with no reader.
   def reset_reporter_presence!
     ReporterPresence.reset!
-    ReporterReportTemplates.reset!
   end
 
   def load_patches

@@ -6,6 +6,23 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **The report widgets on *My page* no longer need the `redmine_reporter` plugin either —
+  and there is now a *spent time* one, which there never was.** With this, no part of the
+  plugin needs it: you can uninstall `redmine_reporter` and keep every dashboard widget.
+
+  **A My page widget now shows only report templates you are allowed to see.** The picker it
+  replaces listed *every* report template in the instance to every user — the plugin it came
+  from has no visibility rule for templates at all. Yours are filtered by the reports
+  permission in each template's project and by the template's own visibility.
+
+  **There is no project to choose, and that is deliberate**: the saved query decides which
+  issues or time entries the report covers, and with no query it covers everything you can
+  see. A My page widget offers your global templates and any you can see in your projects.
+
+  **A spent-time widget you may not use is not shown**, and an hours report that only shows
+  you *your own* hours in some projects now says so — the old wording could only talk about
+  "this project", which is not a thing a My page report has.
+
 - **The two project-dashboard *report* widgets no longer need the `redmine_reporter`
   plugin.** They render this plugin's own report templates, through this plugin's own render
   path, and their **Export as PDF** link produces the PDF the same way — so a dashboard with

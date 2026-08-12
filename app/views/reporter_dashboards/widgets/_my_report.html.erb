@@ -1,0 +1,76 @@
+<%#
+  T-26a increment 3 — one rendered report, in a MY-PAGE block.
+
+  The sibling of `reporter_project_pages/_report.html.erb`, and deliberately not the same
+  partial: a my-page block renders in `MyController`'s view context, which sees its own
+  helper, `ApplicationHelper` and the five core helpers `MyController` declares — and none
+  of ours (`include_all_helpers = false`, HANDOVER §1). So this file may call `l`, core's
+  helpers and MODULES, and nothing else.
+
+  That is why `RedmineReporterDashboards::ReportFrame` and `…::DegradationText` are modules
+  rather than helper methods: they are the two things both surfaces need, and each has one
+  definition that the template editor's helper now delegates to.
+
+  --- WHAT IS DELIBERATELY MISSING COMPARED WITH THE PROJECT DASHBOARD ---
+
+  No PDF export link. `report_pdf_reporter_project_page_path` is project-scoped and my-page
+  has no project; inventing a second, project-less export route would be a second way of
+  doing something that already has a way, for a button the base plugin's own my-page widget
+  never had either.
+
+  No settings/close controls: core's `MyHelper#render_block` supplies those, which is also
+  why this partial must never render as nothing — a block with no content loses the very
+  controls that would let somebody remove it.
+%>
+<h3>
+  <%= widget.template.name %>
+
+  <% if widget.query %>
+    (<%= "#{widget.query.project} |" if widget.query.project %>
+    <% options = (widget.query.try(:as_params) || {}) %>
+    <% if widget.query.is_a?(IssueQuery) %>
+      <%= link_to widget.query.name, _project_issues_path(widget.query.project, options) %>
+    <% else %>
+      <%= link_to widget.query.name, _time_entries_path(widget.query.project, nil, options) %>
+    <% end %>)
+  <% end %>
+
+  (<%= widget.outcome.total_count %>)
+</h3>
+
+<%# §Findings S-14 across projects. `state` takes a project and answers `:none` for a nil
+    one, so asking it here would print "your role does not let you see spent time in this
+    project" over a report drawing on four of them — a false sentence, which is worse than
+    the silence S-14 exists to remove. `state_across_projects` is the honest version. %>
+<% rrd_notice = RedmineReporterDashboards::WidgetReport.time_entry_notice_key(widget.template, user) %>
+<% if rrd_notice %>
+  <p class="warning"><%= l(rrd_notice) %></p>
+<% end %>
+
+<% if widget.outcome.degradations.any? %>
+  <div class="reporter-degradations">
+    <p><strong><%= l(:label_reporter_preview_degradations) %></strong></p>
+    <ul>
+      <% widget.outcome.degradations.each do |degradation| %>
+        <li><%= RedmineReporterDashboards::DegradationText.for(degradation) %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<% if widget.outcome.ok? %>
+  <% widget.outcome.sections.each do |section| %>
+    <%= RedmineReporterDashboards::ReportFrame.frame(
+          section.body, title: l(:label_reporter_report_frame),
+          css_class: 'reporter-report-frame reporter-report-frame--widget') %>
+  <% end %>
+<% else %>
+  <%# INV-5: the error is never the document. The headline and the correlation id, which is
+      the one value FR-58 asks a reader to quote. %>
+  <p class="nodata reporter-report-diagnostic">
+    <%= l(RedmineReporterDashboards::Reporting::Diagnostic::ORIGIN_LABEL_KEYS
+            .fetch(widget.outcome.diagnostic.origin)) %>
+    <%= l(:label_reporter_report_diagnostic_correlation_id) %>:
+    <code><%= widget.outcome.diagnostic.correlation_id %></code>
+  </p>
+<% end %>

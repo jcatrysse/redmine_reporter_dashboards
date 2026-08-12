@@ -83,10 +83,25 @@ module RedmineReporterDashboards
 
       # The templates the settings form may offer, and the same scope `#template_for`
       # resolves against — one definition, so the picker and the lookup cannot disagree.
+      #
+      # `project: nil` MEANS "NO PROJECT CONTEXT", NOT "GLOBAL TEMPLATES ONLY" (T-26a
+      # increment 3). The project bound exists for the project dashboard's reason — a widget
+      # must not offer what its own settings form cannot change — and my-page has no project
+      # for that argument to be about. There the honest bound is `Template.visible(actor)`
+      # alone, which is already the permission model: `Project.allowed_to_condition` for
+      # `view_reporter_dashboards_reports` (so the role AND the reports module, per project)
+      # plus the template's own private/roles/public visibility.
+      #
+      # This is a deliberate change of meaning rather than a new argument, and it is safe
+      # because nothing passed nil before: both dashboard partials always have a project.
+      # The base plugin's answer to the same question was `IssueListReportTemplate.all` —
+      # every template in the instance, to every user, with no visibility model to filter by
+      # (verified against its source, 2026-08-12) — so this is a narrowing, not a port.
       def templates_for(project:, actor:, source:)
-        Template.visible(actor)
-                .where(project_id: [nil, project&.id], source: source.to_s, output: OUTPUT)
-                .order(:name)
+        scope = Template.visible(actor).where(source: source.to_s, output: OUTPUT)
+        scope = scope.where(project_id: [nil, project.id]) if project
+
+        scope.order(:name)
       end
 
       # The stored template, or nil.
@@ -119,6 +134,66 @@ module RedmineReporterDashboards
 
         templates_for(project: project, actor: actor, source: source)
           .find_by(id: template_id)
+      end
+
+      # §Findings S-14 ON A SURFACE WITH NO PROJECT — the locale KEY, not the sentence.
+      #
+      # A key rather than a translated string because the my-page partial has `l` (through
+      # `ApplicationHelper`) and does not have our helper, so the view translates and this
+      # module decides. `nil` for an issue template and for an actor who sees everything, so
+      # the caller renders it unconditionally rather than behind a branch a later edit can
+      # get wrong.
+      #
+      # The project-scoped version is `TemplatesHelper#reporter_time_entry_visibility_notice`
+      # and the two are NOT interchangeable: that one asks `TimeEntryVisibility.state`, which
+      # answers `:none` for a nil project — so used here it would tell a reader their role
+      # does not let them see spent time "in this project" over a report drawing on four.
+      def time_entry_notice_key(template, actor)
+        return nil unless template.respond_to?(:source) && template.source.to_s == 'time_entries'
+
+        case Reporting::TimeEntryVisibility.state_across_projects(actor)
+        when :own then :text_reporter_time_entries_own_only_across_projects
+        when :none then :text_reporter_time_entries_not_visible_anywhere
+        end
+      end
+
+      # MY-PAGE IS THE SAME WIDGET WITH NO PROJECT, and this is the whole of the difference.
+      #
+      # `project: nil` means the templates are bounded by `Template.visible(actor)` alone
+      # and the data by the saved query — or, with no query, by everything the actor can
+      # see. The user asking for this put it exactly right: the query defines the input, so
+      # there is nothing for a project selector to add that a query does not already say,
+      # and a second way of saying it is a second thing that can disagree.
+      def render_for_my_page(actor:, block:, settings:, logger: Rails.logger)
+        render(project: nil, actor: actor, block: block, settings: settings, logger: logger)
+      end
+
+      # Whether this actor may be shown the block at all. Only the spent-time widget has an
+      # extra condition, and it is core's `:view_time_entries` asked GLOBALLY, because
+      # my-page has no project to ask it about — the same rule the project dashboard applies
+      # per project, stated once here so the two surfaces cannot come to disagree.
+      def block_permitted?(block, actor)
+        return true unless ProjectPage.base_block_name(block) == 'report_by_spent_time'
+
+        actor.respond_to?(:allowed_to?) && actor.allowed_to?(:view_time_entries, nil, global: true)
+      end
+
+      # WHAT A MY-PAGE PARTIAL'S RESCUE REPORTS WITH — the half a pre-check cannot cover.
+      #
+      # ERROR with a truncated backtrace, matching `ReporterProjectPagesHelper`'s
+      # `reporter_project_block_error` rather than inventing a second regime for the same
+      # event: an arbitrary exception from a widget body is an unknown defect, so it is
+      # loud, every time. It answers nil so an ERB `<% %>` block that calls it appends
+      # nothing to the buffer.
+      #
+      # It is here rather than in a helper because a my-page partial cannot reach one.
+      def log_my_page_failure(error)
+        Rails.logger.error(
+          '[reporter_dashboards] my-page report widget could not be rendered: ' \
+          "#{error.class}: #{error.message}\n" \
+          "#{Array(error.backtrace).first(5).join("\n")}"
+        )
+        nil
       end
 
       # Render the widget, or nil when its settings do not yet name a resolvable template.

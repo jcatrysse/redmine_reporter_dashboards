@@ -31,14 +31,19 @@ lib/redmine_reporter_dashboards.rb                     routes the reporter-only 
 init.rb                                                logs which mode the plugin booted in; documents that reporter is optional
 
 # --- The integration surface itself: code that only runs when reporter is present.
-# --- T-26a (2026-08-12) removed the PROJECT DASHBOARD half of this section: the two report
-# --- widgets, their PDF export and the optional-widget machinery are now this plugin's own
-# --- (WidgetReport + Reporting::ReportRun), so `project_page.rb`, the dashboard controller
-# --- and its helper came off this list rather than having their reasons reworded. What is
-# --- left is the MY-PAGE half plus the PDF patch, which T-26a's next increment owns.
+# --- T-26a emptied this section of WIDGETS. Increment 2 took the project dashboard
+# --- (`project_page.rb`, the dashboard controller, its helper); increment 3 took my-page
+# --- (`my/_report.erb` and both `my/blocks/` partials, now rendering this plugin's own
+# --- templates through WidgetReport + Reporting::ReportRun). `reporter_report_templates.rb`
+# --- went with them — it existed to ask whether the base plugin's classes resolve, and
+# --- nothing asks any more.
+# ---
+# --- ONE ENTRY IS LEFT AND IT IS NOT A WIDGET. `report_patch` improves the BASE PLUGIN'S
+# --- own PDF output (a binary fallback, and polyfills for its wkhtmltopdf call). No code of
+# --- ours has called it since increment 2 replaced the widget export. Deleting it is a
+# --- behaviour change for installs still running reporter, so it is a CURATOR decision
+# --- rather than a tidy-up, and it is the last thing between this list and `strict`.
 lib/redmine_reporter_dashboards/patches/report_patch.rb          patches reporter's Report#to_pdf
-app/views/my/_report.erb                                        renders a reporter report template
-app/views/my/blocks/_report_by_issues.erb                       renders a reporter report template
 
 # --- Historical record. Comments only; no executable reference.
 lib/redmine_reporter_dashboards/positioned.rb          comments naming the vendor gem method it replaced

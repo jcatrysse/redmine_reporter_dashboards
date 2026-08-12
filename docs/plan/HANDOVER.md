@@ -31,6 +31,31 @@ the intended tree BEFORE launching review agents and diff the whole thing agains
 snapshot, never spot-check lines. And if a commit genuinely cannot wait, stage EXPLICIT PATHS
 the agents do not touch (docs, locales) rather than everything.
 
+**THE BASE PLUGIN'S REPOSITORY CAN BE ATTACHED TO A SESSION, AND SEVERAL ROUNDS OF THIS
+PROJECT GUESSED AT IT INSTEAD.** `jcatrysse/redmine_reporter` is private and was not in the
+session's scope, so its behaviour was inferred from this plugin's own overrides — which are
+copies-plus-fixes and are therefore *mostly* right, which is the dangerous kind of wrong.
+Attaching it (`add_repo`, then one shallow clone) took under a minute and settled T-26a
+increment 3's whole design question in two greps. What it showed, none of it inferable:
+`ReportTemplate` has NO visibility model at all — no column, no scope, no roles — so its
+my-page picker is `IssueListReportTemplate.all`, every template in the instance offered to
+every user; its spent-time my-page block resolves with a bare `TimeEntryQuery.find_by_id`
+where the issues one uses `.visible`; and `report_content`, the endpoint both widgets
+iframe, is `require_login` plus an unscoped `find` on both the template and the query. Ask
+for the repository before designing against a guess about it.
+
+**A REDMINE FIXTURE IS A FACT TO MEASURE, NOT ONE TO ASSUME, AND THREE TESTS IN ONE SITTING
+ASSUMED WRONG.** All three passed for the wrong reason or failed for a confusing one, and
+all three were mine rather than the code's. jsmith is a member of projects 1, 2 AND 5 — so
+"some other project he cannot reach" is project 6, not 2. `view_time_entries` is granted by
+five roles, TWO OF THEM BUILTIN, and a builtin role applies on every public project the
+actor is not a member of — so removing it from Manager leaves `allowed_to?(global: true)`
+true and a permission-refusal test renders the widget anyway. And project 2 has
+`time_tracking` DISABLED, so a role attached to it contributes `:none` and an example built
+to prove "one project narrows the answer" proved nothing. One `rails runner` loop printing
+the fixture's actual memberships, roles and modules is faster than any of the three debugging
+sessions it prevents.
+
 **AN ID STORED IN A SETTINGS BLOB SURVIVES THE TABLE IT NAMED, AND BOTH TABLES START AT 1.**
 A dashboard widget stores `report_template_id`. T-26a moved what that names from the base
 plugin's `report_templates` to `reporter_dashboards_templates` — different tables, both

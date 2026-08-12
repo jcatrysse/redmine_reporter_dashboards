@@ -171,6 +171,8 @@ pt-BR:
   text_reporter_template_no_time_entries: "Este relatório não abrange nenhum tempo gasto, portanto não produziu documento algum. Amplie a seleção ou escolha outra consulta salva."
   text_reporter_time_entries_own_only: "Seu papel permite ver apenas o seu próprio tempo gasto neste projeto, portanto este relatório abrange as suas horas e não as do projeto."
   text_reporter_time_entries_not_visible: "Seu papel não permite ver o tempo gasto neste projeto, portanto este relatório está vazio."
+  text_reporter_time_entries_own_only_across_projects: "Em pelo menos um projeto seu papel permite ver apenas o seu próprio tempo gasto, portanto este relatório mistura as horas do projeto com as suas."
+  text_reporter_time_entries_not_visible_anywhere: "Seus papéis não permitem ver o tempo gasto em nenhum projeto, portanto este relatório está vazio."
   text_reporter_failure_document_notice: "Este documento não é o relatório. Ele registra que o relatório não pôde ser produzido. Cite o identificador de correlação acima ao pedir que uma pessoa administradora consulte o log."
   text_reporter_failure_document_value_unavailable: "Não foi possível exibir este valor neste documento."
   error_reporter_template_import_no_file: "Escolha um arquivo para importar."

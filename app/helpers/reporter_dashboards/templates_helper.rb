@@ -120,92 +120,34 @@ module ReporterDashboards
           .fetch(diagnostic.origin))
     end
 
-    # ONE DEGRADATION, AS A SENTENCE A READER CAN ACT ON — and, where a key exists, in their
-    # own language.
+    # THE SENTENCES NOW LIVE IN `RedmineReporterDashboards::DegradationText`, and these
+    # four methods are delegations rather than copies.
     #
-    # --- WHAT THIS FIXES, AND WHAT IT DELIBERATELY DOES NOT ---
-    #
-    # `Degradation#to_s` answers `aggregation_dimension_unknown: group_by: "activty" is not a
-    # time-entry dimension (2x)` — a symbol and an English sentence built in `lib/`, printed
-    # verbatim. An independent review of T-31 called that correctly: CLAUDE.md §10's letter is
-    # kept, because `to_s` is not a literal in an ERB, and its purpose is missed.
-    #
-    # The whole gap is §Findings **S-17** and it spans fifteen codes across four layers,
-    # which is its own task. What this closes is the eight `aggregation_*` codes — the ones
-    # T-31 introduced or inherited on the same path — through the mechanism S-17's full fix
-    # will use: a key per code, the degradation's own `data` as interpolation, and the RAW
-    # `to_s` as the fallback. So every other code prints exactly as it did today, and adding
-    # a key later is the only change needed to localise it.
-    #
-    # THE FALLBACK IS NOT DECORATION. `technical-spec.md` §7 rule 5 makes "an install one
-    # minor behind reading a newer row" routine, and a code from a newer version of this
-    # plugin — or a typo in a key — must still print something the reader can quote into a
-    # bug report rather than nothing at all. `default: ''` and `rescue` are what guarantee
-    # that; a missing interpolation argument is the realistic failure and it is caught.
-    # TWO VOCABULARIES REACH THIS LIST, AND ONLY ONE OF THEM ANSWERED `#code`.
-    #
-    # `Outcome#degradations` is `diagnostics.degradations + batch.successes.flat_map(...)`
-    # — a `Liquid::Diagnostics::Degradation` (`code`/`detail`/`data`/`count`) next to a
-    # `Render::Degradation` (`capability`/`detail`), and the two classes are deliberately
-    # separate: `diagnostics.rb` argues at length that "the collection was truncated" and
-    # "the browser could not fetch a font" are fixed by different people.
-    #
-    # This method read `#code`, `#data` and `#count` off both. `Render::Degradation` has
-    # none of the three, and `reporter_degradation_sentence`'s rescue lists
-    # `MissingInterpolationArgument` and `ArgumentError`, so the `NoMethodError` escaped:
-    # **every wkhtmltopdf render 500'd this page**, because that adapter stamps
-    # `Degradation(:legacy_engine)` into every `Success` by design — which the partial's
-    # own comment says it renders. Measured, not read: `Render::Degradation.new(...)
-    # .respond_to?(:code)` is `false`. §Findings **E-25**.
-    #
-    # The fix is here rather than on `Render::Degradation`, because giving the render type
-    # a `code`, a `data` and a `count` it has no use for would merge the two vocabularies
-    # the gate and the design keep apart. The view is the one place that must speak both,
-    # so it is the one place that normalises them — and F-16's asset degradations, which
-    # travel as `Render::Degradation`s, are what made the latent defect reachable a second
-    # way.
+    # They moved for the reason `ReportFrame`'s constants moved in the same task:
+    # `include_all_helpers = false`, so a my-page widget cannot reach this helper at all,
+    # and T-26a increment 3 needs the same sentences there. One copy used by three surfaces
+    # cannot drift; two copies can. The argument for every line of them — the two
+    # vocabularies (`code` vs `capability`, §Findings E-25), why the raw `to_s` fallback is
+    # load-bearing rather than decoration, and which codes S-17 still owes — is in that
+    # module, next to the code it explains.
     def reporter_degradation_text(degradation)
-      body = reporter_degradation_sentence(degradation) || degradation.to_s
-      count = reporter_degradation_count(degradation)
-      return body unless count > 1
-
-      "#{body} (#{count}x)"
+      ::RedmineReporterDashboards::DegradationText.for(degradation)
     end
 
     def reporter_degradation_sentence(degradation)
-      code = reporter_degradation_code(degradation)
-      return nil if code.nil?
-
-      key = :"text_reporter_degradation_#{code}"
-      sentence = l(key, default: '', **reporter_degradation_data(degradation))
-      sentence.to_s.strip.empty? ? nil : sentence
-    rescue ::I18n::MissingInterpolationArgument, ::ArgumentError
-      nil
+      ::RedmineReporterDashboards::DegradationText.sentence(degradation)
     end
 
-    # `code` on the Liquid side, `capability` on the render side. Both name the same thing
-    # — which degradation this is — so both get a `text_reporter_degradation_<name>` key
-    # and neither needs one: the raw `to_s` fallback is unchanged for both.
     def reporter_degradation_code(degradation)
-      return degradation.code if degradation.respond_to?(:code)
-      return degradation.capability if degradation.respond_to?(:capability)
-
-      nil
+      ::RedmineReporterDashboards::DegradationText.code_of(degradation)
     end
 
-    # A `Render::Degradation` carries no interpolation data and is not deduplicated, so it
-    # is one occurrence with no arguments. Answering that here keeps the two shapes out of
-    # `reporter_degradation_text`, where a `respond_to?` per field would read as a puzzle.
     def reporter_degradation_data(degradation)
-      return {} unless degradation.respond_to?(:data)
-
-      degradation.data.transform_keys(&:to_sym)
+      ::RedmineReporterDashboards::DegradationText.data_of(degradation)
     end
 
     def reporter_degradation_count(degradation)
-      return 1 unless degradation.respond_to?(:count)
-
-      degradation.count
+      ::RedmineReporterDashboards::DegradationText.count_of(degradation)
     end
 
     # THE OPAQUE-ORIGIN SANDBOX — `technical-spec.md` §4, and INV-9's third mechanism.

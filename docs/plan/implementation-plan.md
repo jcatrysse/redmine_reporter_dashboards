@@ -89,6 +89,7 @@ fact that CI has not yet run on this work at all.
 | FR-50 / §5.2 clause 4 | **done** — `render/engine_preference.rb`, the `render_engine` setting, the settings partial's generated one-line-per-engine comparison, `ReportRun`'s precedence (hint → this installation → declared default → any engine needing no service), and `PreflightSuite` no longer deferring the engine an install SELECTED. Locale keys ×9, terminology per file. E-27 row 2 CLOSED |
 | T-26a | **increments 1 and 2 done; increment 3 (my-page) open.** Increment 1 (`3a549c4`) built `ReportFrame` and `WidgetReport`. Increment 2 swapped the PROJECT DASHBOARD onto them: both block partials, `_report.html.erb`, `_report_settings.html.erb` and `report_pdf` render through `WidgetReport` + `Reporting::ReportRun` + `ReportFrame`, `OPTIONAL_BLOCKS` and the whole optional-widget machinery are deleted, and three entries came off `zero_reporter.allowlist` (strict: 12 files → 9). **Increment 1 shipped a defect that increment 2 fixes**: `ReportRun::OUTPUT_CLASSES` was a second copy of `ExecutionPolicy::OUTPUT_CLASSES` that lacked `:widget`, so `WidgetReport.render` raised `ArgumentError` for every template that resolved — and a spec used `:widget` as its example of an UNKNOWN class, so a test held the drift in place (§Findings **E-40**). **Its independent review REJECTED it** with one blocker and three majors: `source_for` did not strip the `__N` instance suffix, so every SECOND copy of a report widget on a dashboard was dead while the picker went on offering more (a regression — the partial it replaced never used `block` to resolve); an absolute "no configuration in which these cannot render" claim that was false twice over; an FR-46 comment asserting the importer resolves a carried-over `report_template_id` when nothing consults `source_template_id` and the importer never rewrites tab settings (**S-29**, reported not decided); and a surviving mutant proving the spent-time widget's render path had ZERO coverage. All fixed. 14 mutations across two rounds, 13 killed, 1 recorded equivalent |
 | S-29 | **CLOSED by curator decision (option A), 2026-08-12** — `Import::WidgetSettings`, called from `Runner#call` so `import:plan` predicts it and `import:run` performs it. Repoints every report widget's `report_template_id` from the source's id to the copy's, per-widget reporting, unmappable ones named individually, idempotent on a written marker rather than on arithmetic. 11 mutations, 11 killed — and four of them survived the first round, three for real (the marker's read guard, a skipped source being mapped, the plan's key-vs-value shape) |
+| T-26a increment 3 | **done — MY-PAGE IS OWNED, and with it FR-01 is met on every widget surface.** Both `my/blocks/` partials render this plugin's templates through `WidgetReport` + `Reporting::ReportRun`; `my/_report.erb` and `reporter_report_templates.rb` are DELETED. **The base plugin's own my-page code was read first** (its repository was attached to the session): its picker is `IssueListReportTemplate.all` — every template in the instance, to every user — because `ReportTemplate` has no visibility model at all, and its spent-time block resolves its query with a bare `find_by_id`, so a widget there could be pointed at somebody else's private time query. Ours goes through `Template.visible(actor)` and `TimeEntryQuery.visible(actor)`, so this is a narrowing, not a port. **`templates_for(project: nil)` changed meaning** from "global only" to "no project bound" — the honest bound on a surface with no project, and safe because no caller passed nil. **No project selector**, by curator decision: the saved query defines the input and `ReportScope.build(project: nil, …)` already answers both halves. A NEW spent-time my-page block ships (the base plugin had one and this plugin never did). `DegradationText` was extracted the way `ReportFrame` was, for the same reason — `include_all_helpers = false` — and `TemplatesHelper` delegates. S-14 gained `state_across_projects`, because the project-scoped notice answers `:none` for a nil project and would have printed a falsehood. 10 mutations, 10 killed; one guard was DELETED rather than kept after case analysis showed it could not change an answer |
 | T-26 remainder, T-27, T-37, T-38 | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
@@ -4597,18 +4598,20 @@ The choice is therefore still open for MY-PAGE only, and it is narrower than it 
 module exists and is reachable, so what remains is how a partial under `app/views/my/blocks/`
 reaches `l()` and the shared `_degradations` partial with `include_all_helpers = false`.
 
-**Still owed by T-26 after T-26a increments 1-2:**
-  * **increment 3 — the my-page widget.** `app/views/my/{_report.erb,blocks/_report_by_issues.erb}`
-    still render a base-plugin report template, still guard with
-    `ReporterReportTemplates.usable?` plus a rescue, and are the reason the base plugin
-    cannot be uninstalled yet. They also carry the last three `zero_reporter.allowlist`
-    entries outside the importer, together with `patches/report_patch.rb`.
-  * **the CI flip to strict, still BLOCKED.** Measured after increment 2:
-    `ZERO_REPORTER_MODE=strict` exits 1 on **9** files, down from 12. Five of the nine are
-    the detection and glue that cannot go while the integration exists at all
-    (`reporter_presence.rb`, `lib/redmine_reporter_dashboards.rb`, `init.rb`,
-    `glue/legacy/scope_resolution.rb`, `positioned.rb` + migration 001's comment); the rest
-    are increment 3's.
+**Still owed by T-26 after T-26a increments 1-3:**
+  * **the CI flip to strict, still BLOCKED — but on FOUR things now, and one is a decision
+    rather than work.** Measured after increment 3: `ZERO_REPORTER_MODE=strict` exits 1 on
+    **7** files, down from 12 at the start of the task. Six are the detection and glue that
+    cannot go while the integration exists at all (`reporter_presence.rb`,
+    `lib/redmine_reporter_dashboards.rb`, `init.rb`, `glue/legacy/scope_resolution.rb`,
+    `positioned.rb`, migration 001 — the last two comment-only). **The seventh is
+    `patches/report_patch.rb`, and it is a CURATOR DECISION**: it improves the BASE
+    PLUGIN'S own PDF output and no code of ours has called it since increment 2 replaced
+    the widget export, so deleting it is a behaviour change for installs still running
+    reporter rather than a tidy-up.
+  * `glue/legacy/` and `scope_resolution.rb` remain blocked on their own terms (see T-26
+    items 2 and 3): the tags are registered globally on `::Liquid::Template`, so a template
+    authored in the base plugin's own UI still reaches `legacy_bind`.
 T-27 depends on T-26 and is therefore still blocked.
 
 **T-33 · The asset-resolution triple + `asset_policy`** *(deps: T-12; blocks nothing after T-13)*

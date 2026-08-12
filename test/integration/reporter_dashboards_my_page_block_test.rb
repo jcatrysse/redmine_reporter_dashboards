@@ -2,380 +2,344 @@
 
 require File.expand_path('../test_helper', __dir__)
 
-# T-26 — the my-page widget, rendered the way Redmine renders it.
+# T-26a increment 3 — the my-page report widgets, rendered the way Redmine renders them.
 #
 # --- WHY THIS FILE EXISTS AT ALL ---
 #
-# This plugin ships `app/views/my/blocks/_report_by_issues.erb`, and that path is not
-# an implementation detail: Redmine core DISCOVERS my-page blocks by globbing plugin
-# view directories.
+# This plugin ships `app/views/my/blocks/_report_by_{issues,spent_time}.erb`, and those
+# paths are not an implementation detail: Redmine core DISCOVERS my-page blocks by globbing
+# plugin view directories.
 #
 #     # redmine/lib/redmine/my_page.rb — THIS LINE is byte-identical on 5.1 and 7.0
 #     Dir.glob("#{Redmine::Plugin.directory}/*/app/views/my/blocks/_*.{rhtml,erb}")
 #
-# The scoping matters: the FILE is not identical across that span (the line after the
-# glob moved from `gsub(/^_/, '')` to `delete_prefix('_')`), and an earlier version of
-# this comment claimed the file was. The glob is the load-bearing half.
+# The scoping matters: the FILE is not identical across that span (the line after the glob
+# moved from `gsub(/^_/, '')` to `delete_prefix('_')`), and an earlier version of this
+# comment claimed it was. The glob is the load-bearing half.
 #
-# So the mere presence of that file makes THIS plugin contribute a core my-page block
-# named `report_by_issues` on every install, whether or not redmine_reporter is there.
-# The partial then calls `IssueListReportTemplate` — a redmine_reporter constant —
-# unconditionally, on line 14, before any guard.
+# So the mere PRESENCE of those files makes this plugin contribute two core my-page blocks
+# on every install, with no line in `init.rb` anywhere. And core's
+# `MyHelper#render_block_content` rescues **only** `ActionView::MissingTemplate`
+# (`app/helpers/my_helper.rb:59`), so anything else propagates: not a broken widget but a
+# **500 on `/my/page`** — the very page a user would need in order to remove the block.
+# That is §Findings **E-39**, measured, and it is why these partials carry their own rescue.
 #
-# Core's `MyHelper#render_block_content` rescues **only** `ActionView::MissingTemplate`
-# (`app/helpers/my_helper.rb:59`). Anything else propagates, so the exception does not
-# degrade to a broken widget: it takes `/my/page` down with a 500 — and with it the very
-# page the user would need in order to remove the block again.
+# --- WHAT CHANGED, AND WHAT THIS FILE USED TO BE ---
 #
-# TWO configurations reach that raise, and the second is the one that matters most:
+# It used to be a file about a GUARD. The widget rendered one of redmine_reporter's report
+# templates, so it named `IssueListReportTemplate` — undefined on a standalone install, and
+# unloadable on Redmine 7.0 even where the plugin IS installed (its `enum` uses the keyword
+# form Rails 8.0 removed). Every example here was about detecting that and degrading.
 #
-#   1. **Standalone** (no redmine_reporter): `IssueListReportTemplate` is undefined →
-#      `NameError`. This is the supported standalone configuration T-06 was written for;
-#      T-06 fixed it for the PROJECT dashboard by putting those partials where core's
-#      glob cannot see them; T-26a then removed the raise from that surface entirely, by
-#      making the project-dashboard widgets this plugin's own — they live in
-#      `app/views/reporter_project_pages/report_blocks/` and name no base-plugin class.
-#      The my-page surface has NOT had either treatment: core's `MyPage` offers no
-#      directory the glob misses, so the guard has to be in the partial until the my-page
-#      widget is owned too (T-26a increment 3).
-#   2. **Redmine 7.0 with redmine_reporter INSTALLED.** Reporter's report-template
-#      classes use the keyword form of `enum`, removed in Rails 8.0, so referencing
-#      `IssueListReportTemplate` raises there too. MEASURED on Redmine 7.0.0.stable /
-#      Rails 8.1.3.1: `enum status: {...}` → `ArgumentError: wrong number of arguments
-#      (given 0, expected 1..2)`, while `enum :status, {...}` is accepted.
+# None of that is reachable now: the widgets are this plugin's own. `WidgetReport` resolves
+# through `Template.visible(actor)` and `Reporting::ReportRun` renders. The rescue stays —
+# core's behaviour has not changed and an unknown defect in our own body would take the page
+# down exactly the same way — but it is now a backstop rather than the subject.
 #
-# Deleting this plugin's partial does NOT fix case 2 — reporter ships its own
-# `my/blocks/_report_by_issues.erb`, which core would then glob instead and which makes
-# the same unguarded call. Only a guard that WINS the view load path helps, and this
-# plugin's override does win it (it sorts after redmine_reporter).
-#
-# An integration test is the only level at which any of this is visible: nothing here
-# is reachable from a controller test, because the block is discovered from the
-# filesystem and rendered through core's helper.
+# An integration test is the only level at which any of this is visible: nothing here is
+# reachable from a controller test, because the block is discovered from the filesystem and
+# rendered through core's helper, in core's view context, where THIS PLUGIN'S HELPERS DO NOT
+# EXIST (`include_all_helpers = false`). That last point is the one a unit test cannot make.
 class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
   include Redmine::I18n
 
   fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules,
            :issues, :issue_statuses, :trackers, :enumerations, :projects_trackers,
-           :queries
+           :queries, :time_entries
 
   BLOCK = 'report_by_issues'
+  TIME_BLOCK = 'report_by_spent_time'
 
-  ISSUE_CLASS = 'IssueListReportTemplate'
+  Template = RedmineReporterDashboards::Template
 
   def setup
     @jsmith = User.find_by!(login: 'jsmith')
+    @admin = User.find_by!(login: 'admin')
+    @project = Project.find(1)
     # LOCALE IS PINNED, NOT INHERITED. The request locale comes from `User#language`,
     # sourced from Redmine's own BRANCH-VERSIONED `test/fixtures/users.yml`, so an
     # assertion on `l(...)` otherwise depends on what that fixture happens to say on
     # whichever Redmine is checked out — the inheritance §6 forbids.
-    # `test/functional/reporter_preflight_controller_test.rb:416-426` records this from an
-    # earlier review round; this file was missing it.
     @jsmith.update_column(:language, 'en')
+    # THE MODULE IS A PRECONDITION OF VISIBILITY, not decoration: `Template.visible` goes
+    # through `Project.allowed_to_condition`, which requires the permission's module to be
+    # enabled — so without this even an administrator resolves NOTHING and the failure
+    # reads like a broken scope.
+    @project.enable_module!(:reporter_dashboards_reports)
+    Role.find(1).add_permission! :view_reporter_dashboards_reports
     User.current = nil
     log_user('jsmith', 'jsmith')
-    # BOTH memoised answers, both ends. `ReporterReportTemplates` caches its verdict for
-    # the life of the process, so a test that stubs presence would otherwise leak its
-    # answer into whatever ran next — and the leak is order-dependent, which is the
-    # shape §6 forbids.
-    RedmineReporterDashboards::ReporterReportTemplates.reset!
   end
 
   def teardown
     User.current = nil
-    RedmineReporterDashboards::ReporterReportTemplates.reset!
-    remove_planted_class
   end
 
-  # THE PREMISE, asserted rather than assumed. If core ever stops globbing plugin
-  # view directories this whole file becomes moot, and it should say so out loud
-  # rather than keep passing for a reason that has gone away.
-  def test_core_discovers_this_plugins_partial_as_a_my_page_block
+  # THE PREMISE, asserted rather than assumed. If core ever stops globbing plugin view
+  # directories this whole file becomes moot, and it should say so out loud rather than keep
+  # passing for a reason that has gone away.
+  def test_core_discovers_both_partials_as_my_page_blocks
     assert Redmine::MyPage.blocks.key?(BLOCK),
-           'core no longer registers this plugin\'s my/blocks partial — if that is ' \
+           "core no longer registers this plugin's my/blocks partial — if that is " \
            'deliberate, this file and the guard it covers can go'
-    assert_equal 'my/blocks/report_by_issues',
-                 Redmine::MyPage.blocks[BLOCK][:partial]
+    assert_equal 'my/blocks/report_by_issues', Redmine::MyPage.blocks[BLOCK][:partial]
+    assert Redmine::MyPage.blocks.key?(TIME_BLOCK),
+           'the spent-time block is new in T-26a increment 3 and is registered by its path'
   end
 
-  # THE REGRESSION. With the block on the user's page, `/my/page` must render.
-  #
-  # `assert_response :success` is the whole point: before the guard this raised
-  # `NameError` out of the partial, through core's MissingTemplate-only rescue, and
-  # `/my/page` returned 500 for that user on every single page load.
-  def test_my_page_renders_when_the_report_block_is_on_it_and_reporter_is_unavailable
-    skip_if_reporter_report_templates_load
+  # ------------------------------------------------------------------ it renders
 
+  # THE END-TO-END CASE, and the one nothing could assert while the render belonged to
+  # another plugin: a configured my-page widget renders its report, in its own sandboxed
+  # frame, on a Redmine with no base plugin installed at all.
+  def test_a_configured_widget_renders_its_report_in_the_sandboxed_frame
+    template = my_page_template(name: 'Across projects')
+    configure_block(template)
+
+    get '/my/page'
+
+    assert_response :success
+    assert_select "#block-#{BLOCK} h3", /Across projects/
+    frame = css_select("#block-#{BLOCK} iframe.reporter-report-frame--widget").first
+    assert frame, 'the report must be rendered inside the opaque-origin frame'
+    assert_equal 'allow-scripts', frame['sandbox'],
+                 'allow-same-origin would let template JavaScript read the viewer session'
+    assert_includes frame['srcdoc'], "ISSUES=#{Issue.visible(@jsmith).count}"
+    assert_no_match(/translation missing/i, response.body)
+  end
+
+  # THE SCOPE IS EVERY ISSUE THE VIEWER CAN SEE, because my-page has no project and this
+  # widget names no saved query. Asserted against a SECOND project so a single-project
+  # answer cannot pass: the count above would be the same either way with one project.
+  def test_with_no_query_the_report_covers_every_project_the_viewer_can_see
+    other = Project.find(5)
+    other.enable_module!(:issue_tracking)
+    assert Issue.visible(@jsmith).where(project_id: other.id).exists?,
+           'precondition: jsmith must see issues outside project 1'
+    configure_block(my_page_template(name: 'Everything'))
+
+    get '/my/page'
+
+    assert_response :success
+    frame = css_select("#block-#{BLOCK} iframe").first
+    assert_includes frame['srcdoc'], "ISSUES=#{Issue.visible(@jsmith).count}"
+    assert_operator Issue.visible(@jsmith).count, :>,
+                    Issue.visible(@jsmith).where(project_id: @project.id).count
+  end
+
+  # INV-9. The body reaches the page as `srcdoc` ATTRIBUTE data, so a template's own markup
+  # can never become an element in MY PAGE's document, where it would run with the viewer's
+  # session. Asserted on the rendered page, because that is the surface the claim is about.
+  def test_a_script_in_a_template_does_not_become_markup_in_my_page
+    configure_block(my_page_template(content: '<script>alert(1)</script>'))
+
+    get '/my/page'
+
+    assert_response :success
+    assert_select "#block-#{BLOCK} script", 0
+    assert_includes css_select("#block-#{BLOCK} iframe").first['srcdoc'],
+                    '<script>alert(1)</script>'
+  end
+
+  # ------------------------------------------------------------------ what it offers
+
+  # THE GAP THIS CLOSES. The base plugin's my-page picker was `IssueListReportTemplate.all`
+  # — every report template in the instance, offered to every user, because that model has
+  # no visibility rule at all (verified against its source, 2026-08-12). Ours is
+  # `Template.visible(actor)`: the role permission per project, plus the template's own
+  # private/roles/public visibility. The precondition is asserted rather than trusted.
+  def test_the_picker_offers_only_templates_the_viewer_may_see
+    mine = my_page_template(name: 'Visible to me')
+    hidden = Template.create!(project: @project, author: @admin, name: 'Private to admin',
+                              content: '<p>x</p>', source: 'issues', output: 'combined',
+                              visibility: Template::VISIBILITY_PRIVATE)
+    assert_not Template.visible(@jsmith).exists?(hidden.id),
+               'precondition: jsmith must not be able to see this template'
     put_block_on_my_page
 
     get '/my/page'
 
     assert_response :success
+    options = css_select("#block-#{BLOCK} " \
+                         "select[name=\"settings[#{BLOCK}][report_template_id]\"] option")
+              .map(&:text)
+    assert_equal ['', mine.name], options
   end
 
-  # AND THE WIDGET SAYS WHY, rather than rendering as nothing.
-  #
-  # A widget that renders empty loses its own contextual controls, so nobody can take
-  # it off the dashboard any more — the same argument `reporter_project_pages_helper.rb`
-  # makes for the project dashboard's placeholder. The box stays, carrying its reason.
-  def test_the_unavailable_block_renders_a_labelled_placeholder_not_an_empty_box
-    skip_if_reporter_report_templates_load
-
+  # A template in a project this viewer is not a member of must not be offered — the same
+  # rule, one level out from the private/public column.
+  def test_a_template_in_an_unreachable_project_is_not_offered
+    # PROJECT 6, MEASURED: jsmith is a member of 1, 2 and 5 in Redmine's own fixtures, so
+    # the obvious "some other project" is one he can reach and this test would be vacuous.
+    other = Project.find(6)
+    other.enable_module!(:reporter_dashboards_reports)
+    foreign = Template.create!(project: other, author: @admin, name: 'Other project',
+                               content: '<p>x</p>', source: 'issues', output: 'combined',
+                               visibility: Template::VISIBILITY_PUBLIC)
+    assert_not @jsmith.member_of?(other), 'precondition: jsmith must not be a member here'
+    assert_not Template.visible(@jsmith).exists?(foreign.id),
+               'precondition: the template must be genuinely out of reach'
     put_block_on_my_page
 
     get '/my/page'
 
     assert_response :success
-    # `block-<name>` is core's wrapper id (`MyHelper#render_block`), and the assertion is
-    # pinned to the SENTENCE a user reads rather than to a key name, by equality.
-    assert_select "#block-#{BLOCK} p.nodata",
-                  text: l(:text_reporter_widget_requires_plugin, plugin: 'redmine_reporter'),
-                  count: 1
+    assert_select "#block-#{BLOCK} option", text: 'Other project', count: 0
   end
 
-  # THE BOX SURVIVES, and this is the assertion that makes the placeholder load-bearing
-  # rather than decorative. `MyHelper#render_block` wraps a block only `if
-  # content.present?`, so had the guard rendered nil this element — and the close button
-  # inside it — would be absent, and the block would be unremovable through the UI.
-  def test_the_unavailable_block_keeps_its_close_button
-    skip_if_reporter_report_templates_load
-
+  # A GLOBAL TEMPLATE IS OFFERED WITHOUT A PROJECT AT ALL, which is the case `project: nil`
+  # exists for — it used to mean "global only" and now means "no project bound", and this is
+  # the half that must keep working either way.
+  def test_a_global_template_is_offered
+    global = Template.create!(project: nil, author: @admin, name: 'Global report',
+                              content: '<p>x</p>', source: 'issues', output: 'combined',
+                              visibility: Template::VISIBILITY_PUBLIC)
     put_block_on_my_page
 
     get '/my/page'
 
     assert_response :success
-    assert_select "#block-#{BLOCK} .contextual a.icon-close", count: 1
+    assert_select "#block-#{BLOCK} option", text: global.name, count: 1
   end
 
-  # THE FLOW A USER TAKES NEXT. The placeholder is only worth having if the block can
-  # still be removed afterwards — that is the reason it is a placeholder rather than nil.
-  #
-  # `POST my/remove_block` with a `block` param is core's route (`config/routes.rb:104`);
-  # the first version of this test invented `DELETE /my/page/:block` and got a 404, which
-  # would have read as a broken flow rather than a wrong test.
-  def test_the_unavailable_block_can_still_be_removed_from_the_page
-    skip_if_reporter_report_templates_load
-
-    put_block_on_my_page
-
-    post '/my/remove_block', params: { block: BLOCK }, xhr: true
-
-    assert_response :success
-    assert_not_include BLOCK, @jsmith.reload.pref.my_page_layout.values.flatten
-  end
-
-  # --- THE CONFIGURATION THIS WAS ACTUALLY REPORTED ON: Redmine 7.0 WITH reporter ---
-  #
-  # The two cases above run with redmine_reporter absent, which is not the install that
-  # prompted this work. Here presence is stubbed TRUE while the classes still do not
-  # resolve, which is exactly what Redmine 7.0 + redmine_reporter is: `installed?` says
-  # yes, and `IssueListReportTemplate` raises because reporter's `enum` keyword form was
-  # removed in Rails 8.0.
-  #
-  # It is stubbed rather than staged because the real article is a paid third-party
-  # plugin that is not in this tree. What the stub does NOT fake is the failure itself:
-  # the classes are genuinely unresolvable in this process, so `load_error` is a real
-  # exception from a real failed constant lookup, not a canned one.
-  def test_my_page_renders_when_reporter_is_installed_but_its_classes_do_not_load
-    skip_if_reporter_report_templates_load
-
-    RedmineReporterDashboards.stubs(:reporter_present?).returns(true)
+  # The dead end an author meets first: they add the widget, the dropdown is empty, and
+  # nothing says why. The base plugin's settings partial did worse than that — its heading
+  # was `queries.first.is_a?(IssueQuery)`, which RAISES on an empty picker, which on this
+  # surface is a 500.
+  def test_an_empty_picker_says_why_rather_than_offering_a_blank_form
     put_block_on_my_page
 
     get '/my/page'
 
     assert_response :success
-    # A DIFFERENT sentence from the not-installed case, and that distinction is the
-    # point: "needs a plugin you have not installed" is wrong and actively misleading
-    # for an operator who HAS installed it.
     assert_select "#block-#{BLOCK} p.nodata",
-                  text: l(:error_reporter_widget_render_failed),
-                  count: 1
-    assert_select "#block-#{BLOCK} p.nodata",
-                  text: l(:text_reporter_widget_requires_plugin, plugin: 'redmine_reporter'),
-                  count: 0
+                  text: I18n.t(:text_reporter_widget_no_templates)
+    assert_select "#block-#{BLOCK} select", 0
+    assert_no_match(/translation missing/i, response.body)
   end
 
-  # AND IT IS LOGGED, once, with the reason — because the placeholder deliberately does
-  # not put the exception on the page (INV-5: an error is not the document). If nothing
-  # were logged, an operator would have a blank-looking widget and nothing to go on.
-  def test_the_load_failure_is_logged_with_its_cause
-    skip_if_reporter_report_templates_load
+  # ------------------------------------------------------------------ the spent-time block
 
-    RedmineReporterDashboards.stubs(:reporter_present?).returns(true)
+  def test_the_spent_time_block_renders_for_an_actor_who_may_see_hours
+    Role.find(1).add_permission! :view_time_entries
+    template = my_page_template(name: 'Hours', source: 'time_entries',
+                                content: '<p>HOURS={{ time_entries.size }}</p>')
+    configure_block(template, block: TIME_BLOCK)
 
-    # THREE asks, because the claim in the source is "once". This is asked on every
-    # render of every my-page carrying the widget, and a per-render line would bury the
-    # log it is supposed to draw attention to. One ask cannot tell "once" from
-    # "every time".
-    logged = capturing_rails_log do
-      3.times { RedmineReporterDashboards::ReporterReportTemplates.usable?(ISSUE_CLASS) }
-    end
+    get '/my/page'
 
-    lines = logged.lines.grep(/report template classes do not load/)
-    assert_equal 1, lines.size,
-                 "expected exactly one WARN across three asks, got: #{logged.inspect}"
-    assert_match(/NameError/, logged)
+    assert_response :success
+    frame = css_select("#block-#{TIME_BLOCK} iframe.reporter-report-frame--widget").first
+    assert frame, 'the spent-time report must render inside the opaque-origin frame'
+    assert_includes frame['srcdoc'], "HOURS=#{TimeEntry.visible(@jsmith).count}"
   end
 
-  # --- A GUARD WHOSE ONLY SIGNATURE IS THE LOG, SO THE LOG IS WHERE IT IS ASSERTED ---
-  #
-  # `usable?` asks the plugin REGISTRY before it touches a reporter constant, and
-  # `reporter_presence.rb` states why: absence must be a positive question, never
-  # inferred from a swallowed `NameError`. Deleting that first line changes no page
-  # outcome at all — the partial re-asks `reporter_present?` for its wording, and
-  # `load_error` returns non-nil either way — so a behavioural test cannot see it.
-  # MEASURED: mutating `usable?` to drop the registry question left all seven of the
-  # other examples green.
-  #
-  # What it DOES change is this: a standalone install, where the base plugin is not
-  # installed and nothing is wrong, would log "is installed but ... its report template
-  # classes do not load" on the first my-page render. A false sentence, in every
-  # operator's log, for a supported configuration.
-  def test_a_standalone_install_is_not_told_the_base_plugin_failed_to_load
-    skip_if_reporter_report_templates_load
-    skip_if_reporter_is_really_installed
+  # `:view_time_entries` IS ASKED GLOBALLY HERE, because my-page has no project to ask it
+  # about. Refusing renders the placeholder rather than nothing, so the block keeps the
+  # contextual controls that carry its own close button.
+  def test_the_spent_time_block_is_refused_without_the_time_entries_permission
+    # EVERY ROLE, and that is what "globally" means. Measured: five roles grant
+    # `view_time_entries` in Redmine's fixtures, two of them BUILTIN (Non member,
+    # Anonymous) — and a builtin role applies on every public project this actor is not a
+    # member of. Removing it from Manager alone left `allowed_to?(global: true)` true and
+    # the widget rendered, which is the version of this test that proves nothing.
+    Role.all.each { |role| role.remove_permission! :view_time_entries }
+    assert_not @jsmith.allowed_to?(:view_time_entries, nil, global: true),
+               'precondition: the actor must not be able to see hours anywhere'
+    configure_block(my_page_template(name: 'Hours', source: 'time_entries'),
+                    block: TIME_BLOCK)
 
-    subject = RedmineReporterDashboards::ReporterReportTemplates
-    logged = capturing_rails_log do
-      assert_not subject.usable?(ISSUE_CLASS),
-                 'the widgets must not be offered when the base plugin is absent'
-    end
+    get '/my/page'
 
-    assert_empty logged.lines.grep(/report template classes do not load/),
-                 'a standalone install was told the base plugin failed to load, which is ' \
-                 'false — the registry question must come before any constant lookup'
+    assert_response :success
+    assert_select "#block-#{TIME_BLOCK} iframe", 0
+    assert_select "#block-#{TIME_BLOCK} p.nodata", 1
   end
 
-  # --- THE GUARD MUST OPEN, NOT JUST CLOSE ---
-  #
-  # Every example above is about the UNAVAILABLE path, and an independent review showed
-  # what that costs: mutating this partial's guard to `<% if false %>` survived the whole
-  # 931-test suite. Nothing could tell the shipped guard from a hardcoded refusal, which
-  # is a live regression risk for an install running the base plugin on a Redmine where
-  # it works.
-  #
-  # The discriminator has to be chosen carefully, because in THIS tree the widget can
-  # never fully render: `my/report` needs the base plugin's
-  # `report_content_report_template_path` and the else-branch needs its
-  # `my/report_settings` partial, and neither exists here. So the body is entered and
-  # then fails — and the DOM it produces is the SAME placeholder the closed guard
-  # produces. Asserting on the page cannot separate them.
-  #
-  # What separates them is the ERROR log that only `log_render_failure` writes, and it
-  # is only reachable from inside the guarded body. A closed guard cannot produce it.
-  def test_the_guard_opens_when_the_class_resolves_and_the_body_is_entered
-    skip_if_reporter_is_really_installed
+  # §Findings S-14, ACROSS PROJECTS. The project-scoped notice answers `:none` for a nil
+  # project, so used here it would tell a reader their role does not let them see spent time
+  # "in this project" over a report drawing on several — a false sentence, which is worse
+  # than the silence S-14 exists to remove.
+  def test_an_own_only_role_is_told_the_report_mixes_its_own_hours_in
+    role = Role.find(1)
+    role.add_permission! :view_time_entries
+    role.update_column(:time_entries_visibility, 'own')
+    assert_equal :own,
+                 RedmineReporterDashboards::Reporting::TimeEntryVisibility
+                   .state_across_projects(@jsmith),
+                 'precondition: the actor must be in the own-only state'
+    configure_block(my_page_template(name: 'Hours', source: 'time_entries'),
+                    block: TIME_BLOCK)
 
-    plant_issue_class(table: 'queries')
-    put_block_on_my_page
+    get '/my/page'
 
-    logged = capturing_rails_log { get '/my/page' }
+    assert_response :success
+    assert_select "#block-#{TIME_BLOCK} p.warning",
+                  text: I18n.t(:text_reporter_time_entries_own_only_across_projects)
+  end
 
-    # THE PAGE-LEVEL CLAIM LIVES HERE, because this failure mode issues no SQL and so is
-    # not masked by transactional fixtures (see the SQL example below for why that
-    # matters). Before the rescue, this configuration returned 404 and the block vanished
-    # with its own close button.
+  # ------------------------------------------------------------------ it never 500s
+
+  # THE REGRESSION THIS FILE WAS WRITTEN FOR. Core rescues only `ActionView::MissingTemplate`,
+  # so any other exception from a block body is a 500 on `/my/page` — and the page that
+  # 500s is the one carrying the block's own close button.
+  #
+  # The failure is injected at the MODULE the partial calls rather than at a database, for
+  # the reason HANDOVER §1 records: a failed statement aborts the enclosing PostgreSQL
+  # transaction, and transactional fixtures wrap the whole request in one — so every later
+  # query in that request fails no matter what the rescue does, and the assertion would be
+  # about the harness rather than about the code.
+  def test_a_raising_widget_body_is_rescued_and_the_page_still_renders
+    configure_block(my_page_template)
+    subject = RedmineReporterDashboards::WidgetReport
+    subject.stubs(:render_for_my_page).raises(RuntimeError, 'rrd probe failure')
+
+    log = capturing_rails_log { get '/my/page' }
+
     assert_response :success
     assert_select "#block-#{BLOCK} p.nodata",
-                  text: l(:error_reporter_widget_render_failed), count: 1
-    assert_select "#block-#{BLOCK} .contextual a.icon-close", count: 1
-    assert_match(/my-page report widget could not be rendered/, logged,
-                 'the guarded body was never entered — a closed guard produces the same ' \
-                 'placeholder, so this log line is the only thing that tells them apart')
+                  text: I18n.t(:error_reporter_widget_render_failed)
+    assert_includes log, 'rrd probe failure'
   end
 
-  # BLOCKER 1's REGRESSION at the SQL end: the base plugin is installed, its classes
-  # RESOLVE, and its tables are not migrated — any Redmine where the plugin is present
-  # and `rake redmine:plugins:migrate` has not been run yet. `usable?` answers true, the
-  # body is entered, and `find_by` raises.
-  #
-  # --- WHAT THIS ASSERTS, AND WHY IT IS NOT `assert_response :success` ---
-  #
-  # The rescue fires here and the widget degrades — that is what is asserted. The page
-  # still ends 500 in THIS test, and the cause is the test harness rather than the
-  # plugin. MEASURED, rather than assumed, because the first version of this test simply
-  # expected 200 and the honest reading of the failure was not obvious:
-  #
-  #     RESCUED: ActiveRecord::StatementInvalid
-  #     AFTERWARDS RAISES: ActiveRecord::StatementInvalid: PG::InFailedSqlTransaction:
-  #       ERROR: current transaction is aborted, commands ignored until end of
-  #       transaction block
-  #
-  # A failed statement aborts the enclosing PostgreSQL transaction, and transactional
-  # fixtures wrap the whole request in one — so every later query in the request fails no
-  # matter what this plugin does. Rails does not wrap a production request in a
-  # transaction, so there the page completes. Asserting 200 here would be asserting a
-  # property of the harness; asserting the degradation is asserting the plugin.
-  #
-  # The page-level claim is therefore made by
-  # `test_the_guard_opens_when_the_class_resolves_and_the_body_is_entered`, whose failure
-  # mode issues no SQL and which does return 200.
-  def test_a_failure_inside_the_widget_body_is_rescued_and_named
-    skip_if_reporter_is_really_installed
+  # `ScriptError` IS NOT A `StandardError`, and a bare `rescue` would miss it. A class body
+  # that fails to parse raises `SyntaxError` and a bad `require` raises `LoadError`; both
+  # reach a view exactly as fatally as a `NameError`.
+  def test_a_script_error_in_the_widget_body_is_rescued_too
+    configure_block(my_page_template)
+    RedmineReporterDashboards::WidgetReport.stubs(:render_for_my_page)
+                                           .raises(NotImplementedError, 'rrd script error')
 
-    plant_issue_class(table: 'no_such_table_for_rrd_probe')
-    put_block_on_my_page
-    assert RedmineReporterDashboards::ReporterReportTemplates.usable?(ISSUE_CLASS),
-           'precondition: the guard must be OPEN, or this proves nothing about the rescue'
+    get '/my/page'
 
-    logged = capturing_rails_log { get '/my/page' }
-
-    assert_match(/my-page report widget could not be rendered/, logged,
-                 'the widget body raised and nothing rescued it — this is the 500 the ' \
-                 'pre-check alone did not prevent')
-    assert_match(/StatementInvalid/, logged,
-                 'the log must name the cause; the page deliberately does not (INV-5)')
+    assert_response :success
+    assert_select "#block-#{BLOCK} p.nodata",
+                  text: I18n.t(:error_reporter_widget_render_failed)
   end
 
-  # THE SUCCESS MEMO, asserted where it is made. `load_error` stores `false` on success
-  # precisely so a working install does not walk the constant again on every my-page
-  # render; dropping the `|| false` reintroduces that per-render walk and changes no
-  # value anywhere, so only the constructor-level claim can see it.
-  def test_a_resolving_class_is_not_looked_up_twice
-    skip_if_reporter_is_really_installed
+  # A widget that renders as nothing loses its own contextual controls, and the user is left
+  # with a block they can no longer remove. The placeholder keeps the box.
+  def test_a_degraded_block_keeps_its_close_button_and_can_be_removed
+    configure_block(my_page_template)
+    RedmineReporterDashboards::WidgetReport.stubs(:render_for_my_page)
+                                           .raises(RuntimeError, 'rrd probe failure')
 
-    plant_issue_class(table: 'queries')
-    subject = RedmineReporterDashboards::ReporterReportTemplates
-    assert subject.usable?(ISSUE_CLASS)
+    get '/my/page'
 
-    subject.expects(:resolve).never
+    assert_response :success
+    assert_select "#block-#{BLOCK} .contextual a.icon-close[href*=?]", 'remove_block'
 
-    3.times { assert subject.usable?(ISSUE_CLASS) }
-  end
+    post '/my/remove_block', params: { block: BLOCK }
 
-  # ASKING IS PER CLASS. An earlier version asked about both report-template classes at
-  # once, so a broken time-entry class disabled the healthy issue widget. Nothing tested
-  # it either way, and dropping the second class from the list was a surviving mutant.
-  def test_a_broken_second_class_does_not_disable_the_issue_widget
-    skip_if_reporter_is_really_installed
-
-    plant_issue_class(table: 'queries')
-    subject = RedmineReporterDashboards::ReporterReportTemplates
-
-    assert subject.usable?(ISSUE_CLASS),
-           'the issue widget must not be held hostage by the time-entry class'
-    assert_not subject.usable?('TimeEntriesReportTemplate'),
-               'precondition: the other class is genuinely absent in this run'
-  end
-
-  # A NAME OUTSIDE THE KNOWN SET IS A PROGRAMMING ERROR, not a false answer. Returning
-  # false for a typo'd class name would silently disable a widget for ever.
-  def test_an_unknown_class_name_raises_rather_than_answering_false
-    error = assert_raises(ArgumentError) do
-      RedmineReporterDashboards::ReporterReportTemplates.load_error('NoSuchTemplate')
-    end
-    assert_match(/NoSuchTemplate/, error.message)
+    assert_not_includes @jsmith.reload.pref.my_page_layout.values.flatten, BLOCK
   end
 
   private
 
-  # A real logger, not a Mocha matcher with a side effect in it. Nothing in Mocha's
-  # contract says a `with { }` block runs exactly once per call — it is also consulted
-  # when composing failure messages — so counting lines inside one depends on an
-  # implementation detail of the pinned version, and stubbing `warn` wholesale swallows
-  # unrelated warnings for the duration.
+  # A real logger, not a Mocha matcher with a side effect in it. Nothing in Mocha's contract
+  # says a `with { }` block runs exactly once per call — it is also consulted when composing
+  # failure messages — so counting lines inside one depends on an implementation detail of
+  # the pinned version, and stubbing `warn` wholesale swallows unrelated warnings.
   def capturing_rails_log
     buffer = StringIO.new
     original = Rails.logger
@@ -386,49 +350,23 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     Rails.logger = original
   end
 
-  # Stands in for the base plugin's class: present, resolving, and backed by whichever
-  # table the caller names — an existing one to reach the body, a missing one to make the
-  # body fail the way an unmigrated install does.
-  def plant_issue_class(table:)
-    klass = Class.new(ActiveRecord::Base) { self.abstract_class = false }
-    klass.table_name = table
-    Object.const_set(ISSUE_CLASS, klass)
-    @planted = true
-    RedmineReporterDashboards.stubs(:reporter_present?).returns(true)
-    RedmineReporterDashboards::ReporterReportTemplates.reset!
+  def my_page_template(name: 'My page report', content: '<p>ISSUES={{ issues.size }}</p>',
+                       source: 'issues')
+    Template.create!(project: @project, author: @admin, name: name, content: content,
+                     source: source, output: 'combined',
+                     visibility: Template::VISIBILITY_PUBLIC)
   end
 
-  def remove_planted_class
-    return unless @planted
-
-    Object.send(:remove_const, ISSUE_CLASS) if Object.const_defined?(ISSUE_CLASS, false)
-    @planted = nil
-  end
-
-  # The planting examples CREATE the broken-dependency condition, so they must stand down
-  # when a real base plugin is installed rather than clobber its class with a stub.
-  def skip_if_reporter_is_really_installed
-    return unless RedmineReporterDashboards.reporter_present?
-
-    skip 'the base plugin is really installed here, so planting a stand-in for its ' \
-         'report-template class would clobber the real one. These examples cover the ' \
-         'guard against a stand-in; the real article is the base plugin\'s own suite.'
-  end
-
-  # The mirror image of `skip_unless_reporter_report_templates_load`: these examples are
-  # about the UNAVAILABLE case, so they are the ones that must stand down when a working
-  # redmine_reporter is present. Stated as a skip with its reason, never a silent pass.
-  def skip_if_reporter_report_templates_load
-    return unless reporter_report_template_load_error.nil?
-
-    skip 'redmine_reporter is installed and its report template classes load on this ' \
-         'Redmine, so the unavailable-widget path is not reachable here. This file ' \
-         'covers the standalone and the Rails-8.0-enum configurations.'
-  end
-
-  def put_block_on_my_page
+  def put_block_on_my_page(block: BLOCK)
     pref = @jsmith.pref
-    pref.my_page_layout = { 'left' => [BLOCK], 'right' => [] }
+    pref.my_page_layout = { 'left' => [block], 'right' => [] }
+    pref.save!
+  end
+
+  def configure_block(template, block: BLOCK)
+    pref = @jsmith.pref
+    pref.my_page_layout = { 'left' => [block], 'right' => [] }
+    pref.my_page_settings = { block => { report_template_id: template.id } }
     pref.save!
   end
 end

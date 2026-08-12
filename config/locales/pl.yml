@@ -171,6 +171,8 @@ pl:
   text_reporter_template_no_time_entries: "Ten raport nie obejmuje żadnego spędzonego czasu, więc nie utworzył dokumentu. Poszerz wybór lub wybierz inne zapisane zapytanie."
   text_reporter_time_entries_own_only: "Twoja rola pozwala widzieć w tym projekcie tylko własny spędzony czas, więc ten raport obejmuje Twoje godziny, a nie godziny projektu."
   text_reporter_time_entries_not_visible: "Twoja rola nie pozwala widzieć spędzonego czasu w tym projekcie, więc ten raport jest pusty."
+  text_reporter_time_entries_own_only_across_projects: "W co najmniej jednym projekcie Twoja rola pozwala Ci widzieć tylko własny poświęcony czas, więc ten raport miesza godziny projektu z Twoimi."
+  text_reporter_time_entries_not_visible_anywhere: "Twoje role nie pozwalają Ci widzieć poświęconego czasu w żadnym projekcie, więc ten raport jest pusty."
   text_reporter_failure_document_notice: "Ten dokument nie jest raportem. Odnotowuje, że raportu nie udało się wytworzyć. Podaj powyższy identyfikator korelacji, prosząc administratora o zajrzenie do dziennika."
   text_reporter_failure_document_value_unavailable: "Tej wartości nie można pokazać w tym dokumencie."
   error_reporter_template_import_no_file: "Wybierz plik do zaimportowania."

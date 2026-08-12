@@ -94,6 +94,54 @@ module RedmineReporterDashboards
         user.respond_to?(:logged?) && user.logged?
       end
 
+      # T-26a INCREMENT 3 — THE SAME QUESTION WITH NO PROJECT TO ASK IT ABOUT.
+      #
+      # A my-page hours widget spans every project the actor can see, so `state` is the
+      # wrong question: it takes a project and answers `:none` for a nil one, which on
+      # my-page would print *"your role does not let you see spent time in this project"*
+      # over a report that is showing hours from four projects. A false sentence is worse
+      # than no sentence, and S-14 exists precisely because the silent version was worse
+      # than both.
+      #
+      # So this answers the honest cross-project version:
+      #
+      #   :all    every project this actor may see hours in shows them ALL of them
+      #   :own    at least one narrows to their own — the report is a mix and says so
+      #   :none   no membership grants `view_time_entries` anywhere
+      #
+      # DERIVED FROM MEMBERSHIPS, NOT FROM A QUERY OVER THE RESULT SET. Asking which
+      # projects actually contributed rows would be a query per render on a page that
+      # already runs one widget per box, and it would answer differently for two people
+      # looking at the same report. A role the actor holds is a fact about the actor.
+      #
+      # `time_tracking` IS NOT RE-CHECKED HERE, and the first version did check it.
+      # Mutation testing removed that filter and nothing failed, so the case analysis was
+      # done rather than a test invented for it: `state` carries its own module gate and
+      # answers `:none` for a project with time tracking off, and `:none` changes none of
+      # the three outcomes below — `all?(:none)` is unaffected by adding another `:none`,
+      # `include?(:own)` is unaffected, and the fallthrough is reached in both. A guard with
+      # no observable effect is a comment, so it is gone rather than wrapped in a test of
+      # its fiction (the precedent is T-25's, where the surviving mutant's guard was deleted
+      # rather than kept). The BEHAVIOUR it was reaching for is still pinned, by an example
+      # asserting a module-disabled project contributes nothing.
+      #
+      # AN ADMINISTRATOR IS `:all`, and that is not a shortcut: `TimeEntry.visible` gives an
+      # administrator every entry, so any narrowing notice shown to them would be false.
+      def state_across_projects(user)
+        return :none if user.nil?
+        return :all if user.respond_to?(:admin?) && user.admin?
+        return :none unless user.respond_to?(:memberships)
+
+        states = user.memberships.filter_map do |membership|
+          project = membership.project
+          state(user, project) if project
+        end
+        return :none if states.empty? || states.all? { |s| s == :none }
+        return :own if states.include?(:own)
+
+        :all
+      end
+
       def permitted_roles(user, project)
         return [] unless user.respond_to?(:roles_for_project)
 
