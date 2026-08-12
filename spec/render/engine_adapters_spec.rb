@@ -308,11 +308,14 @@ module RedmineReporterDashboards
                 '— check its execute bit, the directories above it, and whether that ' \
                 'filesystem is mounted noexec'
               )
-              # AND IT STILL MUST NOT CLAIM A CAUSE. `because` is how every one of the three
-              # drafts smuggled one in, and `\bpresent\b` rather than a bare substring so the
-              # guard cannot be satisfied by "represents".
-              expect(denied.message).not_to match(/\bpresent\b/)
-              expect(denied.message).not_to match(/\bbecause\b/)
+              # NO `not_to match` GUARDS BESIDE THE EQUALITY, and there were two until a review
+              # measured them dead: RSpec aborts an example at its first failure and equality
+              # is strictly stronger, so neither could ever be the deciding assertion — while
+              # their comment claimed they were what stopped the sentence naming a cause.
+              # Deleting both changes nothing (measured: 37 examples, 0 failures with them
+              # gone, and the noexec-lie mutant still dies on the equality alone). That is
+              # verbatim the finding that deleted `expect(Registry.ids).to eq([])`, and the
+              # same call this change already made in `report_run_spec.rb`.
             end
           end
 

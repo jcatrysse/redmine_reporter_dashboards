@@ -818,7 +818,7 @@ module RedmineReporterDashboards
       #
       #   in production   `EnginePreference.from_settings` writes *"[reporter_dashboards]
       #                   render setting render_engine="athena" dropped: no render engine is
-      #                   registered under that name"* and hands this class `nil`. So
+      #                   registered under that name. Known: …"* and hands this class `nil`. So
       #                   `selected_engine_id` returns at its own `id.nil?` guard and its
       #                   `warn_line` never runs.
       #   through the port `selected_engine_id`'s own line does run — *"this installation

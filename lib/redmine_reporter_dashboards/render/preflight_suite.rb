@@ -108,9 +108,9 @@ module RedmineReporterDashboards
       # without this the skip's own sentence — then "the render engine needs a service, and this
       # install has not chosen it", since corrected twice: it is now "…and it is not this
       # installation's selected engine", true whatever was chosen — would be FALSE on exactly
-      # the installs that chose one,
-      # and the one diagnostic that exists to check the render path would refuse to check the
-      # engine it renders with. Naming an engine explicitly still overrides all of it.
+      # the installs that chose one, and the one diagnostic that exists to check the render
+      # path would refuse to check the engine it renders with. Naming an engine explicitly
+      # still overrides all of it.
       def default_ids
         Registry.ids.reject { |id| deferred?(id) }
       end

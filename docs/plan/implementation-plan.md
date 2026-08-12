@@ -207,6 +207,32 @@ working tree; the whole of `spec/golden` → **167**, 0 failures. (This said 71,
 subset quoted as the directory — the same slip the HANDOVER copy carried, and it survived a pass
 whose whole subject was stale counts.) Recorded in HANDOVER §1.
 
+**E-34 · THE EIGHTH REVIEW: THE NINE-LOCALE FIX WAS PINNED IN ONE LANGUAGE, AND THE OTHER EIGHT
+WERE THE SAME DEFECT AT 8/9 SCALE.** 2026-08-12, `df2144b` reviewed and corrected in the commit
+after it. Fifth consecutive rejection.
+
+| # | What it found | Evidence | State |
+|---|---|---|---|
+| 1 | **Eight of the nine locale values were unpinned.** The commit claimed all nine were "pinned by an assertion on the rendered `<td>`"; that assertion renders ONE page in ONE language | the reviewer reverted all eight non-English values to their verbatim pre-commit falsehood and measured **rspec 2674/0/127, minitest 921 runs/0 failures, nine gate scripts OK — SURVIVED on every surface**. E-33 row 1's own diagnosis ("two tests assert the KEY exists, neither asserts a word of its content") was still true of eight ninths of the content after the fix | **FIXED**: all nine pinned by EQUALITY in a table, inside the file's existing nine-locale test, plus a second test asserting the table covers every shipped locale — derived from `config/locales/*.yml`, because a hand-written list is how eight of nine went unguarded in the first place. The mutant is now KILLED |
+| 2 | **`hu` was grammatically wrong**, and the fix introduced it: clause 1 makes `szolgáltatás` the nominative subject, so clause 2's elided subject is the SERVICE, not the engine — *"and the service is not this installation's selected engine"*. The pre-commit value did not have this problem | a native-grammar reading, with `ru` (which supplies the pronoun `он`) as the contrast | **FIXED**: the engine is the subject — *"A renderelő motor szolgáltatást igényel, és nem ez a telepítés kiválasztott motorja"*. **A native reader is still wanted for hu, pl and zh** |
+| 3 | **`it` used `scelto di`**, which is not idiomatic after a participle — the file's neighbours use `di questa installazione` after a NOUN | the file's own usage | **FIXED**: `scelto per questa installazione` |
+| 4 | **Two guards beside the new equality assertion cannot ever decide**, and their comment claimed they were what stopped the sentence naming a cause. RSpec aborts at the first failure and equality is strictly stronger | deleting both: `37 examples, 0 failures` unchanged, and the noexec-lie mutant still dies on the equality alone | **DELETED**, which is what this same commit did in `report_run_spec.rb` — one rule, two decisions, one commit, and a review caught the inconsistent half |
+| 5 | **The new `FROM_SETTINGS` example's code assertion cannot discriminate its own branch**: looking `:from_settings` up as an id also fails, also falls through, and also answers `:engine_misconfigured`. Only `asked == 1` was doing work | measured: with the mutant applied and that one line removed, `1 example, 0 failures` | **FIXED**: the discriminator is the log, which under the mutant reads *"selects render engine :from_settings"*. Mutant re-measured KILLED |
+| 6 | Minors: the "Recorded, not fixed" paragraph measured the 90-character cut of the message THIS commit replaced (`…at the c` versus the shipped `…red path was r`) — the same stale-quote class the row above it claims to have fixed; a truncated quote presented as verbatim in `report_run.rb`; an unreflowed comment orphan; and the new functional test inherits its locale from a core fixture rather than setting it (§6) | re-derived | **FIXED** |
+
+**Measured after the fixes:** rspec **2674 / 0 failures / 127 pending** with `.git` present, minitest
+**923 runs / 4275 assertions / 0 failures / 0 errors / 4 skips**, nine gate scripts OK, Ruby 2.7 floor
+OK. The locale mutant — the one that survived rspec, minitest and nine gates — is KILLED, and so is
+the sentinel mutant.
+
+**THE PATTERN THIS ROUND MAKES UNDENIABLE, and it is the finding worth keeping.** Five reviews, five
+rejections, and in every single round the reviewer found at least one guard the author's own mutation
+set had no mutant for. The defects were almost never in the behaviour: they were in CLAIMS about
+where a string is printed, which surface a guard covers, and what a count is. The two mechanisms that
+actually closed them are worth stating as rules rather than as history:
+**assert the sentence a human reads, on the surface they read it**, and **pin a sentence this project
+has been wrong about by equality, not by keyword**.
+
 **E-33 · THE SEVENTH REVIEW: THE CORRECTED SENTENCE WAS SHIPPING ON THE JSON SURFACE AND THE
 FALSEHOOD WAS STILL ON THE PAGE, IN NINE LANGUAGES.** 2026-08-11, `0a37625` reviewed and corrected
 in the commit after it. Fourth consecutive rejection, and the fourth in which the code was close to
@@ -224,8 +250,7 @@ right and a CLAIM was not.
 | 8 | Claims: the arrow-consistency argument was overstated (nine locale files and the README still write `→` in HTML-only copy, correctly); *"most of the failure messages"* was replaced by a count the next reviewer could not reproduce under any rule; two plan rows and two code comments quoted sentences that no longer ship; a fixture local was named `present` in the example whose guard forbids that word | counted | **ALL FIXED.** The arrow rule is now stated as what it is: `>` only where a string can reach a drawn artefact or a terminal |
 
 **Recorded, not fixed:** the rake text surface composes `code: message — detail` and squishes it to
-90 characters, so this message's checklist falls outside the cut (measured: the line ends at *"at
-the c"*). That surface has the same defect for other checks and `preflight_suite.rb` already treats
+90 characters, so this message's checklist falls outside the cut (measured on the shipped message: the line ends at *"red path was r"* — and the first version of this paragraph quoted the cut of the message the same commit had just REPLACED). That surface has the same defect for other checks and `preflight_suite.rb` already treats
 it as worth fixing; front-loading every message to fit 90 characters is its own change, on the
 surface rather than on one string. Also unchanged: `to_text`'s `%-46s` column no longer aligns for
 an 83-character title, which is cosmetic and pre-existing.

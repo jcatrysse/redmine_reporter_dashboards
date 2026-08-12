@@ -524,6 +524,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
         RedmineReporterDashboards::Render::Registry.register(:gotenberg,
                                                             ReportRunSpecSupport::FakeAdapter)
         asked = 0
+        logger = ReportRunSpecSupport::Recorder.new
         mod = RedmineReporterDashboards
         existed = mod.respond_to?(:render_engine_id)
         original = existed ? mod.method(:render_engine_id) : nil
@@ -534,12 +535,17 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
 
         begin
           outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
-                        engine_preference: described_class::FROM_SETTINGS).call(pdf: true)
+                        engine_preference: described_class::FROM_SETTINGS,
+                        logger: logger).call(pdf: true)
 
           expect(asked).to eq(1)
           expect(outcome).not_to be_ok
-          # AND THE SENTINEL IS NEVER TREATED AS AN ENGINE NAME. Without the resolution the
-          # symbol itself would be looked up, which is the shape this branch exists to prevent.
+          # AND THE SENTINEL IS NEVER TREATED AS AN ENGINE NAME — asserted on the LOG, because
+          # a review measured that the diagnostic CODE cannot tell the two paths apart: looking
+          # `:from_settings` up as an id also fails, also falls through to the same arm, and
+          # also answers `:engine_misconfigured`. The log is where the difference shows, and
+          # under the mutant it reads "selects render engine :from_settings".
+          expect(logger.lines.join("\n")).not_to include('from_settings')
           expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
         ensure
           if existed

@@ -50,7 +50,7 @@ hu:
   label_reporter_preflight_check_gotenberg_credential: "A renderelő szolgáltatás megköveteli a hitelesítést"
   label_reporter_preflight_check_gotenberg_version: "A renderelő szolgáltatás Gotenberg 8 vagy újabb"
   label_reporter_preflight_check_gotenberg_javascript: "A renderelő szolgáltatásban engedélyezve van a JavaScript, így a diagramok kirajzolhatók"
-  label_reporter_preflight_check_engine_not_selected: "A renderelő motorhoz szolgáltatás kell, és nem ez a telepítés kiválasztott motorja"
+  label_reporter_preflight_check_engine_not_selected: "A renderelő motor szolgáltatást igényel, és nem ez a telepítés kiválasztott motorja"
   label_reporter_preflight_check_engine_configuration: "A motor lekérdezhető volt a beállításairól"
   label_reporter_preflight_check_engine: "A renderelő motor létrehozott egy dokumentumot"
   label_reporter_preflight_check_degradations: "Semmi sem lett észrevétlenül lekorlátozva"
