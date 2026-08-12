@@ -270,31 +270,26 @@ module ReporterDashboards
     # preview, and a second mechanism for the second case is the "two ways of doing one
     # thing" §6 forbids. If the curator wants the header, it needs a content endpoint and
     # a way to address unsaved content, which is a task.
-    CONTENT_SECURITY_POLICY =
-      "default-src 'none'; img-src data:; style-src 'unsafe-inline'; " \
-      "script-src 'unsafe-inline'".freeze
-
-    # NO `allow-same-origin`. That one token is the difference between a sandbox and a
-    # decoration, so it is written here once, next to the reason.
-    SANDBOX = 'allow-scripts'
+    # THE TOKENS AND THE DOCUMENT NOW LIVE IN `RedmineReporterDashboards::ReportFrame`,
+    # and these two constants are delegations rather than copies.
+    #
+    # They moved because `include_all_helpers = false` makes this helper unreachable from a
+    # my-page widget, and T-26a needs the same frame on that surface. The comment that used
+    # to sit here said the policy and the body must not be separable by an edit to one of
+    # two files — which is exactly why the move was a MOVE and not a second copy: that
+    # module is now the only place either is assembled, and everything else delegates.
+    # One copy used twice cannot drift; two copies can.
+    CONTENT_SECURITY_POLICY = ::RedmineReporterDashboards::ReportFrame::CONTENT_SECURITY_POLICY
+    SANDBOX = ::RedmineReporterDashboards::ReportFrame::SANDBOX
 
     def reporter_report_frame(section)
-      content_tag(:iframe, '',
-                  srcdoc: reporter_sandboxed_document(section.body),
-                  sandbox: SANDBOX,
-                  class: 'reporter-report-frame',
-                  title: l(:label_reporter_report_frame))
+      ::RedmineReporterDashboards::ReportFrame.frame(
+        section.body, title: l(:label_reporter_report_frame)
+      )
     end
 
-    # The standalone document the frame parses. Assembled here rather than in a view so
-    # that the policy and the body cannot be separated by an edit to one of two files.
     def reporter_sandboxed_document(body)
-      <<~HTML
-        <!DOCTYPE html>
-        <html><head><meta charset="utf-8">
-        <meta http-equiv="Content-Security-Policy" content="#{CONTENT_SECURITY_POLICY}">
-        </head><body>#{body}</body></html>
-      HTML
+      ::RedmineReporterDashboards::ReportFrame.document(body)
     end
 
     # §9b.2: "preview of 50 of 1 284" — never silently truncated.

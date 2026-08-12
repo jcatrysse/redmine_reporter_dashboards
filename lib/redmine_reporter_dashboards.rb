@@ -8,6 +8,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
 # which looks exactly like a misconfigured role.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/report_frame'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'
 # Asked from a my-page partial, which core renders through its OWN helper set
 # (`include_all_helpers = false`), so this cannot live in one of this plugin's helpers.
@@ -95,6 +96,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/time_entry_visibility'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/report_run'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/failure_document'
+# T-26a — the owned report widget, required AFTER the reporting layer it composes
+# (ReportScope, ReportRun) rather than with the other top-level modules, because it names
+# them at load time through this file's own ordering rather than through require_relative.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/widget_report'
 # T-32 — the ad-hoc mail policy and its delivery. `mail_policy` is required first because
 # `adhoc_delivery` reads it at load time through `require_relative`; listing both here keeps
 # the boot order explicit rather than depending on which file happens to be loaded first.

@@ -107,6 +107,22 @@ that expression and no variable held it. One local (`engine = adapter.new`) was 
 "ordering change". Before planning work around a dependency that looks structural, check
 whether it is only a missing binding.
 
+**A FIRST-OCCURRENCE SUBSTITUTION MUTATES THE COMMENT, NOT THE CODE — AND THIS REPO'S COMMENT
+DENSITY MAKES THAT THE DEFAULT OUTCOME.** Measured 2026-08-12 in T-26a. `perl -0pi -e
+'s/Template\.visible\(actor\)/Template.all/'` has no `/g`, so it replaced the **first** occurrence —
+which was a line of prose in the module's own header, because every construct in this codebase has its
+name repeated in a comment above it. The code was untouched, the test suite passed, and the mutant was
+reported as a SURVIVOR against the single most important claim in the file (that a widget cannot render
+a template its viewer may not see). Applied to the code line instead, it dies immediately.
+
+The general rule is HANDOVER's own — *"if every mutant survives, suspect the harness before the
+tests"* — but the specific failure is worth naming because it produces ONE plausible survivor rather
+than an obviously broken run, which is far harder to disbelieve. Two habits close it. **Mutate by line
+number, skipping comment lines** (`[i for i,l in enumerate(lines) if PATTERN in l and not
+l.strip().startswith('#')]`, and assert the match count is what you expected). And **after applying a
+mutant, grep the MIRROR** — not the working tree — for the mutated construct, because that is the copy
+the run reads.
+
 **A RESCUED `StatementInvalid` STILL 500s A TRANSACTIONAL TEST, AND THE CODE UNDER TEST IS NOT THE
 CAUSE.** Measured 2026-08-12 while covering the my-page guard (§Findings **E-39**). A widget whose
 body raises `ActiveRecord::StatementInvalid` was correctly rescued — the degradation line is in the
