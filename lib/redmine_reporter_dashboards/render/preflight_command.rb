@@ -76,6 +76,8 @@ module RedmineReporterDashboards
         return nothing_registered if reports.empty?
 
         emit(reports)
+        return nothing_verified if every_report_is_a_deferral?(reports)
+
         reports.all?(&:ok?) ? OK : FAILURES
       rescue Registry::UnknownEngine => e
         unknown_engine(e)
@@ -99,6 +101,45 @@ module RedmineReporterDashboards
         out.puts('render preflight: NO ENGINE REGISTERED — nothing was verified. ' \
                  'Load an engine adapter (lib/redmine_reporter_dashboards/render/engines) ' \
                  'before running this.')
+        NOTHING_TO_RUN
+      end
+
+      # EVERY REPORT IS A DEFERRAL, so this run verified nothing — and `NOTHING_TO_RUN` is
+      # the code whose documented meaning is exactly that (§Findings E-27 row 7, decided by
+      # the curator on 2026-08-12).
+      #
+      # It used to exit **0** and print *"OK so far"*, which is two wrong answers in one: a
+      # deploy step was told "fine" about a run that checked nothing, and this repository's
+      # oldest defect class is a green run that verified nothing (INV-7). The other half of
+      # the same disagreement was `Reporting::ReportRun`, which calls this install
+      # `:engine_misconfigured` — one surface said broken, this one said fine, and the
+      # curator's instruction was to correct whichever was wrong. This one was.
+      #
+      # READ OFF THE REPORTS, not from a second port into the suite: a deferral is exactly one
+      # check carrying `PreflightSuite::DEFERRED_CHECK_ID`, so "nothing was verified" is a
+      # property of the output an operator is looking at rather than a fact this class has to
+      # be told. `RRD_ENGINE=<id>` cannot reach here — naming an engine drops the deferrals
+      # from `reports` entirely, which is the point of naming one.
+      def every_report_is_a_deferral?(reports)
+        reports.all? do |report|
+          report.checks.map(&:id) == [PreflightSuite::DEFERRED_CHECK_ID]
+        end
+      end
+
+      # THE DEFERRAL ROWS STAY, which was the condition attached to the recommendation: exit 2
+      # with a blank page would replace one bad answer with another, and those rows carry the
+      # only actionable thing on this surface. `emit` has already run.
+      #
+      # AND THE SENTENCE IS TEXT-ONLY, because `emit` may just have written the JSON artefact
+      # and a line after `JSON.pretty_generate` would stop it parsing. The exit code is what
+      # carries this to a machine; the sentence is for the person.
+      def nothing_verified
+        unless format == :json
+          out.puts('render preflight: NOTHING WAS VERIFIED — every registered render engine ' \
+                   "needs a service, and none is this installation's selected engine. Choose " \
+                   'one under Administration > Plugins, or name one above with RRD_ENGINE to ' \
+                   'check it deliberately.')
+        end
         NOTHING_TO_RUN
       end
 

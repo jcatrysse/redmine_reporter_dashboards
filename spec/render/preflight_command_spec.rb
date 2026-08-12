@@ -90,6 +90,81 @@ module RedmineReporterDashboards
           expect(run).to eq(described_class::OK)
         end
 
+        # THE OTHER RUN THAT VERIFIED NOTHING, and it exited 0 for two releases (§Findings
+        # E-27 row 7, decided 2026-08-12). Every registered engine needs a service and none is
+        # the selected one, so every report is a deferral — the run looked inside no document
+        # at all and told a deploy step "OK so far".
+        #
+        # `:gotenberg` IS THE ID THAT MAKES THIS REAL, because the deferral keys on what
+        # `config/capabilities.yml` says needs a service, not on the adapter class. A stand-in
+        # under that id is deferred exactly as the real one would be, and never instantiated.
+        it 'is 2 when every engine is deferred, because that run verified nothing' do
+          Registry.register(:gotenberg, good)
+
+          expect(run).to eq(described_class::NOTHING_TO_RUN)
+          expect(out.string).to include('NOTHING WAS VERIFIED')
+        end
+
+        # AND THE DEFERRAL ROWS SURVIVE THE NON-ZERO EXIT, which was the condition on the
+        # recommendation the curator accepted: exiting 2 with a blank page replaces one bad
+        # answer with another, and `RRD_ENGINE=<id>` is the only actionable thing here.
+        it 'still prints the deferral and its remediation when it exits 2' do
+          Registry.register(:gotenberg, good)
+
+          run
+
+          expect(out.string).to include('RRD_ENGINE=gotenberg')
+          expect(out.string).to include('selected engine')
+        end
+
+        # THE JSON ARTEFACT STAYS PARSEABLE, because it is an ops interface and `emit` has
+        # already written it by the time the exit code is decided. The sentence is for a
+        # person; the exit code is what carries this to a machine.
+        it 'exits 2 without breaking the JSON artefact' do
+          Registry.register(:gotenberg, good)
+
+          expect(run(format: :json)).to eq(described_class::NOTHING_TO_RUN)
+          expect { JSON.parse(out.string) }.not_to raise_error
+          expect(out.string).not_to include('NOTHING WAS VERIFIED')
+        end
+
+        # THE SHIPPED CONFIGURATION, AND THE ONE THAT MUST NOT GO RED. A mutation found this
+        # missing: `all?` relaxed to `any?` survived the whole suite, and under it an install
+        # with a working Chromium and a deferred Gotenberg — which is what this plugin ships —
+        # would exit 2 and turn every deploy step red while nothing whatsoever was wrong.
+        # "Nothing was verified" means NOTHING; one engine checked is not nothing.
+        it 'is not 2 when one engine was checked and another was merely deferred' do
+          Registry.register(:chromium_cdp, good)
+          Registry.register(:gotenberg, good)
+          stub_preflight(:pass)
+
+          expect(run).to eq(described_class::OK)
+          expect(out.string).not_to include('NOTHING WAS VERIFIED')
+          # And the deferral is still reported, because a silently shorter list is the other
+          # failure mode this surface has.
+          expect(out.string).to include('RRD_ENGINE=gotenberg')
+        end
+
+        # AND SELECTING THAT ENGINE IS THE DECISION THE DEFERRAL WAS WAITING FOR, so the run
+        # checks it and the exit code goes back to being about the checks. Without this the
+        # fix above would make every Gotenberg-only install permanently red, which is the
+        # opposite of what FR-50 bought.
+        it 'is not 2 when the installation has selected the engine that needs a service' do
+          Registry.register(:gotenberg, good)
+          stub_preflight(:pass)
+
+          expect(run(selected_engine_id: 'gotenberg')).to eq(described_class::OK)
+          expect(out.string).not_to include('NOTHING WAS VERIFIED')
+        end
+
+        # Naming one deliberately does the same, and it is the pre-FR-50 way to ask.
+        it 'is not 2 when the operator named the engine with RRD_ENGINE' do
+          Registry.register(:gotenberg, good)
+          stub_preflight(:pass)
+
+          expect(run(engine_ids: 'gotenberg')).to eq(described_class::OK)
+        end
+
         # THE ONE THAT MUST NOT BE 0. "No engine is registered" is not a render defect,
         # so it is not a 1 — but a green preflight that verified nothing is the failure
         # mode this repository keeps rediscovering, so it is not a 0 either.
