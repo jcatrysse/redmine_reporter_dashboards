@@ -88,9 +88,13 @@
 
 /* T-26a - the same frame in a dashboard box, where 40em is most of a screen and there
    are several of them. Only the height differs; every security token is on the element
-   itself and comes from ReportFrame, which a CSS class cannot reach. `resize: vertical`
-   is inherited from the rule above, so a reader whose report is taller can drag it -
-   which is the escape hatch that makes a fixed height acceptable at all. */
+   itself and comes from ReportFrame, which a CSS class cannot reach.
+
+   The element carries BOTH classes, so it keeps `resize: vertical` from the rule above -
+   that is a second matching rule, not CSS inheritance, and the earlier wording here said
+   inheritance. It matters because the `min-height` override wins only on source order:
+   both selectors are specificity (0,1,0), so moving this block above the other silently
+   restores 40em in every dashboard box. Keep it last. */
 .reporter-report-frame--widget {
   min-height: 20em;
 }

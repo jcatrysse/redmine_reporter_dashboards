@@ -95,7 +95,7 @@ module ReporterProjectPagesHelper
   def render_reporter_project_block(block, tab, project)
     # M1: only spent-time reports require the time-entries permission.
     #     Issue reports use :view_issues, which authorize already enforces.
-    base_block = block.to_s.sub(/__\d+\z/, '')
+    base_block = RedmineReporterDashboards::ProjectPage.base_block_name(block)
     if base_block == 'report_by_spent_time' &&
        !User.current.allowed_to?(:view_time_entries, project, global: true)
       return ''

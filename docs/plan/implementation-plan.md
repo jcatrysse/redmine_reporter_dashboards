@@ -87,7 +87,8 @@ fact that CI has not yet run on this work at all.
 | T-28 | **DONE — three increments, two independent reviews, both of which REJECTED it (§Findings **E-23**, **E-24**). FR-54 and FR-62 were NARROWED by curator decision rather than built (§Findings ~~S-28~~), and the one thing that decision leaves open — reports render a URL-referenced image blank, because nothing calls the asset layer — is **F-16** and belongs to T-33. **F-16 IS NOW CLOSED (2026-08-09) and T-28 has no remaining owed half**: the asset layer is called, so a same-origin image is inlined off disk rather than reaching a share-link recipient as a dead URL. Note this does NOT re-open FR-54, which the curator narrowed to option 2 — a share link still authorises ONE DOCUMENT and grants nothing it points at; what changed is that the document now CONTAINS its images instead of pointing at them, which makes the narrowed promise stronger rather than different.** and its increment-2 review REJECTED the change with two blockers that were both "the test cannot fail" rather than "the code is wrong" (§Findings **E-23**).** **Increment 1** (`d9943ca`): migration 010, `ShareLink`, `ShareLinkAccess`. Only the digest is stored; lookup is by digest with a fixed-length constant-time compare; expiry is NOT NULL in the *schema*; `use!` is one conditional UPDATE whose WHERE clause carries the whole rule. **Increment 2** (`d36ad97`): `Reporting::Snapshot` — the write path `reporter_dashboards_documents` had lacked since T-22 created it — plus the public endpoint at `GET /reporter/s/:token`, outside any project, the only controller here with no permission because *"may whoever holds this token have these bytes"* has no person in it. **Two core measurements changed the design and both are findings**: `Attachment.prune` would have deleted every snapshot after a day (**S-24**), and `attachments.container_type` is `varchar(30)` while every model name here is longer (**S-25**). **Increment 3** (`e50bf6b`): the owner's list with revoke and revoke-all, both permissions promoted, and FR-54. **Revocation is OWNERSHIP, not a permission** — a third party holding every grantable permission cannot revoke somebody else's link, and revoke-all checks per link rather than once for the template, or it would be an escalation with a convenient name. **FR-54 IS NOT MET, and the commit that claimed it was cited a control with no call site** — `Assets::Resolver`/`AssetBinding` are never called, `ReportRun` passes the body straight through, and a real render puts `/attachments/download/1` into the PDF verbatim. Nothing leaks today (INV-8 denies the renderer a credential, so the fetch fails) but that is not what FR-54 asks for. **S-28** puts three options to the curator. **`PLANNED` is now EMPTY** — every permission §4.1 names is registered — which makes four permission-spec examples vacuous, so an example asserts the emptiness and names them. Curator decisions taken along the way: **~~S-26~~** (a public link serves on a `login_required` instance — *"public is public… it's a choice"*) and **S-27** (the token is in every access log; short expiries are the bound). Found and fixed **E-22**, a security assertion in increment 1 that tested nothing, proved wrong in both directions. **Its increment-3 review REJECTED it too (§Findings **E-24**)**: four scoping and identity guards had no test — one mutation made the snapshot render as the TEMPLATE'S AUTHOR while still recording the sharer, a measured escalation — and two ordinary form values wrote a full render, a `Document` row and an `Attachment` to disk on a request that then FAILED, repeatable without bound. All fixed; every field is now checked before the render. Mutations: 21 + 15 + 9 + 10, all killed after three rounds of survivors were closed with tests |
 | Curator decisions, 2026-08-11 | **done, and two of the four are deliberately NOT code.** `:gotenberg` promoted to `verification: corpus` with the matrix regenerated from a three-engine run; `:engine_misconfigured` added to the closed `Failure::CODES` set (eight emitting sites — six in the Gotenberg adapter, one in wkhtmltopdf, one in `ReportRun` — four argued non-movers, thirteen-row boundary table). The `gotenberg:8.35.0-chromium` switch is **HELD**: its own module banner lists `pdfcpu` and `pdftk`, so the "3 of 4 advisories are absent" premise the YES rested on is refuted and there is no CVE argument left — and the image REFUSES the compose file's `--libreoffice-disable-routes`. The all-deferred exit code stays the curator's, with a re-measured recommendation. **Three independent reviews (reviewer, adversarial QA, UX) and the first attempt was rejected by all three for the same class of defect** — a control that did not hold the boundary it claimed. §Findings **E-29** |
 | FR-50 / §5.2 clause 4 | **done** — `render/engine_preference.rb`, the `render_engine` setting, the settings partial's generated one-line-per-engine comparison, `ReportRun`'s precedence (hint → this installation → declared default → any engine needing no service), and `PreflightSuite` no longer deferring the engine an install SELECTED. Locale keys ×9, terminology per file. E-27 row 2 CLOSED |
-| T-26 onward | not started |
+| T-26a | **increments 1 and 2 done; increment 3 (my-page) open.** Increment 1 (`3a549c4`) built `ReportFrame` and `WidgetReport`. Increment 2 swapped the PROJECT DASHBOARD onto them: both block partials, `_report.html.erb`, `_report_settings.html.erb` and `report_pdf` render through `WidgetReport` + `Reporting::ReportRun` + `ReportFrame`, `OPTIONAL_BLOCKS` and the whole optional-widget machinery are deleted, and three entries came off `zero_reporter.allowlist` (strict: 12 files → 9). **Increment 1 shipped a defect that increment 2 fixes**: `ReportRun::OUTPUT_CLASSES` was a second copy of `ExecutionPolicy::OUTPUT_CLASSES` that lacked `:widget`, so `WidgetReport.render` raised `ArgumentError` for every template that resolved — and a spec used `:widget` as its example of an UNKNOWN class, so a test held the drift in place (§Findings **E-40**). **Its independent review REJECTED it** with one blocker and three majors: `source_for` did not strip the `__N` instance suffix, so every SECOND copy of a report widget on a dashboard was dead while the picker went on offering more (a regression — the partial it replaced never used `block` to resolve); an absolute "no configuration in which these cannot render" claim that was false twice over; an FR-46 comment asserting the importer resolves a carried-over `report_template_id` when nothing consults `source_template_id` and the importer never rewrites tab settings (**S-29**, reported not decided); and a surviving mutant proving the spent-time widget's render path had ZERO coverage. All fixed. 14 mutations across two rounds, 13 killed, 1 recorded equivalent |
+| T-26 remainder, T-27, T-37, T-38 | not started |
 
 **Phase 1's promise is met and measured**: the plugin installs and runs with neither
 `redmine_reporter` nor the `redmineup` gem. Verified on Redmine 6.1-stable with and without
@@ -106,6 +107,57 @@ A workflow cannot fork itself without reintroducing the very credential G1 remov
 a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
+
+**E-40 · A CLOSED SET COPIED INTO A SECOND CLASS DRIFTED, AND A TEST HELD THE DRIFT IN
+PLACE.** 2026-08-12, in T-26a increment 2. Measured on a booted Redmine 7.0:
+
+    ReportRun::OUTPUT_CLASSES       = [:report, :preview]
+    ExecutionPolicy::OUTPUT_CLASSES = [:widget, :report, :preview]
+    WidgetReport.render(...)        -> ArgumentError: :widget is not a report output class
+
+`Liquid::ExecutionPolicy` has declared `:widget` since T-17 and `ReportRun` has accepted
+`output_class:` since T-23; increment 1's whole argument was that the limits "were built for
+this and left unused". They were — and `ReportRun`'s constructor validates against its OWN
+list, which nobody had compared with the policy's. Every template that actually resolved
+raised, and the commit reported *"OUTPUT_CLASSES accepts `:widget`"* as evidence: true of the
+policy's constant, false of the one the code path checks.
+
+**Three things generalise, and the third is the one worth carrying.**
+
+1. The caller was covered only on its two EARLY-RETURN paths (an unknown block, an
+   unresolvable id). The one line that runs a report was never executed by a test.
+2. The evidence sentence named a constant, not a call. A probe of the CALL would have
+   failed in one line.
+3. **`spec/reporting/report_run_spec.rb:1122` used `:widget` as its example of an unknown
+   output class.** So the divergence was not merely un-compared — it was ASSERTED. A test
+   that pins a copy's drift is worse than no test, because it converts "nobody checked" into
+   "somebody checked and this is correct".
+
+Fixed by making the constant the policy's own object (`assert_same`, not `==`) rather than a
+corrected copy. §Findings **S-29** below is the second finding from the same round.
+
+**S-29 · A WIDGET SETTING CARRIED OVER FROM THE BASE PLUGIN IS A BARE PRIMARY KEY, AND THE
+COLLISION IS THE LIKELY CASE — REPORTED, NOT DECIDED.** 2026-08-12, found by T-26a's
+independent review. `reporter_project_tabs.settings` holds `report_template_id`, which named
+a row in the base plugin's `report_templates`; the widget now resolves it against
+`reporter_dashboards_templates`. Both tables' ids start at 1, so on a real migration the
+stored id usually RESOLVES — to an unrelated report of ours. Measured:
+
+    imported template: id=2667 source_template_id=4242
+    template_for(stored base id 4242) -> nil          # still nil AFTER the import
+    a colliding id -> renders "NOT-THE-ONE-YOU-CONFIGURED"
+
+Nothing consults `source_template_id`, and `import/` never touches `reporter_project_tabs`
+(`rg -n 'ReporterProjectTab|report_template_id' lib/redmine_reporter_dashboards/import/` →
+no matches). Nothing LEAKS — `Template.visible(actor)` still bounds whatever resolves — but
+the widget can show a report nobody configured.
+
+**The comment in `widget_report.rb` claimed the importer resolved this**, which was wrong in
+both halves, and is now corrected to state what the code does. The fix is not taken here
+because every version of it is a migration decision the curator owns: should a stored id be
+read as ours or as the base plugin's, and should the importer rewrite widget settings? Any
+answer this method picks alone is a silent one, and FR-46 is about dashboards SURVIVING a
+migration, which is precisely the case at issue.
 
 **E-29 · THE CURATOR'S FOUR DECISIONS: TWO LANDED, ONE HELD ON A REFUTED PREMISE, ONE
 ANSWERED WITH A RECOMMENDATION — AND THREE INDEPENDENT REVIEWS REJECTED THE FIRST ATTEMPT.**
@@ -4419,8 +4471,12 @@ asked for because Phase 4 had landed since the last one; the answer is that one 
 while none of the three *blocks* did.
 
 1. **Strict flip — the stated reason is STALE, the clause is still blocked.** "Blocked on T-34 alone"
-   is no longer true: T-34 landed 2026-08-10 and T-35 with it. But strict still exits 1 on **12
-   files**, five of them the integration surface, and none of those five has changed since the
+   is no longer true: T-34 landed 2026-08-10 and T-35 with it. **RE-MEASURED 2026-08-12 after
+   T-26a increment 2: strict exits 1 on 9 files, not 12** — `project_page.rb`, the dashboard
+   controller and its helper came off the allowlist when the project-dashboard widgets became
+   owned. The paragraph below describes the 12-file state and is kept because its reasoning
+   about the remaining five still holds. At the time of that check strict exited 1 on **12
+   files**, five of them the integration surface, and none of those five had changed since the
    2026-08-08 check (`report_patch.rb` 2026-08-06, the controller 2026-08-04, the helper 2026-08-05,
    both `my/` views 2026-05-31). **The gate's own failure message is stale the same way** — it says
    "most of the list above goes when T-30..T-32 own the reporting surface" while all three have landed
@@ -4515,8 +4571,31 @@ the old templates to ours; the widget only has to degrade gracefully while that 
 `ScopeBinding#legacy_bind`, so T-26's two blocked deletions and the strict flip stop being blocked —
 and T-27 with them. That is the whole reason this is the keystone rather than one more widget.
 
-**Still owed by T-26 after T-26a:** the CI flip to strict, which stays blocked on the twelve files
-until T-26a lands. T-27 depends on T-26 and is therefore still blocked.
+**THE ONE REAL DESIGN DECISION — TAKEN, AND NEITHER OPTION WAS THE ONE THAT SHIPPED.**
+Increment 1 moved the markup into `RedmineReporterDashboards::ReportFrame` (option 2's
+module), and increment 2 then reached it from the project dashboard by DECLARING the
+existing helper on this plugin's own controller — `helper 'reporter_dashboards/templates'`
+— which is option 1's technique applied to a controller this plugin owns rather than to a
+core one. So there is no core patch and no second construction site: `TemplatesHelper`
+delegates to the module, and a test asserts the two constants are the SAME OBJECT.
+
+The choice is therefore still open for MY-PAGE only, and it is narrower than it was: the
+module exists and is reachable, so what remains is how a partial under `app/views/my/blocks/`
+reaches `l()` and the shared `_degradations` partial with `include_all_helpers = false`.
+
+**Still owed by T-26 after T-26a increments 1-2:**
+  * **increment 3 — the my-page widget.** `app/views/my/{_report.erb,blocks/_report_by_issues.erb}`
+    still render a base-plugin report template, still guard with
+    `ReporterReportTemplates.usable?` plus a rescue, and are the reason the base plugin
+    cannot be uninstalled yet. They also carry the last three `zero_reporter.allowlist`
+    entries outside the importer, together with `patches/report_patch.rb`.
+  * **the CI flip to strict, still BLOCKED.** Measured after increment 2:
+    `ZERO_REPORTER_MODE=strict` exits 1 on **9** files, down from 12. Five of the nine are
+    the detection and glue that cannot go while the integration exists at all
+    (`reporter_presence.rb`, `lib/redmine_reporter_dashboards.rb`, `init.rb`,
+    `glue/legacy/scope_resolution.rb`, `positioned.rb` + migration 001's comment); the rest
+    are increment 3's.
+T-27 depends on T-26 and is therefore still blocked.
 
 **T-33 · The asset-resolution triple + `asset_policy`** *(deps: T-12; blocks nothing after T-13)*
 **DONE 2026-08-06.** *Touches (as built, and the address moved — findings F-13/F-13b):*

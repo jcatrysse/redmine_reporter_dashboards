@@ -12,8 +12,13 @@
   `Reporting::ReportScope` answers "this project's visible issues" for a nil query id and
   the project's subtree for a real one, so the honest condition is the template alone.
 
-  `user` rather than `User.current`: the helper passes the actor explicitly and
-  `WidgetReport` requires one (INV-1). Nothing here reads the current user ambiently.
+  `user` rather than `User.current`, EVERYWHERE INCLUDING THE QUERY PICKER (INV-1). The
+  helper passes the actor explicitly and `WidgetReport` requires one. `Query.visible` takes
+  its actor as an optional first argument and falls back to `User.current` when none is
+  given (`redmine/app/models/query.rb:385`), so the picker below used to read it ambiently
+  — the same answer on this surface today, and exactly the silent drift the module header
+  warns about for "a future scheduled or shared surface". Found by the independent review
+  of T-26a and fixed rather than annotated.
 %>
 <%
   block ||= 'report_by_issues'
@@ -30,7 +35,7 @@
 <% elsif editable %>
   <%= render partial: 'reporter_project_pages/report_settings',
              locals: { block: block, settings: settings, report_type: :issues,
-                       queries: IssueQuery.visible.where(project_id: [nil, project.id]).sorted,
+                       queries: IssueQuery.visible(user).where(project_id: [nil, project.id]).sorted,
                        report_templates: RedmineReporterDashboards::WidgetReport.templates_for(
                          project: project, actor: user, source: 'issues'
                        ),

@@ -2,7 +2,7 @@
 
 Configurable project dashboards for Redmine, plus Liquid tags that replace slow per-issue loops with fast SQL aggregations.
 
-It installs on a plain Redmine and needs no other plugin. Two of its widgets integrate with the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter) plugin when that is installed — see [`redmine_reporter` is optional](#redmine_reporter-is-optional).
+It installs on a plain Redmine and needs no other plugin. One my-page widget still integrates with the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter) plugin when that is installed — see [`redmine_reporter` is optional](#redmine_reporter-is-optional).
 
 ## What does it do?
 
@@ -56,8 +56,16 @@ Redmine. Installed or not, one line in the log says which mode you are in.
 
 What still needs `redmine_reporter` — and only this:
 
-- the two **report widgets** (*Report* and *Report by issues*), which render one of
-  Reporter's own report templates, and their **Export as PDF** link.
+- the **my-page** *Report by issues* widget, which renders one of Reporter's own report
+  templates.
+
+**The two PROJECT-DASHBOARD report widgets no longer do.** They render this plugin's own
+report templates through its own render path, and their **Export as PDF** link produces the
+PDF through this plugin's engines — so both work on a Redmine with neither
+`redmine_reporter` nor the `redmineup` gem installed, which is the whole point of the
+exercise. They are offered in the widget picker unconditionally; what they need is a report
+template you can see, in a project with the **Reports** module enabled, and the widget's own
+settings form says so when there is none.
 
 `issue.target_version` and `issue.custom_field_value` used to be on this list. They were
 added by prepending a module into Reporter's own Liquid drop; that prepend is **gone**,
@@ -115,17 +123,20 @@ belief.
 The plugin's own code stays inside Ruby 2.7 syntax, because that is the floor
 Redmine 5.1 allows. `.codex/check_ruby_floor.sh` guards it and runs in CI.
 
-#### Redmine 7.0: everything except the two report widgets
+#### Redmine 7.0: everything except the my-page report widget
 
 **On Redmine 7.0 (Rails 8.1) the plugin runs standalone, in full.** Verified on
-`7.0-stable` with no `redmine_reporter` and no `redmineup` gem installed: 900 plugin
-specs, 86 adapter execution specs against PostgreSQL, and 114 full-application tests —
+`7.0-stable` with no `redmine_reporter` and no `redmineup` gem installed: 2683 plugin
+specs, 254 adapter execution specs against PostgreSQL 16, and 966 full-application tests —
 0 failures. Since reporter is now optional, the Redmine 7 problem below no longer
-affects anything but the two widgets that actually need it.
+affects anything but the one widget that actually needs it.
 
-The two **report widgets** (`report_by_issues`, `report_by_spent_time`) and the PDF
-export of a report still cannot work on Redmine 7.0 with reporter installed, because
-they depend on redmine_reporter's `ReportTemplate` — and merely referencing that class
+**This section used to say "except the two report widgets", and that stopped being true.**
+The project-dashboard `report_by_issues` and `report_by_spent_time` widgets, and their PDF
+export, are this plugin's own and work on Redmine 7.0 whether or not reporter is installed.
+What is left is the **my-page** *Report by issues* widget, which still renders one of
+reporter's report templates — so it cannot work on Redmine 7.0 with reporter installed,
+because it depends on redmine_reporter's `ReportTemplate` and merely referencing that class
 raises on Rails 8.1:
 
 ```
@@ -145,15 +156,16 @@ The fix belongs in redmine_reporter and is one line — `enum :orientation, {...
 plugin deliberately does not patch it: reporter is a third-party plugin, and carrying a
 patch for it would have to be re-applied at every reporter upgrade.
 
-What this plugin does instead is refuse to fall over. A widget that cannot render shows
-a placeholder and keeps its controls — so the rest of the dashboard is unaffected and an
-administrator can still remove the widget — and the report PDF export answers with a
-clean error instead of a stack trace. The reason is written to `log/production.log`. The
-functional tests that have to touch a report widget **skip** on Redmine 7.0 with the
-explanation above rather than failing anonymously.
+What this plugin does instead is refuse to fall over. The my-page widget checks whether
+reporter's classes actually resolve before naming one, and rescues anything else its body
+raises, so `/my/page` stays up and the block keeps its own close button — without which a
+user could not remove it. The reason is written to `log/production.log`. The two
+integration tests that need reporter to be genuinely absent **skip** with that explanation
+rather than failing anonymously.
 
-So on Redmine 7.0 today: every dashboard widget except the two report widgets works
-normally, and a dashboard that contains one of those stays usable.
+So on Redmine 7.0 today: every project-dashboard widget works normally, including both
+report widgets and their PDF export, and the my-page report block degrades to a labelled
+placeholder that can still be removed.
 
 #### Fixed: `group_by: age` used to report everything as `(none)` on MariaDB
 
@@ -2271,21 +2283,30 @@ Under the hood it reads `Issue#custom_field_value(id)` (Redmine's `Acts::Customi
 
 ## Exporting a report widget to PDF
 
-Report widgets show an **Export as PDF** link in their header. It opens the same report the widget renders — for the widget's configured query — as a PDF in a new tab, reusing the Reporter plugin's own PDF generation. (PDF output requires wkhtmltopdf to be configured for Reporter, the same as Reporter's own report preview.)
+Report widgets show an **Export as PDF** link in their header. It opens the same report the widget renders — the same template, over the same scope — as a PDF in a new tab, through this plugin's own render path: the export and the widget are one resolution differing in one argument, so the export cannot show a report the widget would refuse. PDF output needs one of this plugin's render engines to be available; see [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md) and the admin render preflight page. A failure answers with a clean error page and no bytes, never a file named `.pdf` that is not one.
 
-### What is replacing this, and what is not ready yet
+A widget's export is bounded the way the widget is: it draws **one** document, and only `combined` report templates are offered to a widget, because a dashboard box is one document and a per-record template is one per row.
 
-The section above describes how PDF export works **today**: through Reporter's own
-wkhtmltopdf call, with a fixed delay and injected polyfills. An owned render path now
-exists in the plugin alongside it — three engines behind one interface, a readiness
-protocol instead of the fixed delay, and a conformance corpus that measures what each
-engine actually does. [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md)
-is that measurement, generated from the run rather than written by hand.
+### Which PDF path a report takes, and which rules apply to it
 
-**None of it is wired to a button yet, and the rules below still apply to your
-templates.** When the export path moves over, the flexbox and `responsive: false`
-constraints become a property of the engine you chose rather than a rule you have to
-remember — but that is a later release, and until it ships this section is the truth.
+There are two, and which one you are on decides whether the constraints below apply.
+
+**This plugin's own report templates** — the ones the widgets above render, authored under
+a project's **Reports** tab — go through this plugin's render path: three engines behind
+one interface, a readiness protocol instead of a fixed delay, and a conformance corpus that
+measures what each engine actually does
+([`docs/engine-support-matrix.md`](docs/engine-support-matrix.md), generated from the run
+rather than written by hand). The flexbox and `responsive: false` rules below are a
+property of the engine your installation selected, not something you have to remember; on
+Chromium or Gotenberg they do not apply at all.
+
+**Reporter's own report templates**, rendered by that plugin, still go through its
+wkhtmltopdf call with a fixed delay and injected polyfills — and the rules below are the
+truth for those.
+
+**This paragraph used to say "None of it is wired to a button yet."** That was true when it
+was written and stopped being true when the project-dashboard widgets became this plugin's
+own; the export link in a widget header is that button.
 
 ## Charts in report templates (Chart.js in the PDF)
 

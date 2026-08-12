@@ -10,8 +10,11 @@
   THE EMPTY PICKER NEEDED A SENTENCE. With no usable template the two selects rendered as
   a blank dropdown and a Save button — a dead end with nothing saying why, and the two
   likeliest reasons (nobody has written a report template here yet; the project does not
-  have the reports module enabled) are both things the reader can act on. `label_query`'s
-  select is still shown, because a query is optional and the widget renders without one.
+  have the reports module enabled) are both things the reader can act on. The WHOLE form is
+  replaced, the query select included: a query narrows a report that has to exist first, so
+  offering it alone would be a control with nothing to apply to. (This comment said the
+  query select was "still shown" while line 22 hid it and the test asserted zero selects —
+  caught by the independent review of T-26a.)
 %>
 <h3>
   <%= l(report_type == :issues ? :label_reporter_widget_report_by_issues

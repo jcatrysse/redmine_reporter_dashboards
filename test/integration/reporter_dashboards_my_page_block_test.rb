@@ -31,10 +31,13 @@ require File.expand_path('../test_helper', __dir__)
 #
 #   1. **Standalone** (no redmine_reporter): `IssueListReportTemplate` is undefined →
 #      `NameError`. This is the supported standalone configuration T-06 was written for;
-#      T-06 fixed it for the PROJECT dashboard, by moving those partials to
-#      `blocks/optional/` where core's glob cannot see them (`project_page.rb:25-29`).
-#      The my-page surface never got the same treatment, and core's `MyPage` offers no
-#      `optional/` equivalent to move it to — so the guard has to be in the partial.
+#      T-06 fixed it for the PROJECT dashboard by putting those partials where core's
+#      glob cannot see them; T-26a then removed the raise from that surface entirely, by
+#      making the project-dashboard widgets this plugin's own — they live in
+#      `app/views/reporter_project_pages/report_blocks/` and name no base-plugin class.
+#      The my-page surface has NOT had either treatment: core's `MyPage` offers no
+#      directory the glob misses, so the guard has to be in the partial until the my-page
+#      widget is owned too (T-26a increment 3).
 #   2. **Redmine 7.0 with redmine_reporter INSTALLED.** Reporter's report-template
 #      classes use the keyword form of `enum`, removed in Rails 8.0, so referencing
 #      `IssueListReportTemplate` raises there too. MEASURED on Redmine 7.0.0.stable /

@@ -649,6 +649,91 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
                                                      .where(project_id: @project.id).count}"
   end
 
+  # THE SPENT-TIME WIDGET RENDERS TOO, AND NOTHING ASSERTED IT. The independent review of
+  # T-26a mutated its registered partial path to a name that does not exist and the suite
+  # stayed green — `render_reporter_project_block_content` rescues `ActionView::MissingTemplate`
+  # and returns nil, so the box AND ITS CLOSE BUTTON vanish and the widget cannot be removed.
+  # `test_a_report_widget_resolves_from_the_block_registry` only pins the path's PREFIX,
+  # which the mutant still matched.
+  def test_the_spent_time_widget_renders_its_report_in_the_sandboxed_frame
+    Role.find(1).add_permission! :view_time_entries
+    configure_report_widget(rrd_template(source: 'time_entries', name: 'Hours',
+                                         content: '<p>HOURS={{ time_entries.size }}</p>'),
+                            block: 'report_by_spent_time')
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    assert_select '#reporter-block-report_by_spent_time h3', /Hours/
+    frame = css_select('#reporter-block-report_by_spent_time iframe.reporter-report-frame--widget').first
+    assert frame, 'the spent-time report must render inside the opaque-origin frame'
+    assert_includes frame['srcdoc'],
+                    "HOURS=#{TimeEntry.visible(User.find_by!(login: 'jsmith'))
+                                      .where(project_id: @project.id).count}"
+    assert_no_match(/translation missing/i, response.body)
+  end
+
+  # A SECOND INSTANCE OF A WIDGET IS A FIRST-CLASS CASE, and it was broken.
+  #
+  # `ProjectPage.block_options` hands the picker `report_by_issues__1` the moment one
+  # instance is placed (`MAX_BLOCK_OCCURS` is 15), and `find_block`, the helper and the
+  # controller all strip that suffix — but `WidgetReport.source_for` did not, so the user
+  # added the widget, chose a template, saved, and the box rendered the settings form for
+  # ever with no message. A regression: the partial this replaced never used `block` to
+  # resolve. Found by the independent review of T-26a.
+  def test_a_second_instance_of_the_widget_renders_like_the_first
+    template = rrd_template(name: 'Instance two')
+    @tab.update!(layout: [['report_by_issues'], ['report_by_issues__1']],
+                 settings: { 'report_by_issues' => { 'report_template_id' => template.id },
+                             'report_by_issues__1' => { 'report_template_id' => template.id } })
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    assert_select '#reporter-block-report_by_issues iframe.reporter-report-frame--widget', 1
+    assert_select '#reporter-block-report_by_issues__1 iframe.reporter-report-frame--widget', 1,
+                  'the second instance must render its report, not its settings form'
+  end
+
+  def test_a_second_instance_exports_its_own_pdf
+    template = rrd_template(name: 'Instance two')
+    @tab.update!(layout: [['report_by_issues__1']],
+                 settings: { 'report_by_issues__1' => { 'report_template_id' => template.id } })
+    RedmineReporterDashboards::WidgetReport.stubs(:render)
+                                           .returns(rrd_widget(template, documents: [rrd_document]))
+
+    get :report_pdf, params: { project_id: @project.identifier, tab: @tab.id,
+                               block: 'report_by_issues__1' }
+
+    assert_response :success
+    assert_equal 'application/pdf', response.media_type
+  end
+
+  # AT THE LIMIT AND ONE PAST IT (CLAUDE.md Phase 3). The suffix is only a name, so the
+  # highest instance a dashboard may hold has to render like any other — and the picker
+  # has to stop offering a new one at the cap rather than growing without bound.
+  def test_the_highest_placeable_instance_renders_and_the_next_is_refused
+    template = rrd_template(name: 'Last instance')
+    max = RedmineReporterDashboards::ProjectPage::MAX_BLOCK_OCCURS
+    names = ['report_by_issues'] + (1...max).map { |i| "report_by_issues__#{i}" }
+    assert_equal max, names.size
+    last = names.last
+    @tab.update!(layout: names.map { |n| [n] },
+                 settings: { last => { 'report_template_id' => template.id } })
+
+    get :show, params: { project_id: @project.identifier, tab: @tab.id }
+
+    assert_response :success
+    assert_select "#reporter-block-#{last} iframe.reporter-report-frame--widget", 1
+    # One past the cap: the picker offers no further instance...
+    assert_select '#reporter-block-select option[value^=?]', 'report_by_issues__', 0
+    # ...and add_block refuses one that is asked for anyway.
+    post :add_block, params: { project_id: @project.identifier, tab: @tab.id,
+                               block: "report_by_issues__#{max}" }
+    assert_response :unprocessable_entity
+    assert_equal max, @tab.reload.block_rows.flatten.count { |n| n.start_with?('report_by_issues') }
+  end
+
   # INV-9. The body reaches the page as `srcdoc` ATTRIBUTE data, so a template's own
   # markup can never become an element in the DASHBOARD's document — where it would run
   # with the viewer's session. Asserted on the rendered page rather than on the frame

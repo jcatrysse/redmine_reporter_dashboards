@@ -7,6 +7,9 @@
   at all without it, and `ReporterProjectPagesController#report_block_permitted?` asks the
   same question for the export. Two places, one rule, both above this file — a third copy
   here would be the one that goes stale.
+
+  `TimeEntryQuery.visible(user)` and not `.visible`: see the note in
+  report_blocks/_report_by_issues.erb — the bare form reads `User.current`.
 %>
 <%
   block ||= 'report_by_spent_time'
@@ -23,7 +26,7 @@
 <% elsif editable %>
   <%= render partial: 'reporter_project_pages/report_settings',
              locals: { block: block, settings: settings, report_type: :spent_time,
-                       queries: TimeEntryQuery.visible.where(project_id: [nil, project.id]).sorted,
+                       queries: TimeEntryQuery.visible(user).where(project_id: [nil, project.id]).sorted,
                        report_templates: RedmineReporterDashboards::WidgetReport.templates_for(
                          project: project, actor: user, source: 'time_entries'
                        ),

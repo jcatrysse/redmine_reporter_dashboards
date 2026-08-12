@@ -58,8 +58,9 @@ module RedmineReporterDashboards
     # So the bound is at the PICKER: a widget offers, and resolves, only `combined`
     # templates. An existing setting naming a per-record template stops resolving and falls
     # through to the settings form, which is the same answer FR-46 gives an id imported from
-    # the base plugin. The full report is still one click away on the template's own page,
-    # where a per-record run has somewhere to put N documents.
+    # the base plugin. A per-record report is still available on the template's own page,
+    # where a run has somewhere to put N documents — the widget does not link there, see
+    # `_report.html.erb`.
     OUTPUT = 'combined'
 
     # What a caller needs to draw the widget, which is three things and not one.
@@ -72,8 +73,12 @@ module RedmineReporterDashboards
     Widget = Struct.new(:template, :query, :outcome, keyword_init: true)
 
     class << self
+      # THE INSTANCE SUFFIX IS STRIPPED, and the first version of this method did not do
+      # it. A dashboard may hold up to `MAX_BLOCK_OCCURS` copies of a widget, named
+      # `report_by_issues__1` upward, and answering nil for those made every second copy
+      # unrenderable. `ProjectPage.base_block_name` rather than a fifth local `sub`.
       def source_for(block)
-        SOURCE_BY_BLOCK[block.to_s]
+        SOURCE_BY_BLOCK[ProjectPage.base_block_name(block)]
       end
 
       # The templates the settings form may offer, and the same scope `#template_for`
@@ -87,11 +92,22 @@ module RedmineReporterDashboards
       # The stored template, or nil.
       #
       # NIL IS A NORMAL ANSWER AND THE CALLER MUST TREAT IT AS ONE (FR-46). A dashboard
-      # carried over from the base plugin holds ITS `report_template_id`, which will not
-      # resolve here until the importer has run — and the honest response to that is the
-      # settings form, which is already the partial's empty state. Erroring, or rendering
-      # somebody else's report because the id happened to collide, are the two wrong
-      # answers.
+      # carried over from the base plugin holds ITS `report_template_id`, which names a row
+      # in a different table — so it either fails to resolve, and the honest response is the
+      # settings form that is already the partial's empty state, or it COLLIDES with one of
+      # ours and renders an unrelated report.
+      #
+      # **THIS IS A BARE PRIMARY-KEY LOOKUP WITH NO PROVENANCE CHECK, and the collision is
+      # the likely case rather than the exotic one** — both tables' ids start at 1. An
+      # earlier version of this comment claimed the id "will not resolve here until the
+      # importer has run", which is wrong twice: nothing consults `source_template_id`, and
+      # the importer does not rewrite `reporter_project_tabs.settings` at all, so running it
+      # changes nothing here. Found by the independent review of T-26a and REPORTED RATHER
+      # THAN DECIDED (§Findings S-29): whether a stored id should be read as ours or as the
+      # base plugin's, and whether the importer should rewrite widget settings, is a
+      # migration decision for the curator — every answer this method could pick on its own
+      # is a silent one. Nothing leaks either way: `Template.visible(actor)` still bounds
+      # whatever resolves.
       def template_for(project:, actor:, source:, template_id:)
         return nil if template_id.blank?
 

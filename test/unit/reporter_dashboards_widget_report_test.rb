@@ -43,6 +43,30 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
                               settings: { report_template_id: 1 })
   end
 
+  # A PLACED WIDGET MAY CARRY AN INSTANCE SUFFIX, and the first version of `source_for`
+  # answered nil for every one of them — so every second copy of a report widget on a
+  # dashboard was dead while the picker went on offering more. Asserted across the whole
+  # range a dashboard may hold, and one past it, because the suffix is only a name and
+  # nothing here should care how high it goes.
+  def test_every_placeable_instance_of_a_block_resolves_its_source
+    max = ::RedmineReporterDashboards::ProjectPage::MAX_BLOCK_OCCURS
+    Subject::SOURCE_BY_BLOCK.each do |block, source|
+      assert_equal source, Subject.source_for(block)
+      (1..max).each do |index|
+        assert_equal source, Subject.source_for("#{block}__#{index}"),
+                     "#{block}__#{index} must resolve the same source as #{block}"
+      end
+    end
+  end
+
+  # The strip must not turn an unrelated name into a known one.
+  def test_the_instance_suffix_strip_does_not_invent_a_source
+    ['report_by_issues__', 'report_by_issues__x', 'xreport_by_issues__1',
+     'report_by_issues__1__2x'].each do |block|
+      assert_nil Subject.source_for(block), "#{block} must not resolve a source"
+    end
+  end
+
   # ------------------------------------------------------------------ the run
 
   # THE REGRESSION THIS FILE EXISTED WITHOUT. `#render` was covered only on its two

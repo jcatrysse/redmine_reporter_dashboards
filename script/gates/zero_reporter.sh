@@ -135,8 +135,14 @@ if [ "$MODE" = 'strict' ]; then
     echo "$DEBT" | sed 's/^/    /' >&2
     echo >&2
     echo "Strict is the 1.0 target: no coupling except the importer, which reads the base" >&2
-    echo "plugin's data by name because that is what it is for. Most of the list above goes" >&2
-    echo "when T-30..T-32 own the reporting surface." >&2
+    echo "plugin's data by name because that is what it is for." >&2
+    echo >&2
+    echo "This message used to say the list goes 'when T-30..T-32 own the reporting" >&2
+    echo "surface'. Those landed and the list did not move, so the sentence was training" >&2
+    echo "readers to wait for something that had already happened. What is actually left:" >&2
+    echo "  * the my-page report widget (T-26a increment 3) and the PDF patch it needs;" >&2
+    echo "  * the detection and glue that cannot go while the integration exists at all" >&2
+    echo "    - something has to name the plugin it is looking for." >&2
     status=1
   fi
 fi

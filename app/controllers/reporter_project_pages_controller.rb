@@ -18,10 +18,11 @@ class ReporterProjectPagesController < ApplicationController
   helper :reporter_project_pages
   # `include_all_helpers = false` (Redmine's `config/application.rb`), so a controller sees
   # its OWN helper and nothing else — HANDOVER §1 records a T-23 view that 500'd in
-  # production for exactly this. The report widget renders through the same three helpers
-  # the template editor's preview does (`reporter_report_frame`, `reporter_degradation_text`,
-  # `reporter_time_entry_visibility_notice`) and shares its `_degradations` partial, so it
-  # declares that helper rather than growing a second copy of any of them.
+  # production for exactly this. The report widget renders through the same four helpers
+  # the template editor's preview does — `reporter_report_frame`, `reporter_degradation_text`,
+  # `reporter_time_entry_visibility_notice` and `reporter_diagnostic_headline` — and shares
+  # its `_degradations` partial, so it declares that helper rather than growing a second copy
+  # of any of them.
   helper 'reporter_dashboards/templates'
 
   def show
@@ -149,7 +150,8 @@ class ReporterProjectPagesController < ApplicationController
   # DASHBOARD. Stated in one place and asked by both, so the export cannot outlive the
   # widget's own guard.
   def report_block_permitted?(block)
-    return true unless block.to_s.sub(/__\d+\z/, '') == 'report_by_spent_time'
+    return true unless RedmineReporterDashboards::ProjectPage.base_block_name(block) ==
+                       'report_by_spent_time'
 
     User.current.allowed_to?(:view_time_entries, @project, global: true)
   end

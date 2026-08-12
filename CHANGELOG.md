@@ -6,6 +6,39 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **The two project-dashboard *report* widgets no longer need the `redmine_reporter`
+  plugin.** They render this plugin's own report templates, through this plugin's own render
+  path, and their **Export as PDF** link produces the PDF the same way — so a dashboard with
+  both widgets on it works on a Redmine with neither `redmine_reporter` nor the `redmineup`
+  gem installed. They are offered in the widget picker unconditionally; previously they
+  disappeared from it wherever the other plugin was absent.
+
+  **A widget now shows only report templates you are allowed to see.** The lookup it
+  replaced applied no visibility rule at all, so a widget could display a report its viewer
+  had no permission to open. The report is also rendered *as the person looking at the page*,
+  so two people can see different totals from the same widget — which is the correct answer,
+  not an inconsistency.
+
+  **Only *combined* report templates are offered to a widget.** A *one document per issue*
+  template produces one document per row, and a dashboard box is one document; the full
+  report is available on the template's own page.
+
+  **An existing widget whose stored template no longer resolves falls back to its settings
+  form** rather than erroring — including a dashboard carried over from `redmine_reporter`,
+  whose stored template id names a row in that plugin's tables. Note the limitation, because
+  it is not yet solved: the id is looked up with no record of where it came from, so it can
+  also collide with one of this plugin's templates and show an unrelated report. Check the
+  widgets on a migrated dashboard.
+
+  **If a report cannot be produced, the widget says so inside its own box** — a short line
+  with the reference id to quote — and the PDF export answers with an error page and no
+  file, never a download named `.pdf` that is not a PDF.
+
+  On **Redmine 7.0** this means the project dashboard is now fully usable: the report
+  widgets and their PDF export work there whether or not `redmine_reporter` is installed.
+  The **My page** *Report by issues* block still needs it and still degrades to a labelled
+  placeholder on that version.
+
 - **Reports now embed the images and stylesheets they point at, instead of leaving a gap.**
   A template that referenced an image by URL — a Redmine attachment, or one of the files
   this plugin ships — produced a PDF with **nothing** where the image should have been, and

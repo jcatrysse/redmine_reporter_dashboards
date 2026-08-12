@@ -31,6 +31,41 @@ the intended tree BEFORE launching review agents and diff the whole thing agains
 snapshot, never spot-check lines. And if a commit genuinely cannot wait, stage EXPLICIT PATHS
 the agents do not touch (docs, locales) rather than everything.
 
+**TWO CLOSED SETS WITH THE SAME NAME IN TWO CLASSES WILL DRIFT, AND A TEST CAN PIN THE
+DRIFT IN PLACE.** `ReportRun::OUTPUT_CLASSES` was a copy of
+`Liquid::ExecutionPolicy::OUTPUT_CLASSES` minus `:widget`. Both are checked, at different
+moments — the constructor refuses an unknown class before anything is counted, the policy
+refuses one when the renderer is built — so nothing ever compared them, and T-26a's new
+caller raised `ArgumentError: :widget is not a report output class` for every template that
+resolved. The commit reported *"OUTPUT_CLASSES accepts `:widget`"*, which was true of the
+policy's constant. §Findings **E-40**.
+
+The part worth carrying is the THIRD cause: `spec/reporting/report_run_spec.rb` used
+`:widget` as its example of an *unknown* output class, so the divergence was asserted rather
+than merely unnoticed — a test that pins a copy's drift turns "nobody checked" into
+"somebody checked and this is correct". Three habits close it. **Point the second constant
+at the first and assert `assert_same`, never `==`** (this repo already does it for
+`ReportFrame`'s two constants and for the same reason). **Make the evidence sentence name a
+CALL, not a constant** — the probe that would have found this is one line. And when a class
+is "built and left unused waiting for its caller", the first thing the caller's test must do
+is RUN it: increment 1's tests covered only the two early-return paths, so the one line that
+does the work was never executed.
+
+**A `__N` SUFFIX ON A WIDGET NAME IS A FIRST-CLASS CASE, AND FOUR PLACES STRIPPED IT WHILE
+THE FIFTH DID NOT.** A project dashboard may hold `MAX_BLOCK_OCCURS` (15) copies of a
+widget, named `report_by_issues__1` upward, and `ProjectPage.block_options` offers the next
+one as soon as the first is placed. `find_block`, `ReporterProjectPagesHelper` and
+`ReporterProjectPagesController` each carried their own `sub(/__\d+\z/, '')`;
+`WidgetReport.source_for` — written in the same change — did not, so every SECOND copy of a
+report widget resolved no source, fell back to its settings form for ever and 404'd its own
+PDF export, after the user had chosen a template and saved it. Found by an independent
+review, not by the suite: every test placed exactly one instance.
+
+Two rules. **When you find the same three-character regexp in three files, the fourth copy
+is the bug** — it is now `ProjectPage.base_block_name`, said once. And **test a widget at
+instance 2, at the cap and one past it**; a suite that only ever places one instance cannot
+see this class of defect at all.
+
 **A SUITE RUN FROM A COPY WITH NO `.git` SILENTLY SKIPS GATE G7, AND THE PENDING COUNT IS THE
 ONLY PLACE IT SHOWS.** The ten `spec/golden` byte-identity examples (`RrdGolden::Baseline`,
 `RrdGolden::KernelException`) resolve the `v0.5.0` baseline **through git**, so in a `git archive`
