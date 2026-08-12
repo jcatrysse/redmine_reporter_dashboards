@@ -273,8 +273,16 @@ namespace :reporter_dashboards do
     # It EXITS NON-ZERO when a check failed, so it can be a deploy step rather than
     # something an operator reads and interprets. `PreflightCommand` documents the
     # three codes; 2 ("nothing was verified") is deliberately not 0.
+    # `rake -T` IS THE DEFINITION AN OPERATOR READS, more than the README is — it is what
+    # somebody whose deploy step just went red types first. This said "2 if no engine is
+    # registered" while 2 also meant an unknown id, an unparseable selection and (since
+    # §Findings E-27 row 7) an all-deferred run; a review measured that its own test could not
+    # notice, because the assertion was `assert_match(/exit/i, description)`, which even a
+    # description saying "exit 7 always, and never 2" satisfies.
     desc 'Render a probe document through each engine and report what actually worked ' \
-         '(exit 1 on failure, 2 if no engine is registered; RRD_ENGINE=id, RRD_FORMAT=json)'
+         '(exit 1 on failure, 2 when nothing was verified — no engine registered, an unknown ' \
+         'id, or every engine needs a service and none is selected; RRD_ENGINE=id, ' \
+         'RRD_FORMAT=json)'
     task preflight: :environment do
       require File.expand_path('../redmine_reporter_dashboards/render/preflight_command', __dir__)
       RedmineReporterDashboards::Render::PreflightCommand.load_engines!

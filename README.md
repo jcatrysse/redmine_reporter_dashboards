@@ -334,9 +334,11 @@ Three things worth knowing about the output:
   the id you named does not exist, the selection named nothing at all (a mangled
   `RRD_ENGINE=','` is a typo, not a request for the default set), **or every engine this
   install has needs a service and none of them is the selected one**, so every report was
-  a deferral and nothing was actually checked. That last case used to exit `0` and print
-  "OK so far", which told a deploy step everything was fine about a run that verified
-  nothing. The deferral rows are still printed, and they name what to do.
+  a deferral and nothing was actually checked. That last case used to exit `0`, which told a
+  deploy step everything was fine about a run that verified nothing. The deferral rows are
+  still printed and they name what to do — and each engine's own line still reads "OK so far",
+  which is that engine's summary (nothing failed, nothing ran); the run-level verdict is the
+  exit code and the last line.
   `RRD_ENGINE=<id>` limits it to one engine; `RRD_FORMAT=json` prints the report as
   JSON for an issue or a log.
 

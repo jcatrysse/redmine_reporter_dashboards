@@ -165,6 +165,27 @@ module RedmineReporterDashboards
           expect(run(engine_ids: 'gotenberg')).to eq(described_class::OK)
         end
 
+        # A FAILING CHECK MUST NOT BE RELABELLED "nothing was verified", and a mutation showed
+        # nothing stopped it. `Registry` is deliberately open and `Preflight#configuration_checks`
+        # copies an adapter's own `entry[:id]` verbatim, so a third-party adapter can publish a
+        # check under the deferral's id. A review measured one whose check FAILED coming back as
+        # exit 2 with "NOTHING WAS VERIFIED" — a real failure wearing the wrong sentence. The
+        # predicate matches on the STATE as well for that reason, and this is what holds it.
+        it 'is 1, not 2, when a check merely SHARES the deferral id and failed' do
+          Registry.register(:good, good)
+          allow_any_instance_of(Preflight).to receive(:run).and_return(
+            Preflight::Report.new(
+              engine_id: :good, engine_version: 'good-1', duration_ms: 1,
+              checks: [Preflight::Check.new(id: Render::PreflightSuite::DEFERRED_CHECK_ID,
+                                            title: 't', state: :fail, detail: 'd',
+                                            duration_ms: 1)]
+            )
+          )
+
+          expect(run).to eq(described_class::FAILURES)
+          expect(out.string).not_to include('NOTHING WAS VERIFIED')
+        end
+
         # THE ONE THAT MUST NOT BE 0. "No engine is registered" is not a render defect,
         # so it is not a 1 — but a green preflight that verified nothing is the failure
         # mode this repository keeps rediscovering, so it is not a 0 either.

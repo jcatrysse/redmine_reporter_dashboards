@@ -108,21 +108,36 @@ module RedmineReporterDashboards
       # the code whose documented meaning is exactly that (§Findings E-27 row 7, decided by
       # the curator on 2026-08-12).
       #
-      # It used to exit **0** and print *"OK so far"*, which is two wrong answers in one: a
-      # deploy step was told "fine" about a run that checked nothing, and this repository's
-      # oldest defect class is a green run that verified nothing (INV-7). The other half of
+      # It used to exit **0**, which told a deploy step "fine" about a run that checked
+      # nothing — and this repository's oldest defect class is a green run that verified
+      # nothing (INV-7).
+      #
+      # WHAT DID NOT CHANGE, and an earlier draft of this comment claimed it did: each engine's
+      # own line still reads *"OK so far — 1 check(s) could not run"*. That is `Report#headline`,
+      # and it is that REPORT's summary — nothing failed, nothing ran — which is true and is
+      # shared with the admin page. The run-level verdict is what was wrong, and the run level
+      # is the exit code and the last line. Changing `headline` is a `Report` change on two
+      # surfaces and is outside what was accepted here (§11.5). The other half of
       # the same disagreement was `Reporting::ReportRun`, which calls this install
       # `:engine_misconfigured` — one surface said broken, this one said fine, and the
       # curator's instruction was to correct whichever was wrong. This one was.
       #
       # READ OFF THE REPORTS, not from a second port into the suite: a deferral is exactly one
-      # check carrying `PreflightSuite::DEFERRED_CHECK_ID`, so "nothing was verified" is a
-      # property of the output an operator is looking at rather than a fact this class has to
+      # SKIPPED check carrying `PreflightSuite::DEFERRED_CHECK_ID`, so "nothing was verified" is
+      # a property of the output an operator is looking at rather than a fact this class has to
       # be told. `RRD_ENGINE=<id>` cannot reach here — naming an engine drops the deferrals
       # from `reports` entirely, which is the point of naming one.
+      #
+      # THE STATE IS PART OF THE MATCH, not decoration. `Registry` is deliberately open and
+      # `Preflight#configuration_checks` copies an adapter's own `entry[:id]` verbatim, so a
+      # third-party adapter may publish a check under this id — and a review measured one whose
+      # check FAILED being relabelled "nothing was verified", which is a real failure wearing
+      # the wrong sentence. Requiring `:skip` costs one line and only this file's own deferral
+      # can satisfy it.
       def every_report_is_a_deferral?(reports)
         reports.all? do |report|
-          report.checks.map(&:id) == [PreflightSuite::DEFERRED_CHECK_ID]
+          report.checks.map { |check| [check.id, check.state] } ==
+            [[PreflightSuite::DEFERRED_CHECK_ID, :skip]]
         end
       end
 
@@ -137,8 +152,8 @@ module RedmineReporterDashboards
         unless format == :json
           out.puts('render preflight: NOTHING WAS VERIFIED — every registered render engine ' \
                    "needs a service, and none is this installation's selected engine. Choose " \
-                   'one under Administration > Plugins, or name one above with RRD_ENGINE to ' \
-                   'check it deliberately.')
+                   'one under Administration > Plugins, or run this again with ' \
+                   'RRD_ENGINE=<id> to check one deliberately.')
         end
         NOTHING_TO_RUN
       end

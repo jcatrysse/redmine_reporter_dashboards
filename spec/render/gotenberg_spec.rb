@@ -1938,7 +1938,14 @@ module RedmineReporterDashboards
             end
           end
 
-          it 'defers it with a named skip rather than failing, and rake still exits 0' do
+          # THE SECOND CLAUSE OF THIS NAME USED TO SAY "and rake still exits 0", which
+          # §Findings E-27 row 7 made false in this very `around` block: it leaves `:gotenberg`
+          # as the ONLY registered engine, which is the all-deferred state, and an all-deferred
+          # run now exits 2 because it verified nothing. The body never touched
+          # `PreflightCommand`, so the suite stayed green while `--format documentation`
+          # printed the falsehood — in the file whose subject is the deferral.
+          it 'defers it with a named skip rather than failing, and the run then reports ' \
+             'that nothing was verified' do
             report = PreflightSuite.new.reports.find { |r| r.engine_id.to_s == 'gotenberg' }
 
             expect(report.checks.map(&:state)).to eq([:skip])
@@ -1963,6 +1970,12 @@ module RedmineReporterDashboards
             )
             # One spelling of the menu path per release; `report_run.rb` cannot use `→`.
             expect(report.checks.first.detail).not_to include('→')
+            # AND THE EXIT CODE, against the REAL adapter. Every other example of the new
+            # behaviour uses a stand-in; this `around` is the only place the shipped Gotenberg
+            # class sits alone in the registry, which is exactly the state the exit code is
+            # about. It is never instantiated — `deferred_report` builds a `Check` literal.
+            expect(PreflightCommand.new(out: StringIO.new).call)
+              .to eq(PreflightCommand::NOTHING_TO_RUN)
           end
 
           it 'still runs it, for real, when the operator names it' do

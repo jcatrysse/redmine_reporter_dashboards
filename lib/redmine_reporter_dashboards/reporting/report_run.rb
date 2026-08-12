@@ -830,12 +830,19 @@ module RedmineReporterDashboards
       # belong in a `Diagnostic` field nobody prints. So the third state's fix is the SENTENCE
       # being true, and nothing else was needed.
       #
-      # WHAT THIS DOES NOT CLAIM. `PreflightCommand` answers exit 0 and *"OK so far"* for the
-      # second state, so one surface calls it fine while this one calls it a misconfiguration.
-      # That disagreement is §Findings E-29 row 7, it is OPEN and awaiting a curator decision,
-      # and it is NOT resolved here — the first draft of this comment cited preflight as
-      # agreeing with it, which a review measured as inverted. Naming the disagreement is the
-      # honest state; picking a side for the operator's exit code is the curator's.
+      # AND THE OTHER SURFACE NOW AGREES, which is worth stating because this paragraph spent
+      # three commits saying it did not. `PreflightCommand` used to answer exit 0 for the second
+      # state while this one called it a misconfiguration; §Findings **E-27 row 7** is CLOSED as
+      # of 2026-08-12 by curator decision — an all-deferred run exits `NOTHING_TO_RUN` (2),
+      # because it verified nothing. So both surfaces report this installation as a problem, and
+      # the operator gets the same answer whichever one they look at.
+      #
+      # THE HISTORY IS KEPT BECAUSE IT COST THREE ROUNDS. A draft cited preflight as AGREEING
+      # when it did not (measured inverted); the correction said the disagreement was open and
+      # was right; and this paragraph then survived the commit that closed it, still saying
+      # "OPEN and awaiting a curator decision" one line above a passing test of the opposite.
+      # A comment that outlives the decision it describes is how a closed question gets
+      # re-opened by the next reader.
       def no_engine_diagnostic(sections)
         registry = ::RedmineReporterDashboards::Render::Registry
         ids = registry.ids

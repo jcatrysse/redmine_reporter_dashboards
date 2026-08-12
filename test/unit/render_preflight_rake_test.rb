@@ -58,6 +58,14 @@ class RenderPreflightRakeTest < ActiveSupport::TestCase
     # The exit code is the product — see PreflightCommand. A task whose `-T` line does
     # not say so is a task an operator wires into a deploy step by guessing.
     assert_match(/exit/i, description)
+    # AND IT MUST NAME WHAT 2 ACTUALLY MEANS, all three ways of reaching it. `/exit/i` alone
+    # was measured passing against a description reading "exit 7 always, and never 2" — a
+    # control that cannot fail, on the line an operator reads before wiring this into a deploy
+    # step. The third clause arrived with §Findings E-27 row 7 and the description did not.
+    assert_match(/\b2\b/, description)
+    assert_match(/no engine registered/i, description)
+    assert_match(/unknown id/i, description)
+    assert_match(/needs a service and none is selected/i, description)
   end
 
   # THE ACCEPT-LIST PROMISE. Not "the code calls exit" — the status, caught and read.

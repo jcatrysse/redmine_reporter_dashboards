@@ -68,6 +68,24 @@ All notable changes to this plugin are documented in this file.
 
 ### Changed
 
+- **`rake reporter_dashboards:render:preflight` no longer exits 0 after checking nothing.**
+
+  If every render engine on the installation needs a separate service and none of them is the
+  one you selected, the task had nothing it was allowed to check — and it exited **0**, which
+  told a deploy step everything was fine. It now exits **2**, the code that already meant
+  "nothing was verified", and prints one line saying so. The per-engine rows are still printed,
+  including the `RRD_ENGINE=<id>` line that tells you how to check one deliberately, and
+  `RRD_FORMAT=json` still produces a parseable report. Each engine's own line still reads
+  *"OK so far"* — that is what nothing-failed-and-nothing-ran looks like for one engine; the
+  run-level verdict is the exit code and the last line.
+
+  **One engine checked beside a deferred one is not this case** and stays green: an install with
+  the built-in Chromium and an unconfigured Gotenberg is unaffected.
+
+  **This can turn a previously green deploy step red**, and that is the point: the run was
+  green while verifying nothing. Two things make it green again, and either is a real answer —
+  choose an engine under *Administration → Plugins*, or name one with `RRD_ENGINE=<id>`.
+
 - **Export now writes a versioned bundle** — `format_version`, `exported_at`,
   `plugin_version` and a list of templates — instead of a bare single-template document.
   Files written by earlier versions still import, as do `redmine_reporter`'s YAML exports.
@@ -315,19 +333,6 @@ All notable changes to this plugin are documented in this file.
 
   What this changes for you: the column is something you can plan against, and a regression
   in any of those twenty cells now fails the build instead of being reported and ignored.
-
-- **`rake reporter_dashboards:render:preflight` no longer exits 0 after checking nothing.**
-
-  If every render engine on the installation needs a separate service and none of them is the
-  one you selected, the task had nothing it was allowed to check — and it said *"OK so far"*
-  and exited **0**, which told a deploy step everything was fine. It now exits **2**, the code
-  that already meant "nothing was verified", and prints one line saying so. The per-engine rows
-  are still printed, including the `RRD_ENGINE=<id>` line that tells you how to check one
-  deliberately, and `RRD_FORMAT=json` still produces a parseable report.
-
-  **This can turn a previously green deploy step red**, and that is the point: the run was
-  green while verifying nothing. Two things make it green again, and either is a real answer —
-  choose an engine under *Administration → Plugins*, or name one with `RRD_ENGINE=<id>`.
 
 - **A failed report now says whether the render engine is missing or misconfigured.**
 
