@@ -103,6 +103,13 @@ module RedmineReporterDashboards
 
           expect(run).to eq(described_class::NOTHING_TO_RUN)
           expect(out.string).to include('NOTHING WAS VERIFIED')
+          # AND THE TWO REMEDIES, because only the headline phrase was asserted and a review
+          # measured the consequence: the retracted wording — "or name one ABOVE with
+          # RRD_ENGINE", which pointed at nothing — could be put back verbatim with all 2681
+          # examples green. Corrected copy that nothing pins is what E-33 and E-34 were whole
+          # rounds about.
+          expect(out.string).to include('RRD_ENGINE=<id>')
+          expect(out.string).to include('Administration > Plugins')
         end
 
         # AND THE DEFERRAL ROWS SURVIVE THE NON-ZERO EXIT, which was the condition on the
@@ -179,6 +186,31 @@ module RedmineReporterDashboards
               checks: [Preflight::Check.new(id: Render::PreflightSuite::DEFERRED_CHECK_ID,
                                             title: 't', state: :fail, detail: 'd',
                                             duration_ms: 1)]
+            )
+          )
+
+          expect(run).to eq(described_class::FAILURES)
+          expect(out.string).not_to include('NOTHING WAS VERIFIED')
+        end
+
+        # AND A DEFERRAL-SHAPED CHECK BESIDE A REAL ONE IS NOT "nothing was verified" EITHER,
+        # which is why the match is an EXACT one-element list and not an `include?`. A review
+        # measured `include?` surviving all 2681 examples — and the state it lets through is one
+        # notch out from the defect the exact match was added for: `Preflight#run` returns the
+        # configuration checks ALONE when one of them failed, so a third-party adapter
+        # publishing one check under the deferral's id and one that FAILED produces exactly this
+        # report, and it would have been reported as "nothing was verified" while something
+        # failed.
+        it 'is 1, not 2, when a deferral-shaped check sits beside a failed one' do
+          Registry.register(:good, good)
+          allow_any_instance_of(Preflight).to receive(:run).and_return(
+            Preflight::Report.new(
+              engine_id: :good, engine_version: 'good-1', duration_ms: 1,
+              checks: [Preflight::Check.new(id: Render::PreflightSuite::DEFERRED_CHECK_ID,
+                                            title: 't', state: :skip, detail: 'd',
+                                            duration_ms: 0),
+                       Preflight::Check.new(id: :good_credential, title: 'c', state: :fail,
+                                            detail: 'd', duration_ms: 1)]
             )
           )
 

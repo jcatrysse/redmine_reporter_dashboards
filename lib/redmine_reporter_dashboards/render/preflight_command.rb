@@ -112,12 +112,22 @@ module RedmineReporterDashboards
       # nothing — and this repository's oldest defect class is a green run that verified
       # nothing (INV-7).
       #
-      # WHAT DID NOT CHANGE, and an earlier draft of this comment claimed it did: each engine's
-      # own line still reads *"OK so far — 1 check(s) could not run"*. That is `Report#headline`,
-      # and it is that REPORT's summary — nothing failed, nothing ran — which is true and is
-      # shared with the admin page. The run-level verdict is what was wrong, and the run level
-      # is the exit code and the last line. Changing `headline` is a `Report` change on two
-      # surfaces and is outside what was accepted here (§11.5). The other half of
+      # WHAT DID NOT CHANGE, and two drafts of this comment got it wrong in opposite directions:
+      # each engine's own line still reads *"OK so far — 1 check(s) could not run"*. That is
+      # `Report#headline`, and it is that REPORT's summary — nothing failed, nothing ran — which
+      # is true of that report.
+      #
+      # IT IS THIS COMMAND'S TEXT OUTPUT AND NOTHING ELSE. `headline`'s only caller is
+      # `Report#to_text`, whose only production caller is `#emit` below — measured, after a draft
+      # of this paragraph claimed the line was "shared with the admin page" and that rewording it
+      # would be a change "on two surfaces". The page states the same RULE in its own words
+      # (`ReporterPreflightHelper#reporter_preflight_summary`, nine locale keys) and never prints
+      # this string; a review proved it by replacing `headline` with a constant and watching the
+      # page's functional tests stay green while the render specs went red.
+      #
+      # So rewording it would be a ONE-surface change, and it is still not done here: what was
+      # wrong was the RUN-level verdict, and the run level is the exit code and the last line. A
+      # per-report summary saying "nothing failed and nothing ran" is accurate as it stands. The other half of
       # the same disagreement was `Reporting::ReportRun`, which calls this install
       # `:engine_misconfigured` — one surface said broken, this one said fine, and the
       # curator's instruction was to correct whichever was wrong. This one was.

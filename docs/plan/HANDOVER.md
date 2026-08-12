@@ -2264,7 +2264,7 @@ an ISSUE scope — already frozen in T-01's corpus, so that comparison is alread
    **`:skip` does not make the run red, and `complete?` is why that is honest.** `ok?` means nothing
    failed; `complete?` means nothing was left unanswered; the headline never prints a bare "OK" when
    a check was skipped, and the exit code is 0/1/2 with **2 = nothing was verified** — deliberately
-   not 0. Three things reach 2: no engine registered, an id that does not exist, and (since
+   not 0. Four things reach 2: no engine registered, an id that does not exist, a selection that names none (`RRD_ENGINE=','`), and (since
    §Findings E-27 row 7, 2026-08-12) a run where EVERY report was a deferral, because every
    registered engine needs a service and none is the selected one. One engine checked beside a
    deferral is NOT that: it stays 0/1 on its checks, which is the shipped configuration. If you add a check, add its id to

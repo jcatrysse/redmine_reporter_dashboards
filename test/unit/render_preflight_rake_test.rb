@@ -66,6 +66,14 @@ class RenderPreflightRakeTest < ActiveSupport::TestCase
     assert_match(/no engine registered/i, description)
     assert_match(/unknown id/i, description)
     assert_match(/needs a service and none is selected/i, description)
+    # THE FOURTH DOCUMENTED CAUSE, which the description folded away while the README and
+    # `script/render_preflight_exit_codes.sh` both carry it (that script MEASURES it as its
+    # fourth arm). Three code branches, four documented causes.
+    assert_match(/names none/i, description)
+    # AND THIS ASSERTS THE STORED COMMENT, NOT A RENDERED LINE, deliberately: `rake -T`
+    # truncates to the terminal width — measured at 80 columns, the line ends 42 characters
+    # before the first exit-code word — so no description that also says what the task does can
+    # be checked there. `rake -D`, a piped `-T` and the README are where this text is legible.
   end
 
   # THE ACCEPT-LIST PROMISE. Not "the code calls exit" — the status, caught and read.
