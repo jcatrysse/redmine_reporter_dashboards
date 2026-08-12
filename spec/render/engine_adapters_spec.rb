@@ -308,14 +308,29 @@ module RedmineReporterDashboards
                 '— check its execute bit, the directories above it, and whether that ' \
                 'filesystem is mounted noexec'
               )
-              # NO `not_to match` GUARDS BESIDE THE EQUALITY, and there were two until a review
-              # measured them dead: RSpec aborts an example at its first failure and equality
-              # is strictly stronger, so neither could ever be the deciding assertion — while
-              # their comment claimed they were what stopped the sentence naming a cause.
-              # Deleting both changes nothing (measured: 37 examples, 0 failures with them
-              # gone, and the noexec-lie mutant still dies on the equality alone). That is
-              # verbatim the finding that deleted `expect(Registry.ids).to eq([])`, and the
-              # same call this change already made in `report_run_spec.rb`.
+              # AND ONE KEYWORD GUARD BESIDE THE EQUALITY, WHICH IS NOT REDUNDANT — the two
+              # measurements that matter point opposite ways, so both are written down:
+              #
+              #   * against a mutation of the PRODUCTION string alone, equality subsumes the
+              #     keyword guard, which is what a previous round measured before deleting
+              #     both guards as unreachable.
+              #   * against a REWORD — the message changed and this expectation updated with
+              #     it, which is what an author does and what this file has been bitten by
+              #     three times — equality passes and the keyword guard is the only thing
+              #     left. Measured: with `because` reinstated in the message and the `eq`
+              #     above updated to match, the example passes without this line and fails
+              #     with it.
+              #
+              # So the deletion was wrong and is reverted. `/\bpresent\b/` is NOT restored:
+              # no draft ever smuggled that word in, and its own narrowing round found it
+              # redundant. This one word is the one three drafts used to name a cause.
+              #
+              # AND THE DELETION WAS NOT "the same call made in `report_run_spec.rb` in this
+              # commit", which is how it was justified: that file's subsumed guard was deleted
+              # one commit EARLIER, so the deletion here was propagating an earlier decision
+              # rather than reconciling with one taken alongside it. A review checked the diff
+              # and said so.
+              expect(denied.message).not_to match(/\bbecause\b/)
             end
           end
 

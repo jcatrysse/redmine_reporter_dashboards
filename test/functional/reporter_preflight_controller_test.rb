@@ -413,26 +413,31 @@ class ReporterPreflightControllerTest < ActionController::TestCase
   # `reporter_preflight_check_label`, which prefers the locale key and never reaches the
   # title. The title now only reaches the rake text and the JSON artefact. So the guard has
   # to be here, on the HTML, or the same slip happens again.
-  # `with_locale` AND NOT INHERITED (§6). This asserts English prose, and the locale it used
-  # to get came from Redmine's OWN `test/fixtures/users.yml` — a file that is branch-versioned
-  # across 5.1 → 7.0. A review flagged it: nothing failed, and "set them in the test, do not
-  # inherit them" is the rule regardless.
+  # THE LOCALE IS SET WHERE THE CONTROLLER READS IT, and `I18n.with_locale` is not that place.
+  # This asserts English prose, and the first attempt to stop it INHERITING its locale (§6)
+  # wrapped the request in `with_locale('en')` — which a review measured as decorative:
+  # `ApplicationController#set_localization` is a `before_action` that does
+  # `set_language_if_valid(find_language(user.language))`, so it runs INSIDE the block and
+  # overwrites it. Both directions were measured: `with_locale('de')` still rendered English
+  # and still passed, and `@admin.language = 'de'` rendered German and failed with
+  # `with_locale('en')` still in place. The locale is `User#language`, whose value came from
+  # Redmine's OWN `test/fixtures/users.yml` — branch-versioned across 5.1 → 7.0, which is the
+  # inheritance §6 forbids. So the user's language is what this sets.
   def test_the_deferral_row_does_not_tell_an_installation_it_chose_nothing
     @request.session[:user_id] = @admin.id
+    @admin.update_column(:language, 'en')
 
     # A FAKE UNDER THE `:gotenberg` ID, which this file's header requires and the deferral
     # allows: `deferred?` keys on the registry ID and `deferred_report` never instantiates the
     # adapter, so nothing here can reach a browser or a container.
-    ::I18n.with_locale('en') do
-      with_engine(:gotenberg, StubAdapter) do
-        post :run
+    with_engine(:gotenberg, StubAdapter) do
+      post :run
 
-        assert_response :success
-        assert_select 'td', text: /is not this installation's selected engine/
-        assert_select 'td', text: /has not chosen/, count: 0
-        # The English fallback is silent by design, so a missing key would read as a pass.
-        assert_no_match(/translation missing/i, @response.body)
-      end
+      assert_response :success
+      assert_select 'td', text: /is not this installation's selected engine/
+      assert_select 'td', text: /has not chosen/, count: 0
+      # The English fallback is silent by design, so a missing key would read as a pass.
+      assert_no_match(/translation missing/i, @response.body)
     end
   end
 
@@ -462,7 +467,7 @@ class ReporterPreflightControllerTest < ActionController::TestCase
               label_reporter_preflight_engine label_reporter_preflight_engine_default
               text_reporter_preflight_unknown_engine]
 
-    %w[de en es hu it pl pt-BR ru zh].each do |locale|
+    SHIPPED_LOCALES.each do |locale|
       ::I18n.with_locale(locale) do
         keys.each do |key|
           value = ::I18n.t(key, default: nil)
@@ -490,6 +495,13 @@ class ReporterPreflightControllerTest < ActionController::TestCase
   # pinned by equality: a keyword guard passes a rewording of the same falsehood, and these are
   # the values a native reader has not checked yet — so they are the ones most likely to be
   # silently "improved" back. Any deliberate rewording updates this table, which is the point.
+  # DERIVED ONCE AND SHARED, because the round that introduced the table below wrote a comment
+  # condemning hand-written locale lists sixty lines under one — `%w[de en es hu it pl pt-BR ru
+  # zh]`, in the test whose whole promise is "every key the page uses exists in every locale".
+  # A review measured the consequence: a tenth locale file carrying ONE key passed that test.
+  SHIPPED_LOCALES = Dir[File.expand_path('../../config/locales/*.yml', __dir__)]
+                    .map { |f| File.basename(f, '.yml') }.sort.freeze
+
   DEFERRAL_LABEL = {
     'de' => 'Die Render-Engine benötigt einen Dienst und ist nicht die gewählte Engine ' \
             'dieser Installation',
@@ -497,8 +509,8 @@ class ReporterPreflightControllerTest < ActionController::TestCase
             'engine',
     'es' => 'El motor de renderizado necesita un servicio y no es el motor elegido de esta ' \
             'instalación',
-    'hu' => 'A renderelő motor szolgáltatást igényel, és nem ez a telepítés kiválasztott ' \
-            'motorja',
+    'hu' => 'A renderelő motor szolgáltatást igényel, és nem a telepítés által ' \
+            'kiválasztott motor',
     'it' => 'Il motore di rendering richiede un servizio e non è il motore scelto per ' \
             'questa installazione',
     'pl' => 'Silnik renderujący wymaga usługi i nie jest wybranym silnikiem tej instalacji',
@@ -506,27 +518,29 @@ class ReporterPreflightControllerTest < ActionController::TestCase
                'escolhido desta instalação',
     'ru' => 'Механизму рендеринга нужна служба, и он не является выбранным механизмом ' \
             'этой установки',
-    'zh' => '渲染引擎需要一项服务，且不是本安装选择的引擎'
+    'zh' => '渲染引擎需要一项服务，且不是此安装选择的引擎'
   }.freeze
 
+  # COLLECTED, NOT ABORTED ON THE FIRST. A review reverted all eight non-English values and
+  # this loop reported only `de`; the other seven were invisible, so an eight-locale regression
+  # would have cost eight edit-run cycles to see.
   def test_the_deferral_label_says_the_same_true_thing_in_every_locale
-    DEFERRAL_LABEL.each do |locale, expected|
-      ::I18n.with_locale(locale) do
-        assert_equal expected,
-                     ::I18n.t(:label_reporter_preflight_check_engine_not_selected),
-                     "#{locale}.yml no longer says the deferral is about THIS engine not " \
-                     'being the selected one'
+    wrong = DEFERRAL_LABEL.each_with_object({}) do |(locale, expected), acc|
+      actual = ::I18n.with_locale(locale) do
+        ::I18n.t(:label_reporter_preflight_check_engine_not_selected)
       end
+      acc[locale] = actual unless actual == expected
     end
+
+    assert_equal({}, wrong,
+                 'these locales no longer say the deferral is about THIS engine not being ' \
+                 'the selected one')
   end
 
   # AND THE TABLE ABOVE COVERS EVERY LOCALE THE PLUGIN SHIPS, derived rather than typed — a
   # hand-written list is a list that stops matching the day somebody adds a language, which is
   # how eight of nine went unguarded in the first place.
   def test_the_deferral_label_table_covers_every_shipped_locale
-    shipped = Dir[File.expand_path('../../config/locales/*.yml', __dir__)]
-              .map { |f| File.basename(f, '.yml') }.sort
-
-    assert_equal shipped, DEFERRAL_LABEL.keys.sort
+    assert_equal SHIPPED_LOCALES, DEFERRAL_LABEL.keys.sort
   end
 end

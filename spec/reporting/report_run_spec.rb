@@ -543,9 +543,15 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
           # AND THE SENTINEL IS NEVER TREATED AS AN ENGINE NAME — asserted on the LOG, because
           # a review measured that the diagnostic CODE cannot tell the two paths apart: looking
           # `:from_settings` up as an id also fails, also falls through to the same arm, and
-          # also answers `:engine_misconfigured`. The log is where the difference shows, and
-          # under the mutant it reads "selects render engine :from_settings".
-          expect(logger.lines.join("\n")).not_to include('from_settings')
+          # also answers `:engine_misconfigured`. The log is where the difference shows: under
+          # the mutant it reads *selects render engine "from_settings"* — double-quoted, since
+          # `warn_line` interpolates `id.to_s.inspect`, and the first version of this comment
+          # wrote `:from_settings` with a colon, which is not what ships.
+          #
+          # EMPTY, POSITIVELY. `not_to include` alone would also pass if `logger` stopped being
+          # wired through at all; on the clean path this run has nothing to complain about, so
+          # the expectation is that it said nothing.
+          expect(logger.lines).to eq([])
           expect(outcome.diagnostic.code).to eq(:engine_misconfigured)
         ensure
           if existed
