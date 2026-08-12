@@ -34,9 +34,14 @@ end
 # Deliberately narrow: it only asks whether the constant resolves. If it does, the
 # test runs as normal, so this can never hide a failure in our own code. And a skip
 # is a skip — it is reported as such, not as a pass.
+#
+# The class list comes from `ReporterReportTemplates::CLASS_NAMES` rather than being
+# spelled again here: two hardcoded lists of the same two classes are two things that
+# must agree, and this one would go stale silently.
 def reporter_report_template_load_error
-  IssueListReportTemplate
-  TimeEntriesReportTemplate
+  RedmineReporterDashboards::ReporterReportTemplates::CLASS_NAMES.each do |name|
+    Object.const_get(name)
+  end
   nil
 rescue StandardError, ScriptError => e
   e

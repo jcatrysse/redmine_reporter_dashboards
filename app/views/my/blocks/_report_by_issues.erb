@@ -6,17 +6,75 @@
   into memory. This override wins over the vendor partial because
   redmine_reporter_dashboards sorts after redmine_reporter in the plugin view
   load path. If the vendor rewrites this partial, revisit this override.
-%>
-<%
-  block ||= 'report_by_issues'
-  settings ||= User.current.pref.my_page_settings(block) # The settings variable not defined in Redmine versions < 3.4
-  query = IssueQuery.visible.find_by(id: settings[:query_id])
-  report_template = IssueListReportTemplate.find_by(id: settings[:report_template_id])
-%>
 
-<% if query && report_template %>
-  <%= render partial: 'my/report', locals: { block: block, settings: settings, query: query, collection: query.base_scope, report_template: report_template } %>
+  --- AND IT CARRIES THE GUARD, because THIS FILE is what registers the block ---
+
+  Redmine core discovers my-page blocks by globbing plugin view directories
+  (`Redmine::MyPage.additional_blocks`), so the existence of this file makes this
+  plugin contribute a core my-page block on EVERY install. Core's
+  `MyHelper#render_block_content` then rescues only `ActionView::MissingTemplate`,
+  so a `NameError` from naming a reporter constant here does not degrade the
+  widget — it returns 500 for `/my/page`, the one page from which the user could
+  otherwise remove the block.
+
+  Two configurations reach that: standalone (no redmine_reporter at all), and
+  Redmine 7.0 WITH redmine_reporter, whose report-template classes use the
+  keyword form of `enum` that Rails 8.0 removed. Deleting this override fixes
+  neither, because core would then glob reporter's own partial, which makes the
+  same unguarded call. The guard has to be here, in the file that wins the view
+  load path. Covered by test/integration/reporter_dashboards_my_page_block_test.rb.
+
+  The placeholder is deliberately NOT nil: `MyHelper#render_block` wraps a block
+  only `if content.present?`, so a widget that renders as nothing loses the
+  contextual controls that carry its own close button, and the user is left with
+  a block they can no longer remove.
+
+  --- AND THE PRE-CHECK IS NOT ENOUGH ON ITS OWN ---
+
+  The first version of this guard was `usable?` alone, and an independent review
+  proved /my/page still returned 500 with `usable?` answering TRUE. Resolving the
+  constants says nothing about the three other base-plugin-owned things this body
+  needs: its TABLES (`find_by` against an unmigrated schema), its ROUTE HELPER
+  (`report_content_report_template_path`, used by `my/report` and defined by the
+  base plugin, not here), and its PARTIAL (`my/report_settings`, which this plugin
+  does not ship). Measured: tables absent -> 500; partial absent -> 404, with the
+  block VANISHING together with its close button, because Redmine maps
+  ActionView::MissingTemplate to 404 at the controller and Rails unwraps the
+  Template::Error cause — so a NESTED partial's failure escapes core's own
+  block-level rescue as well.
+
+  Hence both halves: `usable?` decides whether to try, and the rescue below is
+  what makes trying safe. This is the same two-tier shape
+  `reporter_project_pages_helper.rb` already uses for the project dashboard —
+  a named condition degrades quietly, an arbitrary exception is logged loudly —
+  rather than a second way of doing one thing.
+
+  Nothing is appended to the output buffer before the rescue: the only writes in
+  the guarded body are the `<%= render %>` calls, and `render` builds its result
+  before returning, so a raise inside one leaves the buffer untouched and the
+  placeholder is not appended to half a widget.
+%>
+<% if RedmineReporterDashboards::ReporterReportTemplates.usable?('IssueListReportTemplate') %>
+  <% begin %>
+    <%
+      block ||= 'report_by_issues'
+      settings ||= User.current.pref.my_page_settings(block) # The settings variable not defined in Redmine versions < 3.4
+      query = IssueQuery.visible.find_by(id: settings[:query_id])
+      report_template = IssueListReportTemplate.find_by(id: settings[:report_template_id])
+    %>
+
+    <% if query && report_template %>
+      <%= render partial: 'my/report', locals: { block: block, settings: settings, query: query, collection: query.base_scope, report_template: report_template } %>
+    <% else %>
+      <%= render partial: 'my/report_settings',
+                 locals: { block: block, settings: settings, queries: IssueQuery.visible, report_templates: IssueListReportTemplate.all } %>
+    <% end %>
+  <% rescue StandardError, ScriptError => e %>
+    <% RedmineReporterDashboards::ReporterReportTemplates.log_render_failure(e) %>
+    <p class="nodata"><%= l(:error_reporter_widget_render_failed) %></p>
+  <% end %>
+<% elsif RedmineReporterDashboards.reporter_present? %>
+  <p class="nodata"><%= l(:error_reporter_widget_render_failed) %></p>
 <% else %>
-  <%= render partial: 'my/report_settings',
-             locals: { block: block, settings: settings, queries: IssueQuery.visible, report_templates: IssueListReportTemplate.all } %>
+  <p class="nodata"><%= l(:text_reporter_widget_requires_plugin, plugin: RedmineReporterDashboards::ReporterPresence::PLUGIN_ID.to_s) %></p>
 <% end %>

@@ -107,6 +107,52 @@ that expression and no variable held it. One local (`engine = adapter.new`) was 
 "ordering change". Before planning work around a dependency that looks structural, check
 whether it is only a missing binding.
 
+**A RESCUED `StatementInvalid` STILL 500s A TRANSACTIONAL TEST, AND THE CODE UNDER TEST IS NOT THE
+CAUSE.** Measured 2026-08-12 while covering the my-page guard (§Findings **E-39**). A widget whose
+body raises `ActiveRecord::StatementInvalid` was correctly rescued — the degradation line is in the
+log — and the request still ended **500**:
+
+    RESCUED: ActiveRecord::StatementInvalid
+    AFTERWARDS RAISES: ActiveRecord::StatementInvalid: PG::InFailedSqlTransaction:
+      ERROR: current transaction is aborted, commands ignored until end of transaction block
+
+A failed statement aborts the enclosing PostgreSQL transaction, and transactional fixtures wrap the
+whole request in one, so **every later query in that request fails no matter what the rescue does**.
+Rails does not wrap a production request in a transaction, so there the page completes. Two rules.
+**Put a page-level `assert_response :success` on a failure mode that issues NO SQL** (a missing
+constant, a missing partial, a missing route helper) — otherwise the assertion is about the harness,
+not the code. And when a rescue "does not work" in a test, check whether the rescue actually ran (its
+log line) before changing the rescue: here it had run, and the first instinct was to widen it.
+
+**A VIEW DIRECTORY NAME IS A REGISTRATION, AND `app/views/my/blocks/` IS THE ONE THAT BIT.** Redmine
+core discovers my-page blocks by GLOBBING plugin view directories — `Dir.glob(".../*/app/views/my/
+blocks/_*.{rhtml,erb}")` in `lib/redmine/my_page.rb`, unchanged 5.1 → 7.0 — so a partial's PATH
+registers a core my-page block with no `init.rb` line anywhere. Nothing in this plugin's registration
+block mentions my-page, and it shipped one anyway. Then note what core does NOT do:
+`MyHelper#render_block_content` rescues **only** `ActionView::MissingTemplate`, so any other exception
+from a block partial is a **500 on `/my/page`** — taking down the page that carries the block's own
+close button, which is the only way a user could have removed it. Measured 2026-08-12 (§Findings
+**E-39**): `report_by_issues` was registered on a booted 7.0, and `/my/page` returned 500 both
+standalone and with the base plugin present-but-unloadable.
+
+**And the guard for it needs BOTH halves: a pre-check is not a safety net.** The first fix was
+`usable?` alone — "can the base plugin's constants be resolved?" — and an independent review proved
+`/my/page` still returned 500 **with `usable?` answering true**, because resolving a constant says
+nothing about that plugin's TABLES, its ROUTE HELPERS or its PARTIALS, all of which the widget body
+also needs. Worse, the missing-partial variant returned **404 and the block disappeared with its own
+close button**: Redmine maps `ActionView::MissingTemplate` to 404 at the controller and Rails unwraps
+the `Template::Error` cause, so **a nested partial's failure escapes core's block-level rescue as
+well**. Any widget that renders another plugin's partial needs a pre-check *and* a rescue, which is
+the shape `reporter_project_pages_helper.rb` already had for the project dashboard.
+
+Three rules follow. **Before adding a file under `app/views/`, ask whether core globs that
+directory** — `app/views/my/blocks/` and the project-dashboard equivalent both do, which is why T-06
+put the optional dashboard partials in `blocks/optional/` where the glob cannot reach. **A my-page
+partial cannot use this plugin's helpers** (`include_all_helpers = false`; `MyController` declares
+five core helpers and none of ours), so a guard there is a module method, not a helper. And **deleting
+the override is not the fix** — the base plugin ships the same partial, core globs that one instead,
+and it makes the same unguarded call; only a guard that wins the view load path helps.
+
 **REDMINE SETS `include_all_helpers = false`, so a controller sees its OWN helper and nothing
 else.** `config/application.rb:73`. Every core controller lists what it needs (`helper :journals`,
 `helper :projects`, …) and this plugin's own `ReporterPreflightController` does too — which reads

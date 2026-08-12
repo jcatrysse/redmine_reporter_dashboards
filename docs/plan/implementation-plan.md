@@ -207,6 +207,110 @@ working tree; the whole of `spec/golden` → **167**, 0 failures. (This said 71,
 subset quoted as the directory — the same slip the HANDOVER copy carried, and it survived a pass
 whose whole subject was stale counts.) Recorded in HANDOVER §1.
 
+**E-39 · `/my/page` RETURNED 500, AND THE WIDGET NOBODY HAD TESTED WAS REGISTERED BY A FILENAME.**
+2026-08-12, found while investigating the curator's report that "the two Report widgets don't work on
+Redmine 7.0". They do not merely fail to work: on two configurations they took the whole My Page down.
+
+**The registration is the filename.** Redmine core discovers my-page blocks by globbing plugin view
+directories — `Dir.glob("#{Redmine::Plugin.directory}/*/app/views/my/blocks/_*.{rhtml,erb}")`,
+`lib/redmine/my_page.rb`, identical on 5.1-stable and 7.0-stable — so shipping
+`app/views/my/blocks/_report_by_issues.erb` made THIS plugin contribute a core my-page block on every
+install. Measured in a booted 7.0: `Redmine::MyPage.blocks.key?('report_by_issues')` → **true**. The
+partial then named `IssueListReportTemplate`, a base-plugin constant, unconditionally on line 14
+before any guard, and core's `MyHelper#render_block_content` rescues **only**
+`ActionView::MissingTemplate` (`app/helpers/my_helper.rb:59`). So the `NameError` did not degrade the
+widget — it 500'd `/my/page`, which is the one page from which the block could have been removed.
+
+**Two configurations reached it, and the second is why this outranked T-37/T-38.** Standalone, and
+**Redmine 7.0 with the base plugin installed** — the curator's own install. MEASURED on Redmine
+7.0.0.stable / Rails 8.1.3.1: `enum status: {a: 1}` raises `ArgumentError: wrong number of arguments
+(given 0, expected 1..2)` while `enum :status, {a: 1}` is accepted. That confirms the *consequence*
+`test/test_helper.rb:58-62` already diagnosed. **It does not confirm the premise**, and the
+distinction is the honest part: that the base plugin's report templates use the keyword form is read
+from that pre-existing comment, not verified, because the plugin is commercial and absent from this
+tree. What is verified is that IF it does, the classes cannot load here — and that this plugin 500'd
+either way.
+
+**Three things generalise.**
+1. **A view path can be an API.** Nothing in `init.rb` registers a my-page block; a directory name
+   did. `project_page.rb:25-29` already knew this for the PROJECT dashboard — T-06 moved those two
+   partials to `blocks/optional/` precisely so core's glob could not see them, arguing that a widget
+   which "can only ever render an apology" must never be offerable. The my-page surface never got the
+   same treatment, and core's `MyPage` offers no `optional/` to move it to, so the guard has to be in
+   the partial.
+2. **Deleting the override would NOT have fixed it.** The base plugin ships its own
+   `my/blocks/_report_by_issues.erb`, which core would then glob instead and which makes the same
+   unguarded call. Only a guard that WINS the view load path helps. This plugin's override does win
+   it, so the fix is to keep the file and guard it — the opposite of the intuitive answer.
+3. **`include_all_helpers = false` decided where the guard could live.** `config/application.rb:73`,
+   and `MyController` declares only `issues`/`users`/`custom_fields`/`queries`/`activities`. None of
+   this plugin's helpers are in scope in a my-page partial, so `reporter_project_block_unavailable`
+   was unreachable and the answer had to be a module method (`ReporterReportTemplates`) rather than a
+   helper. HANDOVER §1 already carries this trap; this is its second instance.
+
+**`installed?` IS NOT `usable?`, and that is now two questions rather than one.**
+`ReporterPresence.present?` asks the plugin registry; `ReporterReportTemplates.usable?` asks whether
+the constants resolve. An install answers yes to the first and no to the second, which is exactly
+what Redmine 7.0 is. The registry question is asked FIRST and the constant lookup only runs after it
+says yes — so `reporter_presence.rb`'s rule ("absence is a positive question, never a swallowed
+`NameError`") is kept, and the rescue can only ever mean *installed but unusable*, which is a defect
+and is logged as one.
+
+**MUTATION-TESTED, 4 of 4 killed — and the fourth is the entry worth keeping.** Dropping the registry
+question from `usable?` **survived** the first run: the page outcome is identical either way, because
+the partial re-asks `reporter_present?` for its wording and `load_error` is non-nil regardless. Its
+only signature is a log line — a standalone install being told "the base plugin is installed but its
+report template classes do not load", a false sentence in every operator's log for a supported
+configuration. Killed by asserting on the log, which is §1's rule again: **assert the claim where it
+is MADE**, not through behaviour that cannot see it.
+
+**THE TWELFTH REVIEW REJECTED IT, AND WAS RIGHT ON ALL THREE BLOCKERS.** The 4-of-4 above was
+measured against mutants that all lived on the *unavailable* path, which is exactly the blind spot a
+self-run harness has.
+
+1. **A PRE-CHECK IS NOT A SAFETY NET, and `/my/page` still returned 500 with `usable?` answering
+   TRUE.** Resolving the constants says nothing about the three *other* base-plugin-owned things the
+   widget body needs: its TABLES (`find_by` on an unmigrated schema — any install where the plugin is
+   present and `rake redmine:plugins:migrate` has not run), its ROUTE HELPER
+   (`report_content_report_template_path`, used by `my/report` and defined by the base plugin), and
+   its PARTIAL (`my/report_settings`, which this plugin does not ship). The reviewer measured 500 for
+   the first and **404 for the third — with the block vanishing together with its own close button**,
+   because Redmine maps `ActionView::MissingTemplate` to 404 at the controller and Rails unwraps the
+   `Template::Error` cause, so a NESTED partial's failure escapes core's block-level rescue too. The
+   fix is both halves: the pre-check decides whether to try, and a rescue makes trying safe. The
+   plugin already had the two-tier shape one file away in `reporter_project_pages_helper.rb`; the
+   my-page surface had been given the pre-check and not the rescue.
+2. **`<% if false %>` SURVIVED THE ENTIRE 931-TEST SUITE.** Every example was about the unavailable
+   path, so nothing could tell the shipped guard from a hardcoded refusal — a live regression risk for
+   an install running the base plugin on a Redmine where it works. The discriminator needs care,
+   because in this tree the widget can never fully render (no base-plugin route helper, no settings
+   partial), so entering the body produces the *same* placeholder as refusing to. What separates them
+   is the ERROR line only `log_render_failure` writes, which is reachable only from inside the body.
+3. **`zero_reporter` was EXEMPTED, not fixed, and the commit message claimed the opposite.** Adding
+   the allowlist entry *is* the exemption, and `implementation-plan.md`'s own Definition of Done says
+   the allowlist "shrank or held — **never grew**". It was also avoidable: the only thing in the new
+   file matching the gate was ONE doc comment, because the executable code already went through
+   `ReporterPresence::PLUGIN_ID`. Reworded, entry deleted, allowlist back to 17.
+
+**AND A FALSE CLAIM INSIDE THE FIX, which is this project's signature failure and now has a fourth
+instance.** The memo stored `|| false` for a stated reason — "dropping it reintroduces a per-render
+constant walk" — and mutation testing removed it with **no effect at all**, because the memo is keyed
+on `Hash#key?` and `key?` was already true for a stored `nil`. The line was deleted rather than
+wrapped in a test of its own fiction.
+
+**A MEASUREMENT WORTH KEEPING: A RESCUED `StatementInvalid` STILL 500s A TRANSACTIONAL TEST, AND THE
+PLUGIN IS NOT THE CAUSE.** The unmigrated-table example was written expecting 200, got 500, and the
+honest reading was not obvious. `PG::InFailedSqlTransaction: current transaction is aborted, commands
+ignored until end of transaction block` — a failed statement aborts the enclosing transaction, and
+transactional fixtures wrap the whole request in one, so every later query in that request fails
+whatever this plugin does. Rails does not wrap a production request in a transaction. So the
+page-level assertion belongs on a failure mode that issues **no SQL**, and the SQL example asserts the
+degradation instead. Asserting 200 there would have been asserting a property of the harness.
+
+**Second-round mutation score: 5 of 5 killed** (guard hardcoded closed; rescue removed; the second
+class dropped from the known set; `reset!` a no-op — now killed on 3 of 3 seeds where it was 2 of 6),
+plus the equivalent mutant above resolved by deletion.
+
 **E-38 · THE ELEVENTH REVIEW: THE FIX TO A FALSE CLAIM CARRIED A NEW ONE, AND TWO CORRECTIONS WERE
 UNPINNED.** 2026-08-12, `90439bc` reviewed and corrected in the commit after it. Second round running
 in which the behaviour could not be faulted — the reviewer drove seven installation states and nine
