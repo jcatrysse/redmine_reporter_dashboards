@@ -390,6 +390,173 @@ jobs:
         working-directory: redmine
 
   # ------------------------------------------------------------------
+  # T-37 / FR-73 — EVERY STARTER, ON EVERY ENGINE IN THE MATRIX.
+  #
+  # *"a starter gallery whose every entry lints clean and renders on every engine in the
+  # matrix, thumbnails generated in CI"*. The lint half is a spec and runs in `rspec` above;
+  # this is the render half, and it needs the one combination no other job has: a DATABASE
+  # WITH DATA IN IT **and** all three engines. `minitest` has the first, `render-smoke` has
+  # the second, and a starter is a Liquid template rendered over real issues into a real PDF —
+  # so it needs both.
+  #
+  # ONE REDMINE BRANCH, and it is the newest. What this job asks is whether a starter's
+  # markup survives three engines, which is a property of the DOCUMENT rather than of Rails;
+  # the four-branch question ("does this boot and run everywhere") is `minitest`'s and is
+  # asked over the same templates by `spec/starter_gallery_spec.rb`.
+  #
+  # THE THUMBNAILS ARE CHECKED, NOT REGENERATED. Regenerating and diffing PNGs would fail on
+  # a font stack, which §9b.5 marks non-deterministic and CLAUDE.md §7 forbids reporting as
+  # PASS/FAIL. `spec/starter_gallery_spec.rb` instead holds the DIGEST of the body each
+  # thumbnail was drawn from, so a starter edited without redrawing its thumbnail is a red
+  # example with a command in its message. That check needs no engine and runs in `rspec`.
+  # ------------------------------------------------------------------
+  starter-gallery:
+    name: Starter gallery (FR-73, every engine)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+      # THE SAME PINNED DIGEST the corpus uses, and basic auth ON: `Gotenberg#preflight`
+      # fails with a named remediation when the service answers without the credential, so a
+      # container without it would be a different engine from the one the matrix describes.
+      gotenberg:
+        image: gotenberg/gotenberg:8@sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+        env:
+          GOTENBERG_API_BASIC_AUTH_USERNAME: rrd
+          GOTENBERG_API_BASIC_AUTH_PASSWORD: s3cret
+        ports:
+          - 3000:3000
+
+    env:
+      RAILS_ENV: test
+      RRD_GOTENBERG_URL: http://127.0.0.1:3000
+      RRD_GOTENBERG_USERNAME: rrd
+      RRD_GOTENBERG_PASSWORD: s3cret
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Redmine 7.0-stable
+        run: |
+          git clone --depth 1 --branch 7.0-stable \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libpq-dev poppler-utils
+
+      # THE COMPATIBILITY ENGINE, from the release .deb — the same build the corpus was
+      # promoted on. `apt install wkhtmltopdf` gives the UNPATCHED-Qt build, which answers
+      # differently about repeating table headers and SVG link annotations; T-38 lost a round
+      # to exactly that and `Render::Capabilities` carries the retraction.
+      - name: Install the compatibility engine
+        run: |
+          url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb"
+          curl -fsSL -o /tmp/wkhtmltox.deb "$url"
+          sudo apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb
+          wkhtmltopdf --version
+
+      # THE SANDBOX STAYS ON — see `render-smoke` for the full argument. The restriction is
+      # lifted for the job rather than the sandbox being disabled for the browser, and those
+      # are not the same trade.
+      - name: Allow the Chromium sandbox to initialise
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || \
+            echo "::notice::no AppArmor userns restriction to lift on this image"
+
+      - name: Locate a browser
+        id: browser
+        run: |
+          for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
+            path="$(command -v "$candidate" || true)"
+            [ -n "$path" ] || continue
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            "$path" --version
+            exit 0
+          done
+          echo "::error::no browser on this runner" >&2
+          exit 1
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: postgresql
+            database: redmine_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+            encoding: unicode
+          EOF
+        working-directory: redmine
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+          working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      # FIXTURES, because a starter rendered over an empty project produces an empty document
+      # and reports it as a pass. Redmine's own fixtures give project 1 seven issues and three
+      # time entries, which is what makes `issue-document` (one document per issue) and the
+      # spent-time starter mean anything.
+      - name: Populate the test database
+        run: |
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+          bundle exec rake redmine:plugins:migrate
+          bundle exec rake db:fixtures:load
+          bundle exec rails runner 'Project.find(1).enable_module!(:reporter_dashboards_reports)'
+        working-directory: redmine
+
+      # A FRESH GOTENBERG CONTAINER FAILS ITS FIRST RENDER — measured, and recorded in
+      # HANDOVER §3. It is the browser inside it starting up, not a defect in the adapter, and
+      # a job that did not warm it would report two of five starters red on every run.
+      - name: Warm the Gotenberg browser
+        run: |
+          for attempt in 1 2 3 4 5; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/health || true)"
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          printf '<html><body>warm-up</body></html>' > /tmp/warm.html
+          curl -s -u rrd:s3cret -o /tmp/warm.pdf \
+            -F 'files=@/tmp/warm.html' http://127.0.0.1:3000/forms/chromium/convert/html || true
+          head -c 5 /tmp/warm.pdf || true
+
+      # THE RENDER, all five starters against all three engines. Exit 1 on any failure, and
+      # the report names the starter, the engine and the reason — which is how a red cell here
+      # becomes one command on a developer machine rather than a log to read.
+      - name: Render every starter on every engine
+        env:
+          CHROME_PATH: ${{ steps.browser.outputs.path }}
+          RRD_PROJECT: '1'
+          RRD_ACTOR: admin
+        run: bundle exec rake reporter_dashboards:gallery:verify
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
   # T-36 — up -> VERSION=0 -> up, per Rails branch. Gate G11's other half.
   #
   # `technical-spec.md` §7 rule 4: "The down path is TESTED, not asserted … A plugin that

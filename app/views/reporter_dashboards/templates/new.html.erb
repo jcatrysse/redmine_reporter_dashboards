@@ -1,6 +1,28 @@
 <h2><%= l(:label_reporter_template_new) %></h2>
 
 <%#
+  T-37 / FR-73 — THE GALLERY COMES FIRST, and only on this page.
+
+  §9b.1: *"Start from an example, never from empty."* So the five starters are above the
+  form when nothing has been started from yet, and once one has been applied the gallery
+  collapses to one line naming it — because at that point the author's attention belongs to
+  the code, and five links that would replace what they are looking at do not.
+
+  `@starter` is set by the controller only for a starter it recognises; an unknown
+  `?starter=` id leaves it nil and puts a warning in the flash rather than showing a blank
+  form to somebody who asked for an example.
+%>
+<% if @starter %>
+  <p class="icon icon-ok" id="reporter-starter-applied">
+    <%= l(:text_reporter_starter_applied, name: l(@starter.name_key)) %>
+    <%= link_to l(:label_reporter_starter_choose_another),
+                new_project_reporter_template_path(@project) %>
+  </p>
+<% else %>
+  <%= render partial: 'starter_gallery' %>
+<% end %>
+
+<%#
   PREVIEW BEFORE THE FIRST SAVE, which is when it is worth most: §9b.2's whole argument is
   that an author should find out at the keyboard that their template breaks in the PDF.
   Previewing only after saving would mean the first thing a new template does is get

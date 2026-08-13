@@ -125,6 +125,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/template_linter'
 # AFTER them; `liquid/drop_reference` requires `liquid/drops` itself rather than relying on
 # this file's ordering, because a reference that loaded first would describe an empty surface.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/liquid/drop_reference'
+# T-37 / FR-73 — the starter gallery's manifest. Required at boot because the New template
+# page renders it and `#new` prefills from it; it reads files under `starters/` and names no
+# model, so it is a plain lib module rather than anything in `reporting/`.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/starter_gallery'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards

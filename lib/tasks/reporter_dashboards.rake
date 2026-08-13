@@ -334,6 +334,125 @@ namespace :reporter_dashboards do
     warn "wrote #{path} — #{reference.sections.length} drops"
   end
 
+  # T-37 / FR-73 — the starter gallery's RENDER half.
+  #
+  # The lint half is a spec and needs nothing (`spec/starter_gallery_spec.rb`, zero findings
+  # per entry). This half cannot be a spec: it needs a booted Redmine, a project with issues
+  # and time entries in it, and a real engine. So it is a task, and CI is where "renders on
+  # every engine in the matrix" has to be true rather than asserted.
+  #
+  # IT WRITES NO TEMPLATE ROW. `ReportRun.preview` takes an unsaved template, exactly as the
+  # editor's Preview button does, so this is safe to run against a production database — it
+  # adds nothing and leaves no `Document` behind.
+  #
+  # `RRD_THUMBNAILS=1` additionally writes one PNG per starter from the FIRST engine's render
+  # and records the sha256 of the body each was drawn from. That digest is the whole staleness
+  # mechanism: see `StarterGallery.stale_thumbnails` for why it is a digest and not a pixel
+  # comparison.
+  namespace :gallery do
+    desc 'Render every starter template on every registered engine (RRD_PROJECT=id|identifier, ' \
+         'RRD_ACTOR=login|id, RRD_THUMBNAILS=1 to redraw the gallery thumbnails; writes no ' \
+         'template and no document; exit 1 if any starter fails on any engine)'
+    task verify: :environment do
+      require File.expand_path('../redmine_reporter_dashboards/reporting/gallery_check', __dir__)
+      require File.expand_path('../redmine_reporter_dashboards/exchange_tasks', __dir__)
+
+      tasks = RedmineReporterDashboards::ExchangeTasks
+      gallery = RedmineReporterDashboards::StarterGallery
+      check = RedmineReporterDashboards::Reporting::GalleryCheck
+
+      begin
+        project = tasks.find_project(ENV['RRD_PROJECT'])
+        # AN EXPLICIT ACTOR, and it is required rather than defaulting to Anonymous (INV-1).
+        # A report renders as somebody, the scope it reads is that person's, and a gallery
+        # verified as Anonymous would render five empty documents and call them a pass.
+        actor = tasks.resolve_actor(ENV['RRD_ACTOR'])
+      rescue RedmineReporterDashboards::ExchangeTasks::Refused => e
+        warn e.message
+        exit 2
+      end
+
+      if project.nil?
+        warn 'RRD_PROJECT is required: a starter renders over one project\'s issues, and a ' \
+             'gallery verified over an empty scope proves nothing.'
+        exit 2
+      end
+
+      engines = RedmineReporterDashboards::Render::Registry.ids.sort
+      if engines.empty?
+        # EXIT 2 AND NOT 0, the same decision `render:preflight` takes: nothing was
+        # registered, so nothing was verified, and a green run would be a claim about
+        # engines that were never asked.
+        warn 'no render engine is registered, so nothing was verified. Install one and re-run.'
+        exit 2
+      end
+
+      warn "verifying #{gallery.entries.length} starters on #{engines.length} engine(s): " \
+           "#{engines.join(', ')}"
+      results = check.run(actor: actor, project: project, engines: engines, logger: Rails.logger)
+
+      results.each do |result|
+        puts format('%-40s %s  %s', result.label, result.ok ? 'PASS' : 'FAIL', result.detail)
+      end
+
+      failures = results.reject(&:ok)
+      puts "#{results.length - failures.length} of #{results.length} passed"
+
+      if ENV['RRD_THUMBNAILS'].to_s == '1'
+        # THE THUMBNAIL COMES FROM A RENDER THAT PASSED. Drawing one from a failed render
+        # would put a picture of a broken report in the gallery, which is worse than no
+        # picture — and it is the failure §9b.1's "generated in CI" clause exists to prevent,
+        # one step earlier than it expected.
+        require 'tmpdir'
+        begin
+          FileUtils.mkdir_p(gallery::THUMBNAIL_DIRECTORY)
+        rescue Errno::EACCES, Errno::EROFS => e
+          # NAMED, not a backtrace. This happens for real: the mirrored plugin under
+          # `redmine/plugins/` is owned by whoever ran the clone script, and the browser has
+          # to run as a NON-ROOT user (Chromium refuses root and `--no-sandbox` is not the
+          # answer), so the two are routinely different accounts. A bare
+          # `Errno::EACCES @ dir_s_mkdir` reads as a bug in the task.
+          warn "cannot write #{gallery::THUMBNAIL_DIRECTORY}: #{e.message}"
+          warn 'The renders above still passed; only the thumbnails were not written.'
+          exit 1
+        end
+        digests = {}
+
+        gallery.entries.each do |entry|
+          passed = results.find { |r| r.entry.id == entry.id && r.ok && r.pdf_bytes }
+          if passed.nil?
+            warn "#{entry.id}: no engine produced a document, so its thumbnail is left alone"
+            next
+          end
+
+          Dir.mktmpdir do |dir|
+            pdf = File.join(dir, 'page.pdf')
+            File.binwrite(pdf, passed.pdf_bytes)
+            # ONE PAGE, at a low resolution, through poppler — the same tool the conformance
+            # corpus already requires. `-scale-to` bounds the width so a thumbnail is a
+            # thumbnail; the height follows the page, so nothing is cropped.
+            out = File.join(dir, 'thumb')
+            ok = system('pdftoppm', '-png', '-f', '1', '-l', '1', '-scale-to-x', '320',
+                        '-scale-to-y', '-1', pdf, out)
+            produced = Dir.glob("#{out}*.png").first
+            if !ok || produced.nil?
+              warn "#{entry.id}: pdftoppm produced no PNG (is poppler-utils installed?)"
+              next
+            end
+
+            FileUtils.cp(produced, gallery.thumbnail_path(entry))
+            digests[entry.id] = gallery.digest(entry)
+            warn "#{entry.id}: thumbnail written from #{passed.engine_id}"
+          end
+        end
+
+        gallery.record_digests(gallery.recorded_digests.merge(digests))
+      end
+
+      exit 1 if failures.any?
+    end
+  end
+
   namespace :render do
     # T-14. Same shape as `import:plan` and for the same reason: the decisions —
     # which engines, what the exit code means, what happens when there are none —

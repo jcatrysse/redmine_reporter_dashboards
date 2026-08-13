@@ -1,0 +1,13 @@
+# GENERATED — the sha256 of the starter body each thumbnail in this directory was
+# drawn from. Written by `rake reporter_dashboards:gallery:verify RRD_THUMBNAILS=1`.
+# `spec/starter_gallery_spec.rb` fails when a starter has moved since its thumbnail
+# was drawn, which is FR-73's "the thumbnail cannot show something the code no
+# longer produces" — checked by provenance rather than by comparing pixels, because
+# a rendered PNG depends on the font stack and would fail for reasons that are not
+# defects (§9b.5).
+---
+aggregate-report: 8ea57ca341754b7a632762c672c3397ad3f3f7d44a67aeb28522b9f1bbed83bd
+chart-report: cf3c99fca330086627db60aba454a02191b712cfe857aa51659c4b38fd246825
+issue-document: fceb9797affc32399ca4d05e4c8b17f1ae804cd1e8529f61693e209ebaa99862
+spent-time-report: bab3c0dd4c657634a7de8058ebdf0cdffd759f03ba3f67c5753587ea312855cb
+version-status: 50cfe0860738dccc50d669c3fc1eeeeb85f4f4fccc4c8344c45644b7a18db73c

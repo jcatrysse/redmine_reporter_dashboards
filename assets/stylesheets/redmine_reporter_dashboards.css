@@ -116,3 +116,24 @@
    refuses it here — correctly. The batch marker is the translated WORD after the type,
    which needs no box to be read and cannot be wrong in a dark theme. */
 .reporter-drop-reference-batch { display: inline; }
+
+/* T-37 - the starter gallery on the New template page (FR-73). LAYOUT ONLY; see the note on
+   the lint excerpt above for what this file may not contain and which gate enforces it.
+
+   The entries are a row of cards that wrap on a narrow screen. `inline-block` rather than
+   flexbox is not a compatibility choice here - this is CHROME, rendered by the reader's own
+   browser rather than by wkhtmltopdf - it is that the thumbnail, the name and the
+   description stack in one column, which is what an inline-block does with no further
+   rules. The thumbnail's own aspect ratio is whatever the render produced; only the width
+   is bounded, so a taller page thumbnails taller and nothing is cropped. */
+.reporter-starter-list { list-style: none; margin: 0; padding: 0; }
+.reporter-starter {
+  display: inline-block;
+  vertical-align: top;
+  width: 15em;
+  max-width: 100%;
+  margin: 0 1em 1em 0;
+}
+.reporter-starter-link { display: block; }
+.reporter-starter-thumbnail { display: block; width: 100%; height: auto; }
+.reporter-starter-description { display: block; }

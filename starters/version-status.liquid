@@ -1,0 +1,78 @@
+{% comment %}
+=====================================================================
+ Version status — one row per target version, rolled up in SQL
+ ---------------------------------------------------------------------
+ Set the template's OUTPUT to "One document for the whole set" and its
+ SOURCE to "Issues".
+
+ `{% version_rollup %}` does in one query what a
+ `{% for version %}{% for issue %}` loop does in hundreds: it groups the
+ report's issues by target version and returns one row per version, with
+ the counts, the hours and the dates already summed.
+
+ `closed_statuses:` names the statuses that count as finished. Without it
+ the tag uses Redmine's own `is_closed` flag, which is usually what you
+ want — pass names only when your workflow has a status that is closed in
+ practice and not in the database.
+
+ Issues with no target version become a row called "None". That row has
+ no `version` object, which is why every link below is conditional: a
+ report that linked to a version that does not exist would be pointing
+ its reader at a 404.
+=====================================================================
+{% endcomment %}
+
+{% version_rollup from: issues, assign_to: versions %}
+
+<h1>Version status — {{ project.name }}</h1>
+
+<div class="rrd-card">
+  <table>
+    <thead>
+      <tr>
+        <th>Version</th>
+        <th>Due</th>
+        <th class="rrd-number">Open</th>
+        <th class="rrd-number">Closed</th>
+        <th class="rrd-number">Total</th>
+        <th class="rrd-number">Estimated</th>
+        <th class="rrd-number">Spent</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in versions %}
+        <tr>
+          <td>
+            {% if v.version %}
+              <a href="{{ v.version.url }}">{{ v.name }}</a>
+            {% else %}
+              {{ v.name }}
+            {% endif %}
+          </td>
+          <td>{{ v.due_date }}</td>
+          <td class="rrd-number">{{ v.open }}</td>
+          <td class="rrd-number">{{ v.closed }}</td>
+          <td class="rrd-number">{{ v.total }}</td>
+          <td class="rrd-number">{{ v.est_hours }}</td>
+          <td class="rrd-number">{{ v.spent_hours }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% comment %} The same rollup as a chart, so the shape of the release is visible before the
+   numbers are read. `{% chart %}` needs a bucket list, and a rollup row is not one — so the
+   breakdown below is a second aggregation over the same issues rather than a reshaping of
+   the rows above. Two queries, both in SQL, neither of them a loop. {% endcomment %}
+{% sql_aggregate from: issues, group_by: version, drill: true, assign_to: by_version %}
+
+<div class="rrd-card">
+  {% chart id: versions, from: by_version, orientation: horizontal,
+     title: "Issues by target version" %}
+</div>
+
+<p class="rrd-muted">
+  Versions with no issues in this report do not appear: the rollup groups the report's own
+  issues, so it describes the selection rather than the project.
+</p>

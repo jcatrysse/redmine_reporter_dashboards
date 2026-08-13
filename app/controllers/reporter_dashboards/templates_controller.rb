@@ -43,6 +43,7 @@ module ReporterDashboards
     Archive = RedmineReporterDashboards::Archive
     Template = RedmineReporterDashboards::Template
     TemplateLinter = RedmineReporterDashboards::TemplateLinter
+    StarterGallery = RedmineReporterDashboards::StarterGallery
 
     # DECLARED, because Redmine sets `include_all_helpers = false`
     # (`config/application.rb:73`) — a controller sees its OWN helper and nothing else,
@@ -92,6 +93,7 @@ module ReporterDashboards
       @template = Template.new(project_id: @project.id,
                                author_id: User.current.id,
                                visibility: Template::VISIBILITY_PRIVATE)
+      apply_starter
       lint_editor
     end
 
@@ -414,6 +416,42 @@ module ReporterDashboards
       subject.role_ids = @preview_base.role_ids if @preview_base
       subject.attributes = template_params if params[:template].present?
       subject
+    end
+
+    # ------------------------------------------------------------------ T-37, the gallery
+
+    # FR-73 — *"New template offers a starter gallery"*, and the mechanism is one GET.
+    #
+    # `?starter=chart-report` prefills the form from a file this plugin ships. It is a plain
+    # link, so it works with no JavaScript, it is bookmarkable, and the prefilled body goes
+    # through the ordinary editor — which means the lint panel below it immediately shows
+    # zero findings on a starter, which is the first thing an author should see a clean
+    # template look like.
+    #
+    # THE ID NEVER TOUCHES A PATH. `StarterGallery.find` is a lookup in a frozen Hash and
+    # answers nil for anything else; the file name is a constant on the entry it returns. A
+    # path assembled from a parameter is the traversal FR-55 refuses for the same reason one
+    # layer up, and "the value is validated" is what every such loader has said.
+    #
+    # AN UNKNOWN ID IS SAID OUT LOUD. Ignoring it silently would leave an author looking at a
+    # blank form having asked for an example, wondering which of the two of them is broken.
+    def apply_starter
+      requested = params[:starter].to_s
+      return if requested.empty?
+
+      @starter = StarterGallery.find(requested)
+      if @starter.nil?
+        flash.now[:warning] = l(:text_reporter_starter_unknown)
+        return
+      end
+
+      # The NAME is prefilled too, from the starter's own translated label, so the form is
+      # valid the moment it loads: a first save that fails on a blank name teaches an author
+      # that this is fiddly rather than that it works.
+      @template.name = l(@starter.name_key)
+      @template.source = @starter.source
+      @template.output = @starter.output
+      @template.content = StarterGallery.body(@starter)
     end
 
     # ------------------------------------------------------------------ T-37, the lint
