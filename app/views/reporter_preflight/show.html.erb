@@ -49,7 +49,15 @@
         <% @authoring_audit.each do |row| %>
           <tr>
             <td>
-              <span class="<%= reporter_authoring_audit_row_class(row) %>"></span>
+              <%#
+                The icon is emitted only for the row that IS a finding. The first version
+                rendered `<span class="">` on every other row — empty markup carrying an
+                empty class, which is the kind of thing that later gets a CSS rule hung
+                on it. `row.builtin?` decides both the icon and the note, once.
+              %>
+              <% if row.builtin? %>
+                <span class="<%= reporter_authoring_audit_row_class(row) %>"></span>
+              <% end %>
               <%= row.role_name %>
               <% if row.builtin? %>
                 <span class="nodata"><%= l(:text_reporter_authoring_audit_builtin) %></span>

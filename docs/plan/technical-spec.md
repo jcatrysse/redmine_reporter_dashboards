@@ -536,6 +536,24 @@ puts the full SQL — role ids, member ids, project ids — into the document, w
 object; the view uses `raw` at **exactly one** call site, which is the documented trust boundary.
 Gate `no_html_safe.sh` allows `html_safe|\braw\(` in ≤2 files.
 
+**Built in T-27, STRICTER than this line, and the deviation is recorded here rather than
+absorbed (CLAUDE.md §11.3).** The one budget of two files became two arms:
+
+* **`html_safe` on a value: zero files.** Nothing in the plugin does it, so a budget of two
+  would be two free passes nobody asked for. Rails' empty-buffer idiom (`''.html_safe`) is
+  exempt by SHAPE — the occurrences are deleted from the line before matching, so a real
+  call on the same line still fails.
+* **`raw(` / `<%==` / `<%= raw `: the budget of two**, spent through
+  `no_html_safe.allowlist`, which refuses a stale entry.
+
+So the gate refuses a strict subset of what this line permits; the documented cap is never
+exceeded. The pattern also grew `<%==` and the bare ERB form, which the line's `\braw\(`
+misses — an `<%== template_output %>` is exactly `<%= raw … %>`. One form is deliberately
+NOT matched: a bare `raw v` in Ruby, because the pattern that caught it also matched the
+local variable `raw = …` in `query_aggregator.rb` and reported twenty false positives. That
+gap is asserted by an arm of `no_html_safe_selftest.sh` so it is a recorded property rather
+than an assumed one.
+
 **Opaque-origin sandbox.** Widget HTML is served into an iframe from a **same-origin** Redmine
 route today (`_report.html.erb:28`), so template JavaScript has the viewer's session. Change: the
 content endpoint sets `Content-Security-Policy: sandbox allow-scripts; default-src 'none';

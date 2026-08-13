@@ -642,6 +642,50 @@ that template says. Redmine will not offer these to the *Anonymous* or *Non-memb
 and they are not permitted in a closed project. Treat granting one the way you would treat
 giving somebody a shell.
 
+That refusal is not politeness — it is derived. Every authoring permission is declared
+with Redmine's `require: :member`, and the plugin reads that requirement *from* the
+authoring flag rather than typing it on each entry, so a code-execution permission cannot
+be offered to a role that applies to non-members even by an edit that forgets.
+
+#### Who can run server-side code — read this after upgrading
+
+**Administration → Render preflight** opens with a table listing every role that holds a
+template-authoring permission: this plugin's, and the base reporting plugin's, side by
+side. It costs one query, it runs when you open the page, and it is the answer to the
+question this permission model otherwise leaves you to reconstruct by hand.
+
+Read it in two directions:
+
+* **A role in the left column and not the right** authors today, in the plugin you are
+  migrating away from, and will not be able to here. Grant it a permission on this side,
+  or decide that it should no longer author.
+* **A role in the right column and not the left** has code execution *here*. Check that
+  somebody chose it — because on a **brand-new** Redmine, nobody necessarily did. Core's
+  default-data loader gives the *Manager* role every available permission when it seeds a
+  fresh install, ours included. That is not a defect in either project, and it is invisible
+  unless something tells you.
+
+Two things about the table are worth knowing, because both are properties of the older
+plugin rather than of this one:
+
+* **A grant outlives the plugin that registered it.** Nothing in Redmine prunes
+  `roles.permissions` when a plugin is removed. So a role can still appear in the left
+  column on an installation where the base plugin is long gone — and there it is
+  *invisible on the roles screen*, because that screen only lists permissions something
+  currently registers. While that plugin is uninstalled the leftover grant authorises
+  nothing (a project-scoped permission check rejects it before it reaches the role), but
+  it is still in the database and it takes effect again the moment the plugin is
+  reinstalled. This table reads the permission tables directly, so it shows you the row
+  either way.
+* **A built-in role can appear in the left column, and is flagged when it does.** The base
+  plugin's authoring permission carries no `require:`, so Redmine will offer it to
+  *Non-member* and *Anonymous* — code execution for people who are not members of the
+  project, and in the anonymous case for people with no account. Ours cannot land there,
+  per the paragraph above. If you see that row, it is the first thing to fix.
+
+An empty table is the good answer, and it says so in words: only administrators can author
+report templates on that installation.
+
 **A report is displayed inside a sandboxed frame, and that is load-bearing.** A template's
 output is not part of the Redmine page around it: it is parsed as a separate document in a
 frame with no access to your session, your cookies or the page it sits in, and with the

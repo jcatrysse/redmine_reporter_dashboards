@@ -958,7 +958,7 @@ jobs:
   # Non-test gates. A green suite says nothing about any of these.
   # ------------------------------------------------------------------
   gates:
-    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, single_parse, migration_reversibility, gotenberg_accepted_cves)
+    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, no_html_safe, single_parse, migration_reversibility, gotenberg_accepted_cves)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1021,6 +1021,22 @@ jobs:
         run: |
           ./script/gates/chrome_no_design_tokens_selftest.sh
           ./script/gates/chrome_no_design_tokens.sh
+
+      # T-27 / INV-9 — template authoring IS code execution, so nothing may mark a
+      # template's output as trusted markup. `technical-spec.md` §4: "No `html_safe`
+      # anywhere", with a budget of two files for `raw(`.
+      #
+      # THE SELF-TEST RUNS FIRST, for the reason written above `chrome_no_design_tokens`
+      # and demonstrated again here: the first version of this gate was negative-tested
+      # interactively and shipped with FOUR holes an independent review then found —
+      # `raw` without parentheses, `<%==`, a search that crashed inside a command
+      # substitution (that exact trap, a third time), and a missing search path that made
+      # a gate certifying INV-9 having read no files at all. Committing the arms is what
+      # stops the fifth.
+      - name: no_html_safe
+        run: |
+          ./script/gates/no_html_safe_selftest.sh
+          ./script/gates/no_html_safe.sh
 
       # T-17 — one parse entry point, and no globally registered filters. Every limit
       # the execution policy applies is a property of the CALL SITE (resource limits,

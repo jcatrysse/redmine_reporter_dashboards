@@ -31,9 +31,9 @@ module RedmineReporterDashboards
   # happens (FR-19, `ScriptSafeJson`, the drop layer). This module concatenates; it
   # does not decide anything about the body's safety and does not mark it safe. On the
   # HTML binding the result becomes the value of a `srcdoc` ATTRIBUTE, which Rails
-  # escapes as attribute data (INV-9 — the `no_html_safe` gate T-27 owes is not wired yet, so
-  # this is held by construction and by `report_document_spec.rb`'s own source check rather
-  # than by a gate); on the PDF binding
+  # escapes as attribute data (INV-9 — held by construction, by `report_document_spec.rb`'s
+  # own source check, and since T-27 by `script/gates/no_html_safe.sh`, which runs in CI's
+  # `gates` job); on the PDF binding
   # it becomes `DocumentRequest#body`, which no browser of the viewer's ever parses.
   #
   # --- WHAT IS DELIBERATELY NOT HERE -----------------------------------------------

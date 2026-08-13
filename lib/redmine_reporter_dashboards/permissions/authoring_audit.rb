@@ -53,11 +53,32 @@ module RedmineReporterDashboards
     # `roles.permissions`, and Redmine never prunes one when the plugin that registered it
     # goes away: `Role#permissions=` writes what it is given, and nothing anywhere reconciles
     # the column against the registry. So a role can hold `:manage_report_templates` on an
-    # install where the base plugin is **no longer installed at all** — and that is the
-    # worst case, not an edge one, because the grant is invisible on the roles screen (which
-    # renders `setable_permissions`, and an unregistered permission is not setable) while
-    # `Role#allowed_to?` keeps honouring it. Gating this module on
-    # `ReporterPresence.present?` would print an empty list in exactly that case.
+    # install where the base plugin is **no longer installed at all**, and gating this module
+    # on `ReporterPresence.present?` would print an empty list in exactly that case.
+    #
+    # --- WHAT THE DANGLING GRANT DOES AND DOES NOT DO, MEASURED --------------------
+    #
+    # The first version of this comment said the grant is invisible on the roles screen
+    # "while `Role#allowed_to?` keeps honouring it", which overstated the consequence. An
+    # independent review measured it against core and the precise picture is:
+    #
+    #   * INVISIBLE on the roles screen: `app/views/roles/_form.html.erb` renders
+    #     `setable_permissions`, built from `Redmine::AccessControl` — an unregistered
+    #     permission is not setable, so nothing shows the grant. TRUE as stated.
+    #   * `Role#allowed_to?(:manage_report_templates)` still answers **true**:
+    #     `Role#allowed_permissions` (`role.rb:304-311`) is `permissions +
+    #     public_permissions` with no registry filter at all.
+    #   * But every REAL check is project-scoped, and there it answers **false**:
+    #     `User#allowed_to?(action, project)` returns early on
+    #     `Project#allows_to?` (`user.rb:777`), which is built from
+    #     `AccessControl.modules_permissions` (`project.rb:1311-1319`). The base plugin
+    #     declares this permission inside `project_module :issue_tracking`, so while that
+    #     plugin is uninstalled nothing is authorized by the grant.
+    #
+    # So it is STALE DATA that re-arms the moment the plugin is reinstalled — not a live
+    # code-execution path while it is gone. That is still exactly what this page is for: an
+    # administrator migrating needs the list, and needs it after the old plugin has been
+    # removed, which is when no other surface in Redmine will show it to them.
     #
     # Therefore: the audit reads Redmine's own permission tables and asks the plugin registry
     # NOTHING. `ReporterPresence` keeps its one real consumer — deciding whether
@@ -73,10 +94,6 @@ module RedmineReporterDashboards
       # because "how many are there" is a question the reader should not have to re-derive
       # if a later version of that plugin splits it.
       BASE_AUTHORING = %i[manage_report_templates].freeze
-
-      # `Role#builtin`, from core (`app/models/role.rb:37-38`). 0 is a givable role.
-      BUILTIN_NON_MEMBER = 1
-      BUILTIN_ANONYMOUS = 2
 
       # One role's holdings. `base` and `own` are the permission names actually held, not
       # booleans, because the page prints them: "Manager holds authoring" is not actionable
@@ -163,12 +180,21 @@ module RedmineReporterDashboards
                   base: base, own: own)
         end
 
-        # `Role#permissions` is `nil` until something has been granted — core's own
-        # `add_permission!` guards with `unless permissions.is_a?(Array)` — so `Array()`
-        # rather than a bare call. And `to_sym` because the column is a serialized Array
-        # whose contents a fixture, an import or an older Redmine may have left as
-        # Strings: comparing `'manage_report_templates'` against a Symbol silently answers
-        # "nobody holds it", which is this diagnostic failing OPEN.
+        # DEFENSIVE, AND THE STATED REASONS WERE WRONG — corrected after a review measured
+        # them, because a guard whose rationale does not hold is a guard the next reader
+        # deletes on the strength of the rationale.
+        #
+        # What is actually true on 5.1 → 7.0: `Role::PermissionsAttributeCoder.load`
+        # returns an Array of Symbols for every input, `nil` included, and `permissions=`
+        # normalises to symbols on write. So through a persisted `Role` the column is
+        # never nil and never holds Strings, and neither guard below ever fires.
+        #
+        # They stay because THE CALLER IS NOT REQUIRED TO BE A `Role`: this module is
+        # duck-typed on four readers precisely so it can be driven from a Struct in a
+        # DB-less spec, and a future importer reading raw rows would bypass the coder
+        # entirely. The String case is the one that matters, because comparing
+        # `'manage_report_templates'` against a Symbol answers "nobody holds it" — this
+        # diagnostic failing OPEN, which is the one direction that is not safe.
         #
         # `to_s.empty?` and not ActiveSupport's `presence`: this module is required by the
         # DB-less spec run, where Redmine's world — ActiveSupport included — is not loaded.

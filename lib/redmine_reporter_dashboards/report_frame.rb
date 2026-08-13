@@ -26,9 +26,11 @@ module RedmineReporterDashboards
   # copy used twice, not two copies that can drift — which is the property the original
   # comment was protecting, kept while making it reachable.
   #
-  # No `html_safe` anywhere in this file (INV-9; the `no_html_safe` gate T-27's `Accept:` names
-  # does not exist yet, so this is a property of the file rather than an enforced one — a
-  # review pointed out that citing an unwired gate reads as coverage that is not there). The
+  # No `html_safe` anywhere in this file (INV-9), and since T-27 that is ENFORCED rather
+  # than merely true: `script/gates/no_html_safe.sh` fails on `html_safe` applied to a
+  # value anywhere under `app/` or `lib/`, and runs in CI's `gates` job. This comment used
+  # to cite that gate while it did not exist, which a review correctly called out as
+  # reading like coverage that was not there. The
   # frame is
   # built with `content_tag`, whose `srcdoc:` value is escaped as an attribute by Rails, and
   # the document string is deliberately NOT marked safe: it is attribute DATA, not markup

@@ -688,8 +688,23 @@ module RedmineReporterDashboards
         candidates = Dir[File.join(PERMISSION_SPEC_ROOT, '{app,lib,db}', '**', '*.rb')] +
                      [File.join(PERMISSION_SPEC_ROOT, 'init.rb')]
 
+        # FULL-LINE COMMENTS ARE STRIPPED, and T-27 is why the line exists.
+        #
+        # This scanner read whole files, so PROSE about granting counted as granting.
+        # `permissions/authoring_audit.rb` explains its own nil-guard by citing core's
+        # `add_permission!`, and this example went red over a sentence — the same defect
+        # HANDOVER §1 records twice: a scanner that cannot tell a construct from a
+        # description of one (E-14's `<script>` in a `{% comment %}`, 72 findings in a
+        # template that had none). `layer_purity.sh` and `no_html_safe.sh` both strip
+        # comment lines for this reason; this control now agrees with them rather than
+        # being the third scanner in the repo with its own answer.
+        #
+        # It is not a hole: a stripped line is a line Ruby does not execute, and only a
+        # line whose FIRST non-whitespace character is `#` is stripped, so `#` inside a
+        # string literal still counts.
         offenders = candidates.select { |path| File.file?(path) }.select do |path|
           File.read(path, encoding: 'UTF-8')
+              .gsub(/^[[:space:]]*#.*$/, '')
               .match?(/add_permission|roles_permissions|permissions\s*<</)
         end
 

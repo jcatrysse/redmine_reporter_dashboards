@@ -613,7 +613,11 @@ class ReporterPreflightControllerTest < ActionController::TestCase
 
     assert_response :success
     assert_equal [], assigns(:authoring_audit)
-    assert_select 'p.nodata', text: I18n.t(:text_reporter_authoring_audit_none)
+    # `locale:` NAMED, not inherited. `I18n.t` with no locale reads whatever the previous
+    # request left `I18n.locale` at, so this assertion would depend on test order — the
+    # thing CLAUDE.md §6 forbids by name ("set them in the test, do not inherit them").
+    assert_select 'p.nodata',
+                  text: I18n.t(:text_reporter_authoring_audit_none, locale: 'en')
     # And no table, so an empty answer cannot be read as a table that failed to fill.
     assert_select 'td', text: BASE_AUTHORING.to_s, count: 0
   end

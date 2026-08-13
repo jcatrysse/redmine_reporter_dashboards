@@ -25,6 +25,20 @@
 # Format: <path><TAB or spaces><reason>
 
 # --- Detection and the ONE thing still loaded on its answer.
+#
+# T-27 DECIDED WHAT THE DETECTION IS FOR (2026-08-13) and the answer keeps these three
+# entries rather than retiring them: `load_patches` requires REPORTER_GLUE_FILES only on
+# a true answer, and `ScopeBinding#legacy_available?` then asks a positive const_defined?
+# instead of rescuing a NameError. One consumer, load-bearing. These three go when S-30
+# deletes the glue — not before, and not by rewording a comment.
+#
+# The task's own new surface deliberately does NOT join this list. T-27's upgrade
+# diagnostic (`permissions/authoring_audit.rb`, its view section and nine locale files)
+# names the base plugin NOWHERE: it matches the permission NAME `manage_report_templates`,
+# which carries no plugin id, and its prose says "the base plugin". A diagnostic that
+# named it would have added ten entries to the list it is supposed to shrink — and worse,
+# would have implied the audit depends on that plugin being installed. It does not: the
+# grant it looks for outlives the plugin, which is the case it exists for.
 lib/redmine_reporter_dashboards/reporter_presence.rb   owns the detection; PLUGIN_ID names the plugin being looked for
 lib/redmine_reporter_dashboards.rb                     routes the one remaining reporter-only require behind reporter_present?
 init.rb                                                logs which mode the plugin booted in; documents that reporter is optional
