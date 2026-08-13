@@ -103,6 +103,97 @@ class ReporterDashboardsGalleryRakeTest < ActiveSupport::TestCase
     assert_equal 2, error.status
   end
 
+  # ------------------------------------------------------------------ INV-6, no writes
+  #
+  # `GalleryCheck`'s header claims it writes nothing, and a claim in a comment is not a
+  # control. The check is over the STATEMENTS rather than the row counts, because a row that
+  # still looks right proves the run did not happen to change it and not that it could not —
+  # the same reason `import:plan`'s no-write assertion is written this way.
+  #
+  # THE HTML BINDING, because that is the half that touches the database: the Liquid render,
+  # the aggregations and every drop read. The PDF half hands bytes to an engine and touches no
+  # model at all — and it is not stubbed here, because a stub adapter is a fourth engine whose
+  # only property is that it agrees with this test. The whole path (five starters through a
+  # real wkhtmltopdf, statements subscribed) was measured at **0 non-read statements, 0 new
+  # Template / Document / Attachment rows** and is recorded in the T-37 status row.
+  def test_rendering_every_starter_writes_nothing_to_the_database
+    statements = []
+    subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*args|
+      payload = ActiveSupport::Notifications::Event.new(*args).payload
+      next if payload[:cached]
+      next if %w[SCHEMA TRANSACTION].include?(payload[:name].to_s)
+
+      statements << payload[:sql].to_s
+    end
+
+    actor = User.find_by!(admin: true)
+    project = Project.find(1)
+    rendered = RedmineReporterDashboards::StarterGallery.entries.map do |entry|
+      template = RedmineReporterDashboards::Template.new(
+        project_id: project.id, author_id: actor.id, name: entry.id,
+        source: entry.source, output: entry.output,
+        content: RedmineReporterDashboards::StarterGallery.body(entry),
+        visibility: RedmineReporterDashboards::Template::VISIBILITY_PRIVATE
+      )
+      scope, query = RedmineReporterDashboards::Reporting::ReportScope.build(
+        template: template, actor: actor, project: project, query_id: nil
+      )
+      RedmineReporterDashboards::Reporting::ReportRun.preview(
+        template: template, actor: actor, scope: scope, query: query,
+        guard: RedmineReporterDashboards::Render::BatchGuard.new
+      ).call(pdf: false)
+    end
+
+    # THE RENDERS HAVE TO HAVE HAPPENED, or "wrote nothing" is also true of doing nothing —
+    # and a Liquid error would be a diagnostic rather than a raise, so it has to be asked for.
+    assert_equal 5, rendered.length
+    rendered.each_with_index do |outcome, index|
+      id = RedmineReporterDashboards::StarterGallery.entries[index].id
+      assert_nil outcome.diagnostic, "#{id}: #{outcome.diagnostic&.message}"
+      assert outcome.sections.any?, "#{id} produced no HTML at all"
+    end
+
+    offenders = statements.reject do |sql|
+      sql.match?(/\A\s*(?:SELECT|SHOW|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b/i)
+    end
+    assert_equal [], offenders,
+                 "rendering the gallery must write nothing. Not a read:\n#{offenders.join("\n")}"
+  ensure
+    ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
+  end
+
+  # EVERY STARTER RENDERS ITS LIQUID on this Redmine, which is the part of FR-73's "renders on
+  # every engine" that a four-branch CI job can actually answer: a tag that does not exist, a
+  # parameter that is refused or a filter that was removed is a diagnostic or a degradation
+  # here, on every supported Redmine, without a browser anywhere near it.
+  #
+  # It is deliberately NOT a second copy of the assertion above: that one is about writes, this
+  # one is about degradations, and a starter that renders while quietly losing its chart is the
+  # failure this one exists for.
+  def test_every_starter_renders_without_a_degradation
+    actor = User.find_by!(admin: true)
+    project = Project.find(1)
+
+    RedmineReporterDashboards::StarterGallery.entries.each do |entry|
+      template = RedmineReporterDashboards::Template.new(
+        project_id: project.id, author_id: actor.id, name: entry.id,
+        source: entry.source, output: entry.output,
+        content: RedmineReporterDashboards::StarterGallery.body(entry),
+        visibility: RedmineReporterDashboards::Template::VISIBILITY_PRIVATE
+      )
+      scope, query = RedmineReporterDashboards::Reporting::ReportScope.build(
+        template: template, actor: actor, project: project, query_id: nil
+      )
+      outcome = RedmineReporterDashboards::Reporting::ReportRun.preview(
+        template: template, actor: actor, scope: scope, query: query,
+        guard: RedmineReporterDashboards::Render::BatchGuard.new
+      ).call(pdf: false)
+
+      codes = outcome.degradations.map { |d| RedmineReporterDashboards::DegradationText.code_of(d) }
+      assert_equal [], codes, "#{entry.id} degraded: #{codes.join(', ')}"
+    end
+  end
+
   private
 
   # Rake prints its report to stdout and its refusals to stderr, and the refusals are what

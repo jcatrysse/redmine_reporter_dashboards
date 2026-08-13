@@ -236,6 +236,33 @@ class ReporterDashboardsLintPanelTest < ActionController::TestCase
     assert_select 'div#reporter-template-lint table.list tbody tr', minimum: 4
   end
 
+  # ------------------------------------------------------------------ INV-9, the excerpt
+
+  # AN EXCERPT IS THE AUTHOR'S OWN LINE, and it is printed back into the page. A template body
+  # is written by somebody holding a code-execution permission and read by anybody who may edit
+  # it, so an unescaped excerpt would be a stored-XSS surface on the one page every author
+  # opens — the same defect class the review of T-23 found in the report frame.
+  def test_a_findings_excerpt_is_escaped_rather_than_rendered
+    template = create_template(content: "<p>[page] <script>alert('x')</script></p>")
+
+    get :edit, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_not_include "<script>alert('x')</script>", response.body
+    assert_include ERB::Util.html_escape("<script>alert('x')</script>"), response.body
+  end
+
+  # The same for a rule MESSAGE, which is written in `TemplateLinter` and could one day carry a
+  # value out of the body.
+  def test_the_panel_marks_nothing_html_safe
+    template = create_template(content: '<p>[page] "quoted" & <b>bold</b></p>')
+
+    get :edit, params: { project_id: @project.identifier, id: template.id }
+
+    assert_not_include '<b>bold</b>', response.body
+    assert_include ERB::Util.html_escape('<b>bold</b>'), response.body
+  end
+
   # ------------------------------------------------------------------ the clean state
 
   # AN EMPTY PANEL IS INDISTINGUISHABLE FROM ONE THAT DID NOT RUN, and the author has just

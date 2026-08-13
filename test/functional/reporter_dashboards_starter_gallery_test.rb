@@ -53,6 +53,30 @@ class ReporterDashboardsStarterGalleryTest < ActionController::TestCase
     end
   end
 
+  # THE THUMBNAIL PATH IS ASSERTED, AND IT IS THE ONE THING HERE THAT DIFFERS PER REDMINE.
+  # `image_tag(..., plugin:)` is Redmine's own helper override, and 7.0 ships Propshaft while
+  # 5.1 does not — the two produce different URLs from the same call. Both are correct; what
+  # would not be is the `plugin:` option landing in the markup as an ATTRIBUTE, which is
+  # exactly what happens when the call is made outside a view context (measured while
+  # reviewing this task, through `ActionController::Base.helpers`, and it looked like a real
+  # defect until it was probed in a rendered page).
+  #
+  # So this asserts the SHAPE that is common to every branch: a plugin asset URL naming this
+  # plugin, and no stray attribute. The four Redmine branches in CI each render this view.
+  def test_the_thumbnail_is_served_through_redmines_own_plugin_asset_path
+    get_new
+
+    assert_select 'img.reporter-starter-thumbnail', count: Gallery.entries.length
+    assert_select 'img.reporter-starter-thumbnail' do |images|
+      images.each do |image|
+        assert_include 'redmine_reporter_dashboards', image['src']
+        assert_include 'starters/', image['src']
+        assert_nil image['plugin'], 'the plugin: option leaked into the markup as an attribute'
+        assert_not_empty image['alt'].to_s, 'a thumbnail with no alt text'
+      end
+    end
+  end
+
   def test_each_starter_is_named_and_described_in_the_readers_language
     get_new
 
