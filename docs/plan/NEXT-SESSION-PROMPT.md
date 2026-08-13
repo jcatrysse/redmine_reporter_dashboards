@@ -21,34 +21,54 @@ CLAUDE.md §9 *and* the hook's `PINNED_BRANCH` in one commit.
 Read `CLAUDE.md` first, then `docs/plan/HANDOVER.md` §1 (traps) and §3 (environment) — both
 record traps that produce a green run meaning nothing. Then read this brief twice.
 
-**T-27 LANDED ON 2026-08-13 AND THIS BRIEF IS NOW STALE IN ITS TASK.** Everything below about
-*running* things is current and was exercised end to end; the T-27 sections are kept as the
-record of what it decided. **Your task is S-30** unless the curator says otherwise — see the
-section below, and read `§Findings S-30` before touching anything.
+**T-27 AND S-30 BOTH LANDED ON 2026-08-13, AND THIS BRIEF HAS NO TASK LEFT IN IT.**
+Everything below about *running* things is current and was exercised end to end; the task
+sections are kept as the record of what each decided.
+
+**There is no queued work.** Every numbered task is done, the T-26 remainder is closed, and
+T-03's twelve render performance cells are the curator's to release. **Ask the curator what
+to do before starting anything** — and read "Open for the curator" below first, because that
+list is where the next task will come from.
 
 ## Where the work stands
 
-**Every numbered task is done.** What remains is the T-26 remainder (**S-30**) and T-03's twelve
+**Every numbered task is done, and so is the T-26 remainder.** What remains is T-03's twelve
 render performance cells, which the curator said to leave.
 
 **What T-27 settled, so you do not re-open it:** the upgrade diagnostic reads Redmine's own
 permission tables and asks the plugin registry NOTHING, because a grant outlives the plugin that
 registered it — gating it on `ReporterPresence` would print an empty list in the one case it
-exists for. `ReporterPresence` keeps its single real consumer, gating the `REPORTER_GLUE_FILES`
-require, which is the thing **S-30 deletes**. So when the glue goes, the detection goes with it
-and three entries come off `zero_reporter.allowlist` — strict drops from 6 to 3. That is the
-connection between the two tasks and it is the reason to do S-30 next.
+exists for.
+
+**And what S-30 then changed about that answer.** T-27 said the detection's one consumer was
+the `REPORTER_GLUE_FILES` require, and predicted that deleting the glue would take the detection
+with it — strict 6 → 3. That prediction was WRONG by two, and the correction is worth carrying:
+`reporter_present?` has a SECOND consumer, `apply_reporter_patches`, which after S-30 installs
+exactly one thing — `reporter_report_content_patch`, a performance fix on the host plugin's own
+report generation that depends on nothing this plugin resolves. So strict went **6 → 5**, not
+6 → 3, and the detection survives as a one-question thing: may we patch the host plugin's
+controller? Retiring it is a curator decision about whether this plugin should still improve an
+installation that has both — not a tidy-up.
 
 Be precise about one thing T-27 got wrong first and corrected: a dangling grant does NOT
 authorise anything while its plugin is uninstalled (`Project#allows_to?` rejects it before the
 role is consulted). It is stale data that re-arms on reinstall. Do not restore the stronger
 claim.
 
+**And one thing S-30 proved that is worth not re-deriving:** `from:` on an aggregation tag was
+read ONLY by the deleted legacy module. The owned path returns `render_context.scope` and never
+looks at it, so `from: issues` has been decorative on every production render since T-26a — the
+README already says so for a spent-time template and it is in fact true everywhere. Eighteen
+README examples still write it. Whether to keep it as harmless documentation-of-intent or to
+strip it is a curator call; nothing depends on it either way.
+
 Verified at HEAD, on Redmine **7.0-stable** with **PostgreSQL 16**, standalone (no
 `redmine_reporter`, no `redmineup` gem):
 
-    minitest             1056 runs, 5175 assertions, 0 failures, 0 errors, 0 skips
-    rspec                2917 examples, 0 failures, 136 pending — and 2917 / 0 / 146 in the
+    minitest             1040 runs, 5078 assertions, 0 failures, 0 errors, 0 skips
+                         (1056 before S-30; the deleted golden_scope_fixture_test.rb
+                         defined exactly 16 test methods — counted, not trusted)
+    rspec                2869 examples, 0 failures, 136 pending — and 2869 / 0 / 146 in the
                          CI SHAPE (from redmine/, plugin mirrored under plugins/), which is
                          the invocation that found T-38's four red RSpec jobs
     thirteen gates rc=0  including the new no_html_safe + its 16-arm selftest; three need
@@ -56,6 +76,7 @@ Verified at HEAD, on Redmine **7.0-stable** with **PostgreSQL 16**, standalone (
                          Liquid gem and is OK under bundle exec). Sweep the status on its
                          OWN line — `out=$(cmd); echo "$(basename $f): rc=$?"` reports
                          basename's status and is always 0
+    spec_liquid          346 examples, 0 failures on Liquid 4.0.4 AND 5.13.0
     spec/golden          167 examples, 0 failures, 0 pending          <- G7 RAN
     script/migrate_updown.sh rc=0 (G11), .codex/check_ruby_floor.sh rc=0
 
@@ -65,9 +86,14 @@ wrecks the plugin tables**, so `migrate_updown.sh` then fails G11 with what read
 migration — the repair is in HANDOVER §3 and the order that always works is gates →
 `migrate_updown.sh` → minitest → rspec.
 
-Not re-run in the T-27 session, and why: `spec_liquid` (346 on both Liquid majors), the
-conformance corpus and the starter gallery all need engines or the real Liquid gem, and T-27
-touched neither the Liquid layer nor the render path. Their last measured numbers are T-37's.
+**`spec_liquid` WAS RUN FOR S-30, because S-30 touched the Liquid layer** (`ScopeBinding#bind`)
+and leaving it unverified would have been the one gap that mattered: **346 examples, 0
+failures on Liquid 4.0.4 AND on 5.13.0**. The recipe is below under "How to run things here"
+and it takes about a minute — two `gem install`s and a pin file.
+
+Not re-run, and why: the conformance corpus and the starter gallery need render engines this
+container had no Chromium/Gotenberg/wkhtmltopdf set up for, and neither T-27 nor S-30 touched
+the render path. Their last measured numbers are T-37's.
 
 **CI HAS BEEN READ, TWICE, AND THAT IS NEW HERE.** T-38's run (31694811039, `1324c5a`) was 22
 of 26 green with **all four `RSpec` jobs red** — a source-level glob that rejected any path
@@ -115,18 +141,38 @@ CI's `gates` job.** Do not trust a gate here that has no self-test: this one was
 negative-tested interactively, reported as tested, and an independent review then found four
 holes in it. HANDOVER §1 carries the entry.
 
-## S-30 — your task
+## S-30, as built — the record, not a task
 
-`glue/legacy/scope_resolution.rb` was authorised for deletion, attempted, and **reverted on a
-measurement**. Read §Findings **S-30** before touching it. The production argument is sound —
-after T-26a nothing constructs a render without an owned `RenderContext` — but the DB-less tag
-suite uses that path as its harness, and removing the branch is **166 of 249 examples red**.
-Its shape: rewrite the two tag specs onto `RenderContext`, delete the six-source examples with
-an argued list of what coverage went, then delete `glue/`, `#legacy_bind`, `LegacyHost`,
-`test/unit/golden_scope_fixture_test.rb` (it `include`s the module, so deleting it is a LOAD
-failure taking all twelve of its methods) and the `no_thread_local` exemptions.
-**`spec/golden/scope/scope.jsonl` must survive whatever happens to its subject** — it is the one
-artefact in this repository that cannot be regenerated.
+**DONE 2026-08-13.** `glue/` is deleted: `scope_resolution.rb` (six ambient scope sources)
+and `reporter_list_patch.rb` (the thread-local that fed one of them), plus
+`spec/reporter_list_patch_spec.rb`, `test/unit/golden_scope_fixture_test.rb`,
+`ScopeBinding`'s legacy dispatch and `LegacyHost`, `REPORTER_GLUE_FILES`, and the
+`ReporterListPatch` line in `apply_reporter_patches`.
+
+**Why it worked this time.** The 2026-08-12 attempt deleted first and measured 166 of 249
+red. This one rebuilt the harness first: `spec/sql_aggregation` was moved onto an owned
+`RenderContext` and proved indifferent to the module — 695 examples, 0 failures with it
+present AND with `legacy_available?` stubbed false — before a file was removed. **If you ever
+face a deletion like this again, that is the order.**
+
+**The number worth carrying is the SPLIT, not the 166.** Of 150 failures, 121 were testing
+the TAG and merely used a legacy source to hand it a scope: four harness-helper edits fixed
+most of them. Only 38 examples had the deleted behaviour as their subject. The first attempt
+read "166 red" as "166 to port" and reasonably called it a task. **Measure subject-versus-
+harness before estimating a rebuild.**
+
+**`spec/golden/scope/scope.jsonl` and `sql/scope_sql.jsonl` survive byte-identical** and are
+now HISTORICAL RECORDS — `git diff` over `spec/golden/` shows only README changes. They are
+the only surviving description of behaviour this plugin used to have and cannot be
+regenerated, because their subject is gone. `spec/golden/README.md` says so and says not to
+tidy them away. `scope_fixture.rb` stays as their reader.
+
+**Not a visibility regression, and this is the claim to attack if you doubt one thing.**
+`enforce_visibility` existed because a legacy source could hand over an arbitrary relation.
+An owned context cannot: the constructor REFUSES a nil actor (INV-1) and the scope comes from
+`ReportScope.build` over that actor's visible scope, so the intersection moved upstream and
+became unconditional. `test/unit/multi_actor_visibility_test.rb` asserts it against a real
+`Role#issues_visibility` and a real private issue.
 
 ## What T-37 built, because the authoring surface is now four things
 

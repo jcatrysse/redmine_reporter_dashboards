@@ -1899,11 +1899,23 @@ declaration, no matrix cell.
 
 ## 4b. What the next session should start with
 
-**T-27 LANDED ON 2026-08-13, so every numbered task is now done.** What is left is the T-26
-remainder (**S-30**, and read §Findings S-30 before touching it: the deletion was attempted,
-measured at 166 of 249 examples red, and reverted) and T-03's twelve render performance cells,
-which the curator said to leave. `docs/plan/NEXT-SESSION-PROMPT.md` is still written for T-27
-and is now stale in that respect; its run recipes are current and were all exercised.
+**T-27 AND S-30 BOTH LANDED ON 2026-08-13.** Every numbered task is done and the T-26
+remainder is closed. What is left is **T-03's twelve render performance cells, which the
+curator said to leave** — so unless the curator says otherwise, there is no queued work.
+
+**S-30 deleted `glue/` and the deletion held.** The 2026-08-12 attempt measured 166 of 249
+red and was reverted; this one rebuilt the tag suite onto an owned `RenderContext` FIRST and
+proved it indifferent to the module (695 examples, 0 failures with it present and with
+`legacy_available?` stubbed false) before removing a file. **`spec/golden/scope/scope.jsonl`
+and `sql/scope_sql.jsonl` survive byte-identical** and are now historical records — read
+`spec/golden/README.md` before touching them; they are the only surviving description of
+behaviour this plugin used to have and they cannot be regenerated.
+
+**The generalisable lesson is not the number.** 150 of the failures were not testing
+`ScopeResolution` at all: 121 were testing the TAG and merely used a legacy source to hand
+it a scope, so four harness-helper edits fixed most of them, and only 38 examples had the
+deleted behaviour as their subject. The first attempt read "166 red" as "166 to port".
+**Measure the split — subject versus harness — before estimating a rebuild.**
 
 **THE DECISION T-27 OWED IS TAKEN, AND IT INVERTED THE BRIEF'S GUESS.** The brief said
 `init.rb`'s boot line was "the upgrade diagnostic in embryo", i.e. that the diagnostic would grow
