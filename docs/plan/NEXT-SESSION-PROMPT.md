@@ -21,30 +21,53 @@ CLAUDE.md §9 *and* the hook's `PINNED_BRANCH` in one commit.
 Read `CLAUDE.md` first, then `docs/plan/HANDOVER.md` §1 (traps) and §3 (environment) — both
 record traps that produce a green run meaning nothing. Then read this brief twice.
 
-**Your task is T-27 · INV-9 as an enforced boundary.** Its `Accept:` list is in
-`docs/plan/implementation-plan.md`. Read the *decision* section below before you start: T-27
-carries a question that has been waiting for it, and answering it is part of the task.
+**T-27 LANDED ON 2026-08-13 AND THIS BRIEF IS NOW STALE IN ITS TASK.** Everything below about
+*running* things is current and was exercised end to end; the T-27 sections are kept as the
+record of what it decided. **Your task is S-30** unless the curator says otherwise — see the
+section below, and read `§Findings S-30` before touching anything.
 
 ## Where the work stands
 
-**38 of 38 numbered tasks are done. T-37 landed on 2026-08-13.** What remains is **T-27**, the
-T-26 remainder (**S-30**) and T-03's twelve render performance cells, which the curator said to
-leave.
+**Every numbered task is done.** What remains is the T-26 remainder (**S-30**) and T-03's twelve
+render performance cells, which the curator said to leave.
+
+**What T-27 settled, so you do not re-open it:** the upgrade diagnostic reads Redmine's own
+permission tables and asks the plugin registry NOTHING, because a grant outlives the plugin that
+registered it — gating it on `ReporterPresence` would print an empty list in the one case it
+exists for. `ReporterPresence` keeps its single real consumer, gating the `REPORTER_GLUE_FILES`
+require, which is the thing **S-30 deletes**. So when the glue goes, the detection goes with it
+and three entries come off `zero_reporter.allowlist` — strict drops from 6 to 3. That is the
+connection between the two tasks and it is the reason to do S-30 next.
+
+Be precise about one thing T-27 got wrong first and corrected: a dangling grant does NOT
+authorise anything while its plugin is uninstalled (`Project#allows_to?` rejects it before the
+role is consulted). It is stale data that re-arms on reinstall. Do not restore the stronger
+claim.
 
 Verified at HEAD, on Redmine **7.0-stable** with **PostgreSQL 16**, standalone (no
 `redmine_reporter`, no `redmineup` gem):
 
-    minitest             1048 runs, 5152 assertions, 0 failures, 0 errors, 0 skips
-    rspec                2899 examples, 0 failures, 136 pending — and 2899 / 0 / 146 in the
+    minitest             1056 runs, 5175 assertions, 0 failures, 0 errors, 0 skips
+    rspec                2917 examples, 0 failures, 136 pending — and 2917 / 0 / 146 in the
                          CI SHAPE (from redmine/, plugin mirrored under plugins/), which is
                          the invocation that found T-38's four red RSpec jobs
-    twelve gates rc=0    plus the CVE gate in its CI form; sweep the status on its OWN line
-    spec_liquid          346 examples, 0 failures on Liquid 4.0.4 AND 5.13.0
+    thirteen gates rc=0  including the new no_html_safe + its 16-arm selftest; three need
+                         arguments or tools (cve x2, drop_reference_parity, which needs the
+                         Liquid gem and is OK under bundle exec). Sweep the status on its
+                         OWN line — `out=$(cmd); echo "$(basename $f): rc=$?"` reports
+                         basename's status and is always 0
     spec/golden          167 examples, 0 failures, 0 pending          <- G7 RAN
-    conformance corpus   109 examples, 0 failures — chromium_cdp 23/0/0, gotenberg 22/0/1,
-                         wkhtmltopdf (PATCHED qt) 21/0/2
-    starter gallery      15 of 15 — five starters x three engines, measured locally
     script/migrate_updown.sh rc=0 (G11), .codex/check_ruby_floor.sh rc=0
+
+**A CLOUD SESSION STARTS SHALLOW AND THAT FAILS G7 LIKE A REAL BREACH.** `git fetch
+--unshallow origin` first, before concluding anything from `spec/golden`. And **`rspec spec`
+wrecks the plugin tables**, so `migrate_updown.sh` then fails G11 with what reads as a broken
+migration — the repair is in HANDOVER §3 and the order that always works is gates →
+`migrate_updown.sh` → minitest → rspec.
+
+Not re-run in the T-27 session, and why: `spec_liquid` (346 on both Liquid majors), the
+conformance corpus and the starter gallery all need engines or the real Liquid gem, and T-27
+touched neither the Liquid layer nor the render path. Their last measured numbers are T-37's.
 
 **CI HAS BEEN READ, TWICE, AND THAT IS NEW HERE.** T-38's run (31694811039, `1324c5a`) was 22
 of 26 green with **all four `RSpec` jobs red** — a source-level glob that rejected any path
@@ -58,31 +81,41 @@ warm-up it replaced had been posting the wrong form field, so it had never warme
 **Read the run for the head you inherit rather than trusting this paragraph**, and reproduce the
 rspec job locally before you push — the recipe is in HANDOVER §1.
 
-## T-27, and the decision it owns
+## T-27, as built — the record, not a task
 
-`Accept:` has four parts and three of them are small. The one that is not is this: the
-`template_authoring` setting T-27's original text required is **GONE** — T-40 replaced it with
-§4.1's role permissions — so what T-27 owes instead is the **upgrade diagnostic**: the preflight
-page listing every role holding the base plugin's authoring permission BESIDE every role holding
-ours, with a test for the case where the base plugin is absent (the list is empty, not an error)
-**and** a test for a role that holds ours and not theirs. That last one is not hypothetical:
-core's `DefaultData::Loader` grants Manager every setable permission on a fresh install, so on
-that path the diagnostic is the ONLY thing that surfaces a code-execution grant nobody chose.
+**DONE 2026-08-13.** Kept here because the decision it took is one a later session could
+undo by accident.
 
-**THE DECISION THAT HAS BEEN WAITING FOR THIS TASK.** `ZERO_REPORTER_MODE=strict` is at **6
-files**, from 12. Two are comment-only historical records (`positioned.rb`, migration 001) and
-want a `[permanent]` marker or a reword. Three are the DETECTION (`ReporterPresence`) — and
-nothing is patched on its answer any more, so its only consumers are `init.rb`'s boot log and
-the one glue require. **That boot line is T-27's upgrade diagnostic in embryo.** The sixth is
-S-30. Decide what the detection is FOR, then either grow it into the diagnostic or delete it and
-build the diagnostic from Redmine's own permission tables.
+The `template_authoring` setting T-27's original text required was already GONE (T-40
+replaced it with §4.1's role permissions), so what it owed instead was the **upgrade
+diagnostic**: the preflight page listing every role holding the base plugin's authoring
+permission beside every role holding ours. That shipped as
+`lib/redmine_reporter_dashboards/permissions/authoring_audit.rb` plus a section on
+`reporter_preflight/show.html.erb`, with both `Accept:` cases tested by name (base plugin
+absent → empty list, not an error; a role holding ours and not theirs).
 
-The rest of T-27's list is already true and needs asserting rather than building: the widget
-iframe carries `sandbox="allow-scripts"` without `allow-same-origin` plus a restrictive CSP
-(`ReportFrame`, T-38), and the height-fit `postMessage` regression the `Accept:` line names was
-never introduced because no height-fit script exists. Check both rather than assuming.
+**The base plugin's authoring permission is `:manage_report_templates`, and that was
+MEASURED** from its own repository at `b1d1736` rather than inferred — `init.rb:19-32`
+registers six permissions and only that one takes a template body from params
+(`params[:report_template][:type].constantize.new`). The other five render STORED
+templates. Attach the repo before second-guessing this.
 
-## S-30, if the curator sends you there instead
+**The asymmetry the page exists to show:** `:manage_report_templates` carries no `require:`,
+so Redmine offers it to Non-member and Anonymous; ours cannot land there because
+`Entry#requires` derives `:member` from `authoring`. Hence `Role.all`, not `Role.givable`.
+
+The other three `Accept:` parts were already true and are now asserted rather than assumed:
+the label reads *"Author report templates (executes server-side code)"* in all nine locales,
+the widget iframe carries `sandbox="allow-scripts"` without `allow-same-origin` plus a
+restrictive CSP (four tests across four surfaces), and the height-fit `postMessage`
+regression was never introduced because no height-fit script exists — the CSS says so.
+
+**`no_html_safe.sh` now exists, has a committed `_selftest.sh` (16 arms), and is wired into
+CI's `gates` job.** Do not trust a gate here that has no self-test: this one was
+negative-tested interactively, reported as tested, and an independent review then found four
+holes in it. HANDOVER §1 carries the entry.
+
+## S-30 — your task
 
 `glue/legacy/scope_resolution.rb` was authorised for deletion, attempted, and **reverted on a
 measurement**. Read §Findings **S-30** before touching it. The production argument is sound —
@@ -130,8 +163,24 @@ job as the README's record of the old idiom). And the chart form has no "drill o
   three grouped calculations. **A release blocker by decision.**
 - **`<html lang>` is absent from both bindings.** Setting it needs a decision about whose locale
   a SCHEDULED report speaks.
-- **`ZERO_REPORTER_MODE=strict` is at 6 files** — see T-27 above, which is where the decision
-  belongs.
+- **`ZERO_REPORTER_MODE=strict` is at 6 files.** T-27 took the decision: three are the detection,
+  which stays until S-30 deletes the glue it gates. Two are comment-only historical records
+  (`positioned.rb`, migration 001) still wanting a `[permanent]` marker or a reword — the
+  allowlist header makes the marker a CURATOR decision, so T-27 did not take it. The sixth is
+  S-30's, and going from 6 to 3 is what finishing S-30 buys.
+- **`manage_public_reporter_dashboards_templates` is flagged as code execution and cannot
+  author.** T-40 marks it `authoring: true`, and its own comment says a role holding only it is
+  refused at `#create` by a second guard. T-27's diagnostic reads the flag faithfully, so such a
+  role prints *"Check that this was intended"* about somebody who cannot write a template — the
+  cry-wolf failure that module is otherwise careful to avoid. Either the flag means "grants a
+  code-execution privilege" (and this row does not) or it means "belongs to the authoring group"
+  (and the audit needs a narrower predicate). **A one-line decision, and T-27 did not take it
+  because the flag is T-40's contract.** Found by the independent review.
+- **The audit's rows sort alphabetically by role name**, so a builtin role holding code execution
+  — the most alarming row the page can print — lands wherever the alphabet puts it. It carries a
+  warning icon and a note, and the table is small by construction (only authoring roles), so this
+  was left as predictable-and-deterministic rather than sorted by severity. Worth a second
+  opinion if any real install shows a long list.
 - **`hu`, `pl`, `zh`** values were written by a model, not a native speaker; T-37 added 49 more
   keys in each. The curator's answer was "don't care, leave it" — recorded so it is not
   re-raised.
