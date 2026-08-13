@@ -736,6 +736,47 @@ plugin shows it whenever there is more than one slice. On other chart types the 
 parameter is a warning, because with one series a legend really is redundant and no linter
 can tell how many series `from:` will produce.
 
+### The editor
+
+Four things sit around the text box, and none of them needs JavaScript to be useful.
+
+**A findings panel, from the same linter the rake task runs.** Under the editor is a table of
+everything the linter has to say about the template in front of you: severity, `line:column`,
+the rule's id and what to do about it, with your own line quoted beneath. The same findings
+come out of
+
+```bash
+bundle exec rake reporter_dashboards:lint_templates          # every template here
+bundle exec rake reporter_dashboards:lint_templates RRD_PROJECT=my-project
+```
+
+which exits **1** if any template has an ERROR (a warning does not fail it) and **2** if you
+name a project that does not exist. It is the same linter object in both places, and a test
+runs the two over one template and compares the finding lists, so they cannot come to
+disagree. Linting happens on the server, so the panel works with JavaScript off — and there is
+no gutter, because a plain `<textarea>` cannot draw one.
+
+**A template reference in the sidebar, generated from the code.** Every value a template can
+print, per drop, with its type, a copyable `{{ … }}` snippet, and a *batch* marker on the
+accessors that cost no extra query inside a `{% for %}` loop. It is read from the drop classes
+themselves on each request rather than from a list somebody maintains, and CI fails the build
+if the shipped `docs/drop-reference.md` and the code disagree in either direction. So the
+reference cannot be stale, which is the one thing every hand-written plugin wiki page is.
+
+**A starter gallery on *New template*.** Five examples — one document per issue, an aggregate
+report, a report with charts, a spent-time report and a version rollup — each with a
+description and a thumbnail of its real output. Choosing one opens the editor with it; nothing
+is stored until you press *Create*. All five lint clean, and CI renders every one of them on
+every engine the support matrix covers, so a starter cannot be an example of something that no
+longer works. They live in [`starters/`](starters/) if you would rather read them there.
+
+**A chart form that writes the tag.** Pick a type, name the aggregation to read and the keys
+to plot, press *Insert*, and one `{% chart … %}` line lands at the cursor. It stores nothing:
+what you save is the text you can read, diff, export and paste into an issue. Drill-through is
+not on that form because it is not a chart parameter — `drill: true` belongs on the
+`{% sql_aggregate %}` above, and the form says so rather than writing a parameter the chart tag
+ignores.
+
 ### Preview
 
 The editor's **Preview** button renders the content in the form — not the saved version —

@@ -205,5 +205,50 @@ RSpec.describe RedmineReporterDashboards::StarterGallery do
     it 'records nothing for a starter that is not in the gallery' do
       expect(described_class.recorded_digests.keys.sort).to eq(entries.map(&:id).sort)
     end
+
+    # --- THE NEGATIVE HALF, AND IT WAS A MUTATION SURVIVOR ---
+    #
+    # Every example above passes against a `stale_thumbnails` that always answers `[]`:
+    # replacing `next if was == digest(entry)` with a bare `next` killed the detector and the
+    # suite stayed green, because nothing here had ever shown it a CHANGED body. A detector
+    # with no negative case is indistinguishable from a method that returns an empty array.
+    #
+    # So these three drive it: a body that has moved, a starter with no entry in the manifest,
+    # and one whose PNG is missing. Each names its own reason, because "stale" with no reason
+    # is a red build somebody clears by regenerating without reading.
+    describe 'the staleness detector itself' do
+      it 'reports a starter whose body has changed since its thumbnail was drawn' do
+        entry = entries.first
+        allow(described_class).to receive(:digest).and_call_original
+        allow(described_class).to receive(:digest).with(entry).and_return('0' * 64)
+
+        stale = described_class.stale_thumbnails
+
+        expect(stale.map { |found, _reason| found.id }).to eq([entry.id])
+        expect(stale.first.last).to include('has changed since its thumbnail was drawn')
+      end
+
+      it 'reports a starter the manifest has never heard of' do
+        entry = entries.last
+        recorded = described_class.recorded_digests.reject { |id, _| id == entry.id }
+        allow(described_class).to receive(:recorded_digests).and_return(recorded)
+
+        stale = described_class.stale_thumbnails
+
+        expect(stale.map { |found, _reason| found.id }).to eq([entry.id])
+        expect(stale.first.last).to include('not recorded in thumbnails.yml')
+      end
+
+      it 'reports a starter whose thumbnail file is absent' do
+        entry = entries[1]
+        allow(described_class).to receive(:thumbnail?).and_call_original
+        allow(described_class).to receive(:thumbnail?).with(entry).and_return(false)
+
+        stale = described_class.stale_thumbnails
+
+        expect(stale.map { |found, _reason| found.id }).to eq([entry.id])
+        expect(stale.first.last).to include('no thumbnail has been generated')
+      end
+    end
   end
 end
