@@ -87,13 +87,17 @@ module RedmineReporterDashboards
         #
         # `RenderContext.from` and NOT `TagContext.for`: the latter never answers nil and
         # building its fallback reads `User.current`, and an ambient actor read on a path
-        # that needs no actor is what INV-1 is about. Nil is the answer this wants — no
-        # owned render context IS the legacy path, and the legacy path resolves issue scopes
-        # and nothing else.
+        # that needs no actor is what INV-1 is about. Nil is the answer this wants.
         #
-        # Asking the RELATION instead was considered and is worse than useless: every
-        # legacy-path scope is an issue scope and correctly carries no annotation, and the
-        # tag specs' scope doubles answer no `model`, `klass` or `table_name` at all — so a
+        # S-30 CHANGED WHAT NIL MEANS HERE. It used to mean "the legacy path produced this
+        # render, and that path resolves issue scopes and nothing else", so defaulting to
+        # `:issues` described a real producer. There is no such producer now: `bind`
+        # answers NONE for a context-less render, so a nil context reaches the kernel with
+        # no scope at all and the default is a formality rather than a claim about
+        # anybody's data.
+        #
+        # Asking the RELATION instead was considered and is worse than useless: the tag
+        # specs' scope doubles answer no `model`, `klass` or `table_name` at all, so a
         # sniffing check would raise on the doubles and fail OPEN on exactly the object it
         # could not identify. The producer knows, because `template.source` is a column.
         def report_source(liquid_context)

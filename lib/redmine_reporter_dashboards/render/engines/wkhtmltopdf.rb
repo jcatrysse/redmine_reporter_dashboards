@@ -185,8 +185,9 @@ module RedmineReporterDashboards
         # --- WHY `IO.select` AND NOT THREE READER THREADS ---
         #
         # The obvious shape is a thread per stream. `script/gates/no_thread_local.sh`
-        # forbids `Thread.new` outside the legacy glue and was right to fail the first
-        # version of this method — but the gate is not the reason this is written the way
+        # forbids `Thread.new` anywhere under app/ or lib/ — its exemption list was the
+        # legacy glue and has been EMPTY since S-30 deleted it — and it was right to fail
+        # the first version of this method — but the gate is not the reason this is written the way
         # it is, it is only what prompted looking again. Threads here would need to be
         # joined on every exit path including the timeout one, and a reader thread
         # blocked on a pipe that nobody will ever write to again is a leak that outlives

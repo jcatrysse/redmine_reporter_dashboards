@@ -296,11 +296,20 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   #
   # `actor:` is mandatory and that is INV-1 working: a context cannot exist without a
   # named viewer, so a spec cannot accidentally assert against an ambient one.
-  SPEC_ACTOR = Struct.new(:id, :login).new(1, 'spec-actor').freeze
+  # A memoised METHOD, not a constant. `SPEC_ACTOR = ...` inside an `RSpec.describe` block
+  # defines **`Object::SPEC_ACTOR`** for the whole process — the block's lexical scope is
+  # the file's top level — so the first draft of S-30 gave this file and
+  # `liquid_version_rollup_tag_spec.rb` one shared actor and Ruby printed
+  # *"already initialized constant SPEC_ACTOR"*. Both suites still passed, because the two
+  # Structs happened to be equivalent: a collision that passes is the version of this bug
+  # HANDOVER §1 says costs a session.
+  def spec_actor
+    @spec_actor ||= Struct.new(:id, :login).new(1, 'spec-actor').freeze
+  end
 
   def owned_registers(scope: nil, query: nil, source: :issues)
     context = RedmineReporterDashboards::Liquid::RenderContext.new(
-      actor: SPEC_ACTOR, scope: scope, query: query, source: source
+      actor: spec_actor, scope: scope, query: query, source: source
     )
     { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY => context }
   end
@@ -407,7 +416,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     it 'looks the query up as the owning context\'s actor, not the ambient user' do
       build_tag('query_id: 42, assign_to: stats').render(build_context({}, owned_registers))
 
-      expect(LiquidTagIssueQueryStub.visible_args).to eq([SPEC_ACTOR])
+      expect(LiquidTagIssueQueryStub.visible_args).to eq([spec_actor])
       expect(LiquidTagIssueQueryStub.visible_args).not_to eq([User.current])
     end
 

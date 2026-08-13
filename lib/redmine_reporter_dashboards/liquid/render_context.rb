@@ -62,9 +62,11 @@ module RedmineReporterDashboards
       # here. Every legacy-path scope is an issue scope and correctly needs no annotation,
       # and the specs' scope doubles answer no `model`/`klass`/`table_name` at all, so a
       # sniffing check would either raise on them or fail open on exactly the object it
-      # cannot identify. The producer KNOWS (`template.source` is a column), so it says so,
-      # and a consumer that cannot find a render context gets `:issues` — which is what the
-      # legacy path is, always.
+      # cannot identify. The producer KNOWS (`template.source` is a column), so it says so.
+      #
+      # A consumer that cannot find a render context still reads `:issues`, but since S-30
+      # that is a formality rather than a description: there is no context-less producer
+      # left, and `ScopeBinding#bind` answers NONE before the source is ever consulted.
       SOURCES = %i[issues time_entries].freeze
 
       attr_reader :actor, :scope, :query, :correlation_id, :diagnostics, :budget, :batch,
@@ -100,7 +102,8 @@ module RedmineReporterDashboards
       #                the preview an author sees while writing.
       # source         `:issues` or `:time_entries` — which TABLE `scope` is over. Defaults
       #                to `:issues` because that is what every caller predating T-31 holds
-      #                and what the legacy glue always produces. An unknown value is
+      #                (the legacy glue produced nothing else either, until S-30 deleted
+      #                it). An unknown value is
       #                REFUSED rather than coerced: a stored string selecting behaviour is
       #                the shape T-25's review found reporting success while mailing the
       #                wrong person's numbers, and the same argument applies to a scope

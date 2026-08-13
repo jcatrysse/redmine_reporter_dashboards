@@ -80,7 +80,12 @@ matches() {
 }
 
 FOUND="$(matches | sort -u)"
-ALLOWED="$(printf '%s\n' "${EXEMPT[@]}" | sort -u)"
+# `${EXEMPT[@]+...}` AND NOT A BARE `"${EXEMPT[@]}"`. S-30 emptied this array, and
+# expanding an EMPTY array under `set -u` is an unbound-variable error on bash before
+# 4.4 — which is the bash a macOS developer has (3.2). Measured fine on this container's
+# 5.2, and that is exactly the kind of "works here" that ships a gate nobody else can
+# run. The `+` form expands to nothing at all when the array is empty.
+ALLOWED="$(printf '%s\n' ${EXEMPT[@]+"${EXEMPT[@]}"} | sort -u)"
 
 UNLISTED="$(comm -23 <(echo "$FOUND") <(echo "$ALLOWED") | sed '/^$/d')"
 STALE="$(comm -13 <(echo "$FOUND") <(echo "$ALLOWED") | sed '/^$/d')"

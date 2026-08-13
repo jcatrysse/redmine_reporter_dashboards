@@ -115,11 +115,16 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
   # sources `Glue::Legacy::ScopeResolution` resolved. That module is deleted, so the scope
   # arrives the way every production render has supplied it since T-26a: an explicit
   # `RenderContext` in the registers. `actor:` is mandatory, which is INV-1 working.
-  SPEC_ACTOR = Struct.new(:id, :login).new(1, 'spec-actor').freeze
+  # A memoised METHOD and not a constant — see the identical note in
+  # `liquid_aggregate_tag_spec.rb`. Two files each assigning `SPEC_ACTOR` inside a
+  # `describe` block define one `Object::SPEC_ACTOR` between them.
+  def spec_actor
+    @spec_actor ||= Struct.new(:id, :login).new(1, 'spec-actor').freeze
+  end
 
   def owned_registers(scope: nil)
     context = RedmineReporterDashboards::Liquid::RenderContext.new(
-      actor: SPEC_ACTOR, scope: scope
+      actor: spec_actor, scope: scope
     )
     { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY => context }
   end
@@ -203,7 +208,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
       build_tag('from: issues').render(ctx)
       drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']
 
-      expect(drop.instance_variable_get(:@render_context).actor).to eq(SPEC_ACTOR)
+      expect(drop.instance_variable_get(:@render_context).actor).to eq(spec_actor)
     end
 
     it 'returns an empty string (side-effect tag)' do
