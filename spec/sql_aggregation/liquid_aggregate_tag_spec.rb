@@ -284,6 +284,38 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     Liquid::Context.new({}, assigns, registers)
   end
 
+  # --- S-30 · THE OWNED HARNESS -------------------------------------------------------
+  #
+  # Every example below that is about WHAT THE TAG DOES rather than about how a scope is
+  # found gets its scope this way: an explicit `RenderContext` in the registers, which is
+  # the only way a render is constructed in production after T-26a.
+  #
+  # It replaced a harness built on `Glue::Legacy::ScopeResolution`'s six sources — an
+  # `issues` drop assign, a `sql_issue_query` register, `container`, `controller`, a
+  # `@sql_base_scope` ivar and a thread-local. Those sources were how a tag got a scope
+  # before T-07 and are deleted with the module. The examples whose SUBJECT was that
+  # resolution went with it (listed in the deletion's commit message); everything else
+  # merely used one of them to hand the tag a scope, and needs only this.
+  #
+  # `actor:` is mandatory and that is INV-1 working: a context cannot exist without a
+  # named viewer, so a spec cannot accidentally assert against an ambient one.
+  SPEC_ACTOR = Struct.new(:id, :login).new(1, 'spec-actor').freeze
+
+  def owned_registers(scope: nil, query: nil, source: :issues)
+    context = RedmineReporterDashboards::Liquid::RenderContext.new(
+      actor: SPEC_ACTOR, scope: scope, query: query, source: source
+    )
+    { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY => context }
+  end
+
+  # The common case: a query stub that answers `base_scope`, exactly as `IssueQuery` does.
+  # The context carries BOTH, because that is what production carries — the aggregation
+  # reads the scope and the drill-through URLs read the query, and one object answering
+  # both is what keeps them consistent.
+  def owned_query_registers(query, source: :issues)
+    owned_registers(scope: query.base_scope, query: query, source: source)
+  end
+
   # ------------------------------------------------------------------
   # Scope resolution via `from: issues` (IssuesDrop path)
   # ------------------------------------------------------------------
@@ -984,8 +1016,12 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       obj
     end
 
+    # S-30: the scope arrives through the owned context, not through an `issues` drop.
+    # `from: issues` stays in the markup because these examples are about the OTHER
+    # parameters; on an owned render it selects nothing, which is what the README already
+    # documents for a time-entry template and is true of every render since T-26a.
     def render(markup, assigns = {})
-      ctx = build_context(assigns.merge('issues' => drop))
+      ctx = build_context(assigns, owned_registers(scope: scope))
       build_tag(markup).render(ctx)
       ctx
     end
@@ -1320,8 +1356,12 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
 
     before { allow(SqlAggregation::QueryAggregator).to receive(:completeness).and_return(completeness_result) }
 
+    # S-30: the scope arrives through the owned context, not through an `issues` drop.
+    # `from: issues` stays in the markup because these examples are about the OTHER
+    # parameters; on an owned render it selects nothing, which is what the README already
+    # documents for a time-entry template and is true of every render since T-26a.
     def render(markup, assigns = {})
-      ctx = build_context(assigns.merge('issues' => drop))
+      ctx = build_context(assigns, owned_registers(scope: scope))
       build_tag(markup).render(ctx)
       ctx
     end
@@ -1438,8 +1478,9 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       obj
     end
 
+    # S-30: see the note on the identical helper above — owned context, not a drop.
     def render(markup)
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag(markup).render(ctx)
       ctx
     end
@@ -1762,12 +1803,12 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       stub_const('Setting', DrillTagSettingStub)
     end
 
-    # registers hold the query; the same object answers base_scope, so the
+    # The context holds the query; the same object answers base_scope, so the
     # aggregation and the URLs come from one source, exactly as in production.
     def render(markup, result: dimension_with_filters, registers: nil)
       allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(result)
       allow(SqlAggregation::QueryAggregator).to receive(:flags).and_return(result)
-      ctx = build_context({}, registers.nil? ? { sql_issue_query: query } : registers)
+      ctx = build_context({}, registers.nil? ? owned_query_registers(query) : registers)
       build_tag(markup).render(ctx)
       ctx.scopes.last['stats']
     end
