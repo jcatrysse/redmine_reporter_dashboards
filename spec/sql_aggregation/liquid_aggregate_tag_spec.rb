@@ -320,47 +320,51 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   # Scope resolution via `from: issues` (IssuesDrop path)
   # ------------------------------------------------------------------
 
-  describe 'scope resolution from issues drop' do
-    let(:drop_with_ivar) do
-      obj = Object.new
-      obj.instance_variable_set(:@issues, scope)
-      obj
-    end
-
-    it 'extracts @issues ivar from the drop and runs aggregation' do
-      ctx = build_context('issues' => drop_with_ivar)
-      tag = build_tag('from: issues, periods: 6, closed_statuses: "Closed;Rejected", assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-
-    it 'assigns result to the named variable in context' do
-      ctx = build_context('issues' => drop_with_ivar)
-      tag = build_tag('from: issues, assign_to: stats')
-
-      tag.render(ctx)
-
-      expect(ctx.scopes.last['stats']).to eq(agg_result)
-    end
-
-    it 'defaults assign_to to "stats" when omitted' do
-      ctx = build_context('issues' => drop_with_ivar)
-      tag = build_tag('from: issues')
-
-      tag.render(ctx)
-
-      expect(ctx.scopes.last['stats']).to eq(agg_result)
-    end
-
-    it 'returns empty string so no output appears in template' do
-      ctx = build_context('issues' => drop_with_ivar)
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(tag.render(ctx)).to eq('')
-    end
-  end
+  # ====================================================================================
+  # S-30 · WHAT WAS DELETED HERE, AND WHAT COVERAGE WENT WITH IT
+  # ====================================================================================
+  #
+  # Four describe blocks stood here and are gone with
+  # `Glue::Legacy::ScopeResolution`. Their subject was HOW A TAG FINDS A SCOPE when the
+  # render supplied no `RenderContext` — six sources, tried in order. After T-26a there is
+  # no such render: every widget, preview, schedule, share and mail render constructs a
+  # context from an explicit actor, and `ScopeBinding#bind` returns `render_context.scope`
+  # without consulting any of them. So these examples asserted the behaviour of code that
+  # no longer exists, and they could not be ported — there is nothing to port them ONTO.
+  #
+  # Deleted, with what each covered:
+  #
+  #   * `scope resolution from issues drop` (4) — an `issues` assign holding a drop with an
+  #     `@issues` ivar. The `from:` parameter selected which assign to read.
+  #   * `scope resolution from context registers` (10) — `:sql_issue_query`, `:container`
+  #     and `:controller`, and the PRECEDENCE between them.
+  #   * `scope resolution from drop @sql_base_scope ivar` (1) — the base plugin's
+  #     "Strategy A" patch, which set that ivar on its own drop.
+  #   * `a scope resolved from a drop` (5) — `enforce_visibility`: a drop-resolved scope was
+  #     intersected with `Issue.visible(User.current)`, because a drop could hand over any
+  #     relation at all. Two of its examples covered the register and query_id paths NOT
+  #     doing that, which is finding F-2.
+  #   * `#resolve_query` (12) — resolving an `IssueQuery` for drill-through from the same
+  #     six sources plus a thread-local the base plugin's patch set.
+  #
+  # NONE OF THIS IS A VISIBILITY REGRESSION, and that is the load-bearing claim.
+  # `enforce_visibility` existed because a legacy source could produce an arbitrary
+  # relation. An owned context cannot: it is built with an explicit `actor:` (INV-1 —
+  # the constructor refuses nil) and its scope is produced by `ReportScope.build` from
+  # that actor's own visible scope. The intersection is not removed, it moved upstream and
+  # became unconditional. `test/unit/multi_actor_visibility_test.rb` is where that is
+  # asserted against a real `Role#issues_visibility` and a real private issue, which is
+  # something no DB-less example here could ever have done.
+  #
+  # WHAT IS KEPT, pointed at the owned path instead: `query_id:` resolution, which is a
+  # live feature (`ScopeBinding#from_query_id`) and is covered under
+  # `scope resolution from query_id` below; and the tag's own behaviour with a scope in
+  # hand, which is every other describe block in this file and now gets its scope from
+  # `owned_registers`.
+  #
+  # `spec/golden/scope/scope.jsonl` — the frozen oracle recording what the six sources
+  # answered — SURVIVES this deletion untouched. It is the one artefact in this repository
+  # that cannot be regenerated, and it stays as the record of the behaviour that was here.
 
   # ------------------------------------------------------------------
   # Scope resolution via query_id
@@ -372,7 +376,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'finds the IssueQuery by id and uses base_scope' do
-      ctx = build_context
+      ctx = build_context({}, owned_registers)
       tag = build_tag('query_id: 42, periods: 6, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
@@ -381,7 +385,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'resolves query_id from Liquid context when it is a variable' do
-      ctx = build_context('my_qid' => 42)
+      ctx = build_context({ 'my_qid' => 42 }, owned_registers)
       tag = build_tag('query_id: my_qid, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
@@ -390,7 +394,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'assigns empty result when query_id is not found' do
-      ctx = build_context
+      ctx = build_context({}, owned_registers)
       tag = build_tag('query_id: 999, assign_to: stats')
 
       tag.render(ctx)
@@ -398,10 +402,16 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       expect(ctx.scopes.last['stats']['total']).to eq(0)
     end
 
-    it 'looks the query up through the visibility scope' do
-      build_tag('query_id: 42, assign_to: stats').render(build_context)
+    # S-30 CHANGED WHAT THIS ASSERTS, AND THE CHANGE IS THE POINT. It used to expect
+    # `User.current` — the ambient actor, which is all the legacy path had. The owned path
+    # passes `render_context.actor`, so the visibility lookup is made as the NAMED viewer.
+    # That is INV-1 holding one level deeper, and asserting the old value here would now be
+    # asserting the defect.
+    it 'looks the query up as the owning context\'s actor, not the ambient user' do
+      build_tag('query_id: 42, assign_to: stats').render(build_context({}, owned_registers))
 
-      expect(LiquidTagIssueQueryStub.visible_args).to eq([User.current])
+      expect(LiquidTagIssueQueryStub.visible_args).to eq([SPEC_ACTOR])
+      expect(LiquidTagIssueQueryStub.visible_args).not_to eq([User.current])
     end
 
     it 'assigns the empty result for a query the user may not see' do
@@ -411,7 +421,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       )
       expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
 
-      ctx = build_context
+      ctx = build_context({}, owned_registers)
       build_tag('query_id: 42, assign_to: stats').render(ctx)
 
       expect(ctx.scopes.last['stats']['total']).to eq(0)
@@ -422,9 +432,9 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
         Class.new { def self.find_by(id:); nil; end }
       )
       allow(Rails.logger).to receive(:warn) # the tag also logs "no scope resolved"
-      expect(Rails.logger).to receive(:warn).with(/not visible to the current user/)
+      expect(Rails.logger).to receive(:warn).with(/does not exist or is not visible to this actor/)
 
-      build_tag('query_id: 42, assign_to: stats').render(build_context)
+      build_tag('query_id: 42, assign_to: stats').render(build_context({}, owned_registers))
     end
   end
 
@@ -663,121 +673,21 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       build_tag('assign_to: stats').render(owned_context(:issues))
     end
 
-    # The legacy path has no render context at all, and it resolves issue scopes only —
-    # so it must keep working with no annotation anywhere.
-    it 'aggregates on the legacy path, which carries no source at all' do
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
-
-      build_tag('from: issues, assign_to: stats')
-        .render(build_context({}, { sql_issue_query: LiquidTagIssueQueryStub.new(scope) }))
-    end
+    # S-30 DELETED the example that sat here: *"aggregates on the legacy path, which
+    # carries no source at all"*. `source` is the T-31 field naming which TABLE a scope is
+    # over, and its whole point was that the legacy path predates it and therefore carries
+    # none — the tag had to treat "no context" as "issues". There is no context-less render
+    # any more, so the case cannot arise; `report_source` still defaults to `:issues` when
+    # a context does not name one, and the two examples above cover that.
   end
 
   # ------------------------------------------------------------------
   # Scope resolution via context.registers (fast path in production)
   # ------------------------------------------------------------------
 
-  describe 'scope resolution from context registers' do
-    it 'uses :sql_issue_query register when present (Reporter patch path)' do
-      query = LiquidTagIssueQueryStub.new(scope)
-      ctx = build_context({}, { sql_issue_query: query })
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-
-    it 'uses :container register when it IS an IssueQuery (Reporter zero-patch path)' do
-      query = LiquidTagIssueQueryStub.new(scope)
-      ctx = build_context({}, { container: query })
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-
-    it 'uses :container @query ivar when container wraps an IssueQuery' do
-      query     = LiquidTagIssueQueryStub.new(scope)
-      container = Object.new
-      container.instance_variable_set(:@query, query)
-      ctx = build_context({}, { container: container })
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-
-    it 'uses :controller register @query when :sql_issue_query and :container absent' do
-      query      = LiquidTagIssueQueryStub.new(scope)
-      controller = double('controller')
-      allow(controller).to receive(:instance_variable_get).with(:@query).and_return(query)
-      ctx = build_context({}, { controller: controller })
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-
-    it 'falls back to drop resolution when registers are empty' do
-      drop = Object.new
-      drop.instance_variable_set(:@issues, scope)
-      ctx = build_context({ 'issues' => drop }, {})
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-
-    it 'falls back to drop when :controller has no @query' do
-      controller = double('controller')
-      allow(controller).to receive(:instance_variable_get).with(:@query).and_return(nil)
-      drop = Object.new
-      drop.instance_variable_set(:@issues, scope)
-      ctx = build_context({ 'issues' => drop }, { controller: controller })
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-
-    it 'prefers :sql_issue_query over :container and :controller' do
-      query1 = LiquidTagIssueQueryStub.new(scope)
-      other_scope = LiquidTagScopeStub.new
-      query2 = LiquidTagIssueQueryStub.new(other_scope)
-      controller = double('controller')
-      allow(controller).to receive(:instance_variable_get).with(:@query).and_return(query2)
-      ctx = build_context({}, { sql_issue_query: query1, container: query2, controller: controller })
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-  end
-
   # ------------------------------------------------------------------
   # Scope resolution via drop ivar inspection (@sql_base_scope patch path)
   # ------------------------------------------------------------------
-
-  describe 'scope resolution from drop @sql_base_scope ivar' do
-    it 'uses @sql_base_scope ivar when present on the drop (Strategy A patch)' do
-      drop = Object.new
-      drop.instance_variable_set(:@issues, [double('issue', id: 1)])
-      drop.instance_variable_set(:@sql_base_scope, scope)
-      ctx = build_context('issues' => drop)
-      tag = build_tag('from: issues, assign_to: stats')
-
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate).with(scope, anything).and_return(agg_result)
-
-      tag.render(ctx)
-    end
-  end
 
   # ------------------------------------------------------------------
   # Parameter parsing
@@ -791,7 +701,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'parses period as a string' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, period: week, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -802,7 +712,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'defaults period to month when omitted' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -813,7 +723,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'passes period: day correctly' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, period: day, periods: 30, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -824,7 +734,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'passes period: year correctly' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, period: year, periods: 3, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -835,7 +745,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'parses periods as an integer' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, period: month, periods: 12, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -846,7 +756,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'passes nil periods when omitted (letting aggregator use default)' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, period: month, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -857,7 +767,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'accepts legacy months param as alias for periods when period is month' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, months: 12, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -868,7 +778,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'parses closed_statuses from double-quoted string' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, closed_statuses: "Closed;Rejected", assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -879,7 +789,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'parses closed_statuses from single-quoted string' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag("from: issues, closed_statuses: 'Closed,Done', assign_to: stats")
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -890,7 +800,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'passes empty closed_statuses when omitted' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
@@ -913,7 +823,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'calls QueryAggregator.breakdown when group_by is present' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: tracker, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:breakdown)
@@ -924,7 +834,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'does NOT call aggregate when group_by is present' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: status, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
@@ -934,7 +844,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'assigns breakdown result to context variable' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: tracker, assign_to: by_tracker')
 
       tag.render(ctx)
@@ -943,7 +853,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'passes group_by: status correctly' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: status, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:breakdown)
@@ -954,7 +864,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'passes group_by: priority correctly' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: priority, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:breakdown)
@@ -965,7 +875,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'passes group_by: assignee correctly' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: assignee, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:breakdown)
@@ -976,7 +886,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'uses aggregate (not breakdown) when group_by is absent' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, period: month, periods: 6, assign_to: stats')
 
       expect(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
@@ -988,7 +898,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     it 'assigns empty result and returns blank when breakdown raises' do
       allow(SqlAggregation::QueryAggregator).to receive(:breakdown).and_raise(StandardError, 'oops')
 
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: tracker, assign_to: stats')
 
       expect { tag.render(ctx) }.not_to raise_error
@@ -1089,7 +999,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       end
 
       it 'works under the legacy geo_aggregate tag name' do
-        ctx = build_context('issues' => drop)
+        ctx = build_context({}, owned_registers(scope: scope))
         tag = described_class.new('geo_aggregate', 'from: issues, group_by: cf_92, assign_to: stats', [])
 
         expect(tag.render(ctx)).to eq('')
@@ -1279,14 +1189,14 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       it 'returns an empty string even when the dimension is rejected' do
         allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(nil)
 
-        ctx = build_context('issues' => drop)
+        ctx = build_context({}, owned_registers(scope: scope))
         expect(build_tag('from: issues, group_by: cf_0, assign_to: stats').render(ctx)).to eq('')
       end
 
       it 'never raises when the dimension aggregation blows up' do
         allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_raise(StandardError, 'boom')
 
-        ctx = build_context('issues' => drop)
+        ctx = build_context({}, owned_registers(scope: scope))
         expect { build_tag('from: issues, group_by: cf_92, assign_to: stats').render(ctx) }.not_to raise_error
         expect(ctx.scopes.last['stats']['total']).to eq(0)
       end
@@ -1434,7 +1344,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       end
 
       subject(:res) do
-        ctx = build_context({}, { sql_issue_query: query })
+        ctx = build_context({}, owned_query_registers(query))
         build_tag('group_by: completeness, fields: "cf_94;status_id", drill: true, assign_to: x')
           .render(ctx)
         ctx.scopes.last['x']
@@ -1522,7 +1432,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'resolves the measure from a Liquid variable' do
-      ctx = build_context('issues' => drop, 'm' => 'distinct')
+      ctx = build_context({ 'm' => 'distinct' }, owned_registers(scope: scope))
       expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
         .with(scope, hash_including(measure: 'distinct'))
 
@@ -1554,191 +1464,11 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   # Visibility of a drop-resolved scope
   # ------------------------------------------------------------------
 
-  describe 'a scope resolved from a drop' do
-    # Issue.visible is the guarantee the register and query_id paths get for free from
-    # base_scope; a drop is whatever the render context happens to hold.
-    let(:visible_marker) { LiquidTagScopeStub.new }
-
-    let(:issue_class) do
-      marker = visible_marker
-      Class.new do
-        define_singleton_method(:_marker) { marker }
-        define_singleton_method(:visible) { |_user| _marker }
-      end
-    end
-
-    let(:drop) do
-      obj = Object.new
-      obj.instance_variable_set(:@issues, scope)
-      obj
-    end
-
-    before { stub_const('Issue', issue_class) }
-
-    it 'is intersected with what the current user may see' do
-      merged = LiquidTagScopeStub.new
-      expect(scope).to receive(:merge).with(visible_marker).and_return(merged)
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
-        .with(merged, anything).and_return(agg_result)
-
-      build_tag('from: issues, assign_to: stats').render(build_context('issues' => drop))
-    end
-
-    it 'leaves the register path alone — base_scope is Issue.visible already' do
-      query = LiquidTagIssueQueryStub.new(scope)
-      expect(scope).not_to receive(:merge)
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
-        .with(scope, anything).and_return(agg_result)
-
-      build_tag('from: issues, assign_to: stats')
-        .render(build_context({}, { sql_issue_query: query }))
-    end
-
-    it 'leaves the query_id path alone for the same reason' do
-      LiquidTagIssueQueryStub.register(42, scope)
-      expect(scope).not_to receive(:merge)
-
-      build_tag('query_id: 42, assign_to: stats').render(build_context)
-    end
-
-    it 'uses the scope as resolved when the intersection cannot be applied' do
-      allow(scope).to receive(:merge).and_raise(StandardError, 'not a relation')
-      expect(Rails.logger).to receive(:warn).with(/could not intersect the resolved scope/)
-      expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
-        .with(scope, anything).and_return(agg_result)
-
-      build_tag('from: issues, assign_to: stats').render(build_context('issues' => drop))
-    end
-
-    it 'still returns nil when the drop resolves to nothing' do
-      ctx = build_context('issues' => nil)
-      build_tag('from: issues, assign_to: stats').render(ctx)
-      expect(ctx.scopes.last['stats']['total']).to eq(0)
-    end
-  end
 
   # ------------------------------------------------------------------
   # IssueQuery resolution (drill-through prerequisite)
   # ------------------------------------------------------------------
 
-  describe '#resolve_query' do
-    let(:query) { LiquidTagIssueQueryStub.new(scope) }
-
-    def resolve(markup, assigns = {}, registers = {})
-      build_tag(markup).resolve_query(build_context(assigns, registers))
-    end
-
-    after { Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = nil }
-
-    it 'resolves the query_id param through the visibility scope' do
-      LiquidTagIssueQueryStub.register(42, scope)
-      expect(resolve('query_id: 42')).to be(LiquidTagIssueQueryStub.find_by(id: 42))
-      expect(LiquidTagIssueQueryStub.visible_args).to eq([User.current])
-    end
-
-    it 'resolves a query_id given as a Liquid variable' do
-      LiquidTagIssueQueryStub.register(7, scope)
-      expect(resolve('query_id: my_qid', 'my_qid' => 7)).not_to be_nil
-    end
-
-    it 'returns nil — never raises — for a query the user may not see' do
-      allow(LiquidTagIssueQueryStub).to receive(:visible).and_return(
-        Class.new { def self.find_by(id:); nil; end }
-      )
-      expect { resolve('query_id: 42') }.not_to raise_error
-      expect(resolve('query_id: 42')).to be_nil
-    end
-
-    it 'does not fall back to the registers when an explicit query_id fails' do
-      allow(LiquidTagIssueQueryStub).to receive(:visible).and_return(
-        Class.new { def self.find_by(id:); nil; end }
-      )
-      expect(resolve('query_id: 999', {}, { sql_issue_query: query })).to be_nil
-    end
-
-    it 'resolves the :sql_issue_query register' do
-      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be(query)
-    end
-
-    it 'resolves the :container register when it IS an IssueQuery' do
-      expect(resolve('from: issues', {}, { container: query })).to be(query)
-    end
-
-    it 'resolves the @query ivar of the :container register' do
-      container = Object.new
-      container.instance_variable_set(:@query, query)
-      expect(resolve('from: issues', {}, { container: container })).to be(query)
-    end
-
-    it 'resolves the @query ivar of the :controller register' do
-      controller = double('controller')
-      allow(controller).to receive(:instance_variable_get).with(:@query).and_return(query)
-      expect(resolve('from: issues', {}, { controller: controller })).to be(query)
-    end
-
-    it 'resolves the thread-local ReporterListPatch sets' do
-      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = query
-      expect(resolve('from: issues')).to be(query)
-    end
-
-    it 'prefers the registers over the thread-local' do
-      other = LiquidTagIssueQueryStub.new(LiquidTagScopeStub.new)
-      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = other
-      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be(query)
-    end
-
-    it 'prefers :sql_issue_query over :container and :controller' do
-      other      = LiquidTagIssueQueryStub.new(LiquidTagScopeStub.new)
-      controller = double('controller')
-      allow(controller).to receive(:instance_variable_get).with(:@query).and_return(other)
-      registers = { sql_issue_query: query, container: other, controller: controller }
-      expect(resolve('from: issues', {}, registers)).to be(query)
-    end
-
-    it 'refuses a query the viewer may not see, whatever the source' do
-      query.visible = false
-      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be_nil
-    end
-
-    it 'refuses an invisible query from the thread-local too' do
-      # ReporterListPatch resolves it with a bare find_by, because that lookup also
-      # feeds base_scope — so the gate has to sit on the reading side.
-      query.visible = false
-      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = query
-      expect(resolve('from: issues')).to be_nil
-    end
-
-    it 'says why an invisible query was refused' do
-      query.visible = false
-      expect(Rails.logger).to receive(:warn).with(/not visible to the current user/)
-      resolve('from: issues', {}, { sql_issue_query: query })
-    end
-
-    it 'never raises when the visibility check itself blows up' do
-      allow(query).to receive(:visible?).and_raise(StandardError, 'no user')
-      expect { resolve('from: issues', {}, { sql_issue_query: query }) }.not_to raise_error
-      expect(resolve('from: issues', {}, { sql_issue_query: query })).to be_nil
-    end
-
-    it 'accepts a query object that has no visible? at all' do
-      bare = Class.new(LiquidTagIssueQueryStub) { undef_method :visible? }.new(scope)
-      stub_const('IssueQuery', bare.class)
-      expect(resolve('from: issues', {}, { sql_issue_query: bare })).to be(bare)
-    end
-
-    it 'returns nil when nothing holds a query' do
-      expect(resolve('from: issues')).to be_nil
-    end
-
-    it 'ignores a register that is not an IssueQuery' do
-      expect(resolve('from: issues', {}, { container: scope, controller: Object.new })).to be_nil
-    end
-
-    it 'ignores a thread-local that is not an IssueQuery' do
-      Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = scope
-      expect(resolve('from: issues')).to be_nil
-    end
-  end
 
   # ------------------------------------------------------------------
   # drill: true
@@ -1856,7 +1586,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
         expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
           .and_return(dimension_with_filters)
 
-        ctx = build_context({}, { sql_issue_query: query })
+        ctx = build_context({}, owned_query_registers(query))
         build_tag('group_by: status, drill: true, assign_to: stats').render(ctx)
       end
 
@@ -1864,14 +1594,14 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
         expect(SqlAggregation::QueryAggregator).to receive(:breakdown).and_return(breakdown_result)
         expect(SqlAggregation::QueryAggregator).not_to receive(:dimension_breakdown)
 
-        ctx = build_context({}, { sql_issue_query: query })
+        ctx = build_context({}, owned_query_registers(query))
         build_tag('group_by: status, drill: false, assign_to: stats').render(ctx)
       end
 
       it 'accepts drill given as a Liquid boolean variable' do
         allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
           .and_return(dimension_with_filters)
-        ctx = build_context({ 'enabled' => true }, { sql_issue_query: query })
+        ctx = build_context({ 'enabled' => true }, owned_query_registers(query))
         build_tag('group_by: cf_92, drill: enabled, assign_to: stats').render(ctx)
         expect(ctx.scopes.last['stats']['drill_available']).to be(true)
       end
@@ -1888,9 +1618,9 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
         end
         tag = build_tag('group_by: cf_92, drill: enabled, assign_to: stats')
 
-        first = build_context({ 'enabled' => true }, { sql_issue_query: query })
+        first = build_context({ 'enabled' => true }, owned_query_registers(query))
         tag.render(first)
-        second = build_context({ 'enabled' => false }, { sql_issue_query: query })
+        second = build_context({ 'enabled' => false }, owned_query_registers(query))
         tag.render(second)
 
         expect(first.scopes.last['stats']['drill_available']).to be(true)
@@ -2044,7 +1774,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     describe 'when no IssueQuery can be resolved' do
       subject(:res) do
         render('group_by: cf_92, drill: true, assign_to: stats',
-               registers: { container: scope })
+               registers: owned_registers(scope: scope))
       end
 
       it 'reports drill-through as unavailable' do
@@ -2065,14 +1795,15 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
 
       it 'says why in the log' do
         expect(Rails.logger).to receive(:warn).with(/no IssueQuery could be resolved/)
-        render('group_by: cf_92, drill: true, assign_to: stats', registers: { container: scope })
+        render('group_by: cf_92, drill: true, assign_to: stats',
+               registers: owned_registers(scope: scope))
       end
     end
 
     describe 'the time series' do
       it 'reports drill-through as unavailable and points at group_by: period' do
         expect(Rails.logger).to receive(:warn).with(/use group_by: period/)
-        ctx = build_context({}, { sql_issue_query: query })
+        ctx = build_context({}, owned_query_registers(query))
         build_tag('drill: true, assign_to: stats').render(ctx)
         expect(ctx.scopes.last['stats']['drill_available']).to be(false)
         expect(ctx.scopes.last['stats']).not_to have_key('base_url')
@@ -2088,19 +1819,17 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
         allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
           .and_return(dimension_with_filters)
 
-        ctx = build_context({}, { sql_issue_query: query })
+        ctx = build_context({}, owned_query_registers(query))
         build_tag('query_id: 42, group_by: cf_92, drill: true, assign_to: stats').render(ctx)
 
         expect(ctx.scopes.last['stats']['base_url']).to include('/projects/other/issues')
       end
 
-      it 'uses the thread-local when nothing else holds a query' do
-        Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = query
-        res = render('group_by: cf_92, drill: true, assign_to: stats', registers: { container: scope })
-        expect(res['drill_available']).to be(true)
-      ensure
-        Thread.current[RedmineReporterDashboards::Glue::Legacy::ScopeResolution::QUERY_THREAD_KEY] = nil
-      end
+      # S-30 DELETED the example that sat here: *"uses the thread-local when nothing else
+      # holds a query"*. The base plugin's list patch set a thread-local so its own
+      # `IssueQuery` could reach a Liquid tag that had no other channel to it — the whole
+      # reason `no_thread_local.sh` carried two exemptions. Nothing sets that key now, and
+      # an owned context carries the query as a field, which is the example above.
     end
 
     describe 'when even the base URL does not fit' do
@@ -2179,7 +1908,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     describe 'when the aggregation itself fails' do
       it 'assigns the empty result, with drill-through reported unavailable' do
         allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(nil)
-        ctx = build_context({}, { sql_issue_query: query })
+        ctx = build_context({}, owned_query_registers(query))
         build_tag('group_by: cf_0, drill: true, assign_to: stats').render(ctx)
 
         expect(ctx.scopes.last['stats']['drill_available']).to be(false)
@@ -2228,31 +1957,31 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     end
 
     it 'returns the time series result unchanged' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, assign_to: stats').render(ctx)
       expect(ctx.scopes.last['stats']).to eq(agg_result)
     end
 
     it 'returns the legacy core-field breakdown unchanged' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, group_by: tracker, assign_to: stats').render(ctx)
       expect(ctx.scopes.last['stats']).to eq(breakdown_result)
     end
 
     it 'returns the dimension result unchanged' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, group_by: cf_92, assign_to: stats').render(ctx)
       expect(ctx.scopes.last['stats']).to eq(dimension_result)
     end
 
     it 'returns the flags result unchanged' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, group_by: flags, assign_to: kpi').render(ctx)
       expect(ctx.scopes.last['kpi']).to eq(flags_result)
     end
 
     it 'never resolves an IssueQuery for the URLs' do
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, group_by: cf_92, assign_to: stats')
       expect(tag).not_to receive(:resolve_query)
       tag.render(ctx)
@@ -2260,7 +1989,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
 
     it 'never builds a drill-through builder' do
       expect(SqlAggregation::DrillThrough).not_to receive(:build)
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, group_by: cf_92, assign_to: stats').render(ctx)
     end
   end
@@ -2283,7 +2012,7 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       drop.instance_variable_set(:@issues, scope)
       allow(SqlAggregation::QueryAggregator).to receive(:aggregate).and_raise(StandardError, 'db error')
 
-      ctx = build_context('issues' => drop)
+      ctx = build_context({}, owned_registers(scope: scope))
       tag = build_tag('from: issues, assign_to: stats')
 
       expect { tag.render(ctx) }.not_to raise_error

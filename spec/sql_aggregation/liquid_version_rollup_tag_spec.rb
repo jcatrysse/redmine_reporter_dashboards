@@ -112,21 +112,30 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     Liquid::Context.new({}, assigns, registers)
   end
 
-  def drop_with(scope)
-    obj = Object.new
-    obj.instance_variable_set(:@issues, scope)
-    obj
+  # --- S-30 · THE OWNED HARNESS -------------------------------------------------------
+  #
+  # These examples used to hand the tag a scope through an `issues` drop, one of the six
+  # sources `Glue::Legacy::ScopeResolution` resolved. That module is deleted, so the scope
+  # arrives the way every production render has supplied it since T-26a: an explicit
+  # `RenderContext` in the registers. `actor:` is mandatory, which is INV-1 working.
+  SPEC_ACTOR = Struct.new(:id, :login).new(1, 'spec-actor').freeze
+
+  def owned_registers(scope: nil)
+    context = RedmineReporterDashboards::Liquid::RenderContext.new(
+      actor: SPEC_ACTOR, scope: scope
+    )
+    { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY => context }
   end
 
   describe 'aggregation + decoration' do
     it 'assigns the rows to the default variable "versions"' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues').render(ctx)
       expect(ctx.scopes.last['versions']).to be_an(Array)
     end
 
     it 'decorates each row with a version name (None for a nil version_id)' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, assign_to: versions').render(ctx)
       names = ctx.scopes.last['versions'].map { |r| r['name'] }
       expect(names).to eq(['Alpha 1.0', 'Beta 2.0', 'None']) # sorted case-insensitively
@@ -137,7 +146,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     # template sees and the two answer the same names — a duck-typed assertion would
     # have passed the deleted class just as happily.
     it 'attaches the owned VersionDrop for real versions and nil for the None bucket' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues').render(ctx)
       rows = ctx.scopes.last['versions']
       real = rows.find { |r| r['version_id'] == 1 }
@@ -151,7 +160,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     # class swap and must not be a vocabulary change; `project_name` and
     # `project_identifier` in particular were only on the addon's drop until this task.
     it 'answers every accessor the retired drop published' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues').render(ctx)
       drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']
 
@@ -171,7 +180,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     # so a per-row build would read the ambient actor twice and hand out two Batches
     # for one render.
     it 'builds one render context for every row' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues').render(ctx)
       contexts = ctx.scopes.last['versions'].filter_map { |r| r['version'] }
                     .map { |d| d.instance_variable_get(:@render_context) }
@@ -180,29 +189,35 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
       expect(contexts.uniq(&:object_id).length).to eq(1)
     end
 
-    # INV-1 through the seam: no RenderContext in the registers means the host plugin
-    # produced this render, and the actor is the ambient one — read ONCE, in
-    # TagContext, and carried explicitly from there.
-    it 'renders under the legacy fallback context when no owned renderer supplied one' do
-      ctx = build_context('issues' => drop_with(scope))
+    # S-30 DELETED the example that used to sit here: *"renders under the legacy fallback
+    # context when no owned renderer supplied one"*. Its subject was the seam itself — a
+    # render arriving with NO `RenderContext`, where the actor came from the ambient
+    # `User.current` via `TagContext`. There is no such render any more, so the example
+    # asserted the behaviour of deleted code.
+    #
+    # What it was really protecting is INV-1 — that the drop carries an EXPLICIT actor
+    # rather than reading an ambient one — and that is kept, pointed at the owned path,
+    # by the example below.
+    it 'carries the owning context\'s actor into every decorated version drop' do
+      ctx = build_context({}, owned_registers(scope: scope))
 
-      expect(RedmineReporterDashboards::Liquid::TagContext).not_to be_owned(ctx)
+      expect(RedmineReporterDashboards::Liquid::TagContext).to be_owned(ctx)
 
       build_tag('from: issues').render(ctx)
       drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']
 
-      expect(drop.instance_variable_get(:@render_context).actor).to eq(User.current)
+      expect(drop.instance_variable_get(:@render_context).actor).to eq(SPEC_ACTOR)
     end
 
     it 'returns an empty string (side-effect tag)' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect(build_tag('from: issues').render(ctx)).to eq('')
     end
   end
 
   describe 'parameter parsing' do
     it 'parses closed_statuses and cost_fields and forwards them to the aggregator' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect(SqlAggregation::QueryAggregator).to receive(:version_rollup)
         .with(scope, closed_statuses: ['Closed', 'Rejected'], cost_field_ids: [20, 21])
         .and_return(rollup_rows)
@@ -210,7 +225,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     end
 
     it 'defaults to empty closed_statuses and cost_field_ids' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect(SqlAggregation::QueryAggregator).to receive(:version_rollup)
         .with(scope, closed_statuses: [], cost_field_ids: [])
         .and_return(rollup_rows)
@@ -218,7 +233,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     end
 
     it 'resolves a custom assign_to variable' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, assign_to: my_versions').render(ctx)
       expect(ctx.scopes.last['my_versions']).to be_an(Array)
     end
@@ -226,14 +241,14 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
 
   describe 'error handling' do
     it 'assigns an empty array when no scope can be resolved' do
-      ctx = build_context('issues' => nil)
+      ctx = build_context({}, owned_registers(scope: nil))
       expect { build_tag('from: issues').render(ctx) }.not_to raise_error
       expect(ctx.scopes.last['versions']).to eq([])
     end
 
     it 'assigns an empty array and does not raise when the aggregator fails' do
       allow(SqlAggregation::QueryAggregator).to receive(:version_rollup).and_raise(StandardError, 'db error')
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect { build_tag('from: issues').render(ctx) }.not_to raise_error
       expect(ctx.scopes.last['versions']).to eq([])
     end
