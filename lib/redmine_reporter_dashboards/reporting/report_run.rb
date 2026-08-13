@@ -4,6 +4,7 @@ require 'securerandom'
 
 require_relative 'diagnostic'
 require_relative 'attachment_mapper'
+require_relative '../report_document'
 require_relative '../liquid/render_context'
 require_relative '../liquid/template_renderer'
 require_relative '../liquid/execution_policy'
@@ -117,6 +118,14 @@ module RedmineReporterDashboards
       # the resident total is documents × per-document budget: at `BatchGuard`'s default of
       # 50 documents that is **1.6 GiB**, on a request any member can make. Measured by an
       # independent QA pass, which also confirmed all requests are built up front.
+      #
+      # WHAT IS COUNTED IS THE DOCUMENT THE ENGINE RECEIVES, which since T-38 is the wrapped
+      # body rather than the template's raw output — `#pdf_document` adds a doctype, a head
+      # and the report stylesheet, a few kilobytes per document. That is the right thing to
+      # count (the budget exists to bound what is held in memory and posted to an engine) and
+      # it is not free of consequence: `test_the_budget_admits_a_run_exactly_at_the_limit`
+      # derives its budget from `ReportDocument.wrap(body).bytesize` for exactly this reason,
+      # and it caught the change rather than being told about it.
       #
       # 128 MiB is the ceiling rather than a target: it still admits four full-size
       # documents or fifty ordinary ones, and it bounds the worst case twelve-fold. It is a
@@ -539,7 +548,7 @@ module RedmineReporterDashboards
         spent = 0
 
         sections.each do |section|
-          resolution = resolver.call(section.body)
+          resolution = resolver.call(pdf_document(section.body))
           bound = ::RedmineReporterDashboards::Render::AssetBinding.apply(
             resolution: resolution,
             correlation_id: section.job.correlation_id,
@@ -566,6 +575,28 @@ module RedmineReporterDashboards
         end
 
         BoundRequests.new(requests: requests, degradations: degradations, failure: nil)
+      end
+
+      # T-38 — THE BODY BECOMES A DOCUMENT HERE, and this is the PDF binding's half of
+      # "one stylesheet, two outputs".
+      #
+      # Phase A produces a FRAGMENT: `template.content` is what an author wrote, which
+      # is `<h1>`s and tables and `{% chart %}` tags, not a `<!DOCTYPE>`. The HTML
+      # binding has always wrapped it — `ReportFrame` builds a document for the srcdoc
+      # iframe — and the PDF binding did not: `section.body` went to the engine as it
+      # stood, and every browser-based engine parsed it into a document with its own
+      # default stylesheet. That is why the two bindings could not share a type scale:
+      # one of them had no head to put one in.
+      #
+      # WRAPPED BEFORE RESOLUTION, not after, and the ordering is forced: the resolver
+      # takes a body and answers a `Resolution`, and `AssetBinding.apply` reads
+      # `resolution.body` — so anything added afterwards would have to be spliced into a
+      # frozen value object. Wrapping first also means the stylesheet is inside the
+      # document the scanner walks, which costs nothing (it contains no `url()` and
+      # therefore no reference) and keeps the byte budget honest: what is counted is
+      # what the engine receives.
+      def pdf_document(body)
+        ::RedmineReporterDashboards::ReportDocument.wrap(body)
       end
 
       # NAMES BOTH NUMBERS, which is the same rule `BatchGuard`'s cap refusal follows: a

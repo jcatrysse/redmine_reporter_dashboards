@@ -797,6 +797,24 @@ jobs:
       - name: compat_size
         run: ./script/gates/compat_size.sh
 
+      # T-38 — §9b's "no design language of its own for chrome", enforced. Fails on a
+      # colour, a typeface, a font size, a line height, a custom property or an
+      # @font-face under assets/stylesheets/. The report BODY is where this plugin's
+      # design is spent and is deliberately not scanned: it lives in Ruby
+      # (`ReportStylesheet`) so its palette can be READ from Charts::Palette rather than
+      # restated, which is T-38's single-source clause.
+      #
+      # THE SELF-TEST RUNS FIRST, the way `cve_accepted_diff`'s does two jobs down, and for the
+      # reason this repository keeps relearning: a gate nobody has watched fail is not yet a
+      # gate. This one shipped twice with an arm that detected its condition and exited 0
+      # anyway — once because its reader crashed and a crashed reader looks like a clean file,
+      # once because an `exit` inside a command substitution exits a subshell. Both are cases
+      # in the self-test now, driven by breaking the reader for real.
+      - name: chrome_no_design_tokens
+        run: |
+          ./script/gates/chrome_no_design_tokens_selftest.sh
+          ./script/gates/chrome_no_design_tokens.sh
+
       # T-17 — one parse entry point, and no globally registered filters. Every limit
       # the execution policy applies is a property of the CALL SITE (resource limits,
       # the deadline, :strict, and rethrow_errors, without which Liquid writes its

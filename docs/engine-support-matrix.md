@@ -107,4 +107,7 @@ same fact written where an operator can read it (`config/capabilities.yml`).
 | `F-18-fonts` | text goes onto the page and comes back off it | PASS | PASS | PASS |
 | `F-19-pathological-input` | malformed and oversized input is bounded, either way | PASS | PASS | PASS |
 | `F-20-escaping-payloads` | the escaping payload set under this engine's JS parser | PASS | PASS | PASS |
+| `F-21-repeating-table-header` | the shipped stylesheet repeats a table header on every page of a long table | PASS | PASS | PASS |
+| `F-22-unbroken-blocks` | the shipped stylesheet never lets a card or a chart block straddle a page break | PASS | PASS | PASS |
+| `F-23-drill-through-links` | a chart's drill-through anchors become real PDF link annotations | PASS | PASS | PASS |
 

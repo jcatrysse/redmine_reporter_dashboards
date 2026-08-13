@@ -41,6 +41,13 @@
   var STATE = 'data-rd-mermaid-state';
   var SELECTOR = '[data-rd-mermaid]';
 
+  // T-38 — the accessibility labels the TAG computed. See `mermaid_tag.rb`: Mermaid draws
+  // in the browser, so this is the only place a `<title>`/`<desc>` can be put into its SVG,
+  // and F-17 measured that Mermaid emits neither in this configuration.
+  var TITLE_ATTR = 'data-rd-mermaid-title';
+  var DESC_ATTR = 'data-rd-mermaid-desc';
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
   // The settings §6.1 keeps as DEFAULTS rather than as a defence. They cost nothing and
   // spare an author from knowing about them; nothing downstream depends on them being
   // honoured, because after F-17 nothing needs to.
@@ -61,6 +68,86 @@
 
   function mark(list, state) {
     for (var i = 0; i < list.length; i += 1) { list[i].setAttribute(STATE, state); }
+  }
+
+  // The diagram source, per element, READ BEFORE MERMAID RUNS. Mermaid replaces the
+  // `<pre>`'s content with the SVG, so afterwards the source is gone — and the source is
+  // what the `<desc>` says, for the reason `mermaid_tag.rb` gives: `A --> B` describes the
+  // picture, so it is the diagram's equivalent of the numbers `SvgRenderer` puts in its own
+  // `<desc>`.
+  function sources(list) {
+    var out = [];
+    for (var i = 0; i < list.length; i += 1) {
+      out.push((list[i].textContent || '').replace(/^\s+|\s+$/g, ''));
+    }
+    return out;
+  }
+
+  // The SVG's own direct child of this name, or null.
+  //
+  // DIRECT CHILDREN ONLY, and `getElementsByTagName` would have been wrong: it searches
+  // DESCENDANTS, so one `<title>` inside one node of a large flowchart would look like the
+  // diagram having a name and this would add none.
+  function childNamed(svg, name) {
+    var kids = svg.childNodes || [];
+    for (var i = 0; i < kids.length; i += 1) {
+      if (kids[i].nodeName && String(kids[i].nodeName).toLowerCase() === name) { return kids[i]; }
+    }
+    return null;
+  }
+
+  // `<name>text</name>`, inserted before `ref` — or appended when `ref` is null, which is
+  // what `insertBefore` does with a null reference in every DOM.
+  function insertLabel(svg, name, text, ref) {
+    var doc = svg.ownerDocument;
+    if (!doc || !doc.createElementNS) { return null; }
+
+    var node = doc.createElementNS(SVG_NS, name);
+    node.appendChild(doc.createTextNode(text));
+    svg.insertBefore(node, ref || null);
+    return node;
+  }
+
+  // THE ORDER IS THE ACCESSIBLE NAME, and the first version of this got it wrong in exactly
+  // one case. SVG takes a graphic's name from a `<title>` that is the FIRST child, so:
+  //
+  //   * a missing `<title>` goes at the head;
+  //   * a missing `<desc>` goes immediately AFTER the title — not at the head. Inserting it
+  //     at the head is correct only while there is no title, and when Mermaid had emitted one
+  //     itself (an author's `accTitle:`) it pushed that title into second place and the
+  //     diagram lost its name. Caught by the example that plants an existing title.
+  //
+  // AN EXISTING LABEL WINS, both of them: an author who wrote `accTitle:`/`accDescr:` has
+  // said what they want, and overwriting it would make the library's own accessibility
+  // feature unreachable through this tag.
+  function label(element, source) {
+    if (!element.querySelector) { return; }
+
+    var svg = element.querySelector('svg');
+    if (!svg) { return; }
+
+    var title = childNamed(svg, 'title');
+    var titleText = element.getAttribute(TITLE_ATTR);
+    if (!title && titleText) {
+      title = insertLabel(svg, 'title', titleText, svg.firstChild);
+    }
+
+    if (childNamed(svg, 'desc')) { return; }
+
+    var descText = element.getAttribute(DESC_ATTR) || source;
+    if (!descText) { return; }
+
+    insertLabel(svg, 'desc', descText, title ? title.nextSibling : svg.firstChild);
+  }
+
+  // A LABEL FAILURE MUST NOT COST THE DIAGRAM. This runs inside `finish`, which is what
+  // calls `rd.end()`, so an exception here would hold the document open until the watchdog
+  // — the readiness contract paying for an accessibility nicety. Wrapped per element so one
+  // odd SVG does not take the rest with it.
+  function labelAll(list, texts) {
+    for (var i = 0; i < list.length; i += 1) {
+      try { label(list[i], texts[i]); } catch (e) { /* the diagram is drawn; the label is not */ }
+    }
   }
 
   // The readiness contract (T-11), reached defensively: `chart_shell.js` normally defines it,
@@ -87,10 +174,14 @@
     rd.begin();
     mark(list, 'pending');
 
+    // Captured here, before `mermaid.run` replaces the elements' content.
+    var texts = sources(list);
+
     var finished = false;
     function finish(state) {
       if (finished) { return; }
       finished = true;
+      if (state === 'drawn') { labelAll(list, texts); }
       mark(list, state);
       rd.end();
     }

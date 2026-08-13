@@ -62,7 +62,7 @@
   <% widget.outcome.sections.each do |section| %>
     <%= RedmineReporterDashboards::ReportFrame.frame(
           section.body, title: l(:label_reporter_report_frame),
-          css_class: 'reporter-report-frame reporter-report-frame--widget') %>
+          css_class: RedmineReporterDashboards::ReportFrame::WIDGET_CHROME) %>
   <% end %>
 <% else %>
   <%# INV-5: the error is never the document. The headline and the correlation id, which is

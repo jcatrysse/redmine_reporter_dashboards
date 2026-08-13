@@ -31,6 +31,26 @@ the intended tree BEFORE launching review agents and diff the whole thing agains
 snapshot, never spot-check lines. And if a commit genuinely cannot wait, stage EXPLICIT PATHS
 the agents do not touch (docs, locales) rather than everything.
 
+**A MUTATION HARNESS WITH ONE SHARED BACKUP FILE WILL PUT ONE SUBJECT INTO ANOTHER.** T-38's
+own, 2026-08-13: `mutate()` copied its target to `/tmp/mut.bak`, patched, ran a spec and copied
+the backup back. Two batches ran concurrently — one over `template_linter.rb`, one over
+`mermaid_boot.js` — and the restore put **the JavaScript file's contents into
+`template_linter.rb`**, 632 lines deleted, while every mutation in both batches reported
+`killed`. Nothing failed. The tell was a `grep` for a construct that had to be there returning
+zero.
+
+Three rules, and the first two are cheap enough that there is no excuse:
+**name the backup after the file** (`/tmp/mut-$(echo "$file" | tr / _).bak`);
+**verify the restore** (compare the digest after copying back, and say `RESTORE-FAILED` loudly
+if it differs); and **never run two mutation batches at once** — the whole point is attributing
+one red run to one edit.
+
+What made it recoverable was the snapshot §1 already demands for a different reason: a
+`git diff HEAD` plus a `sha256sum` manifest of every modified and untracked file, taken before
+any agent or harness ran. Diffing the manifest afterwards showed exactly which files differed
+and why, so the corruption was one file to rebuild rather than a session to reconstruct. Take
+the manifest, not just the diff.
+
 **THE BASE PLUGIN'S REPOSITORY CAN BE ATTACHED TO A SESSION, AND SEVERAL ROUNDS OF THIS
 PROJECT GUESSED AT IT INSTEAD.** `jcatrysse/redmine_reporter` is private and was not in the
 session's scope, so its behaviour was inferred from this plugin's own overrides — which are
@@ -482,6 +502,24 @@ that build discards every `--footer-*` flag and says so on stderr ("is not suppo
 qt, and will be ignored") — loud enough to read, quiet enough to miss in a corpus run. A plausible result from the wrong binary is this repository's
 favourite failure mode; **check `wkhtmltopdf --version` says `(with patched qt)` before attributing
 anything to the code.**
+
+**IT IS NOT ONLY THE FOOTER, AND ON 2026-08-13 IT COST TWO FALSE CAPABILITY CLAIMS.** T-38 needed
+two engine facts and measured both on the distro build: does `thead { display: table-header-group }`
+repeat a table header, and does an `<a xlink:href>` inside an inline SVG become a `/URI` link
+annotation. That build answers **no to both** — the header lands on page 1 only, even on a minimal
+document carrying nothing but the canonical rule, and neither SVG anchor produces an annotation. Two
+capabilities were written into `Render::Capabilities::ALL` on that evidence, declared on chromium and
+gotenberg, withheld from wkhtmltopdf, and two new fixtures were given a `requires!` so that engine
+would skip them.
+
+The patched build answers **yes to both**: the header repeats on all 7 pages of the same document,
+and all three anchors produce annotations. So there was no support difference, and the closed
+vocabulary nearly grew two entries describing an artefact of one binary. Everything was retracted
+the same day; `Render::Capabilities` carries the retraction and the rule it leaves —
+**a capability is a claim about every SUPPORTED build, so measure it on the build the matrix is
+about**. Three rows of this table would have prevented it, which is why the row above now says
+"footers" and this paragraph says "and at least two other things": treat the distro build as
+answering NO to any print-pipeline question until the patched one agrees.
 
 With the right build: `chromium_cdp` **20 pass / 0 fail / 0 skip**, `wkhtmltopdf` **18 pass / 0 fail
 / 2 skip** (the two are `:readiness_expression`, accounted for by §Findings E-5). **The curator
@@ -1641,6 +1679,7 @@ record as of the last local run.
 | **T-16: the chart layer, DB-less** | **yes, locally (2026-08-06)** | **1562 rspec examples, 0 failures** (was 1462), including 10 SVG goldens as deterministic text, the six families through both emitters, and the escaping payload set through the JSON data block. All seven gates green, `vendor_integrity` new and **negative-tested on all three arms** — a corrupted vendored byte, an unmanifested vendored file, and a planted CDN reference each fail it |
 | **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
 | **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1832 rspec examples, 0 failures** (was 1562), 116 pending — 265 new, of which 39 exist because the review found four blockers (§Findings E-17): the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
+| **T-38: the conformance corpus, ALL THREE engines, twice** | **yes, locally (2026-08-13)** | 23 fixtures — the three T-38 added included. `chromium_cdp` Chrome/141.0.7390.37 **23/0/0**, `gotenberg` 8.35.0 **22/0/1** (`F-14`, an `:asset_inline` it does not declare), `wkhtmltopdf 0.12.6.1 (with patched qt)` **21/0/2** (`F-11`/`F-12`, `:readiness_expression`). **100 examples, 0 failures** with `RRD_MATRIX_WRITE=1`, and **100 examples, 0 failures, 3 pending** on a second clean run WITHOUT it — which is what makes G9 a pass rather than a regeneration: the committed matrix and a fresh run agree. Run as the non-root `rrdbench` user against a real Gotenberg container on the pinned digest. **The FIRST run of this set used the DISTRO wkhtmltopdf and was 18/1/4**, which produced two false capability declarations before the patched build refuted them — §1, and this is why that entry now says "and at least two other things" |
 | **T-13: the conformance corpus, BOTH engines, LOCALLY** | **yes (2026-08-06) — first time for wkhtmltopdf outside CI** | On the build CI uses (`0.12.6.1`, **patched qt**): `chromium_cdp` Chrome/141.0.7390.37 **20 pass / 0 fail / 0 skip**, `wkhtmltopdf` **18 pass / 0 fail / 2 skip** — 67 examples, 0 failures, and the two skips are `:readiness_expression`, which E-5 accounted for. **Nothing is unexplained, so E-5's promotion condition was met — and the curator TOOK the decision on 2026-08-06** (§Findings E-18, and E-5 is now closed). The matrix has since been regenerated from this run and carries wkhtmltopdf's cells. Run as the non-root `rrd` user with `RRD_CONFORMANCE=1`. **On the DISTRO build it is 17/1/2 and the failure is the footer fixture — that build cannot do footers at all**; see §1 |
 | **OQ-L settled by measurement — Mermaid 11.16.1 through both engines** | **yes, locally (2026-08-06)** | One probe document, both engines. Chromium 141: `mermaid.run()` resolves and both node labels extract from the PDF as SVG text. wkhtmltopdf 0.12.6.1 patched: **`PROBE-NO-MERMAID-GLOBAL`** — the bundle never defines its global, because Mermaid 11 is an esbuild IIFE opening with `\|\|=` (ES2021) that Qt WebKit cannot parse (`--debug-javascript` names it: `SyntaxError: Parse error`, once, at
 the bundle's script line) — established by a DISCRIMINATOR, not inferred: two three-line documents differing only in `x.a = x.a \|\| 1` versus `x.a \|\|= 1` print `ES5-OK-1` and `INIT` respectively, and `INIT` means the statement BEFORE the assignment never ran, so the whole script block failed to parse. That rules out a timeout, the 3.5 MB size (a same-size ES5-only script runs fine) and the probe's

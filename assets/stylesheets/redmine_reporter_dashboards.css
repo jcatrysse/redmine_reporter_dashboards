@@ -1,4 +1,32 @@
-/* Project dashboard styles for redmine_reporter_dashboards. */
+/* Chrome for redmine_reporter_dashboards — LAYOUT ONLY.
+ *
+ * technical-spec.md §9b: "look native, not branded. The plugin adopts Redmine's own
+ * markup, classes and icon set per version and ships NO design language of its own for
+ * chrome. 'Beautiful' is spent entirely on the report OUTPUT, where it is ours to
+ * control, and 'native' is spent on the admin and authoring chrome, where it is not."
+ *
+ * T-38 made that mechanical. `script/gates/chrome_no_design_tokens.sh` fails on a
+ * colour, a typeface, a font size, a line height, a custom property or an @font-face in
+ * this directory — so what is left here can only be box model, flow and position. A
+ * plugin that declares no colour cannot look wrong on one of the four Redmine versions
+ * it supports, because it is not the one choosing.
+ *
+ * Three things moved out of this file when that gate arrived, and one of them was a bug:
+ *
+ *   * THE MERMAID STATE RULES (FR-68) went to `ReportStylesheet`, because they applied
+ *     to nothing here. A `{% mermaid %}` diagram only ever exists inside a report body,
+ *     and every surface that shows one puts it in an opaque-origin `srcdoc` iframe
+ *     (`ReportFrame`) or hands it to a render engine — neither of which parses
+ *     Redmine's page stylesheet. The dashed border and muted source treatment were
+ *     unreachable.
+ *   * THE FRAME'S BORDER AND BACKGROUND became Redmine's own `box` class, added by
+ *     `ReportFrame`. `.box` has carried a padded, bordered, version-appropriate
+ *     container since Redmine 1.x — checked on 5.1-stable, 6.1-stable and 7.0-stable,
+ *     where 7.0 draws it from `--oc-gray-*` and the older branches from hex. Ours would
+ *     have been one hex for all four.
+ *   * A GLYPH FONT SIZE AND A LINK FONT WEIGHT, which were there to make our controls
+ *     match Redmine's. Inheriting is a better way to match than guessing.
+ */
 
 /* Each layout row is a flex line; widgets in the row share the width evenly.
    flex-wrap + a non-zero flex-basis lets widgets wrap onto multiple lines on
@@ -10,12 +38,12 @@
 #reporter-project-page .mypage-box { margin-bottom: 12px; }
 
 /* "Export as PDF" link in a report widget header. */
-.reporter-report-pdf { margin-left: 6px; font-weight: normal; }
+.reporter-report-pdf { margin-left: 6px; }
 
 /* Per-widget move controls, shown in the widget's contextual corner. */
 .reporter-move-controls { display: inline-flex; gap: 2px; margin-right: 4px; vertical-align: middle; }
 .reporter-move-control { display: inline-flex; align-items: center; }
-.reporter-move-control--glyph { text-decoration: none; font-size: 11px; line-height: 1; }
+.reporter-move-control--glyph { text-decoration: none; }
 .reporter-move-control--glyph span { display: inline-block; }
 
 /* Tab ordering re-uses the same controls. */
@@ -25,64 +53,20 @@
 .reporter-dashboard-tab-order { margin-left: 6px; }
 .reporter-dashboard-tab-order a { margin-left: 4px; }
 
-/* --- Mermaid (T-35) -------------------------------------------------------------------
- *
- * A diagram is a `<pre>` holding its own source until Mermaid replaces it, so these rules
- * are about the two states where it does NOT get replaced. FR-68 asks for the source to be
- * "emitted, labelled, never a blank space": the source is there by construction, and this is
- * the labelling.
- *
- * NO TEXT IN THE CSS, deliberately. `content:` cannot be localised and this plugin ships nine
- * locales (CLAUDE.md §10), so a hardcoded English sentence here would read as a bug to a
- * Russian or Dutch reader and be invisible to review in English. The treatment is therefore
- * typographic — a dashed border and a muted monospace source — which says "this is source, not
- * a drawing" in every language. A worded explanation belongs with FR-58's diagnostics surface,
- * which is where the render's degradation list is already shown.
- */
-.rrd-mermaid {
-  margin: 1em 0;
-  overflow-x: auto;
-}
-
-/* Drawn: the SVG has replaced the source, so the <pre>'s own formatting must not fight it. */
-.rrd-mermaid[data-rd-mermaid-state="drawn"] {
-  white-space: normal;
-  font-family: inherit;
-  background: none;
-  border: 0;
-  padding: 0;
-}
-
-/* Not drawn: the engine could not run the library, the diagram was refused, or it failed.
- * Same treatment for all three — to a reader they are one situation: this is the source. */
-.rrd-mermaid[data-rd-mermaid-state="unsupported"],
-.rrd-mermaid[data-rd-mermaid-state="failed"],
-.rrd-mermaid[data-rd-mermaid-state="refused"] {
-  border: 1px dashed #bbb;
-  border-radius: 3px;
-  padding: 8px 10px;
-  color: #555;
-  font-size: 12px;
-  font-family: monospace;
-}
-
-/* A refused diagram has an EMPTY body, so without a minimum it would be an invisible element
- * and the gap INV-4 objects to would be back. */
-.rrd-mermaid[data-rd-mermaid-state="refused"] {
-  min-height: 1.5em;
-}
-
 /* T-23 - the sandboxed report frame (technical-spec.md SS4, INV-9).
    The frame is an opaque origin, so the parent cannot measure its content and there is
    no height-fit script: a fixed, resizable, scrolling box is the honest shape rather
    than a frame that silently clips a long report. SS4's postMessage replacement is
    described for the host plugin's widget path and is owed here only if auto-height is
-   asked for. */
+   asked for.
+
+   The visible edge is Redmine's `box`, added by `ReportFrame` rather than declared
+   here - see the header. Nothing in this rule paints anything: the document inside the
+   frame paints its own background, which comes from `Palette::BACKGROUND` through
+   `ReportStylesheet`, so the colour is stated once and in the layer that owns it. */
 .reporter-report-frame {
   width: 100%;
   min-height: 40em;
-  border: 1px solid #ddd;
-  background: #fff;
   resize: vertical;
 }
 

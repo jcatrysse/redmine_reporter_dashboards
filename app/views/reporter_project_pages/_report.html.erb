@@ -71,7 +71,8 @@
 
 <% if widget.outcome.ok? %>
   <% widget.outcome.sections.each do |section| %>
-    <%= reporter_report_frame(section, css_class: 'reporter-report-frame reporter-report-frame--widget') %>
+    <%= reporter_report_frame(section,
+                              css_class: RedmineReporterDashboards::ReportFrame::WIDGET_CHROME) %>
   <% end %>
 <% else %>
   <p class="nodata reporter-report-diagnostic">

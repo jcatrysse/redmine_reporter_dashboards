@@ -21,6 +21,37 @@ module RedmineReporterDashboards
         asset_inline asset_upload asset_http timeout
       ].freeze
 
+      # --- TWO CAPABILITIES WERE ADDED HERE BY T-38 AND THEN RETRACTED, SAME DAY -------
+      #
+      # `:repeating_table_header` and `:svg_link_annotations`. Both were argued from a
+      # measurement, both passed F-14's test on paper, and both were WRONG — the measurement
+      # was taken against the wrong build of wkhtmltopdf, and the vocabulary nearly grew two
+      # entries describing a support difference that does not exist.
+      #
+      # WHAT HAPPENED, because it is the cheapest possible version of this lesson. T-38 needs
+      # two engine facts: does `thead { display: table-header-group }` really repeat a header,
+      # and does an `<a xlink:href>` inside an inline SVG become a `/URI` annotation. Measured
+      # on `apt install wkhtmltopdf` (Ubuntu noble, 0.12.6): **no** to both — header on page 1
+      # only even on a minimal document, and no annotation for either SVG anchor. Two
+      # capabilities were written, declared on chromium and gotenberg, withheld from
+      # wkhtmltopdf, and two fixtures were given a `requires!` so that engine would SKIP.
+      #
+      # Then the patched build went on: `wkhtmltopdf 0.12.6.1 (with patched qt)`, the release
+      # `.deb` CI installs. **YES to both** — the header repeats on all 7 pages, and all three
+      # anchors produce `/URI` annotations. So there is no support difference, there was never
+      # anything for the vocabulary to say, and both fixtures run on all three engines with no
+      # `requires!` at all.
+      #
+      # HANDOVER §1 CARRIES THIS TRAP IN CAPITALS — *"check `wkhtmltopdf --version` says
+      # `(with patched qt)` before attributing a red cell to the engine"* — and it still cost
+      # a round, because `apt install wkhtmltopdf` is the obvious way to get the binary and it
+      # is the unsupported build. The distro build's own corpus run is the tell: 17/1/2 with
+      # the footer fixture red, which §4 already records.
+      #
+      # THE RULE THIS LEAVES: a capability is a claim about EVERY supported build of an engine,
+      # so the measurement behind one has to be taken on the build the support matrix is about.
+      # A capability argued from one binary is a capability argued from one accident.
+
       # --- `:modern_javascript`, and why it is NOT `:mermaid` (T-35, FR-68b) ---
       #
       # `:javascript` means "the engine has a script engine". It says nothing about WHICH

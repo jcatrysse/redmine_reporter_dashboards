@@ -75,6 +75,12 @@ module RedmineReporterDashboards
         # so this needs no collector and no state on the tag.
         REGISTER_KEY = :rrd_mermaid_assets_emitted
 
+        # An accessible label is a label, not a paragraph. `ChartLayout::MAX_LABEL_CHARS`
+        # bounds a chart's category labels at 24 for a layout reason this has none of, so
+        # the number is its own: long enough for a real sentence, short enough that an
+        # attribute cannot become the document.
+        MAX_LABEL_CHARS = 200
+
         # `[A-Za-z][\w-]*`, the same restriction `ChartSpec` puts on a chart id: RESTRICTED
         # rather than escaped, so there is nothing to get wrong later when it lands in an
         # attribute.
@@ -145,7 +151,7 @@ module RedmineReporterDashboards
           return refusal(id, 'too_large') if raw.bytesize > max_bytes(context)
           return refusal(id, 'empty') if raw.strip.empty?
 
-          assets(context) + diagram(id, escape(raw))
+          assets(context) + diagram(id, escape(raw), raw)
         rescue ::Liquid::Error, ArgumentError
           # An authoring mistake. The document keeps rendering — a template with one broken
           # diagram out of four is still three diagrams of report — and the placeholder says a
@@ -177,8 +183,131 @@ module RedmineReporterDashboards
           text.gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
         end
 
-        def diagram(id, source)
-          %(<pre class="rrd-mermaid" data-rd-mermaid="#{id}">\n#{source}\n</pre>)
+        # T-38 — "every `SvgRenderer` AND MERMAID output carries `<title>`/`<desc>`".
+        #
+        # --- WHY THE LABELS TRAVEL AS ATTRIBUTES AND NOT AS SVG ---
+        #
+        # §Findings F-17, measured: Mermaid draws in the BROWSER on both bindings, so the
+        # plugin never holds the SVG — there is no server-side moment in which to add a
+        # child element to it. What the plugin CAN do is state the labels where the boot
+        # script will find them, which is what these two attributes are. `mermaid_boot.js`
+        # inserts them into the SVG once Mermaid has produced one, and leaves Mermaid's own
+        # `accTitle:`/`accDescr:` alone if the author used those instead.
+        #
+        # F-17 also measured that Mermaid emits NO `<title>` and NO `<desc>` in this
+        # configuration, so without this there is none — a screen reader announces several
+        # hundred unlabelled `<path>` elements, which is the state `SvgRenderer` has a
+        # `role="img"` and an `aria-labelledby` to avoid.
+        #
+        # --- THE DEFAULT TITLE IS THE DIAGRAM'S OWN KEYWORD, IN ITS OWN WORDS ---
+        #
+        # "Every output carries one" means a diagram with no `title:` needs a default, and
+        # the obvious English default is the one thing this cannot be: CLAUDE.md §10 forbids
+        # a hardcoded user-facing string, the report body has no locale (`ReportDocument`
+        # says why it carries no `lang`), and a `<title>` reading "flowchart diagram" in a
+        # Russian report is the bug §10 is about. So the default is Mermaid's OWN first
+        # keyword — `flowchart`, `sequenceDiagram`, `gantt` — which is a language-neutral
+        # fact about the source rather than a sentence in one language.
+        #
+        # --- AND THE DEFAULT DESCRIPTION IS NOT HERE AT ALL ---
+        #
+        # `SvgRenderer`'s `<desc>` carries the numbers, because for a chart the numbers are
+        # the content. A diagram's equivalent content is its SOURCE — `A --> B` says what
+        # the picture says — and the source is already in the `<pre>`, which is where the
+        # boot script reads it from BEFORE Mermaid replaces it. Duplicating it into an
+        # attribute would double every diagram's bytes to say the same thing twice.
+        # `source` is the ESCAPED body, which is what goes into the `<pre>`. `raw` is the
+        # author's, which is what the title is derived from — deriving it from the escaped
+        # copy and then escaping the result again is how `&` becomes `&amp;amp;`.
+        def diagram(id, source, raw)
+          %(<pre class="rrd-mermaid" data-rd-mermaid="#{id}") +
+            %( data-rd-mermaid-title="#{attribute(diagram_title(raw))}") +
+            authored_desc_attribute +
+            %(>\n#{source}\n</pre>)
+        end
+
+        # BOUNDED, like the title — and the first version was not, which an independent review
+        # found: `MAX_LABEL_CHARS` was applied to `title` only, so a `desc:` was bounded by
+        # nothing but the template body. A description is the parameter MOST likely to be long,
+        # and the constant's own comment says "short enough that an attribute cannot become the
+        # document".
+        def authored_desc_attribute
+          desc = @params['desc'].to_s.strip
+          return '' if desc.empty?
+
+          %( data-rd-mermaid-desc="#{attribute(desc[0, MAX_LABEL_CHARS])}")
+        end
+
+        # The author's `title:`, or the diagram's own keyword. BOUNDED, because it lands in
+        # an attribute and `title:` is author-supplied like every other parameter.
+        # THREE SOURCES, IN THIS ORDER, and the middle one is a review finding.
+        #
+        #   `title:` on the tag        the author said it here, so it wins.
+        #   the diagram's frontmatter  Mermaid 11 renders a `title:` inside a `---` block as the
+        #                              diagram's VISIBLE title. Reading it is not a nicety: the
+        #                              first version skipped frontmatter entirely to find the
+        #                              keyword, so a diagram displaying "Approval flow" got an
+        #                              accessible name of "flowchart" — a screen reader and a
+        #                              sighted reader given different answers about one picture.
+        #   Mermaid's own keyword      the fallback. `flowchart`, `sequenceDiagram`, `gantt`.
+        #
+        # AND THE FALLBACK IS DELIBERATELY NOT AN ENGLISH SENTENCE. "flowchart diagram" would be
+        # a hardcoded user-facing string (CLAUDE.md §10) in a document that has no locale —
+        # `ReportDocument` says why it carries no `lang` — so a Russian report would get an
+        # English name. Mermaid's keyword is a language-neutral fact about the source.
+        def diagram_title(raw_source)
+          authored = @params['title'].to_s.strip
+          return authored[0, MAX_LABEL_CHARS] unless authored.empty?
+
+          (frontmatter_title(raw_source) || keyword_of(raw_source))[0, MAX_LABEL_CHARS]
+        end
+
+        # `title:` inside a `---` … `---` block, which is where Mermaid 11 takes the diagram's
+        # visible title from. Nothing else in the frontmatter is read: it is YAML, this is not a
+        # YAML parser, and a `title:` line is the only key with a reader here.
+        def frontmatter_title(raw_source)
+          lines = raw_source.to_s.lines.map(&:strip)
+          return nil unless lines.first == '---'
+
+          closing = lines[1..].to_a.index('---')
+          return nil if closing.nil?
+
+          line = lines[1, closing].to_a.find { |one| one.start_with?('title:') }
+          return nil if line.nil?
+
+          value = line.sub(/\Atitle:\s*/, '').strip.gsub(/\A["']|["']\z/, '')
+          value.empty? ? nil : value
+        end
+
+        # Mermaid's first keyword. Blank lines, `%%` directives and comments, and an
+        # optional `---` YAML frontmatter block are skipped, because all three can legally
+        # precede the diagram declaration and none of them is the diagram's kind.
+        #
+        # ANSWERS `''` RATHER THAN GUESSING when it finds nothing it recognises. An empty
+        # title means the boot script writes no `<title>`, which is honest; a made-up one
+        # would be a label that describes nothing.
+        def keyword_of(raw_source)
+          lines = raw_source.to_s.lines.map(&:strip)
+          lines = drop_frontmatter(lines)
+          line = lines.find { |one| !one.empty? && !one.start_with?('%%') }
+          line.to_s[/\A[A-Za-z][A-Za-z0-9_-]*/].to_s
+        end
+
+        def drop_frontmatter(lines)
+          return lines unless lines.first == '---'
+
+          closing = lines[1..].to_a.index('---')
+          closing.nil? ? lines : lines[(closing + 2)..].to_a
+        end
+
+        # THE BODY ESCAPER IS NOT ENOUGH FOR AN ATTRIBUTE. `escape` handles `&`, `<` and
+        # `>`, which is what a `<pre>`'s content needs; an attribute value also has to
+        # survive its own quoting. `PARAM_RE` accepts a single-quoted value, so
+        # `title: 'say "hi"'` really can carry a double quote, and both quote forms are
+        # escaped rather than one — a rule with an exception is a rule somebody applies
+        # inconsistently.
+        def attribute(value)
+          escape(value.to_s).gsub('"', '&quot;').gsub("'", '&#39;')
         end
 
         # A REFUSED DIAGRAM IS STILL AN ELEMENT (INV-4). A reader looking at a gap cannot tell a

@@ -261,8 +261,9 @@ PASS.
 ## 9. Commit and PR discipline
 
 - **Work lands on the integration branch this project actually runs in**, currently
-  `claude/plugin-repo-docs-setup-8u9k17`. Do **not** open a per-task branch or a pull request unless
-  the curator asks.
+  `claude/next-session-prompt-it4too` (it was `claude/plugin-repo-docs-setup-8u9k17` until
+  2026-08-13; the curator's instruction that session was *"blijf in deze branch, maak geen nieuwe"*).
+  Do **not** open a per-task branch or a pull request unless the curator asks.
 
   **This line used to read "One task per branch", and it cost a session.** That session read it
   literally and told the curator new work needed new branches — which is not how this project runs,

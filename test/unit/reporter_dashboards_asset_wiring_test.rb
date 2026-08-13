@@ -575,14 +575,30 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
   end
 
   # AT the budget is allowed and one past it is not — the AT-and-one-past pair CLAUDE.md
-  # §3 asks for on anything with a limit. Driven at the byte, against a body whose size is
-  # known exactly.
+  # §3 asks for on anything with a limit. Driven at the byte.
+  #
+  # THE BUDGET IS MEASURED ON THE DOCUMENT, NOT ON THE TEMPLATE'S OUTPUT, and T-38 is why
+  # this example changed. `ReportRun#pdf_document` wraps each rendered body in the
+  # standalone document the engine actually receives — a doctype, a head and the report
+  # stylesheet — and `MAX_RUN_ASSET_BYTES` counts what the engine receives, which is the
+  # number the limit exists to bound. So the size this example has to be exact about is
+  # `ReportDocument.wrap(body).bytesize`, and computing it that way keeps the pair exact
+  # instead of leaving a few kilobytes of slack that would make "one past" untestable.
+  #
+  # It is derived rather than hard-coded for the reason every number in this file is: a
+  # literal would need editing whenever the stylesheet grows a rule, and somebody would
+  # eventually "fix" it by widening the budget, which is exactly the assertion this
+  # example is.
   def test_the_budget_admits_a_run_exactly_at_the_limit
     body = '<p>no assets at all</p>'
-    with_run_budget(body.bytesize) do
+    document_bytes = RedmineReporterDashboards::ReportDocument.wrap(body).bytesize
+    assert document_bytes > body.bytesize,
+           'precondition: the engine receives a whole document, not the raw body'
+
+    with_run_budget(document_bytes) do
       assert render(body).ok?, 'a run exactly at the budget must be allowed'
     end
-    with_run_budget(body.bytesize - 1) do
+    with_run_budget(document_bytes - 1) do
       outcome = render(body)
 
       assert_not outcome.ok?

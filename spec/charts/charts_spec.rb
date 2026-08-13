@@ -425,6 +425,37 @@ RSpec.describe RedmineReporterDashboards::Charts do
       expect(svg).to include('aria-labelledby=')
     end
 
+    # T-38 asks for it on EVERY output, not on the default one. `emit_title_and_desc` is
+    # unconditional, which is easy to see by reading and easy to lose in an edit that makes
+    # one family take a different path — `pie_body`, `progress_body` and `empty_state` each
+    # replace the whole body, and a `<title>` emitted from inside one of them would be
+    # missing from the other two. So every type in the closed vocabulary is driven, plus the
+    # empty state, which is the one case with no numbers to describe.
+    C::ChartSpec::TYPES.each do |type|
+      it "carries a <title> and a <desc> on a #{type} chart" do
+        svg = described_class.render(spec_for(type: type))
+
+        expect(svg).to include('<title id="rrd-chart-v1-title">')
+        expect(svg).to include('<desc id="rrd-chart-v1-desc">')
+        expect(svg).to include('aria-labelledby="rrd-chart-v1-title rrd-chart-v1-desc"')
+        expect(svg).to include('role="img"')
+      end
+
+      it "names the family in the #{type} chart's title when the author gave none" do
+        svg = described_class.render(spec_for(type: type))
+        title = svg[%r{<title[^>]*>([^<]*)</title>}, 1]
+
+        expect(title).to eq("#{spec_for(type: type).family} chart")
+      end
+    end
+
+    it 'carries both even when there is no data to describe' do
+      svg = described_class.render(spec_for(categories: [], series: []))
+
+      expect(svg).to include('<title id="rrd-chart-v1-title">')
+      expect(svg).to match(%r{<desc id="rrd-chart-v1-desc">[^<]*with no data</desc>})
+    end
+
     it 'escapes the five XML entities — an unescaped & is a document that does not open' do
       svg = described_class.render(spec_for(categories: ['a & b', '<x>', %(q"q)],
                                             title: "Tom's & Jerry's <report>"))

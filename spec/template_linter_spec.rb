@@ -40,7 +40,7 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
         # turns `write the` into `writethe` and silently stops matching — found the
         # hard way while adding the last four alternatives.
         expect(rule.message).to match(
-          /v3|v4|owned|engine|document request|json|js|chart layer|readiness|replaced|vendors|write the|ask the|use the|not provided by/i
+          /v3|v4|owned|engine|document request|json|js|chart layer|readiness|replaced|vendors|write the|ask the|use the|leave `legend:`|not provided by/i
         ), "#{rule.id}'s message offers no way forward"
       end
     end
@@ -530,6 +530,165 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
 
       expect(found.map(&:rule)).to eq(['script.unfiltered_interpolation'])
       expect(found.first.line).to eq(1)
+    end
+  end
+
+  # --- T-38 / FR-76: a chart whose meaning rests on colour alone ------------------------
+  #
+  # "Meaning never carried by colour alone" is mostly held by construction — Okabe-Ito, a
+  # darker stroke on every fill, a `<title>` per element and a `<desc>` per chart, and the
+  # series name printed beside its swatch. The one thing an AUTHOR can take away is the
+  # legend, so `legend:` is what this pair of rules is about.
+  #
+  # BOTH SEVERITIES ARE ASSERTED, and the split is the design: a pie has no category axis,
+  # so its legend is the only place a slice is named and switching it off is decidable from
+  # the tag alone (:error). Every other family labels its categories on the axis, so a
+  # legend is redundant for one series and load-bearing for several — and the series count
+  # comes from `from:` at render time, which no pattern can see (:warning, with the
+  # ambiguity in the message). An error there would fire on every single-series bar chart
+  # whose author wrote down the default, which is how a linter gets switched off.
+  describe 'a chart whose meaning would rest on colour alone (FR-76)' do
+    def rules_for(body)
+      described_class.lint(body).map { |finding| [finding.severity, finding.rule] }
+    end
+
+    %w[pie doughnut].each do |type|
+      it "reports a #{type} with its legend switched off as an ERROR" do
+        found = described_class.lint("{% chart id: a, from: x, type: #{type}, legend: false %}")
+
+        expect(found.map(&:rule)).to eq(['chart.pie_legend_disabled'])
+        expect(found.first.severity).to eq(:error)
+        expect(found.first.line).to eq(1)
+      end
+    end
+
+    it 'puts such a template into rework, which is what "fails a lint" means' do
+      analysis = described_class.analyse('{% chart id: a, type: pie, legend: false %}')
+
+      expect(analysis).to be_rework
+    end
+
+    # EVERY SPELLING `bool_param` READS AS FALSE. It answers true for exactly `true`,
+    # `yes` and `1`, so a rule that matched only the word `false` would miss three ways of
+    # writing the same defect — and `10` is one of them, which is why the value test is a
+    # negative lookahead rather than a list of falsy words.
+    ['false', '"false"', '0', 'off', 'no', 'nope', '10'].each do |value|
+      it "reports `legend: #{value}` on a pie, because bool_param reads it as false" do
+        expect(rules_for("{% chart id: a, type: pie, legend: #{value} %}"))
+          .to eq([[:error, 'chart.pie_legend_disabled']])
+      end
+    end
+
+    # THE NEGATIVE CASES, and every one of them was a FALSE `:error` at some point in this
+    # rule's short life — which is the crying-wolf outcome its own header says it exists to
+    # avoid, and the reason the list is this long.
+    #
+    #   `true` / `"true"`   an optional `\s*` or `["']?` in front of a negative lookahead lets
+    #                       the engine backtrack until the lookahead is evaluated against the
+    #                       space or the quote instead of the value. `(?> … )` is the fix.
+    #   `TRUE` / `Yes`      `ChartTag#bool_param` DOWNCASES, and the rules did not. Found by an
+    #                       independent review; `/i` is the fix.
+    #   `""`                `bool_param` returns its FALLBACK for an empty value, so the legend
+    #                       stays ON. `(?![\s,%"'])` is the fix.
+    ['true', '"true"', "'true'", 'yes', '1',
+     'TRUE', 'True', 'YES', 'Yes', '"TRUE"',
+     '""', "''"].each do |value|
+      it "does not report `legend: #{value}`, which leaves the legend ON" do
+        expect(rules_for("{% chart id: a, type: pie, legend: #{value} %}")).to eq([])
+      end
+    end
+
+    # THE TYPE IS CASE-INSENSITIVE TOO, because `ChartSpec#resolve_type` downcases. Before the
+    # fix `type: PIE` took the WARNING rather than the error — a miss of the one defect this
+    # clause exists for — and `type: Progress` was not exempt at all.
+    %w[PIE Pie DOUGHNUT Doughnut].each do |type|
+      it "reports `type: #{type}` as the pie ERROR, not as the generic warning" do
+        expect(rules_for("{% chart id: a, type: #{type}, legend: false %}"))
+          .to eq([[:error, 'chart.pie_legend_disabled']])
+      end
+    end
+
+    it 'does not report a pie that leaves `legend:` off the tag altogether' do
+      expect(rules_for('{% chart id: a, from: x, type: pie %}')).to eq([])
+    end
+
+    it 'reads a `type:` written after `legend:`, because a tag is not ordered' do
+      expect(rules_for('{% chart id: a, legend: false, type: pie %}'))
+        .to eq([[:error, 'chart.pie_legend_disabled']])
+    end
+
+    it 'reads a tag spread over several lines, and a value containing a per cent sign' do
+      body = "{% chart id: a, from: x,\n   type: pie, title: \"50% done\",\n   legend: false %}"
+
+      expect(rules_for(body)).to eq([[:error, 'chart.pie_legend_disabled']])
+    end
+
+    describe 'every other family' do
+      it 'is a WARNING, because one series needs no legend and two do' do
+        found = described_class.lint('{% chart id: a, from: x, type: bar, legend: false %}')
+
+        expect(found.map(&:rule)).to eq(['chart.legend_disabled'])
+        expect(found.first.severity).to eq(:warning)
+      end
+
+      it 'therefore does not put the template into rework' do
+        expect(described_class.analyse('{% chart id: a, type: bar, legend: false %}'))
+          .not_to be_rework
+      end
+
+      it 'admits in the message that it may be a false positive' do
+        found = described_class.lint('{% chart id: a, type: line, legend: false %}')
+
+        expect(found.first.message).to match(/false positive/)
+      end
+
+      it 'defaults to bar when no type is given, and still warns' do
+        expect(rules_for('{% chart id: a, from: x, legend: false %}'))
+          .to eq([[:warning, 'chart.legend_disabled']])
+      end
+
+      # A progress bar has ONE number and prints it as text beside the bar, so a legend
+      # would label a single blue bar "blue" — `ChartSpec#default_legend` says so and
+      # switches it off itself. Flagging the author for writing that down would be the
+      # crying-wolf case in its purest form.
+      it 'exempts a progress bar, which has nothing to label' do
+        expect(rules_for('{% chart id: a, from: x, type: progress, legend: false %}')).to eq([])
+      end
+
+      it 'exempts it whatever the case, because ChartSpec downcases the type' do
+        expect(rules_for('{% chart id: a, type: Progress, legend: false %}')).to eq([])
+        expect(rules_for('{% chart id: a, type: PROGRESS, legend: false %}')).to eq([])
+      end
+
+      # ONE finding, not two. A pie takes the error and the warning is suppressed for the
+      # same tag, so an author is told once.
+      it 'does not also warn about a pie the error already covers' do
+        expect(rules_for('{% chart id: a, type: pie, legend: false %}').length).to eq(1)
+      end
+    end
+
+    describe 'scope' do
+      # The construct in prose, in a comment, and in CSS. Each of these is text that
+      # MENTIONS the defect rather than being it — §Findings E-14's lesson, and the reason
+      # every rule in this file declares where it may match.
+      it 'does not fire on prose that talks about a legend' do
+        expect(rules_for('<p>Set legend: false on a pie and the slices lose their names.</p>'))
+          .to eq([])
+      end
+
+      it 'does not fire inside a {% comment %} explaining the rule' do
+        body = '{% comment %}{% chart id: a, type: pie, legend: false %}{% endcomment %}'
+
+        expect(rules_for(body)).to eq([])
+      end
+
+      it 'does not fire on a stylesheet declaration that happens to say legend' do
+        expect(rules_for('<style>.legend { display: none }</style>')).to eq([])
+      end
+
+      it 'does not fire on another tag that carries a legend parameter' do
+        expect(rules_for('{% sql_aggregate group_by: status, legend: false %}')).to eq([])
+      end
     end
   end
 

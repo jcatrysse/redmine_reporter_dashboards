@@ -663,6 +663,79 @@ a saved query with `?query_id=…` and the report resolves through that query in
 only through queries you could already open, so a report can never show you issues the
 issue list would not.
 
+### How a report is styled, and what you get for free
+
+Every report — the page you look at and the PDF you download — is wrapped in **one
+print-first stylesheet**, inlined into both. You do not link it, enable it or opt into it;
+it is part of the document by construction, which is the point. The two bindings are then
+the same document at two sizes rather than two designs, and *"it looked fine in the browser
+and broke in the PDF"* has one fewer way to happen.
+
+What it does, and none of it needs anything in your template:
+
+| | |
+|---|---|
+| **A table header repeats on every page.** | A three-page issue list whose columns are named only on page 1 is unreadable past the first break. |
+| **The stylesheet asks the engine not to split a table row.** | Half a row above the fold and half below is a number you cannot trust. Asked, not measured: the conformance corpus proves it for a card and a chart block (`F-22`) and has no fixture for a row, so this one is a request rather than a promise. |
+| **Headings stay with what they introduce**, and paragraphs keep three lines together (`orphans`/`widows`). | |
+| **The type is one scale, shared with the charts.** | A table cell and a chart's axis label are the same size in the same face, because the stylesheet reads both from the chart layer rather than restating them. |
+| **The colours are the chart palette.** | The grey of a table rule is the grey of a chart's grid line — one source, so *"the axis is a slightly different grey in the PDF"* cannot happen. |
+| **A link is underlined**, not merely coloured. | On paper a link whose only mark is a colour is meaning carried by colour alone. |
+
+Three class names are yours to use, and they are the whole vocabulary:
+
+```html
+<div class="rrd-card">…</div>   <!-- a block that is never split across a page -->
+<td class="rrd-number">42</td>  <!-- right-aligned, with figures that line up -->
+<p class="rrd-muted">…</p>      <!-- smaller, quieter text -->
+```
+
+`.rrd-card` is the one to know: put a chart and its caption in one, and they stay on the
+same page. There is deliberately **no grid or column class** — a layout that promises the
+same result on Chromium and on wkhtmltopdf's 2011 WebKit is a promise this plugin will not
+make, so how cards sit next to each other stays yours.
+
+**Your own `<style>` still wins.** The plugin's rules are in the document head and a
+template's are in its body, so anything you declare overrides the default at equal
+specificity. Nothing is `!important`.
+
+**Page size, orientation and margins are not in the stylesheet.** They come from the
+template's own settings and are applied by the render engine, so there is no `@page` rule of
+ours for yours to fight with.
+
+**Charts carry their own accessibility.** Every server-drawn chart has a `<title>` and a
+`<desc>` naming the numbers; the palette is Okabe-Ito with a darker stroke on every fill, so a
+colour-blind reader and a greyscale printer both keep the chart; and the drill-through anchors
+are real link annotations in the PDF, so a chart in a downloaded report is clickable — measured
+on all three engines in the [support matrix](docs/engine-support-matrix.md).
+
+A **legend** appears whenever there is something for it to name: more than one series, or more
+than one slice in a pie. A single-series chart labels its categories on the axis and a progress
+bar prints its own number, so neither gets one — and if you switch a pie's legend off by hand,
+the linter stops you (below).
+
+**A `{% mermaid %}` diagram gets a `<title>` and a `<desc>` as well, wherever the diagram is
+drawn at all.** That last clause matters: Mermaid runs in the browser, so a diagram drawn on the
+`wkhtmltopdf` engine is not drawn — its JavaScript is too old for the library, the source stays
+visible instead of the picture, and there is no SVG for a label to go into. Pass `title:` and
+`desc:` to name a diagram yourself; without them the title comes from the diagram's own
+frontmatter `title:` or, failing that, its Mermaid keyword, and the description is the diagram
+source:
+
+```liquid
+{% mermaid id: flow, title: "Approval flow", desc: "Draft to review to approved" %}
+flowchart LR
+  A[Draft] --> B[Review] --> C[Approved]
+{% endmermaid %}
+```
+
+**One lint you may meet.** A pie or doughnut chart with `legend: false` is a **lint error**,
+not a warning: a pie has no category axis, so its legend is the only place a slice is named
+and switching it off leaves coloured wedges. Leave `legend:` off the tag entirely and the
+plugin shows it whenever there is more than one slice. On other chart types the same
+parameter is a warning, because with one series a legend really is redundant and no linter
+can tell how many series `from:` will produce.
+
 ### Preview
 
 The editor's **Preview** button renders the content in the form — not the saved version —

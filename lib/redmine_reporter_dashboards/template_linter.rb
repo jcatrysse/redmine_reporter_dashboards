@@ -311,9 +311,87 @@ module RedmineReporterDashboards
                         '`.closed_issues_url` and `.time_url`')
     ].freeze
 
+    # T-38 / FR-76 — "a chart whose meaning rests on colour alone fails a lint".
+    #
+    # --- WHY THE ONLY ERROR HERE IS ABOUT A PIE -----------------------------------------
+    #
+    # The plugin already does most of FR-76 by construction: `Palette` is Okabe-Ito, every
+    # fill carries a darker stroke, `SvgRenderer` puts the value in a `<title>` on each
+    # element and a `<desc>` on the chart, and the legend prints each series name beside its
+    # swatch. What an AUTHOR can still take away is the legend, and `legend:` is the one
+    # parameter that does it (`ChartSpec#default_legend` otherwise decides it from the data).
+    #
+    # The two cases are not equally decidable, and pretending they were is how a linter
+    # starts crying wolf:
+    #
+    #   A PIE OR DOUGHNUT has no category axis. The legend is THE ONLY PLACE a slice is
+    #   named, so switching it off leaves coloured wedges and nothing else — which is not a
+    #   hypothetical: `ChartSpec#default_legend`'s own comment records shipping exactly that
+    #   ("three unlabelled coloured wedges") because the default keyed on series rather than
+    #   categories. Decidable from the tag alone, so it is an :error.
+    #
+    #   EVERY OTHER FAMILY labels its categories on the axis, so a legend is redundant for
+    #   ONE series and load-bearing for several — and the series count comes from `from:` at
+    #   render time, which no pattern can see. That is a :warning whose message says so, the
+    #   same discipline `chartjs2.begin_at_zero_moved` follows. Making it an error would flag
+    #   every single-series bar chart whose author wrote down the default.
+    #
+    # `suppressed_by` does the per-tag work: a `:liquid` region is ONE `{% … %}` span, so a
+    # `type:` in the same tag suppresses the rule for that tag and for no other.
+
+    # A `legend:` value `ChartTag#bool_param` reads as FALSE, matched without a callback.
+    # `bool_param` answers `%w[true yes 1].include?(raw.downcase)` — so `legend: 0`,
+    # `legend: off` and `legend: 10` all switch the legend off, and a rule that matched only
+    # the word `false` would miss three spellings of the same defect.
+    #
+    # THREE THINGS HERE ARE LOAD-BEARING, and the first draft had none of them. Each was
+    # measured, and each of the first two produced a false `:error` — the crying-wolf outcome
+    # this rule pair's own header says it exists to avoid.
+    #
+    # THE TWO ATOMIC GROUPS. Written `\s*["']?(?!(?:true|yes|1)\b)`, the engine backtracks the
+    # optional parts until the lookahead lands somewhere harmless: `legend: true` matched
+    # because `\s*` gave back the space and `(?!true)` was then evaluated against the space,
+    # and `legend: "true"` matched because `["']?` gave back the quote. An optional element in
+    # front of a negative lookahead makes the lookahead optional too. `(?> … )` cannot give
+    # anything back.
+    #
+    # `/i`, BECAUSE `bool_param` DOWNCASES. Found by an independent review: `legend: TRUE`,
+    # `legend: True` and `legend: YES` all switch the legend ON and all three were reported as
+    # errors. The rules that interpolate this carry `i` for the same reason —
+    # `ChartSpec#resolve_type` downcases too, so `type: PIE` was a pie the pie rule could not
+    # see and `type: Progress` was a progress bar the exemption did not reach.
+    #
+    # THE SECOND LOOKAHEAD, for the EMPTY value. `bool_param` returns its FALLBACK when the
+    # raw value is nil or empty, so `legend: ""` leaves the legend at the default — on. Without
+    # `(?![\s,%"'])` the pattern matched the closing quote and called that a switched-off
+    # legend.
+    LEGEND_OFF = /(?>[ \t]*)(?>["']?)(?!(?:true|yes|1)\b)(?![\s,%"'])/i.freeze
+
+    CHART_ACCESSIBILITY_RULES = [
+      Rule.new(id: 'chart.pie_legend_disabled', severity: :error, scope: :liquid,
+               pattern: /\A\{%-?\s*chart\b(?=[\s\S]*\btype\s*:\s*["']?(?:pie|doughnut)\b)
+                         [\s\S]*\blegend\s*:#{LEGEND_OFF}/xmi,
+               message: 'a pie has no category axis, so its legend is the only place a ' \
+                        'slice is named — switching it off leaves coloured wedges and ' \
+                        'nothing else, which is meaning carried by colour alone (FR-76). ' \
+                        'Colour-blind readers and greyscale printers both lose the chart. ' \
+                        'Leave `legend:` off the tag and the plugin shows it whenever there ' \
+                        'is more than one slice'),
+
+      Rule.new(id: 'chart.legend_disabled', severity: :warning, scope: :liquid,
+               pattern: /\A\{%-?\s*chart\b[\s\S]*\blegend\s*:#{LEGEND_OFF}/mi,
+               suppressed_by: /\btype\s*:\s*["']?(?:pie|doughnut|progress)\b/i,
+               message: 'the legend is what names a series. With one series that is ' \
+                        'redundant and this is a false positive; with two or more it is ' \
+                        'the only thing telling them apart, and colour alone is what FR-76 ' \
+                        'forbids. The series count comes from `from:` at render time, so ' \
+                        'no linter can tell which this is — check it, or leave `legend:` ' \
+                        'off and let the plugin decide from the data')
+    ].freeze
+
     PATTERN_RULES = (CHARTJS_RULES + HANDSHAKE_RULES + ENGINE_RULES +
                      LIQUID_IDIOM_RULES + REMOVED_FILTER_RULES +
-                     DEPRECATED_SURFACE_RULES).freeze
+                     DEPRECATED_SURFACE_RULES + CHART_ACCESSIBILITY_RULES).freeze
     RULES         = (PATTERN_RULES + [SCRIPT_INTERPOLATION_RULE]).freeze
 
     # The filters that make an interpolation safe inside <script>.

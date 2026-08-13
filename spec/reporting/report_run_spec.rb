@@ -7,6 +7,11 @@ require_relative '../../lib/redmine_reporter_dashboards/reporting/report_run'
 # loaded here (it needs ActiveSupport). The classes themselves are DB-less, so the PORT is
 # injected and what travels through it is the real `Assets::Resolver`.
 require_relative '../../lib/redmine_reporter_dashboards/assets'
+# T-38. `ReportFrame` is loaded for ONE assertion — that the HTML binding's document and
+# the PDF binding's carry the same stylesheet object. It is safe in a DB-less run: the
+# module reaches `ActionController::Base.helpers` only from `#frame`, and this file calls
+# `#document`, which is pure string assembly.
+require_relative '../../lib/redmine_reporter_dashboards/report_frame'
 require 'tmpdir'
 
 # T-23 — the decisions a run makes ABOUT a render, driven without one.
@@ -1149,6 +1154,109 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       expect do
         run(scope: nil, template: template(output: 'per_record')).call
       end.to raise_error(ArgumentError, /per-record report needs a record scope/)
+    end
+  end
+
+  # --- T-38: ONE STYLESHEET, TWO OUTPUTS ------------------------------------------------
+  #
+  # Phase A produces a FRAGMENT — `template.content` is what an author wrote, not a
+  # `<!DOCTYPE>`. The HTML binding has always wrapped it (`ReportFrame` builds the srcdoc
+  # document); the PDF binding did not, so `section.body` went to the engine bare and
+  # every browser-based engine parsed it with its own default stylesheet. That is why the
+  # two bindings could not share a type scale: one of them had no head to put one in.
+  #
+  # What is asserted here is the PDF half, at the seam where it happens, and the ASYMMETRY
+  # — because the asymmetry is the thing a later reader will otherwise "fix" by wrapping
+  # twice.
+  describe 'the report stylesheet, on the PDF binding' do
+    def sheet
+      ::RedmineReporterDashboards::ReportStylesheet
+    end
+
+    def drew_pdf(html)
+      seen = []
+      ReportRunSpecSupport::FakeAdapter.behaviour = lambda do |request|
+        seen << request
+        RedmineReporterDashboards::Render::Success.new(
+          bytes: ReportRunSpecSupport::PDF_BYTES, engine: 'fake', engine_version: '1.0'
+        )
+      end
+      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                    engine: ReportRunSpecSupport::FakeAdapter,
+                    renderer: ReportRunSpecSupport::CountingRenderer.new(
+                      body_for: ->(_n) { html }
+                    )).call(pdf: true)
+      [outcome, seen]
+    end
+
+    it 'reaches the engine as a whole document rather than a fragment' do
+      _outcome, seen = drew_pdf('<h1>Report</h1>')
+
+      expect(seen.first.body).to start_with('<!DOCTYPE html>')
+      expect(seen.first.body).to include('<h1>Report</h1>')
+    end
+
+    # THE SAME OBJECT the HTML binding gets, not an equal string. This is the whole of
+    # "one stylesheet": `ReportDocument` is the only assembler and `ReportStylesheet` is
+    # the only source, so a second copy could not exist without failing here.
+    it 'carries the same stylesheet the HTML binding inlines' do
+      _outcome, seen = drew_pdf('<h1>Report</h1>')
+
+      expect(seen.first.body).to include(sheet.style_element)
+      expect(::RedmineReporterDashboards::ReportFrame.document('<h1>Report</h1>'))
+        .to include(sheet.style_element)
+    end
+
+    # NO CSP ON THE PDF PATH. There is no browser to enforce one, `default-src 'none'`
+    # would be a policy nothing applies, and an engine may reasonably refuse to fetch its
+    # own document under it. The sandbox belongs to the surface that has one.
+    it 'does not carry the frame\'s content security policy' do
+      _outcome, seen = drew_pdf('<h1>Report</h1>')
+
+      expect(seen.first.body).not_to include('Content-Security-Policy')
+    end
+
+    it 'wraps each document of a per-record run, not just the first' do
+      seen = []
+      ReportRunSpecSupport::FakeAdapter.behaviour = lambda do |request|
+        seen << request
+        RedmineReporterDashboards::Render::Success.new(
+          bytes: ReportRunSpecSupport::PDF_BYTES, engine: 'fake', engine_version: '1.0'
+        )
+      end
+
+      run(scope: ReportRunSpecSupport::FakeScope.new(3),
+          engine: ReportRunSpecSupport::FakeAdapter,
+          template: template(output: 'per_record')).call(pdf: true)
+
+      expect(seen.length).to eq(3)
+      expect(seen).to all(have_attributes(body: a_string_starting_with('<!DOCTYPE html>')))
+      expect(seen).to all(have_attributes(body: a_string_including(sheet.style_element)))
+    end
+
+    # THE HTML PATH'S SECTIONS STAY FRAGMENTS, and this is the asymmetry worth pinning: a
+    # view calls `ReportFrame.frame(section.body)`, which wraps. A section that arrived
+    # already wrapped would produce a document with two heads and two stylesheets —
+    # accepted silently by every browser, and visible only as a doubled cascade.
+    it 'leaves the HTML binding\'s sections unwrapped, because the frame wraps them' do
+      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                    renderer: ReportRunSpecSupport::CountingRenderer.new(
+                      body_for: ->(_n) { '<h1>Report</h1>' }
+                    )).call
+
+      expect(outcome).to be_ok
+      expect(outcome.sections.first.body).to eq('<h1>Report</h1>')
+      expect(outcome.sections.first.body).not_to include('<!DOCTYPE')
+    end
+
+    # The stylesheet adds bytes to every document, and `MAX_RUN_ASSET_BYTES` is measured
+    # on what the engine receives. A run's headroom must not become a function of how many
+    # documents it draws in a way nobody costed: 4 KiB × 50 documents is 200 KiB against a
+    # 128 MiB budget, and this is the assertion that would notice if the stylesheet grew
+    # by three orders of magnitude.
+    it 'costs the run budget a bounded amount per document' do
+      expect(sheet.style_element.bytesize * 50)
+        .to be < (described_class::MAX_RUN_ASSET_BYTES / 100)
     end
   end
 end

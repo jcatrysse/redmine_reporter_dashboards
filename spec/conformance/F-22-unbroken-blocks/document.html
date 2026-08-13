@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-22</title>
+@@REPORT_STYLESHEET@@
+<style>
+  /* THE ONLY RULES IN THIS FIXTURE, and none of them is a break rule: seven spacer
+     heights, whose whole job is to land the blocks below at a DIFFERENT offset inside
+     each page. The break behaviour under test comes from the shipped stylesheet above.
+
+     Seven heights and not one, because engines disagree about how many millimetres fit
+     on a page — measured, wkhtmltopdf draws this document in 4 pages and Chromium in 5 —
+     so a single spacer tuned to put one block on one boundary is tuned for one engine.
+     Fourteen blocks at drifting offsets cross a boundary on every engine. */
+  .s1 { height: 34mm; }
+  .s2 { height: 38mm; }
+  .s3 { height: 42mm; }
+  .s4 { height: 46mm; }
+  .s5 { height: 50mm; }
+  .s6 { height: 54mm; }
+  .s7 { height: 30mm; }
+</style>
+</head><body>
+<h1>UNBROKEN-BLOCKS</h1>
+<!--BLOCKS-->
+</body></html>

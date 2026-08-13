@@ -118,7 +118,13 @@
                                                   @template.source)) %></p>
   <% end %>
 
+  <%# T-38: the frame's own border and background are gone (chrome declares no colour),
+      so the native container draws its edge. `box` on a DIV and not on the iframe —
+      Redmine puts it on containers everywhere, and `.box`'s padding against the frame's
+      `width: 100%` would overflow a replaced element by 22px. `preview.html.erb` already
+      had this wrapper; the widget surfaces are inside `.mypage-box`, which is the same
+      container under another name. %>
   <% @outcome.sections.each do |section| %>
-    <%= reporter_report_frame(section) %>
+    <div class="box"><%= reporter_report_frame(section) %></div>
   <% end %>
 <% end %>

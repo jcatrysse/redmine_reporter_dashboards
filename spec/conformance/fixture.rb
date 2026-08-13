@@ -32,6 +32,12 @@ module RedmineReporterDashboards
       # `format` because a stylesheet is full of `%` and `50%` is not a format string.
       CHART_SHELL_TOKEN = '@@CHART_SHELL@@'
       EGRESS_URL_TOKEN = '@@EGRESS_URL@@'
+      # T-38. The SHIPPED report stylesheet, inlined — for the reason `CHART_SHELL_TOKEN`
+      # exists: a fixture that carried its own `display: table-header-group` would prove
+      # that the ENGINE can repeat a table header, which nobody doubts, and nothing about
+      # whether the stylesheet every report gets asks it to. What the two clauses T-38
+      # asserts here are about is `ReportStylesheet`, so that is what goes in the document.
+      REPORT_STYLESHEET_TOKEN = '@@REPORT_STYLESHEET@@'
 
       attr_reader :id, :title, :area, :dir, :requires, :harness_notes,
                   :request_overrides, :checks, :expect_failure, :readiness_options,
@@ -137,11 +143,19 @@ module RedmineReporterDashboards
         File.join(dir, 'document.html')
       end
 
-      def body(chart_shell: '', egress_url: '')
+      # THE BLOCK FORM FOR THE NEW TOKEN, and the reason is a latent defect rather than style:
+      # `String#gsub` with a String replacement interprets `\\`, `\0` and `\1` in it, so a
+      # replacement that ever contained a backslash would be mangled. A block replacement is
+      # taken literally. The stylesheet has no backslash today (a spec asserts the CSS carries
+      # no `url(`, and nothing else in it could) — this is the class of bug closed rather than
+      # a bug fixed, and the two older tokens are left alone because changing them is not this
+      # task's to do.
+      def body(chart_shell: '', egress_url: '', report_stylesheet: '')
         expand(
           File.read(document_path, encoding: 'UTF-8')
               .gsub(CHART_SHELL_TOKEN, chart_shell)
               .gsub(EGRESS_URL_TOKEN, egress_url)
+              .gsub(REPORT_STYLESHEET_TOKEN) { report_stylesheet }
         )
       end
 
@@ -151,6 +165,10 @@ module RedmineReporterDashboards
 
       def needs_egress_listener?
         File.read(document_path, encoding: 'UTF-8').include?(EGRESS_URL_TOKEN)
+      end
+
+      def needs_report_stylesheet?
+        File.read(document_path, encoding: 'UTF-8').include?(REPORT_STYLESHEET_TOKEN)
       end
 
       def to_s

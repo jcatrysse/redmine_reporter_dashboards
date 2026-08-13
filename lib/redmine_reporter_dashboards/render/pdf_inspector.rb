@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'cgi'
 require 'open3'
 require 'tmpdir'
 
@@ -168,6 +169,84 @@ module RedmineReporterDashboards
       def colour_matches?(actual, expected, tolerance: COLOUR_TOLERANCE)
         actual.length == expected.length &&
           actual.each_with_index.all? { |value, i| (value - expected[i]).abs <= tolerance }
+      end
+
+      # ---- link annotations (T-38) -------------------------------------------
+      #
+      # "Drill-through links in the PDF are real links, asserted by extracting the link
+      # annotations from the produced PDF." Two readers, and the second exists because the
+      # first cannot see the annotation that matters.
+      #
+      # MEASURED 2026-08-13, on this container, on all three engines in the matrix — and the
+      # wkhtmltopdf row is stated for the SUPPORTED build, because the first version of this
+      # comment stated it for the distro one and was wrong (see `Render::Capabilities`, which
+      # carries the retraction of the two capabilities that mistake nearly bought):
+      #
+      #   plain `<a href>` around text     every engine: annotation, and poppler reports it
+      #   `<a xlink:href>` around a <rect> every engine: the annotation IS in the PDF
+      #                                    (`/URI (https://…)` in the bytes), and poppler
+      #                                    reports NOTHING — there is no text under it
+      #   `<a xlink:href>` around <text>   every engine: annotation, and poppler reports it
+      #
+      # `pdftohtml` is a TEXT extractor: it attaches a link to the text under it, and
+      # `SvgRenderer` wraps `<rect>`, `<circle>` and `<path>` — never text — so a chart's
+      # drill-through is invisible to it. That is a limitation of the reader, and reporting
+      # it as "the engine drew no link" would be the harness lying about the engine, which
+      # `spec/conformance/README.md` says must never happen.
+      #
+      # So there are two readings and `PdfProbe` cross-checks them: everything poppler can
+      # see must also be in the byte scan. If the scan misses something poppler found, the
+      # SCAN is broken and the harness says so in its own words instead of blaming an
+      # engine. That is what makes a byte scan admissible here at all.
+      LINK_TOOLS = %w[pdftohtml].freeze
+
+      def missing_link_tools
+        LINK_TOOLS.reject { |tool| which(tool) }
+      end
+
+      # The hrefs poppler reports, which is the subset of annotations that sit over text.
+      # `-xml` rather than `-c`: the XML output carries `<a href="…">` around the text run
+      # and nothing else, so there is no HTML to parse around it.
+      #
+      # `CGI.unescapeHTML` IS THE WHOLE CORRECTNESS OF THE CROSS-CHECK, and the first version
+      # left it out. `pdftohtml -xml` XML-escapes the attribute, so a URL with a `&` in it
+      # comes back as `…?filter=all&amp;x=1` while `uri_annotations_at` reads the raw bytes
+      # and answers `…?filter=all&x=1`. `PdfProbe.links` compares the two sets and raises when
+      # poppler saw something the scan did not — so every `&` in a URL produced a HARNESS
+      # failure blaming the reader for a link it had read perfectly. Measured by an
+      # independent review against a hand-built PDF, and it matters more than it sounds: a
+      # real Redmine drill-through URL is `&`-dense
+      # (`/issues?set_filter=1&f[]=status_id&op[]==&v[status_id][]=1`), so the guard would
+      # have detonated on the first realistic chart.
+      def text_links_at(path)
+        require_link_tools!
+        xml = run('pdftohtml', '-stdout', '-xml', '-i', path)
+        xml.scan(/<a\s+href="([^"]*)"/).flatten.map { |href| CGI.unescapeHTML(href) }.uniq
+      end
+
+      # Every `/URI` value in the file's bytes.
+      #
+      # A SCAN AND NOT A PARSER, and the difference is the point: it decodes nothing, walks
+      # no object graph and answers "these URI strings are in this file". Both engines in
+      # this repository's matrix write the annotation dictionary uncompressed, which is why
+      # it works; an engine that put its annotations inside a Flate object stream would
+      # answer an EMPTY list here, and `PdfProbe.links` is what turns that into a harness
+      # failure rather than an accusation against the engine.
+      #
+      # The literal-string form `(…)` is what both engines emit — measured. Balanced inner
+      # parentheses are not handled, and a URL containing one is not something to guess at:
+      # the fixture's own URLs are plain.
+      def uri_annotations_at(path)
+        File.binread(path).scan(/\/URI\s*\(([^()]*)\)/).flatten
+            .map { |uri| uri.force_encoding(Encoding::UTF_8) }.uniq
+      end
+
+      def require_link_tools!
+        missing = missing_link_tools
+        return true if missing.empty?
+
+        raise Unavailable,
+              "reading a PDF's link annotations needs #{missing.join(', ')} on PATH"
       end
 
       # ---- plumbing ---------------------------------------------------------

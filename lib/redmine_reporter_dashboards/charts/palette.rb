@@ -58,6 +58,13 @@ module RedmineReporterDashboards
       PROGRESS_FILL = '#0072B2'
       PROGRESS_TRACK = '#E4E4E4'
 
+      # A LINK, in the report body. Named rather than reusing `PROGRESS_FILL`, which is what
+      # T-38's first draft did: it is the same blue, and it meant that retuning a progress bar
+      # would silently retune every link in every report. Same value, separate reason —
+      # `#0072B2` on `#FFFFFF` is about 4.6:1, which is AA for body text, and the underline is
+      # what carries the meaning on paper (FR-76).
+      LINK = '#0072B2'
+
       # Chrome. Named rather than inlined at the seven places that draw a line, because
       # "the axis is a slightly different grey in the PDF" is the kind of difference
       # nobody can find later.

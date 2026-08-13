@@ -13,6 +13,9 @@ require_relative '../../lib/redmine_reporter_dashboards/render/failure'
 require_relative '../../lib/redmine_reporter_dashboards/render/result'
 require_relative '../../lib/redmine_reporter_dashboards/render/readiness'
 require_relative '../../lib/redmine_reporter_dashboards/render/renderer'
+# T-38 — the SHIPPED report stylesheet, for the fixtures that assert print behaviour is a
+# property of it rather than of a copy in a fixture (`Fixture::REPORT_STYLESHEET_TOKEN`).
+require_relative '../../lib/redmine_reporter_dashboards/report_stylesheet'
 
 module RedmineReporterDashboards
   # T-12 — the engine conformance corpus.
@@ -107,6 +110,13 @@ module RedmineReporterDashboards
 
       def byte_size
         File.size(pdf!)
+      end
+
+      # T-38 — every URI the document carries as a link ANNOTATION, which is what makes a
+      # link a link rather than blue text. `PdfProbe.links` cross-checks its own reading
+      # against poppler's and raises if the two disagree; see the comment there.
+      def links
+        PdfProbe.links(pdf!)
       end
 
       def degradations
@@ -351,7 +361,8 @@ module RedmineReporterDashboards
         overrides = fixture.request_overrides.merge(dynamic)
         readiness = fixture.readiness_options && Render::Readiness.new(**fixture.readiness_options)
         body = fixture.body(chart_shell: chart_shell_tag(fixture),
-                            egress_url: egress ? egress.url : '')
+                            egress_url: egress ? egress.url : '',
+                            report_stylesheet: report_stylesheet_tag(fixture))
 
         Render::DocumentRequest.new(
           body: body,
@@ -359,6 +370,16 @@ module RedmineReporterDashboards
           readiness: readiness,
           **overrides
         )
+      end
+
+      # The SHIPPED stylesheet, from the module every report goes through — same rule as
+      # the chart shell below it, and the same reason: a fixture carrying its own copy of
+      # `thead { display: table-header-group }` would assert something about the engine and
+      # nothing about `ReportStylesheet`, which is what T-38's two print clauses are about.
+      def report_stylesheet_tag(fixture)
+        return '' unless fixture.needs_report_stylesheet?
+
+        RedmineReporterDashboards::ReportStylesheet.style_element
       end
 
       # The SHIPPED shell, inlined. A fixture that exercised a copy would pass while

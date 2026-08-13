@@ -50,8 +50,20 @@ module RedmineReporterDashboards
         Inspector.available?
       end
 
+      # THE LINK READER IS IN THIS LIST TOO, so the harness's ONE up-front check covers it and
+      # `PdfProbe.links` never has to raise a second exception class for the same condition.
+      # This file says a few lines up why that must not happen — "two classes for one
+      # condition is how a rescue ends up catching neither" — and the first version of the
+      # link probe had exactly that shape: `require_tools!` raising `ToolMissing` and then
+      # `Inspector.require_link_tools!` raising `Inspector::Unavailable` with the inspector's
+      # operator-facing wording. Found in review.
+      #
+      # It is added HERE and not to `Inspector::TOOLS`, and that is the point of this file
+      # being a policy: `Render::Preflight` shares the inspector and runs on somebody's
+      # install, where a missing `pdftohtml` should not turn a working diagnostic into an
+      # unavailable one. The harness needs it; an operator's preflight does not.
       def missing_tools
-        Inspector.missing_tools
+        Inspector.missing_tools + Inspector.missing_link_tools
       end
 
       def which(tool)
@@ -108,6 +120,46 @@ module RedmineReporterDashboards
 
       def colour_matches?(actual, expected, tolerance: COLOUR_TOLERANCE)
         Inspector.colour_matches?(actual, expected, tolerance: tolerance)
+      end
+
+      # T-38 — the link annotations in the document, and the CROSS-CHECK that makes reading
+      # them admissible under this file's own rule.
+      #
+      # `spec/conformance/README.md`: "A wrong answer from *our* reader must never be
+      # confusable with a wrong answer from the engine." The two readings the inspector
+      # offers are exactly that risk and exactly its answer:
+      #
+      #   poppler (`pdftohtml -xml`)   TRUSTWORTHY, and PARTIAL. It attaches a link to the
+      #                                text under it, so it sees an `<a href>` around a word
+      #                                and cannot see an `<a xlink:href>` around a `<rect>`
+      #                                — which is every chart drill-through `SvgRenderer`
+      #                                emits. Measured 2026-08-13 against Chromium: the
+      #                                annotation is in the file and poppler reports nothing.
+      #   the byte scan                COMPLETE for the engines in this matrix, and it is
+      #                                ours. If an engine ever wrote its annotations into a
+      #                                compressed object stream the scan would answer an
+      #                                empty list, which reads exactly like an engine that
+      #                                drew no links.
+      #
+      # So the scan is the answer and poppler is its witness: anything poppler found that
+      # the scan did not means THE SCAN is broken, and the raise says so in the harness's
+      # own voice. A fixture that asserts on this therefore cannot blame an engine for a
+      # reader's blind spot — which is the whole reason the two are read together rather
+      # than picking whichever one is convenient.
+      def links(pdf_path)
+        require_tools!
+
+        scanned = Inspector.uri_annotations_at(pdf_path)
+        witnessed = Inspector.text_links_at(pdf_path)
+        missed = witnessed - scanned
+        return scanned if missed.empty?
+
+        raise ProbeFailed,
+              "the harness's link reader missed #{missed.inspect}, which pdftohtml found in " \
+              "the same file. This is a HARNESS failure, not an engine one: the byte scan " \
+              'reads only uncompressed annotation dictionaries, and this document has ' \
+              'annotations it cannot see. Do not read a red cell here as the engine ' \
+              'drawing no links.'
       end
 
       def read_ppm_pixel(bytes, x_fraction, y_fraction)

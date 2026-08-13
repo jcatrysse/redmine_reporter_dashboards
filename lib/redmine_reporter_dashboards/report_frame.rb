@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'report_document'
+
 module RedmineReporterDashboards
   # The sandboxed frame a rendered report is displayed in — ONE construction site.
   #
@@ -24,7 +26,10 @@ module RedmineReporterDashboards
   # copy used twice, not two copies that can drift — which is the property the original
   # comment was protecting, kept while making it reachable.
   #
-  # No `html_safe` anywhere in this file (INV-9, and the `no_html_safe` gate). The frame is
+  # No `html_safe` anywhere in this file (INV-9; the `no_html_safe` gate T-27's `Accept:` names
+  # does not exist yet, so this is a property of the file rather than an enforced one — a
+  # review pointed out that citing an unwired gate reads as coverage that is not there). The
+  # frame is
   # built with `content_tag`, whose `srcdoc:` value is escaped as an attribute by Rails, and
   # the document string is deliberately NOT marked safe: it is attribute DATA, not markup
   # the page parses. The frame's own document is parsed by the browser inside an opaque
@@ -50,10 +55,41 @@ module RedmineReporterDashboards
       "default-src 'none'; img-src data:; style-src 'unsafe-inline'; " \
       "script-src 'unsafe-inline'"
 
+    # THE TWO SURFACES, SAID ONCE — T-38.
+    #
+    # These used to be string literals at three call sites (the helper's default and two
+    # widget partials), which is the shape HANDOVER §1 records as "when you find the same
+    # regexp in three files, the fourth copy is the bug". Only the HEIGHT differs between
+    # them; every security token is on the element and comes from here.
+    #
+    # --- `box` IS NOT IN EITHER OF THEM, AND THE FIRST VERSION PUT IT IN ONE -------------
+    #
+    # `chrome_no_design_tokens.sh` took the frame's own `border` and `background` away, so
+    # something else has to draw its edge, and Redmine's `box` is the native answer (§9b:
+    # "adopts Redmine's own markup, classes and icon set per version" — it has carried a
+    # padded, bordered container since 1.x, painted from `--oc-gray-*` on 7.0 and from hex
+    # on the older branches). The first version put `box` ON THE IFRAME, and an independent
+    # review rejected it with two reasons, both right:
+    #
+    #   * `templates/preview.html.erb:66` ALREADY wraps the frame in `<div class="box">`, so
+    #     the preview became a box inside a box — the exact defect the widget variant exists
+    #     to avoid, missed because the reasoning only considered `.mypage-box`.
+    #   * `.box` carries `padding: 10px` and a `1px` border, and `.reporter-report-frame` is
+    #     `width: 100%` with no `box-sizing` — and Redmine 7.0's stylesheet sets no universal
+    #     `border-box`. Content-box arithmetic makes the used width overflow its container by
+    #     22px.
+    #
+    # So `box` goes on a CONTAINER, which is what Redmine puts it on everywhere — never on a
+    # replaced element. `templates/show.html.erb` wraps the frame in one; `preview` already
+    # did; the widget surfaces are inside `.mypage-box`, which is the same container under
+    # another name.
+    PAGE_CHROME = 'reporter-report-frame'
+    WIDGET_CHROME = 'reporter-report-frame reporter-report-frame--widget'
+
     class << self
       # The frame element. `title:` is supplied by the caller so each surface can name it
       # in its own words while the security tokens stay here.
-      def frame(body, title:, css_class: 'reporter-report-frame')
+      def frame(body, title:, css_class: PAGE_CHROME)
         view.content_tag(:iframe, '',
                          srcdoc: document(body),
                          sandbox: SANDBOX,
@@ -61,15 +97,27 @@ module RedmineReporterDashboards
                          title: title)
       end
 
-      # The standalone document the frame parses. Assembled here, with the policy, so the
-      # two cannot be separated by an edit to one of two files.
+      # The standalone document the frame parses. The POLICY is assembled here, and
+      # nowhere else, so the sandbox and the body it constrains cannot be separated by
+      # an edit to one of two files.
+      #
+      # T-38 MOVED THE REST OF THE DOCUMENT to `ReportDocument`, and the property this
+      # comment used to protect is unchanged: that module never invents a `head`, it
+      # only concatenates the one its caller owns. What it adds is the report
+      # stylesheet — which the PDF binding needs identically, and a second assembler
+      # is how the HTML view and the PDF stop being the same document (§9b.4).
+      #
+      # `style-src 'unsafe-inline'` is what makes the inlined stylesheet legal under
+      # this policy; a `<link>`ed one would be a fetch `default-src 'none'` denies.
       def document(body)
-        <<~HTML
-          <!DOCTYPE html>
-          <html><head><meta charset="utf-8">
-          <meta http-equiv="Content-Security-Policy" content="#{CONTENT_SECURITY_POLICY}">
-          </head><body>#{body}</body></html>
-        HTML
+        ReportDocument.wrap(body, head: csp_meta)
+      end
+
+      # The policy, as the element that carries it. One method so the string appears
+      # once and the `document` above reads as what it is: a policy plus a body.
+      def csp_meta
+        %(<meta http-equiv="Content-Security-Policy" ) +
+          %(content="#{CONTENT_SECURITY_POLICY}">\n)
       end
 
       private
