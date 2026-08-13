@@ -31,6 +31,33 @@ the intended tree BEFORE launching review agents and diff the whole thing agains
 snapshot, never spot-check lines. And if a commit genuinely cannot wait, stage EXPLICIT PATHS
 the agents do not touch (docs, locales) rather than everything.
 
+**A `cd` INSIDE A MUTATION HARNESS'S COMMAND LEAKS INTO EVERY LATER RESTORE.** T-37's own,
+2026-08-13, and it is the third variant of the same lesson. The harness ran each mutation's
+test through `eval "$cmd"`, and the minitest commands began `cd redmine && …` — unquoted, in
+the harness's own shell. From the tenth mutation on, `cp "$bak" "$file"` resolved `$file`
+relative to `redmine/`, so the restore wrote nowhere and **one mutation stayed in the working
+tree** (`reporter_lint_findings` with its bound removed). The recovery cost nothing for one
+reason only: the tree had been COMMITTED before mutating, so `git diff HEAD` named the file and
+`git checkout HEAD --` undid it. Two rules, and the first is the cheap one. Commit before you
+mutate. And run each command in a SUBSHELL — `( eval "$cmd" )` — so a `cd` cannot outlive it.
+
+**`out=$(cmd); echo "$(basename $f): rc=$?"` REPORTS `basename`'S STATUS, NOT THE COMMAND'S.**
+T-37's own gate sweep, 2026-08-13. It printed `rc=0` for all thirteen gates while
+`zero_reporter.sh` was FAILING — a new file mentioned the base plugin's id in a comment and was
+not on the allowlist. `$?` is read after the command substitution inside `echo`'s argument list
+runs, so it is `basename`'s exit code and it is always 0. The sweep was reported as evidence, and
+it was evidence of nothing. Capture the status on its OWN line — `cmd; rc=$?` — before anything
+else runs. This is §7's "a check that could not run looks exactly like a check that passed", one
+level out: a check that RAN, and a reader that lost the answer.
+
+**A DETECTOR WITH NO NEGATIVE CASE IS AN EMPTY ARRAY WITH A NAME.** T-37's thumbnail staleness
+check, found by mutation: replacing `next if was == digest(entry)` with a bare `next` killed
+the whole check and the suite stayed green. Four examples covered it — that a thumbnail exists,
+that it is a real PNG, that the recorded digest equals the body's — and every one of them
+passes against a method that answers `[]` unconditionally, because none of them had ever shown
+it a CHANGED body. When you write something whose job is to REPORT a condition, the test that
+matters is the one that creates the condition.
+
 **A MUTATION HARNESS WITH ONE SHARED BACKUP FILE WILL PUT ONE SUBJECT INTO ANOTHER.** T-38's
 own, 2026-08-13: `mutate()` copied its target to `/tmp/mut.bak`, patched, ran a spec and copied
 the backup back. Two batches ran concurrently — one over `template_linter.rb`, one over
@@ -1641,6 +1668,24 @@ plugin or the vendor gem, each listed with its reason in
   broken spec, not a missing gem). `gem install rspec activesupport activerecord pg liquid
   --no-document` fixes both. The rspec-from-inside-Redmine path CI uses does not need them because
   Redmine's own bundle supplies them.
+- **THE STARTER GALLERY'S RENDER CHECK NEEDS DATA, AN ACTOR AND A NON-ROOT USER** (T-37).
+  `rake reporter_dashboards:gallery:verify` renders five templates on every REGISTERED engine, so
+  it needs all three installed and a database with issues and time entries in it:
+
+      cd redmine && LANG=C.UTF-8 RAILS_ENV=test bundle exec rake db:fixtures:load
+      bundle exec rails runner 'Project.find(1).enable_module!(:reporter_dashboards_reports)'
+
+  Redmine's own fixtures give project 1 seven issues and three time entries, which is what makes
+  the per-issue starter and the spent-time starter mean anything — over an empty scope all five
+  render nothing and report it as five passes, which is why the task REFUSES without
+  `RRD_PROJECT` and without `RRD_ACTOR`. Chromium still refuses to run as root, so the run goes
+  through the `rrdbench` user; `RRD_THUMBNAILS=1` writes the PNGs **into the mirror**, so copy
+  them back to the source tree afterwards or the next `rsync` deletes them.
+- **A FRESH GOTENBERG CONTAINER FAILS ITS FIRST ONE OR TWO RENDERS.** Measured twice now (T-34's
+  preflight, T-37's gallery): the first two starters came back `engine_crashed` and all five
+  passed on the immediate re-run. It is the browser inside the container starting up. Warm it with
+  one throwaway conversion — or read two false failures and start looking for a defect in the
+  adapter.
 - **Switching Redmine branches** used to fail silently because `test_setup.sh` dirties
   Redmine's Gemfile. `redmine_clone.sh` now discards that and asserts `HEAD`. If you
   see a run reporting one Redmine version while behaving like another, check this first
@@ -1680,6 +1725,9 @@ record as of the last local run.
 | **T-16: the shared-layout falsifier, Chromium 141** | **yes, locally (2026-08-06)** | Run as the non-root user. `chart.chartArea` against `ChartLayout#plot`: left 0.86%, right 0.00%, top 0.22%, bottom 1.17% — **worst edge 1.17% against a 2% tolerance** — and Chart.js used exactly the pinned ticks, min and max with no readiness degradation. **Its first run was red twice**, at 21.88% and then 4.94%, and both were real defects (§Findings E-16) |
 | **T-33: the asset layer, DB-less** | **yes, locally (2026-08-06)** | **1832 rspec examples, 0 failures** (was 1562), 116 pending — 265 new, of which 39 exist because the review found four blockers (§Findings E-17): the policy's fail-closed collapse asserted as an equality of every answer, the fetcher's closed header set through a **recording double**, the resolved-IP check against 18 addresses including the v4-mapped forms, containment against a literal / percent-encoded / **double**-encoded `..` and a **symlink out of the root**, and the structural-inline terminator payloads. All seven gates green, `layer_purity` **strict** with its two new arms **negative-tested in both directions**. `spec/golden` green (166) after `git fetch --unshallow` — see the trap in §1 |
 | **T-38: the conformance corpus, ALL THREE engines, twice** | **yes, locally (2026-08-13)** | 23 fixtures — the three T-38 added included. `chromium_cdp` Chrome/141.0.7390.37 **23/0/0**, `gotenberg` 8.35.0 **22/0/1** (`F-14`, an `:asset_inline` it does not declare), `wkhtmltopdf 0.12.6.1 (with patched qt)` **21/0/2** (`F-11`/`F-12`, `:readiness_expression`). **100 examples, 0 failures** with `RRD_MATRIX_WRITE=1`, and **100 examples, 0 failures, 3 pending** on a second clean run WITHOUT it — which is what makes G9 a pass rather than a regeneration: the committed matrix and a fresh run agree. Run as the non-root `rrdbench` user against a real Gotenberg container on the pinned digest. **The FIRST run of this set used the DISTRO wkhtmltopdf and was 18/1/4**, which produced two false capability declarations before the patched build refuted them — §1, and this is why that entry now says "and at least two other things" |
+| **T-37: the starter gallery, ALL THREE engines** | **yes, locally (2026-08-13)** | **15 of 15** — five starters through `rake reporter_dashboards:gallery:verify` on `chromium_cdp` Chrome/141, `gotenberg` 8.35.0 and `wkhtmltopdf 0.12.6.1 (with patched qt)`. Needs Redmine's own fixtures loaded (`rake db:fixtures:load`, project 1 = 7 issues + 3 time entries), an explicit `RRD_ACTOR`, and a NON-ROOT user for Chromium. **Its own harness found three defects in the starters and one in the tag on the first run**: the spent-time starter asked for `from:`, `measure: sum` and `of: hours` — none of which that source has — and `group_by: user` turned out to be UNREACHABLE on that source, because a bare tag parameter is resolved as a Liquid variable and `user` is always assigned. **A FRESH GOTENBERG CONTAINER FAILED ITS FIRST TWO RENDERS** and passed all five on the second run: that is the browser inside it starting up, documented in §3, and a job that does not warm it reads two false failures |
+| **T-37: the linter's cost, measured before and after** | **yes, locally (2026-08-13)** | The reported hold-a-worker defect, closed. `TemplateLinter.analyse` on a 512 KiB body of `é` — exactly `MAX_BODY_BYTES`, so the bound never protected it — **35.6 s → 0.002 s**. The real 33 KB example **0.277 s → 0.028 s**; a tag-dense multi-byte body at the bound **39.7 s → 0.71 s**; 116 KB of tag-dense ASCII **1.21 s → 0.18 s**. Three changes, none of which alters a finding: the body is scanned as BYTES (every pattern asserted ASCII-only; the column and the excerpt are decoded back so both are still counted in characters), `HtmlScanner` jumps to the next `[<{]` rather than stepping per character, and the two region lists are computed once per analysis instead of about fifty times. The whole linter suite went from **41 s to 0.35 s**, which is the same measurement from the other side |
+| **T-37: 14 mutations, 1 survivor, 1 defect in the harness itself** | **yes, locally (2026-08-13)** | Round 1: 7 killed, **1 SURVIVED** (the thumbnail staleness detector — see §1, it had four tests and every one passed against a version that always answered `[]`), 1 plant missed, and then **the harness left a mutation in the working tree** because a `cd` in a minitest command leaked into every later restore. Recovered from git in one command, because the tree had been committed before mutating. Round 2 after the fixes: **7 killed, 0 survivors**, tree verified clean |
 | **T-13: the conformance corpus, BOTH engines, LOCALLY** | **yes (2026-08-06) — first time for wkhtmltopdf outside CI** | On the build CI uses (`0.12.6.1`, **patched qt**): `chromium_cdp` Chrome/141.0.7390.37 **20 pass / 0 fail / 0 skip**, `wkhtmltopdf` **18 pass / 0 fail / 2 skip** — 67 examples, 0 failures, and the two skips are `:readiness_expression`, which E-5 accounted for. **Nothing is unexplained, so E-5's promotion condition was met — and the curator TOOK the decision on 2026-08-06** (§Findings E-18, and E-5 is now closed). The matrix has since been regenerated from this run and carries wkhtmltopdf's cells. Run as the non-root `rrd` user with `RRD_CONFORMANCE=1`. **On the DISTRO build it is 17/1/2 and the failure is the footer fixture — that build cannot do footers at all**; see §1 |
 | **OQ-L settled by measurement — Mermaid 11.16.1 through both engines** | **yes, locally (2026-08-06)** | One probe document, both engines. Chromium 141: `mermaid.run()` resolves and both node labels extract from the PDF as SVG text. wkhtmltopdf 0.12.6.1 patched: **`PROBE-NO-MERMAID-GLOBAL`** — the bundle never defines its global, because Mermaid 11 is an esbuild IIFE opening with `\|\|=` (ES2021) that Qt WebKit cannot parse (`--debug-javascript` names it: `SyntaxError: Parse error`, once, at
 the bundle's script line) — established by a DISCRIMINATOR, not inferred: two three-line documents differing only in `x.a = x.a \|\| 1` versus `x.a \|\|= 1` print `ES5-OK-1` and `INIT` respectively, and `INIT` means the statement BEFORE the assignment never ran, so the whole script block failed to parse. That rules out a timeout, the 3.5 MB size (a same-size ES5-only script runs fine) and the probe's
@@ -1769,6 +1817,18 @@ declaration, no matrix cell.
 ---
 
 ## 4b. What the next session should start with
+
+**T-37 LANDED ON 2026-08-13 AND WITH IT ALL 38 NUMBERED TASKS ARE DONE.** What is left is
+**T-27** (which owns a decision that has been waiting for it — what `ReporterPresence`'s
+detection is FOR, now that nothing is patched on its answer and its only consumers are a boot log
+and one glue require), the T-26 remainder (**S-30**, and read §Findings S-30 before touching it:
+the deletion was attempted, measured at 166 of 249 examples red, and reverted), and T-03's twelve
+render performance cells, which the curator said to leave. `docs/plan/NEXT-SESSION-PROMPT.md` is
+written for T-27 and carries the run recipes, including the two the gallery added.
+
+**One thing T-37 leaves that is not a task:** `starter-gallery`, the CI job it added, is the only
+one with both a database and all three engines, and **it has never run**. Read it before trusting
+what it says.
 
 **THE THREE OPEN DECISIONS ARE TAKEN (curator, 2026-08-08). T-31 IS UNBLOCKED and its entry in
 `implementation-plan.md` has been rewritten to match.** Read §Findings **S-13** first — not
