@@ -38,13 +38,17 @@ Verified at HEAD, on Redmine **7.0-stable** with **PostgreSQL 16**, standalone (
     starter gallery      15 of 15 — five starters x three engines, measured locally
     script/migrate_updown.sh rc=0 (G11), .codex/check_ruby_floor.sh rc=0
 
-**CI HAS BEEN READ, AND IT WAS NOT GREEN.** T-38's run (31694811039, `1324c5a`) was 22 of 26
-jobs green with **all four `RSpec` jobs red** — a source-level spec whose glob rejected any path
-containing `/redmine/`, which is every path once the plugin is installed the way CI installs it.
-Fixed in `a321ab9`, and the fix is verified in BOTH invocations. **Read the run for the head you
-inherit rather than trusting this paragraph**, and reproduce the rspec job locally before you
-push — the recipe is in HANDOVER §1. **T-37 also added a job**, `starter-gallery`, the only one
-with both a database and all three engines, and it had never run when this was written.
+**CI HAS BEEN READ, TWICE, AND THAT IS NEW HERE.** T-38's run (31694811039, `1324c5a`) was 22
+of 26 green with **all four `RSpec` jobs red** — a source-level glob that rejected any path
+containing `/redmine/`, which is every path once the plugin is installed the way CI installs it,
+and one example in that file had been passing vacuously on an empty glob. Fixed in `a321ab9`.
+T-37's run 250 (`6bc7d42`) is then **26 of 27 green**: every RSpec job recovered, and the one red
+cell is the new `starter-gallery` job at **14 of 15** — `issue-document / chromium_cdp` timed out
+as the FIRST render of the job while the other four chromium renders passed, which is a cold pool
+rather than a starter. Every engine is warmed through `render:preflight` now (and the Gotenberg
+warm-up it replaced had been posting the wrong form field, so it had never warmed anything).
+**Read the run for the head you inherit rather than trusting this paragraph**, and reproduce the
+rspec job locally before you push — the recipe is in HANDOVER §1.
 
 ## T-27, and the decision it owns
 

@@ -530,20 +530,44 @@ jobs:
           bundle exec rails runner 'Project.find(1).enable_module!(:reporter_dashboards_reports)'
         working-directory: redmine
 
-      # A FRESH GOTENBERG CONTAINER FAILS ITS FIRST RENDER — measured, and recorded in
-      # HANDOVER §3. It is the browser inside it starting up, not a defect in the adapter, and
-      # a job that did not warm it would report two of five starters red on every run.
-      - name: Warm the Gotenberg browser
+      # EVERY ENGINE IS WARMED, AND THE FIRST VERSION OF THIS STEP WARMED NOTHING.
+      #
+      # A cold engine fails its FIRST render and passes every one after it. Measured twice:
+      # locally a fresh Gotenberg container failed two of five starters and then passed all
+      # five (HANDOVER §3), and this job's own first CI run reported
+      # `issue-document / chromium_cdp FAIL engine/timeout` — the first render of the job, on
+      # the engine that has to start a browser — while the other four chromium renders passed.
+      # 14 of 15, and the one red cell was about the runner rather than about the starter.
+      #
+      # `render:preflight` is the plugin's OWN diagnostic and it exists for exactly this: it
+      # starts every registered engine and draws its probe document. Warming through it rather
+      # than through curl means the warm-up uses the same adapters, the same pool and the same
+      # deadline as the measurement that follows.
+      #
+      # `|| true`, deliberately: its verdicts are `render-smoke`'s to enforce, and a preflight
+      # check failing here must not be reported as a starter that does not render.
+      #
+      # The curl half is kept only to wait for the container's port, and its payload is fixed:
+      # Gotenberg requires the file to be named `index.html` and answered
+      # *"form file 'index.html' is required"* to the first version — a warm-up that 400s is a
+      # warm-up that did not happen, which is §7's "a check that could not run looks exactly
+      # like a check that passed" wearing a different hat.
+      - name: Warm every engine
+        env:
+          CHROME_PATH: ${{ steps.browser.outputs.path }}
         run: |
           for attempt in 1 2 3 4 5; do
             code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/health || true)"
             [ "$code" = "200" ] && break
             sleep 3
           done
-          printf '<html><body>warm-up</body></html>' > /tmp/warm.html
+          printf '<html><body>warm-up</body></html>' > /tmp/index.html
           curl -s -u rrd:s3cret -o /tmp/warm.pdf \
-            -F 'files=@/tmp/warm.html' http://127.0.0.1:3000/forms/chromium/convert/html || true
-          head -c 5 /tmp/warm.pdf || true
+            -F 'files=@/tmp/index.html;filename=index.html' \
+            http://127.0.0.1:3000/forms/chromium/convert/html
+          head -c 5 /tmp/warm.pdf
+          echo
+          cd "$GITHUB_WORKSPACE/redmine" && bundle exec rake reporter_dashboards:render:preflight || true
 
       # THE RENDER, all five starters against all three engines. Exit 1 on any failure, and
       # the report names the starter, the engine and the reason — which is how a red cell here

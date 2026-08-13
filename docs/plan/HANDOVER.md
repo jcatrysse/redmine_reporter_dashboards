@@ -1702,11 +1702,20 @@ plugin or the vendor gem, each listed with its reason in
   `RRD_PROJECT` and without `RRD_ACTOR`. Chromium still refuses to run as root, so the run goes
   through the `rrdbench` user; `RRD_THUMBNAILS=1` writes the PNGs **into the mirror**, so copy
   them back to the source tree afterwards or the next `rsync` deletes them.
-- **A FRESH GOTENBERG CONTAINER FAILS ITS FIRST ONE OR TWO RENDERS.** Measured twice now (T-34's
-  preflight, T-37's gallery): the first two starters came back `engine_crashed` and all five
-  passed on the immediate re-run. It is the browser inside the container starting up. Warm it with
-  one throwaway conversion — or read two false failures and start looking for a defect in the
-  adapter.
+- **A COLD ENGINE FAILS ITS FIRST RENDER — ANY ENGINE, NOT JUST GOTENBERG.** Measured three
+  times now. A fresh Gotenberg container failed the first two starters locally and passed all
+  five on the immediate re-run (`engine_crashed`); and the `starter-gallery` job's first CI run
+  reported `issue-document / chromium_cdp FAIL engine/timeout` — **the first render of the job**,
+  on the engine that has to start a browser — while the other four chromium renders passed. **14
+  of 15, and the red cell was about the runner rather than about the starter.**
+  Warm every engine through `rake reporter_dashboards:render:preflight`, which starts each one
+  and draws its probe with the same adapters, pool and deadline the measurement will use. Do not
+  raise the timeout: that hides a real property of a cold pool.
+- **A WARM-UP THAT 400s IS A WARM-UP THAT DID NOT HAPPEN.** The same CI run's Gotenberg warm-up
+  posted `-F 'files=@/tmp/warm.html'` and got *"form file 'index.html' is required"* — Gotenberg
+  names the entry point, and the step reported success because `curl` exited 0. It is §7's "a
+  check that could not run looks exactly like a check that passed" wearing a different hat: assert
+  something about the RESULT of a warm-up, or it is a sleep with extra steps.
 - **Switching Redmine branches** used to fail silently because `test_setup.sh` dirties
   Redmine's Gemfile. `redmine_clone.sh` now discards that and asserts `HEAD`. If you
   see a run reporting one Redmine version while behaving like another, check this first
