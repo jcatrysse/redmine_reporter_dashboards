@@ -34,9 +34,14 @@ module RedmineReporterDashboards
       # --- REMOVAL CONDITION, INV-7-SHAPED, STATED ON ARRIVAL ---
       #
       # It goes when: (1) `:chromium_cdp` has been green in the render-smoke job for two
-      # releases, AND (2) no supported install still selects it, AND (3) the shims in
-      # `glue/legacy/wk_legacy_shims.rb` have no other caller. Not "when it feels old" —
-      # three conditions somebody can check.
+      # releases, AND (2) no supported install still selects it. Not "when it feels old" —
+      # conditions somebody can check.
+      #
+      # There used to be a third: "the ES5 shims have no other caller". **It is satisfied and
+      # the shims are deleted** (T-26a, 2026-08-12). Their only caller was the base plugin's
+      # PDF patch, which went with the rest of that integration, and this adapter never used
+      # them: `{% chart %}` emits inline SVG on the PDF binding and runs no JavaScript at
+      # all, so there is nothing here for a 2011 engine to be missing.
       #
       # --- THE RUNAWAY-SCRIPT GUARD GOES BACK ON ---
       #

@@ -24,26 +24,16 @@
 #
 # Format: <path><TAB or spaces><reason>
 
-# --- Detection and gating of the optional dependency. Cannot be removed while the
-# --- integration exists at all: something has to name what it is looking for.
+# --- Detection and the ONE thing still loaded on its answer.
 lib/redmine_reporter_dashboards/reporter_presence.rb   owns the detection; PLUGIN_ID names the plugin being looked for
-lib/redmine_reporter_dashboards.rb                     routes the reporter-only patch list behind reporter_present?
+lib/redmine_reporter_dashboards.rb                     routes the one remaining reporter-only require behind reporter_present?
 init.rb                                                logs which mode the plugin booted in; documents that reporter is optional
 
-# --- The integration surface itself: code that only runs when reporter is present.
-# --- T-26a emptied this section of WIDGETS. Increment 2 took the project dashboard
-# --- (`project_page.rb`, the dashboard controller, its helper); increment 3 took my-page
-# --- (`my/_report.erb` and both `my/blocks/` partials, now rendering this plugin's own
-# --- templates through WidgetReport + Reporting::ReportRun). `reporter_report_templates.rb`
-# --- went with them — it existed to ask whether the base plugin's classes resolve, and
-# --- nothing asks any more.
-# ---
-# --- ONE ENTRY IS LEFT AND IT IS NOT A WIDGET. `report_patch` improves the BASE PLUGIN'S
-# --- own PDF output (a binary fallback, and polyfills for its wkhtmltopdf call). No code of
-# --- ours has called it since increment 2 replaced the widget export. Deleting it is a
-# --- behaviour change for installs still running reporter, so it is a CURATOR decision
-# --- rather than a tidy-up, and it is the last thing between this list and `strict`.
-lib/redmine_reporter_dashboards/patches/report_patch.rb          patches reporter's Report#to_pdf
+# --- THE WIDGET SURFACE IS GONE (T-26a, 2026-08-12). This section used to list both report
+# --- widgets on two surfaces, their PDF export, the optional-widget machinery, the reporter
+# --- PDF patch and its ES5 shims. All deleted: `patches/report_patch.rb`,
+# --- `glue/legacy/wk_legacy_shims.rb`, `reporter_report_templates.rb`, `my/_report.erb`.
+# --- Nothing in this plugin PATCHES the base plugin any more.
 
 # --- Historical record. Comments only; no executable reference.
 lib/redmine_reporter_dashboards/positioned.rb          comments naming the vendor gem method it replaced
@@ -77,6 +67,8 @@ lib/redmine_reporter_dashboards/import/runner.rb         [permanent] T-24 copies
 lib/redmine_reporter_dashboards/template_linter.rb       [permanent] usage groups name the gem the accessors come from
 lib/tasks/reporter_dashboards.rake                       [permanent] `rake -T` must say what import:plan surveys
 
-# --- The legacy glue itself (T-07). Named because naming it is the point: this
-# --- directory exists only while the base plugin does, and it is deleted at 1.0.
-lib/redmine_reporter_dashboards/glue/legacy/scope_resolution.rb   says in one line why glue/legacy/ exists at all
+# --- The legacy glue (T-07). ONE FILE, and its deletion was AUTHORISED AND REVERTED —
+# --- see §Findings S-30. `ScopeBinding#bind` falls back to it for every render with no
+# --- owned RenderContext, and the DB-less tag suite uses that path as its harness:
+# --- removing the branch is 166 of 249 examples red. That is a task, not a tidy-up.
+lib/redmine_reporter_dashboards/glue/legacy/scope_resolution.rb   the scope fallback for a render with no owned RenderContext

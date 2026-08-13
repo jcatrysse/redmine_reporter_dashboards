@@ -6,6 +6,12 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
+- **This plugin no longer patches `redmine_reporter` at all.** It used to replace two
+  methods on that plugin's `Report` class to improve *its* PDF output. Nothing here needed
+  that any more, so it is gone — along with the JavaScript compatibility shims it injected,
+  which this plugin's own PDF engine never used. If you still run `redmine_reporter`, its
+  own PDF export goes back to its own behaviour.
+
 - **The report widgets on *My page* no longer need the `redmine_reporter` plugin either —
   and there is now a *spent time* one, which there never was.** With this, no part of the
   plugin needs it: you can uninstall `redmine_reporter` and keep every dashboard widget.
