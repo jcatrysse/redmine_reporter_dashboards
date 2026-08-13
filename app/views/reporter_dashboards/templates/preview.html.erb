@@ -3,7 +3,7 @@
 <% end %>
 
 <%#
-  T-23 / §9b.2 — the preview, in BOTH bindings.
+  T-23 / §9b.2 — the preview, in BOTH bindings. T-37 put the EDITOR on this page.
 
   --- WHY THE PDF HALF IS ALWAYS REPORTED, EVEN WHEN IT COULD NOT RUN ---
 
@@ -13,6 +13,22 @@
   either the PDF was produced (and its engine, version and duration are named), or it was
   not, and the diagnostics panel says why with the correlation id to quote. There is no
   third state in which the reader is left to assume.
+
+  --- WHY THE EDITOR IS HERE (T-37) ---
+
+  The rest of that clause: *"on failure it shows FR-58's diagnostics … **in the editor,
+  next to the code**, which is the only place it is actionable."* It did not: the
+  diagnostics were rendered on a page carrying no code, so the author's next move was the
+  browser's Back button — which loses the render they were reading. The form is the same
+  partial `new` and `edit` render, so a fix-and-preview-again loop needs no navigation and
+  nothing has been saved along the way.
+
+  --- READING ORDER IS THE POINT OF THE LAYOUT ---
+
+  What failed, then the code that failed, then what came out. The diagnostics panel is
+  ABOVE the editor rather than inside the PDF box below it, because an author who has just
+  pressed Preview lands at the top of the page and the answer to "what happened" must not
+  be below the fold.
 %>
 <h2><%= l(:label_preview) %><% if @template.name.present? %>: <%= @template.name %><% end %></h2>
 
@@ -23,54 +39,78 @@
       would have nowhere to go. The first version of this block tested `@template` and
       therefore never rendered at all. %>
   <% if @preview_base %>
-    <%= link_to l(:button_back),
-                edit_project_reporter_template_path(@project, @preview_base),
-                class: 'icon icon-edit' %>
+    <%= link_to l(:label_reporter_template),
+                project_reporter_template_path(@project, @preview_base),
+                class: 'icon icon-list' %>
   <% end %>
 </div>
 
 <%# NO OUTCOME MEANS THE SUBJECT WAS REFUSED BEFORE IT RAN — bad page geometry in the
-    request body, which reaches `Integer()` and a closed list further down. The errors
-    are the whole page in that case; there is nothing to preview. %>
+    request body, which reaches `Integer()` and a closed list further down. The errors say
+    which field; the editor below is where it gets fixed, which is why this is no longer
+    the whole page (T-37 — it used to be, and the only way on was Back). %>
 <% if @outcome.nil? %>
   <%= error_messages_for 'template' %>
+<% elsif @diagnostic %>
+  <%= render partial: 'diagnostics', locals: { diagnostic: @diagnostic } %>
+<% end %>
+
+<%# THE EDITOR, carrying the content that was just previewed rather than what is stored.
+    Save posts to the record when there is one and to the collection when there is not, so
+    an unsaved draft previewed twice is still unsaved. %>
+<% if @preview_base %>
+  <%= render partial: 'editor',
+             locals: { url: project_reporter_template_path(@project, @preview_base),
+                       method: :patch,
+                       preview_url: preview_project_reporter_template_path(@project, @preview_base),
+                       submit_label: l(:button_save) } %>
 <% else %>
-
-<% if @outcome.truncated? %>
-  <%# NEVER SILENTLY TRUNCATED (INV-4's spirit, §9b.2's words): the number shown and the
-      number that exists, both, in the reader's own locale formatting. %>
-  <p class="warning"><%= reporter_preview_bound_notice(@outcome) %></p>
+  <%= render partial: 'editor',
+             locals: { url: project_reporter_templates_path(@project),
+                       method: :post,
+                       preview_url: preview_project_reporter_templates_path(@project),
+                       submit_label: l(:button_create) } %>
 <% end %>
 
-<div class="box">
-<%# §Findings S-14 — the narrowing is stated, never silent. Answers nil for an issue
-    template and for an actor who sees every hour in the project, so this is rendered
-    unconditionally rather than behind a branch a later edit can get wrong. %>
-<% if (rrd_notice = reporter_time_entry_visibility_notice(@template, User.current, @project)) %>
-  <p class="warning" id="reporter-time-entry-visibility"><%= rrd_notice %></p>
-<% end %>
-  <h3><%= l(:label_reporter_preview_pdf) %></h3>
-  <%= render partial: 'degradations', locals: { outcome: @outcome } %>
-
-  <% if @diagnostic %>
-    <%= render partial: 'diagnostics', locals: { diagnostic: @diagnostic } %>
-  <% else %>
-    <p class="icon icon-ok">
-      <%= l(:text_reporter_preview_pdf_ok,
-            engine: "#{@outcome.engine_id} #{@outcome.engine_version}".strip,
-            duration: @outcome.duration_ms) %>
-    </p>
+<% if @outcome %>
+  <% if @outcome.truncated? %>
+    <%# NEVER SILENTLY TRUNCATED (INV-4's spirit, §9b.2's words): the number shown and the
+        number that exists, both, in the reader's own locale formatting. %>
+    <p class="warning"><%= reporter_preview_bound_notice(@outcome) %></p>
   <% end %>
-</div>
 
-<div class="box">
-  <h3><%= l(:label_reporter_preview_html) %></h3>
-  <% if @outcome.sections.any? %>
-    <% @outcome.sections.each do |section| %>
-      <%= reporter_report_frame(section) %>
+  <div class="box">
+  <%# §Findings S-14 — the narrowing is stated, never silent. Answers nil for an issue
+      template and for an actor who sees every hour in the project, so this is rendered
+      unconditionally rather than behind a branch a later edit can get wrong. %>
+  <% if (rrd_notice = reporter_time_entry_visibility_notice(@template, User.current, @project)) %>
+    <p class="warning" id="reporter-time-entry-visibility"><%= rrd_notice %></p>
+  <% end %>
+    <h3><%= l(:label_reporter_preview_pdf) %></h3>
+    <%= render partial: 'degradations', locals: { outcome: @outcome } %>
+
+    <% if @diagnostic %>
+      <%# THE PANEL IS NOT REPEATED HERE. It is above the editor, which is where an author
+          reads it; this line exists so that the PDF section is never silent about its own
+          outcome, which is the one thing §9b.2 forbids. %>
+      <p class="icon icon-warning"><%= l(:text_reporter_preview_pdf_failed) %></p>
+    <% else %>
+      <p class="icon icon-ok">
+        <%= l(:text_reporter_preview_pdf_ok,
+              engine: "#{@outcome.engine_id} #{@outcome.engine_version}".strip,
+              duration: @outcome.duration_ms) %>
+      </p>
     <% end %>
-  <% else %>
-    <p class="nodata"><%= l(:text_reporter_preview_no_html) %></p>
-  <% end %>
-</div>
+  </div>
+
+  <div class="box">
+    <h3><%= l(:label_reporter_preview_html) %></h3>
+    <% if @outcome.sections.any? %>
+      <% @outcome.sections.each do |section| %>
+        <%= reporter_report_frame(section) %>
+      <% end %>
+    <% else %>
+      <p class="nodata"><%= l(:text_reporter_preview_no_html) %></p>
+    <% end %>
+  </div>
 <% end %>

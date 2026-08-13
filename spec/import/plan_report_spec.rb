@@ -145,8 +145,24 @@ RSpec.describe RedmineReporterDashboards::Import::PlanReport do
     it 'prints the rule, the line and the excerpt for each finding' do
       text = described_class.render(result(templates: [broken])).join("\n")
 
-      expect(text).to match(/ERROR\s+line 1\s+footer\.engine_page_token/)
+      expect(text).to match(/ERROR\s+line 1:\d+\s+footer\.engine_page_token/)
       expect(text).to match(/> <footer>\[page\]<\/footer>/)
+    end
+
+    # T-37 — THE COLUMN IS PRINTED HERE TOO, and that is the clause rather than a
+    # decoration: FR-71 puts the editor's panel and this report behind one linter, and
+    # `Finding#position` is the one method both read. A report that printed the line
+    # while the panel printed line and column would be two vocabularies for one
+    # position, which is exactly the drift the shared-linter rule exists to stop.
+    #
+    # The number is asserted EXACTLY. `<script>xAxes: []` puts `xAxes` at character 9,
+    # so a column that is off by one — or is a byte offset, or is 0-based — fails here
+    # rather than being read as "close enough" by whoever looks at the panel.
+    it 'prints the column beside the line, and it points at the match' do
+      text = described_class.render(result(templates: [template(1, body: '<script>xAxes: []</script>')]))
+                            .join("\n")
+
+      expect(text).to match(/ERROR\s+line 1:9\s+chartjs2\.scales_axes/)
     end
 
     it 'distinguishes a warning from an error in the margin' do
@@ -156,8 +172,8 @@ RSpec.describe RedmineReporterDashboards::Import::PlanReport do
       both = template(2, body: "<script>xAxes: []\nbeginAtZero: true</script>")
       text = described_class.render(result(templates: [warned, both])).join("\n")
 
-      expect(text).to match(/ERROR\s+line 1\s+chartjs2\.scales_axes/)
-      expect(text).to match(/warning line 2\s+chartjs2\.begin_at_zero_moved/)
+      expect(text).to match(/ERROR\s+line 1:\d+\s+chartjs2\.scales_axes/)
+      expect(text).to match(/warning line 2:\d+\s+chartjs2\.begin_at_zero_moved/)
     end
 
     it 'never prints a template body, only bounded excerpts' do

@@ -82,3 +82,18 @@
 .reporter-report-frame--widget {
   min-height: 20em;
 }
+
+/* T-37 - the lint panel's excerpt cell. LAYOUT ONLY, and that is enforced rather than
+   observed: `script/gates/chrome_no_design_tokens.sh` refuses a colour, a typeface, a
+   font size, a line height, a custom property or an @font-face anywhere in this file, so
+   the severity of a finding is carried by its own translated word in the first column and
+   never by a colour this file invents.
+
+   An excerpt is a line of somebody's template bounded to EXCERPT_LIMIT characters, and a
+   minified line has no spaces in it at all - without `break-all` one finding widens the
+   table past the page and the whole panel scrolls sideways. */
+.reporter-lint-excerpt {
+  display: inline-block;
+  max-width: 100%;
+  word-break: break-all;
+}

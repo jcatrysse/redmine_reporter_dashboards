@@ -265,6 +265,54 @@ namespace :reporter_dashboards do
     end
   end
 
+  # T-37 — THE TASK §9b.1 NAMES, which had never been written.
+  #
+  # §9b.1 describes the editor's panel as *"fed by the same linter that runs in
+  # `rake reporter_dashboards:lint_templates`"*. That sentence has been in the spec since
+  # the authoring section was written and the task it names did not exist, so the parity it
+  # promised had nothing to be parallel to — and the editor had no panel either.
+  #
+  # It is deliberately NOT under `migrate_from_reporter:`. That namespace surveys the base
+  # plugin's rows through raw SQL before a migration; this reads OUR templates through our
+  # own model, after one. Same linter, different subject, and `Import::PlanReport` versus
+  # `LintReport` is the same split one level up.
+  #
+  # `find_project` is `ExchangeTasks`', not a second parser: `RRD_PROJECT` already accepts
+  # an id or an identifier for `export:bundle`, and two spellings of one argument is how an
+  # operator learns to distrust the whole set.
+  desc 'Lint every report template in this installation (RRD_PROJECT=id|identifier limits ' \
+       'it to one project; writes nothing; exit 1 if any template has an ERROR)'
+  task lint_templates: :environment do
+    require File.expand_path('../redmine_reporter_dashboards/lint_report', __dir__)
+    require File.expand_path('../redmine_reporter_dashboards/exchange_tasks', __dir__)
+
+    begin
+      project = RedmineReporterDashboards::ExchangeTasks.find_project(ENV['RRD_PROJECT'])
+    rescue RedmineReporterDashboards::ExchangeTasks::Refused => e
+      # EXIT 2 for "your arguments were wrong", the same code `export:bundle` uses, so a
+      # script can tell a bad argument from a template with an error.
+      warn e.message
+      exit 2
+    end
+
+    scope = RedmineReporterDashboards::Template.order(:project_id, :name, :id)
+    scope = scope.where(project_id: project.id) if project
+
+    # NO VISIBILITY SCOPE, AND THAT IS DELIBERATE RATHER THAN AN OVERSIGHT. A rake task
+    # runs as nobody — `User.current` is Anonymous — so `Template.visible` would lint the
+    # public templates of public projects and silently skip every private one, which is
+    # the opposite of what an operator asking "is anything in this installation broken"
+    # needs. The task is reachable only by somebody with a shell on the server, which is
+    # strictly more access than any permission grants, and it prints a template's NAME and
+    # bounded EXCERPTS of its findings, never its body.
+    entries = RedmineReporterDashboards::LintReport.analyse(
+      scope.map { |template| ["##{template.id} #{template.name}", template.content.to_s] }
+    )
+
+    puts RedmineReporterDashboards::LintReport.render(entries)
+    exit 1 if RedmineReporterDashboards::LintReport.failed?(entries)
+  end
+
   namespace :render do
     # T-14. Same shape as `import:plan` and for the same reason: the decisions —
     # which engines, what the exit code means, what happens when there are none —

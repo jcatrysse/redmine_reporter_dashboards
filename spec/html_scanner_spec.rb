@@ -94,6 +94,21 @@ module RedmineReporterDashboards
         it 'does not treat prose `a < b` as an element' do
           expect(contents('<p>a < b and c</p><script>s</script>')).to eq(['s'])
         end
+
+        # T-37 — THE TWO CHARACTERS THE SCAN JUMPS TO ARE `<` AND `{`, and each has a
+        # form that means nothing. The loop used to step one character at a time and fall
+        # through to `index += 1`; it now jumps to the next `[<{]`, so a `<` or `{` that
+        # starts nothing has to advance the index by hand or the jump finds the same
+        # character for ever. These two examples are that guard: with the `+= 1` removed
+        # they do not fail, they HANG, which is why they are separate examples with
+        # nothing else in them.
+        it 'does not stall on a `{` that is neither `{{` nor `{%`' do
+          expect(contents('<p>{ plain brace }</p><script>s</script>')).to eq(['s'])
+        end
+
+        it 'does not stall on a `<` that starts no tag name' do
+          expect(contents('<p>1 < 2 and 3 <= 4</p><script>s</script>')).to eq(['s'])
+        end
       end
 
       # --------------------------------------------------------------
@@ -195,6 +210,23 @@ module RedmineReporterDashboards
 
           expect(contents(source)).to eq(['real'])
           expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 5.0
+        end
+
+        # T-37 — THE SAME DOCUMENT WITH ONE ACCENTED LETTER IN IT, which is the case the
+        # guard above could not see. Character indexing into a multi-byte String is
+        # O(index), so this shape was **quadratic**: measured 1.9 s for 120 KB and 39.7 s
+        # for a body at `TemplateLinter::MAX_BODY_BYTES`. It is 0.03 s now.
+        #
+        # THE BOUND IS DELIBERATELY 100x THE MEASUREMENT. A wall-clock assertion on
+        # somebody else's CI runner is only honest if it fails on an ALGORITHM change
+        # rather than on a slow machine, and the defect it guards against was three orders
+        # of magnitude, not thirty per cent.
+        it 'scans a large MULTI-BYTE document in linear time too' do
+          source = ("<div title=\"{{ a > b }}\">é</div>\n" * 5_000) + '<script>real</script>'
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+          expect(contents(source)).to eq(['real'])
+          expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 3.0
         end
       end
     end

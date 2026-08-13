@@ -32,6 +32,37 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
       expect(ids.tally.select { |_id, n| n > 1 }).to eq({})
     end
 
+    # T-37 — THE PROPERTY THE BYTE SCAN RESTS ON.
+    #
+    # `analyse` binds the body to BINARY so that indexing is O(1) instead of O(index) on a
+    # multi-byte template (see `#scannable` — the measurement is 35.6 s → 0.002 s). That is
+    # only equivalent while every pattern is ASCII-only: a regexp whose SOURCE contains a
+    # non-ASCII character raises `Encoding::CompatibilityError` against a BINARY subject,
+    # so the failure would be an exception in front of an author rather than a wrong
+    # finding — but it would be an exception nobody met until a template happened to reach
+    # that rule. This example is what stops a rule being added with `é` in its pattern.
+    it 'has an ASCII-only pattern for every rule, which is what makes the byte scan safe' do
+      # One rule carries no pattern of its own — the FR-19 interpolation rule is matched
+      # by a method rather than by a regexp — so a nil is a legitimate answer here and
+      # not a hole in the check.
+      offenders = described_class.rules.select(&:pattern)
+                                .reject { |rule| rule.pattern.source.ascii_only? }
+      suppressors = described_class.rules.select(&:suppressed_by)
+                                  .reject { |rule| rule.suppressed_by.source.ascii_only? }
+
+      expect(offenders.map(&:id)).to eq([])
+      expect(suppressors.map(&:id)).to eq([])
+    end
+
+    it 'has an ASCII-only pattern for every usage marker too' do
+      offenders = described_class::USAGE_GROUPS.flat_map do |group, markers|
+        markers.reject { |_label, pattern| pattern.source.ascii_only? }
+               .map { |label, _pattern| "#{group} / #{label}" }
+      end
+
+      expect(offenders).to eq([])
+    end
+
     it 'says what to do, not only what is wrong' do
       # Every message names the replacement or the reason. A finding an author cannot
       # act on is a finding they learn to ignore.
@@ -402,6 +433,137 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
 
     it 'reports a match on the first line' do
       expect(described_class.lint('[page]').map(&:line)).to eq([1])
+    end
+  end
+
+  # T-37 — THE COLUMN, WHICH IS WHAT MAKES THE PANEL POINT AT SOMETHING.
+  #
+  # `[OQ-M]` closed off the gutter (there is no CodeMirror to vendor and a `<textarea>`
+  # cannot draw one), so the editor's panel says "line 4, column 12" in words. Every
+  # number below is asserted EXACTLY, because a column that is out by one, 0-based or
+  # measured in bytes is worse than no column at all: it reads as precision and sends
+  # the author to the wrong place.
+  describe 'the column' do
+    it 'is 1-based, so a match at the very start of the body is column 1' do
+      expect(described_class.lint('[page]').map(&:column)).to eq([1])
+    end
+
+    # `[page]` is used rather than a JavaScript idiom because its rule matches the whole
+    # token: the `setLineDash` rule matches the METHOD NAME, so `ctx.setLineDash` reports
+    # the column of `setLineDash` and not of `ctx`, which is right and makes for an
+    # assertion nobody can read.
+    it 'counts from the start of ITS OWN line, not from the start of the body' do
+      body = "line one\nline two\n<p>[page]</p>\n"
+
+      finding = described_class.lint(body).first
+      expect([finding.line, finding.column]).to eq([3, 4])
+    end
+
+    # THE ONE PROPERTY A BYTE COLUMN WOULD FAIL. `é` is two bytes and one character, so
+    # ten of them shift a character column by 10 and a byte column by 20. This is not
+    # hypothetical for this plugin: the linter's own bound is a BYTE bound
+    # (MAX_BODY_BYTES) while every offset it works with is a character offset.
+    it 'counts characters and not bytes' do
+      body = "<p>#{'é' * 10}[page]</p>"
+
+      expect(described_class.lint(body).first.column).to eq(14)
+    end
+
+    # `collapse` keeps ONE finding per (rule, line) with a count, so the column can only
+    # be one of them. It is the first, which is where an author starts reading.
+    it 'points at the FIRST match when a line carries several of one rule' do
+      finding = described_class.lint('[page] and [topage]').first
+
+      expect(finding.count).to eq(2)
+      expect(finding.column).to eq(1)
+    end
+
+    it 'is set on every finding a real template produces' do
+      body = "<script>xAxes: []\nwindow.status = 'x';\n{{ issue.subject }}</script>\n[page]"
+      findings = described_class.lint(body)
+
+      expect(findings.length).to be >= 3
+      expect(findings.map(&:column)).to all(be_a(Integer))
+      expect(findings.map(&:column)).to all(be >= 1)
+    end
+
+    # The truncation finding is about the BODY rather than a place in it, and the cut is
+    # at a byte offset — see its comment in the linter.
+    it 'is 1 on the truncation finding, which has no meaningful character column' do
+      body = 'x' * (described_class::MAX_BODY_BYTES + 1)
+      truncation = described_class.lint(body).find { |f| f.rule == 'body.truncated' }
+
+      expect(truncation.column).to eq(1)
+    end
+
+    describe '#position — the one spelling both surfaces print' do
+      it 'joins the line and the column' do
+        expect(described_class.lint('[page]').first.position).to eq('1:1')
+      end
+
+      # A Finding assembled outside this module must not turn into "42:" in a panel.
+      it 'degrades to the line alone when a caller built a finding without a column' do
+        finding = described_class::Finding.new(rule: 'x', severity: :error, line: 42,
+                                               excerpt: '', message: 'm')
+
+        expect(finding.position).to eq('42')
+      end
+    end
+  end
+
+  # T-37 — WHAT COMES BACK OUT OF THE BYTE SCAN.
+  #
+  # `analyse` works on a BINARY copy of the body so that indexing is O(1) rather than
+  # O(index) — the fix for a measured 35.6 s analysis. Everything a reader sees has to
+  # come back as valid UTF-8 counted in characters, and these are the examples that say so.
+  describe 'a body that is not plain ASCII' do
+    it 'gives the excerpt back as valid UTF-8, not as bytes' do
+      excerpt = described_class.lint("<p>naïve ünïcödé [page]</p>").first.excerpt
+
+      expect(excerpt).to eq('<p>naïve ünïcödé [page]</p>')
+      expect(excerpt.encoding).to eq(Encoding::UTF_8)
+      expect(excerpt).to be_valid_encoding
+    end
+
+    it 'counts the excerpt limit in characters, so a cut cannot split a character' do
+      long = "<p>#{'é' * (described_class::EXCERPT_LIMIT + 20)}[page]</p>"
+      excerpt = described_class.lint(long).first.excerpt
+
+      expect(excerpt).to be_valid_encoding
+      expect(excerpt.length).to eq(described_class::EXCERPT_LIMIT + 1) # the ellipsis
+    end
+
+    # THE OLD BEHAVIOUR WAS AN EXCEPTION, and it was reachable: a body pasted from a file
+    # in another encoding reaches `Regexp#match` and raises
+    # `ArgumentError: invalid byte sequence in UTF-8`, three frames inside the scanner.
+    # A linter must report on a template it cannot fully read, not 500 on it.
+    it 'lints a body that is not valid UTF-8 instead of raising on it' do
+      body = "<p>[page] \xC3</p>".dup.force_encoding(Encoding::UTF_8)
+
+      findings = described_class.lint(body)
+
+      expect(findings.map(&:rule)).to include('footer.engine_page_token')
+      expect(findings.first.excerpt).to be_valid_encoding
+    end
+
+    it 'reports a line number that is unaffected by multi-byte characters' do
+      body = "é\né\n<p>[page]</p>"
+
+      expect(described_class.lint(body).first.line).to eq(3)
+    end
+
+    # The measurement this replaced: 35.6 s for exactly this body, which is
+    # MAX_BODY_BYTES of one multi-byte character — so the linter's own bound did not
+    # protect the request it now runs in. 0.002 s after the fix; the bound below is three
+    # orders of magnitude of headroom, because a wall-clock assertion on somebody else's
+    # runner must fail on an algorithm and not on a busy machine.
+    it 'analyses a body AT the byte bound without holding the request' do
+      body = 'é' * (described_class::MAX_BODY_BYTES / 2)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      described_class.analyse(body)
+
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 5.0
     end
   end
 

@@ -66,8 +66,29 @@ module RedmineReporterDashboards
       # deadline.
       MAX_REGIONS = 500
 
+      # --- THE SCAN IS OVER BYTES, AND `content_offset` IS A BYTE OFFSET (T-37) ---
+      #
+      # Every position in this class is an index into `@source`, and `String#[]`,
+      # `String#index` and `Regexp#match(str, pos)` are **O(index)** on a multi-byte
+      # String — Ruby walks the encoding from the start to find the nth character. So one
+      # accented letter anywhere in a template made the whole scan quadratic: measured
+      # 1.9 s for a 120 KB document and 39.7 s at `TemplateLinter::MAX_BODY_BYTES`, which
+      # is a request-holding defect on the editor's lint panel (T-37) rather than a
+      # micro-optimisation.
+      #
+      # A BINARY copy indexes in O(1). It is exact rather than approximate because every
+      # pattern and every literal in this class is ASCII, and no byte of a UTF-8
+      # multi-byte sequence can be mistaken for one: continuation bytes are all ≥ 0x80.
+      #
+      # `content` is handed back in the SOURCE'S OWN ENCODING, so a caller passing UTF-8
+      # gets UTF-8 (and it is always valid, because every delimiter this class cuts on is
+      # ASCII). `content_offset` is a BYTE offset — for an ASCII document that is the same
+      # number as before; for a caller that needs a character offset it is a `byteslice`
+      # away, and `TemplateLinter` (the only consumer) works in bytes for the same reason.
       def initialize(source)
-        @source = source.to_s
+        original = source.to_s
+        @encoding = original.encoding
+        @source = original.b
         @length = @source.length
       end
 
@@ -86,20 +107,40 @@ module RedmineReporterDashboards
       # regexp. Each branch consumes a construct whole, which is what makes a `>` inside
       # an attribute or a Liquid expression harmless: it is never looked at as markup
       # because the scanner is not in a state that looks for markup there.
+      #
+      # --- WHY IT JUMPS RATHER THAN STEPS (T-37) ---
+      #
+      # Only two characters can start anything this scanner cares about: `<` (an element
+      # or an `<!--` comment) and `{` (a Liquid expression or tag). The loop used to read
+      # `@source[index]` for every character of the document and fall through to
+      # `index += 1` for almost all of them, which is O(n) String indexings — and
+      # `String#[]` on a MULTI-BYTE string is O(index), because Ruby has to walk the
+      # encoding to find the nth character. That made the whole scan quadratic on any
+      # template containing one accented letter: measured 2.35 s for a 120 KB body, and
+      # `TemplateLinter.analyse` took **35.6 s** at its own 512 KiB bound.
+      #
+      # Jumping to the next `[<{]` is exactly equivalent — every character it skips is one
+      # the old loop's `else` branch skipped too — and it turns the number of indexings
+      # from "one per character" into "one per construct".
+      INTERESTING = /[<{]/.freeze
+
       def scan
         found = []
         index = 0
 
         while index < @length
-          char = @source[index]
+          index = @source.index(INTERESTING, index) || @length
+          break if index >= @length
 
           if liquid_at?(index)
             index = skip_liquid(index)
           elsif comment_at?(index)
             index = skip_comment(index)
-          elsif char == '<' && tag_name_at(index + 1)
+          elsif @source[index] == '<' && tag_name_at(index + 1)
             index = consume_element(index, found)
           else
+            # A `<` that starts no tag name, or a `{` that is not `{{`/`{%`. One past it,
+            # or the jump above would find the same character for ever.
             index += 1
           end
 
@@ -174,7 +215,7 @@ module RedmineReporterDashboards
         tag_end = skip_attributes(after_name)
         return tag_end if tag_end >= @length
 
-        attributes = parse_attributes(@source[after_name...tag_end].to_s)
+        attributes = parse_attributes(slice(after_name, tag_end))
         content_start = tag_end + 1
 
         lowered = name.downcase
@@ -186,23 +227,50 @@ module RedmineReporterDashboards
 
         close = find_end_tag(lowered, content_start)
         found << Region.new(name: lowered, attributes: attributes,
-                            content: @source[content_start...close].to_s,
+                            content: slice(content_start, close),
                             content_offset: content_start)
         close
       end
 
+      # Bytes out of the binary copy, labelled with the encoding the caller handed in.
+      # `dup` because `force_encoding` mutates, and a slice of a frozen source can be
+      # frozen.
+      def slice(from, to)
+        @source[from...to].to_s.dup.force_encoding(@encoding)
+      end
+
       # A tag name only where HTML permits one, so `a < b` in prose is not an element and
       # `</script>` is not confused with `<script>`.
+      #
+      # `\G` PINS THE MATCH TO `index` and reads no further than the name (T-37). This
+      # used to be `@source[index..]&.slice(…)`, which allocated a COPY OF THE REST OF THE
+      # DOCUMENT for every `<` in it — O(n) per tag, so O(n²) for the document, on top of
+      # the multi-byte indexing cost the scan loop pays. `Regexp#match(str, pos)` with `\G`
+      # cannot match anywhere but at `pos`, which is what the `\A` on a sliced tail was
+      # for.
+      TAG_NAME = /\G[A-Za-z][A-Za-z0-9-]*/.freeze
+
       def tag_name_at(index)
-        @source[index..]&.slice(/\A[A-Za-z][A-Za-z0-9-]*/)
+        TAG_NAME.match(@source, index)&.[](0)
       end
 
       # Walk to the `>` that ends the tag, skipping quoted attribute values and Liquid.
       # `<script data-note="a>b">` is the second case a regex gets wrong: `[^>]*>` stops
       # inside the attribute, and everything after it is then read as document text —
       # so the script's content is never linted at all.
+      # Same jump as `scan`, for the same reason and with the same equivalence argument:
+      # the only characters that mean anything inside a tag are the two quotes, the `>`
+      # that ends it and the `{` that starts a Liquid expression, and every other one fell
+      # through to `index += 1`. It matters for an UNCLOSED tag — `<script` with no `>`
+      # walks to the end of the document, which on a multi-byte body was the same
+      # quadratic cost one level down.
+      IN_TAG = /["'>{]/.freeze
+
       def skip_attributes(index)
         while index < @length
+          index = @source.index(IN_TAG, index) || @length
+          break if index >= @length
+
           char = @source[index]
 
           if liquid_at?(index)
@@ -212,6 +280,7 @@ module RedmineReporterDashboards
           elsif char == '>'
             return index
           else
+            # A `{` that is not `{{` or `{%`.
             index += 1
           end
         end

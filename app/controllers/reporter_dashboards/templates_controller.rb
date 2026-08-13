@@ -42,6 +42,7 @@ module ReporterDashboards
     Render = RedmineReporterDashboards::Render
     Archive = RedmineReporterDashboards::Archive
     Template = RedmineReporterDashboards::Template
+    TemplateLinter = RedmineReporterDashboards::TemplateLinter
 
     # DECLARED, because Redmine sets `include_all_helpers = false`
     # (`config/application.rb:73`) — a controller sees its OWN helper and nothing else,
@@ -91,6 +92,7 @@ module ReporterDashboards
       @template = Template.new(project_id: @project.id,
                                author_id: User.current.id,
                                visibility: Template::VISIBILITY_PRIVATE)
+      lint_editor
     end
 
     def create
@@ -106,11 +108,18 @@ module ReporterDashboards
         flash[:notice] = l(:notice_successful_create)
         redirect_to project_reporter_template_path(@project, @template)
       else
+        # THE PANEL IS ON THE 422 TOO. A rejected save re-renders the editor, and the
+        # findings are about the body the author is looking at — leaving `@lint` nil here
+        # would raise in the partial, which is the failure mode a view-level `if` would
+        # hide instead of fixing.
+        lint_editor
         render :new, status: :unprocessable_entity
       end
     end
 
-    def edit; end
+    def edit
+      lint_editor
+    end
 
     def update
       @template.attributes = template_params
@@ -120,6 +129,7 @@ module ReporterDashboards
         flash[:notice] = l(:notice_successful_update)
         redirect_to project_reporter_template_path(@project, @template)
       else
+        lint_editor
         render :edit, status: :unprocessable_entity
       end
     end
@@ -136,6 +146,11 @@ module ReporterDashboards
     # still sees their own work.
     def preview
       @template = preview_subject
+      # THE LINT IS OF WHAT WAS SUBMITTED, and it happens BEFORE the blocking-error return
+      # below: a template refused for a bad page size still shows its findings, because the
+      # page it lands on is the editor and an author fixing one problem should not have the
+      # other list disappear.
+      lint_editor
       # VALIDATED BEFORE IT IS RUN, and `#create`/`#update` are why this was not already
       # covered: they validate on save, and preview is the one action whose subject goes
       # from the request body straight into a render. Without this,
@@ -379,13 +394,43 @@ module ReporterDashboards
     # A saved template is previewed as a COPY carrying the editor's content, so the stored
     # row cannot be modified by a preview even by accident — `dup` drops the id, so
     # nothing downstream can save it either. `@preview_base` is kept separately because
-    # the view needs it for the link back to the editor, which the copy cannot provide.
+    # the view needs it to address the record the copy no longer identifies.
+    #
+    # --- THE ROLE LIST IS CARRIED OVER, AND WITHOUT THIS IT WAS A DATA LOSS (T-37) ---
+    #
+    # `dup` drops the id, and a HABTM reads through the id, so `subject.roles` on the copy
+    # is EMPTY however many roles the stored template has. That cost nothing while the
+    # preview page had no form on it. T-37 put the editor there, so the visibility
+    # fieldset would have rendered every role UNTICKED — and pressing Save from the preview
+    # page would then have cleared the role list of a `visibility: roles` template, quietly,
+    # on a page whose entire purpose is that it changes nothing until you save.
+    #
+    # Assigning `role_ids` on an unsaved record builds the association in memory only;
+    # nothing here writes, which `assert_no_difference` on the join table asserts.
     def preview_subject
       subject = (@preview_base || Template.new).dup
       subject.project_id = @project.id
       subject.author_id = @preview_base&.author_id || User.current.id
+      subject.role_ids = @preview_base.role_ids if @preview_base
       subject.attributes = template_params if params[:template].present?
       subject
+    end
+
+    # ------------------------------------------------------------------ T-37, the lint
+
+    # FR-71 — THE FINDINGS THE EDITOR SHOWS, FROM THE LINTER THE RAKE TASK RUNS.
+    #
+    # One call, in one place, so `new`, `edit`, the two 422s and `preview` cannot come to
+    # lint different things. `TemplateLinter.analyse` is the whole of it: the panel adds no
+    # rule, suppresses none, and re-orders nothing —
+    # `test/functional/reporter_dashboards_lint_parity_test.rb` runs this path and
+    # `rake reporter_dashboards:lint_templates` over one fixture and compares the finding
+    # lists, which is the assertion T-37's `Accept:` line asks for.
+    #
+    # `@template.content.to_s` because a brand-new template's content is nil and a body of
+    # nil is a template with no findings rather than a missing panel.
+    def lint_editor
+      @lint = TemplateLinter.analyse(@template.content.to_s)
     end
 
     # ------------------------------------------------------------------ running

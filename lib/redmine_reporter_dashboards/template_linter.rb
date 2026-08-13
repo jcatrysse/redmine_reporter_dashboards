@@ -48,13 +48,50 @@ module RedmineReporterDashboards
     # (rule, line) with a count, rather than one per match: a line is the unit an
     # author fixes, and `<footer>[page] / [topage]</footer>` printing the same message
     # and the same excerpt twice is noise that teaches the reader to skim.
-    Finding = Struct.new(:rule, :severity, :line, :excerpt, :message, :count, keyword_init: true) do
+    #
+    # --- `column` (T-37) ---
+    #
+    # `technical-spec.md` §9b.1 spells the shape of a finding as
+    # `{line, column, severity, code, message}`, and T-37's lint panel is where that
+    # column is finally read: the panel is beside a `<textarea>` rather than in a
+    # gutter (`[OQ-M]` closed that off), so "line 42, column 17" is the only way it can
+    # point at a place. Three properties of it, all deliberate:
+    #
+    #   1-BASED and in CHARACTERS, not bytes — it is compared against what a person
+    #   counts in an editor, and the offsets it is derived from are character offsets
+    #   (`Regexp#match(str, pos)`), so a template full of `é` would be off by one per
+    #   character if this were a byte column.
+    #
+    #   IT IS THE FIRST MATCH ON THAT LINE, because `collapse` keeps one finding per
+    #   (rule, line) with a count. A line with three `fontSize:` on it reports the
+    #   column of the first and `count: 3`; reporting three findings was rejected
+    #   before this field existed and the reason has not changed.
+    #
+    #   IT IS DERIVED FROM THE SAME SLICE AS `line`, in `finding` below, so the two
+    #   cannot disagree — a line computed one way and a column another is how a panel
+    #   ends up pointing confidently at the wrong place.
+    Finding = Struct.new(:rule, :severity, :line, :column, :excerpt, :message, :count,
+                         keyword_init: true) do
       def error?
         severity == :error
       end
 
       def count
         self[:count] || 1
+      end
+
+      # THE ONE PLACE A POSITION IS SPELLED. `rake …:lint_templates`,
+      # `migrate_from_reporter:plan` and the editor's panel all print this method rather
+      # than formatting `line` and `column` themselves — T-37's `Accept:` line is that
+      # the panel and the rake task are fed by the same linter, and two surfaces that
+      # agree on the numbers while disagreeing on how a position reads are still two
+      # vocabularies for one thing (CLAUDE.md §6).
+      #
+      # Degrades to the line alone rather than printing a trailing colon: every Finding
+      # this module builds carries a column, but a Finding assembled elsewhere (a spec,
+      # a future caller) must not turn into `"42:"` in front of a reader.
+      def position
+        column.nil? ? line.to_s : "#{line}:#{column}"
       end
     end
 
@@ -477,12 +514,31 @@ module RedmineReporterDashboards
     end
 
     class << self
+      # --- THE TWO REGION LISTS ARE COMPUTED ONCE HERE AND PASSED DOWN (T-37) ---
+      #
+      # They used to be recomputed by every caller that wanted them: once per :script
+      # rule, once per :liquid rule, and once more for the usage table — so a template
+      # with 4 000 Liquid expressions scanned itself about fifty times. Measured on a
+      # 116 KB body of `<p>x {{ issue.subject }}</p>`: **1.21 s**, and 11.7 s for the
+      # same body written with one multi-byte character per line, because character
+      # indexing into a multi-byte String is O(index) and every one of those passes pays
+      # it again.
+      #
+      # T-37 is the task that puts the linter behind a synchronous page request, so it is
+      # the task that has to care. Both lists are PURE functions of `text`, which is why
+      # threading them through is a safe change rather than a rewrite — and why they are
+      # passed as arguments rather than memoised in an ivar: this is a module, its
+      # singleton is shared by every Puma thread, and a memo on it would be a race
+      # between two authors' templates.
       def analyse(body)
         text, truncated = bound(body.to_s)
+        text = scannable(text)
+        scripts = script_regions(text)
+        liquid  = liquid_regions_with_offsets(text)
 
         Analysis.new(
-          findings: findings_for(text, truncated),
-          usage: usage_for(text),
+          findings: findings_for(text, truncated, scripts, liquid),
+          usage: usage_for(liquid),
           charts: charts_for(text),
           lines: text.count("\n") + 1,
           truncated: truncated
@@ -511,14 +567,52 @@ module RedmineReporterDashboards
         [text.byteslice(0, MAX_BODY_BYTES).to_s.scrub(''), true]
       end
 
+      # --- THE BODY IS SCANNED AS BYTES, AND THE REASON IS MEASURED (T-37) ---
+      #
+      # Every offset in this module is an index into `text`, and `String#[]` /
+      # `String#index` / `Regexp#match(str, pos)` are **O(index)** on a multi-byte String:
+      # Ruby has to walk the encoding from the start to find the nth character. So a
+      # template containing one accented letter made the whole analysis quadratic —
+      # `analyse` took **35.6 s** on a 512 KiB body of `é`, which is exactly
+      # MAX_BODY_BYTES, so the bound did not protect it. Reported to the curator during
+      # T-38 as a hold-a-worker defect; T-37 is the task that puts this behind a
+      # synchronous page request, so it is the task that fixes it.
+      #
+      # `String#b` gives a BINARY copy, where a character is a byte and indexing is O(1).
+      # Three properties make it safe rather than clever, and each is asserted:
+      #
+      #   EVERY PATTERN IN THIS FILE IS ASCII-ONLY, so matching is unchanged — a
+      #   spec walks PATTERN_RULES, USAGE_GROUPS and the interpolation rule and fails on
+      #   the first non-ASCII source, because a UTF-8 regexp against a BINARY subject
+      #   raises Encoding::CompatibilityError rather than quietly matching differently.
+      #
+      #   THE LINE NUMBER IS UNCHANGED, because it counts `\n` and a newline is one byte
+      #   which cannot appear inside a UTF-8 sequence (continuation bytes are all ≥ 0x80).
+      #
+      #   THE COLUMN AND THE EXCERPT ARE DECODED BACK before they leave, so both are still
+      #   counted in CHARACTERS. That is what `#finding` and `#excerpt_at` do, and the
+      #   multi-byte examples in the spec are what hold it.
+      #
+      # It also stops `analyse` RAISING on a body that is not valid UTF-8 (a stray byte in
+      # a pasted template used to reach `Regexp#match` and produce
+      # `ArgumentError: invalid byte sequence`) — the bytes are now scrubbed out of the
+      # excerpt instead, which is the visible-degradation answer rather than a 500.
+      def scannable(text)
+        text.b
+      end
+
+      # Back to UTF-8 for anything a reader sees. `scrub` because the body may have been
+      # cut mid-character by `bound`, or may never have been valid UTF-8 at all.
+      def decode(bytes)
+        bytes.to_s.dup.force_encoding(Encoding::UTF_8).scrub('')
+      end
+
       # ----------------------------------------------------------------
       # Findings
       # ----------------------------------------------------------------
 
-      def findings_for(text, truncated)
-        scripts = script_regions(text)
-
-        found = PATTERN_RULES.flat_map { |rule| pattern_findings(text, scripts, rule) }
+      def findings_for(text, truncated, scripts, liquid)
+        found = PATTERN_RULES.flat_map { |rule| pattern_findings(text, scripts, liquid, rule) }
         found += script_interpolation_findings(text, scripts)
         found << truncation_finding(text) if truncated
         collapse(found).sort_by { |finding| [finding.line, finding.rule] }
@@ -531,10 +625,10 @@ module RedmineReporterDashboards
         end
       end
 
-      def pattern_findings(text, scripts, rule)
+      def pattern_findings(text, scripts, liquid, rule)
         regions = case rule.scope
                   when :script then scripts
-                  when :liquid then liquid_regions_with_offsets(text)
+                  when :liquid then liquid
                   else [[0, text]]
                   end
 
@@ -572,14 +666,33 @@ module RedmineReporterDashboards
       end
 
       def truncation_finding(text)
+        # COLUMN 1 AND NOT THE END OF THE LINE. This finding is about the body rather
+        # than about a place in it: the cut is at MAX_BODY_BYTES, which is a BYTE
+        # offset, and pointing a character column at it would be a precise-looking
+        # number that is wrong on any body containing one multi-byte character.
         Finding.new(rule: 'body.truncated', severity: :warning, line: text.count("\n") + 1,
-                    excerpt: '',
+                    column: 1, excerpt: '',
                     message: "body is larger than #{MAX_BODY_BYTES} bytes and was linted up to " \
                              'that point only — findings past it are not reported')
       end
 
+      # ONE SLICE FOR BOTH NUMBERS. `line` counts the newlines before the match and
+      # `column` counts the characters after the last of them, so they are two readings
+      # of the same string and cannot contradict each other. Computing the column from a
+      # second `rindex` over the whole text would also work and would be one more place
+      # for an off-by-one to live.
+      #
+      # `text` is BINARY here (see `#scannable`), so the head is sliced in bytes and the
+      # COLUMN IS DECODED — the character count is what a person reads off their editor's
+      # status bar, and the byte count is off by one per accented letter on the line.
       def finding(id, severity, text, offset, message)
-        Finding.new(rule: id, severity: severity, line: line_at(text, offset),
+        head = text[0, offset].to_s
+        last_break = head.rindex("\n")
+        line_head = last_break.nil? ? head : head[(last_break + 1)..].to_s
+
+        Finding.new(rule: id, severity: severity,
+                    line: head.count("\n") + 1,
+                    column: decode(line_head).length + 1,
                     excerpt: excerpt_at(text, offset), message: message)
       end
 
@@ -587,12 +700,14 @@ module RedmineReporterDashboards
       # Usage
       # ----------------------------------------------------------------
 
-      def usage_for(text)
-        liquid = liquid_regions(text)
+      # TAKES THE REGION LIST `analyse` ALREADY BUILT (T-37), rather than scanning the
+      # body a second time for the same `{{ … }}` spans.
+      def usage_for(liquid)
+        bodies = liquid_bodies(liquid)
 
         USAGE_GROUPS.each_with_object({}) do |(group, markers), out|
           counts = markers.each_with_object({}) do |(label, pattern), inner|
-            hits = liquid.sum { |region| region.scan(pattern).length }
+            hits = bodies.sum { |region| region.scan(pattern).length }
             inner[label] = hits if hits.positive?
           end
           out[group] = counts unless counts.empty?
@@ -607,8 +722,8 @@ module RedmineReporterDashboards
       # a migration that a template needs work it does not need. So the two share
       # `inert_spans`, and the asymmetry that would otherwise develop between the
       # finding list and the usage table cannot.
-      def liquid_regions(text)
-        liquid_regions_with_offsets(text).map do |_offset, region|
+      def liquid_bodies(liquid)
+        liquid.map do |_offset, region|
           region.sub(/\A\{[{%]-?/, '').sub(/-?[%}]\}\z/, '')
         end
       end
@@ -624,8 +739,12 @@ module RedmineReporterDashboards
         end
       end
 
+      # `decode` because `text` is BINARY (see `#scannable`) and this string is printed:
+      # the pattern only admits ASCII, so nothing changes but the encoding label, and a
+      # BINARY string reaching a view is the kind of thing that surfaces three layers away.
       def chart_type_at(text, offset)
-        text[offset, CHART_TYPE_WINDOW].to_s[/\btype\s*:\s*["']([a-zA-Z]+)["']/, 1]
+        found = text[offset, CHART_TYPE_WINDOW].to_s[/\btype\s*:\s*["']([a-zA-Z]+)["']/, 1]
+        found && decode(found)
       end
 
       # ----------------------------------------------------------------
@@ -700,10 +819,18 @@ module RedmineReporterDashboards
         text[0, offset].to_s.count("\n") + 1
       end
 
+      # THE LINE IS CUT AT ITS OWN NEWLINE, not out of a copy of the rest of the document.
+      # `text[start..]` allocated everything after the match to read one line from it,
+      # which is O(n) per finding — cheap on a template with three findings and not on one
+      # with three hundred.
+      #
+      # DECODED FIRST, TRUNCATED AFTER: EXCERPT_LIMIT is a limit on what a reader sees, so
+      # it counts characters. Cutting the bytes first would also cut a character in half.
       def excerpt_at(text, offset)
         start = text.rindex("\n", offset)
         start = start.nil? ? 0 : start + 1
-        line = text[start..].to_s[/[^\n]*/].to_s.strip
+        stop  = text.index("\n", start) || text.length
+        line  = decode(text[start...stop]).strip
         line.length > EXCERPT_LIMIT ? "#{line[0, EXCERPT_LIMIT]}…" : line
       end
     end

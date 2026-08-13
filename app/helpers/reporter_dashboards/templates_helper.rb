@@ -247,5 +247,49 @@ module ReporterDashboards
         shown: number_with_delimiter(outcome.shown_count),
         total: number_with_delimiter(outcome.total_count))
     end
+
+    # ------------------------------------------------------------------ T-37, the panel
+
+    # A BOUND ON THE PANEL, and it is not the same number as the rake task's.
+    #
+    # One bad paste produces hundreds of findings, and a page that renders all of them is
+    # a page an author cannot use to fix the first one. The count above the table stays
+    # COMPLETE — the truncation is stated, never a quietly shorter list (INV-4's spirit,
+    # and the same rule the preview's "N of M" follows one panel up).
+    #
+    # It is deliberately larger than `LintReport::MAX_FINDINGS_PER_TEMPLATE` (25): that
+    # one is a terminal, where a reader scrolls back through other templates' findings
+    # too, and this one is a single template in a browser with a scrollbar.
+    PANEL_MAX_FINDINGS = 100
+
+    def reporter_lint_findings(analysis)
+      analysis.findings.first(PANEL_MAX_FINDINGS)
+    end
+
+    def reporter_lint_undisplayed(analysis)
+      [analysis.findings.length - PANEL_MAX_FINDINGS, 0].max
+    end
+
+    # THE SUMMARY COUNTS MATCHES, NOT ROWS. `collapse` keeps one finding per (rule, line)
+    # with a `count`, so a line carrying six `fontSize:` is one row and six problems; a
+    # summary that said "1 warning" would understate the work by the exact factor the
+    # collapsing saved.
+    def reporter_lint_summary(analysis)
+      l(:text_reporter_template_lint_summary,
+        errors: analysis.errors.sum(&:count),
+        warnings: analysis.warnings.sum(&:count))
+    end
+
+    def reporter_lint_severity_label(finding)
+      finding.error? ? l(:label_reporter_lint_error) : l(:label_reporter_lint_warning)
+    end
+
+    # Redmine's own two states rather than a plugin-local pair of colours — §9b's "look
+    # native, not branded", and `chrome_no_design_tokens.sh` (T-38) would refuse a colour
+    # here anyway.
+    def reporter_lint_severity_class(finding)
+      finding.error? ? 'error' : 'warning'
+    end
+
   end
 end

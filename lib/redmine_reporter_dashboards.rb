@@ -115,6 +115,11 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/schedul
 # lacked since T-22 created it. Required after `report_run` and `report_scope` because it
 # names both, and before the controllers, which name it.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/snapshot'
+# T-37 — the linter, required at boot because `TemplatesController` runs it on every
+# editor request (FR-71's findings panel). It was only ever loaded by the two rake tasks
+# before, through `require_relative` from `import/survey`, so a controller naming it would
+# have depended on a task having run first.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/template_linter'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards

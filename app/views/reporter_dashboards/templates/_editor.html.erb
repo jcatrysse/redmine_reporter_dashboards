@@ -1,0 +1,47 @@
+<%#
+  T-37 — ONE EDITOR, ON THREE PAGES.
+
+  `new`, `edit` and `preview` all render this. Before T-37 the first two carried their own
+  copy of the form-plus-buttons and `preview` carried no editor at all, which is why
+  §9b.2's clause — *"on failure it shows FR-58's diagnostics … **in the editor, next to
+  the code**, which is the only place it is actionable"* — was not met: the diagnostics
+  were on a page with no code on it, and the way back to the editor was the browser's Back
+  button, which loses the render you just looked at.
+
+  --- WHAT THE THREE PAGES DIFFER IN, AND IT IS ONLY THIS ---
+
+    url / method     where Save goes: POST to the collection, or PATCH to the record
+    preview_url      where the Preview button goes, which needs the id when there is one
+    submit_label     Create or Save
+
+  Everything else — the fields, the buttons, the lint panel and their order — is here, so
+  the three surfaces cannot come to disagree about which controls an author has.
+
+  --- THE PREVIEW BUTTON'S TWO ATTRIBUTES ARE LOAD-BEARING ---
+
+  `formaction` sends this form's own body (the UNSAVED content) to the preview action, and
+  `formmethod: 'post'` changes the verb without changing the body — which still carries
+  Rails' hidden `_method=patch` on the edit and preview pages, so `Rack::MethodOverride`
+  rewrites the request to PATCH before routing. Both verbs are declared on the preview
+  route for exactly that reason; getting it wrong is a 404 on every press, which is what
+  the first version of T-23's editor did.
+%>
+<%= labelled_form_for :template, @template,
+                      url: url,
+                      html: { method: method, id: 'reporter-template-form' } do |f| %>
+  <%= render partial: 'form', locals: { f: f } %>
+  <p>
+    <%= submit_tag submit_label %>
+    <%= submit_tag l(:label_preview),
+                   name: 'preview',
+                   formaction: preview_url,
+                   formmethod: 'post' %>
+    <%= link_to l(:button_cancel), project_reporter_templates_path(@project) %>
+  </p>
+<% end %>
+
+<%# OUTSIDE THE FORM, DELIBERATELY. It is a report about the body, not a control that
+    submits with it, and nesting it inside would put a `<table>` in a form for no reason.
+    `@lint` is set by every action that renders this partial — see the controller's
+    `lint_editor`, which is the one place it is computed. %>
+<%= render partial: 'lint', locals: { analysis: @lint } %>

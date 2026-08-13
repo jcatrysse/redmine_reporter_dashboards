@@ -187,7 +187,10 @@ module RedmineReporterDashboards
           findings.first(MAX_FINDINGS_PER_TEMPLATE).each do |finding|
             marker = finding.error? ? 'ERROR  ' : 'warning'
             times  = finding.count > 1 ? " (x#{finding.count} on this line)" : ''
-            lines << format('    %s line %-5d %s%s', marker, finding.line, finding.rule, times)
+            # `Finding#position` rather than `finding.line` — T-37 gave a finding a
+            # column and this report is one of the three surfaces that must read it the
+            # same way the editor's panel does.
+            lines << format('    %s line %-9s %s%s', marker, finding.position, finding.rule, times)
             wrap(finding.message).each { |line| lines << "#{MESSAGE_INDENT}#{line}" }
             lines << "#{MESSAGE_INDENT}> #{finding.excerpt}" unless finding.excerpt.empty?
           end
