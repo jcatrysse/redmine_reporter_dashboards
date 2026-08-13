@@ -26,11 +26,22 @@
 
 # --- Detection and the ONE thing still loaded on its answer.
 #
-# T-27 DECIDED WHAT THE DETECTION IS FOR (2026-08-13) and the answer keeps these three
-# entries rather than retiring them: `load_patches` requires REPORTER_GLUE_FILES only on
-# a true answer, and `ScopeBinding#legacy_available?` then asks a positive const_defined?
-# instead of rescuing a NameError. One consumer, load-bearing. These three go when S-30
-# deletes the glue — not before, and not by rewording a comment.
+# T-27 DECIDED WHAT THE DETECTION IS FOR (2026-08-13); S-30 then took away the consumer
+# it named, and ONE other remains — so these three entries stay, for a smaller reason
+# than before, written out so the next reader does not have to re-derive it.
+#
+# T-27's answer was "`load_patches` requires REPORTER_GLUE_FILES only on a true answer".
+# That is gone: `glue/` is deleted and `load_patches` now requires this plugin's own two
+# patches unconditionally. What still asks `reporter_present?` is
+# `apply_reporter_patches`, and after S-30 it installs exactly one thing —
+# `reporter_report_content_patch`, which hands the host plugin's own report generation a
+# `base_scope` instead of a materialised Array. That is a performance fix on THAT
+# plugin's path, it depends on nothing this plugin resolves, and it obviously cannot run
+# when that plugin is absent.
+#
+# So the detection is now a one-question thing: may we patch the host plugin's
+# controller? These three go when that patch does, and that is a curator decision about
+# whether this plugin still improves an installation that has both — not a tidy-up.
 #
 # The task's own new surface deliberately does NOT join this list. T-27's upgrade
 # diagnostic (`permissions/authoring_audit.rb`, its view section and nine locale files)
@@ -81,8 +92,9 @@ lib/redmine_reporter_dashboards/import/runner.rb         [permanent] T-24 copies
 lib/redmine_reporter_dashboards/template_linter.rb       [permanent] usage groups name the gem the accessors come from
 lib/tasks/reporter_dashboards.rake                       [permanent] `rake -T` must say what import:plan surveys
 
-# --- The legacy glue (T-07). ONE FILE, and its deletion was AUTHORISED AND REVERTED —
-# --- see §Findings S-30. `ScopeBinding#bind` falls back to it for every render with no
-# --- owned RenderContext, and the DB-less tag suite uses that path as its harness:
-# --- removing the branch is 166 of 249 examples red. That is a task, not a tidy-up.
-lib/redmine_reporter_dashboards/glue/legacy/scope_resolution.rb   the scope fallback for a render with no owned RenderContext
+# --- The legacy glue (T-07) IS GONE (S-30, 2026-08-13). `glue/` is deleted entirely and
+# --- this entry with it. The first attempt was reverted at 166 of 249 DB-less examples
+# --- red, because the tag suite used that path as its HARNESS; the suite was rebuilt onto
+# --- RenderContext first, and then the deletion was a deletion.
+# --- `spec/golden/scope/scope.jsonl` survives as the record of what the six sources
+# --- answered. It is the one artefact here that cannot be regenerated.

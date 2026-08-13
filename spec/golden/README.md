@@ -25,15 +25,26 @@ see [§The baseline is not an oracle](#the-baseline-is-not-an-oracle).
 | `aggregation/manifest.json` | provenance: baseline commit, reference date, zone, engine, digests | yes |
 | `aggregation/overlay/*.jsonl` | the per-engine exceptions the overlay declares | yes |
 | `adapter_overlay.rb` | which cases may differ per engine, why, and how many may exist | n/a |
-| `scope/scope.jsonl` | **the irrecoverable one**: what `ScopeResolution` resolves, per (template, query, actor) | **no** |
-| `sql/scope_sql.jsonl` | the SQL those scopes generate, tokenised | yes |
+| `scope/scope.jsonl` | **the irrecoverable one, and now a HISTORICAL RECORD**: what the deleted `ScopeResolution` resolved, per (template, query, actor) | **no — its subject is gone** |
+| `sql/scope_sql.jsonl` | the SQL those scopes generated, tokenised | **no, for the same reason** |
 | `performance_cases.rb` | **the T-03 matrix**: 9 workloads × 3 issue counts, plus the query budget, the expected answer size and the two blocked render media | n/a |
 | `performance.rb` | the statistics (nearest-rank percentiles, sample stddev), the `stddev/p50 > 0.35` invalid rule, and the artefact IO | n/a |
 | `performance/baseline.json` | **the measurement**: p50/p95/max/stddev per cell, its provenance, and the 12 render cells recorded as blocked | yes, by re-running the benchmark |
 
 The value corpus is regenerable because the kernel's signature does not change and
-`v0.5.0` stays in git. **The scope fixture is not.** Once `scope_resolution.rb` is
-deleted there is nothing left to ask. That is why it is frozen first.
+`v0.5.0` stays in git. **The scope fixture is not.**
+
+**`scope_resolution.rb` WAS DELETED ON 2026-08-13 (S-30), so there is now nothing left to
+ask, exactly as this paragraph predicted.** Both scope files stay in the repository as the
+RECORD of what the six ambient sources answered — an `issues` drop, the `sql_issue_query` /
+`container` / `controller` registers, a `@sql_base_scope` ivar and a thread-local — and of
+the SQL they generated. `scope_fixture.rb` stays with them as their reader, so the record
+is readable rather than a pair of orphaned `.jsonl` files.
+
+Nothing asserts against them any more: `test/unit/golden_scope_fixture_test.rb`, the test
+that did, is deleted with its subject. **Do not delete these two files to tidy up.** They
+are the only surviving description of behaviour this plugin used to have, they cost
+nothing, and CLAUDE.md §1 names deletion as the one irreversible action in this plan.
 
 ## Regenerating
 
@@ -56,10 +67,10 @@ RRD_REFERENCE_DATE=2025-12-29 RRD_CORPUS_OVERLAY_WRITE=1 \
   bundle exec rspec -I plugins/redmine_reporter_dashboards/spec \
                        plugins/redmine_reporter_dashboards/spec/adapter/aggregation_corpus_spec.rb
 
-# 3. the scope fixture — needs the full application
-RRD_SCOPE_WRITE=1 bundle exec rake redmine:plugins:test \
-  NAME=redmine_reporter_dashboards \
-  TEST=plugins/redmine_reporter_dashboards/test/unit/golden_scope_fixture_test.rb
+# 3. the scope fixture — NO LONGER REGENERABLE (S-30, 2026-08-13). `scope_resolution.rb`
+#    and the test that drove it are deleted; RRD_SCOPE_WRITE has nothing to run. The two
+#    files under scope/ and sql/ are a historical record now. Left here as the answer to
+#    "what was the command", because the next reader will look for it.
 
 # 4. the performance baseline (T-03) — opt-in, ~3 minutes, seeds 100 000 issues
 RRD_BENCH=1 RRD_BENCH_WRITE=1 RRD_REFERENCE_DATE=2025-12-29 \

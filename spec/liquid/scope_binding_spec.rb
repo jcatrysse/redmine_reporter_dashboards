@@ -250,40 +250,44 @@ RSpec.describe RedmineReporterDashboards::Liquid::ScopeBinding do
   end
 
   # ------------------------------------------------------------------
-  # No render context — the legacy dispatch
+  # No render context — NONE, and no dispatch anywhere
   # ------------------------------------------------------------------
 
   describe 'with no render context' do
-    it 'resolves nothing when the legacy glue is not loaded' do
-      # A standalone install: no reporter, so no legacy module, and these tags are
-      # never invoked anyway (T-06 degrades the widgets). Answering "nothing" is the
-      # honest outcome, and it is fail-closed.
-      hide_const('RedmineReporterDashboards::Glue') if defined?(RedmineReporterDashboards::Glue)
-
-      binding = described_class.bind({}, FakeLiquidContext.new)
+    # S-30 REPLACED THE PAIR OF EXAMPLES THAT SAT HERE. One asserted that a missing
+    # legacy module resolved nothing; the other asserted that a PRESENT one was
+    # delegated to, carrying `@raw_params`. The module is deleted, so the second
+    # asserted the behaviour of code that no longer exists — and the first passed for a
+    # reason that has changed: it used to be "the glue is not loaded on this install",
+    # and it is now "there is no glue".
+    #
+    # What replaces them is stronger than either: NONE is unconditional, and nothing can
+    # make `bind` reach outside the context again.
+    it 'resolves nothing, whatever else is lying about in the Liquid context' do
+      binding = described_class.bind({ 'from' => 'widgets' }, FakeLiquidContext.new)
 
       expect(binding.scope).to be_nil
       expect(binding.query).to be_nil
       expect(binding.source).to eq(:none)
     end
 
-    it 'delegates to the legacy module when it IS loaded, carrying the raw params' do
-      legacy = Module.new do
-        def resolve_scope(_context)
-          [:legacy_scope, @raw_params['from']]
-        end
+    # THE POINT OF THE DELETION, stated as an assertion rather than as a comment. A
+    # legacy-era context carried the scope in an ambient source — an `issues` drop, a
+    # `sql_issue_query` register, a `container`, a `controller`. Handing `bind` all of
+    # them at once must still produce NONE: no named viewer, no scope (INV-1).
+    it 'refuses a scope offered through the old ambient sources' do
+      drop = Object.new
+      drop.instance_variable_set(:@issues, :some_relation)
+      context = FakeLiquidContext.new(
+        assigns: { 'issues' => drop },
+        registers: { sql_issue_query: :a_query, container: :a_container,
+                     controller: :a_controller }
+      )
 
-        def resolve_query(_context)
-          :legacy_query
-        end
-      end
-      stub_const('RedmineReporterDashboards::Glue::Legacy::ScopeResolution', legacy)
+      binding = described_class.bind({ 'from' => 'issues' }, context)
 
-      binding = described_class.bind({ 'from' => 'widgets' }, FakeLiquidContext.new)
-
-      expect(binding.scope).to eq([:legacy_scope, 'widgets'])
-      expect(binding.query).to eq(:legacy_query)
-      expect(binding.source).to eq(:legacy)
+      expect(binding.scope).to be_nil
+      expect(binding.source).to eq(:none)
     end
   end
 

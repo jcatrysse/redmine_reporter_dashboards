@@ -32,14 +32,18 @@ PATTERN='Thread\.current|thread_variable_set|thread_variable_get|Thread\.new|Fib
 SEARCH_PATHS=(app lib)
 
 # The only files allowed to carry it, each with the reason. This list may only SHRINK.
-EXEMPT=(
-  # Owns the thread-local that gets reporter's IssueQuery into a Liquid tag. Reporter's
-  # liquidize() takes no registers argument to extend, so there is no other channel.
-  # Deleted with glue/legacy/ at 1.0; replaced by Liquid::RenderContext.
-  "lib/redmine_reporter_dashboards/glue/legacy/reporter_list_patch.rb"
-  # Reads the key the patch above sets. Frozen by the scope fixture oracle.
-  "lib/redmine_reporter_dashboards/glue/legacy/scope_resolution.rb"
-)
+# S-30, 2026-08-13: THIS LIST IS EMPTY, and that is the end state the comment above it
+# has been promising since it was written. Both entries were `glue/legacy/` —
+# `reporter_list_patch.rb`, which parked the host plugin's IssueQuery in a thread-local
+# because its `liquidize()` took no registers argument to extend, and
+# `scope_resolution.rb`, which read that key. Both are deleted; `Liquid::RenderContext`
+# carries the query as a field, which is what a register is for.
+#
+# An empty list means the gate now asserts something absolute: NO per-thread state
+# anywhere under app/ or lib/. Keep it that way — a render is a request, a request is a
+# thread, and state parked on the thread is the shape that serves the first viewer's
+# scope to the second.
+EXEMPT=()
 
 cd "$ROOT"
 
@@ -113,7 +117,7 @@ if [ -n "$STALE" ]; then
 fi
 
 if [ "$STATUS" -eq 0 ] && [ -z "$STALE" ]; then
-  echo "no_thread_local: OK — per-thread state exists only in glue/legacy/, and every exemption is used."
+  echo "no_thread_local: OK — no per-thread state under app/ or lib/, and every exemption is used."
 fi
 
 exit "$STATUS"

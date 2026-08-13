@@ -152,17 +152,22 @@ module RedmineReporterDashboards
   # PDF binding and runs no JavaScript at all. That is condition (3) of the adapter's own
   # removal condition satisfied for the SHIMS, not for the adapter.
   #
-  # `REPORTER_GLUE_FILES` STAYS, and `glue/legacy/scope_resolution` with it. The intent was
-  # to delete it in the same change — the curator authorised it — and the attempt was
-  # REVERTED on a measurement: `ScopeBinding#bind` falls back to that module for every
-  # render with no owned `RenderContext`, and the DB-less tag suite uses exactly that path
-  # as its harness. Removing the branch is **166 of 249 examples red**, most of them
-  # covering the six scope sources the module resolves, which have to be deleted rather
-  # than ported. That is a task, not a deletion, and half-doing it is the worst state.
-  # See §Findings **S-30**.
-  REPORTER_GLUE_FILES = %w[
-    redmine_reporter_dashboards/glue/legacy/scope_resolution
-  ].freeze
+  # AND `REPORTER_GLUE_FILES` IS GONE TOO (S-30, 2026-08-13), with `glue/` entirely.
+  #
+  # It held `glue/legacy/scope_resolution` — six ambient sources a tag could get a scope
+  # from before T-07 — and `glue/legacy/reporter_list_patch`, which parked the host
+  # plugin's `IssueQuery` in a thread-local because its `liquidize()` took no registers
+  # argument to extend. The two were a producer/consumer pair and died together.
+  #
+  # The first attempt at this deletion was reverted on a measurement (166 of 249 DB-less
+  # examples red) because the tag suite used that path as its HARNESS. It no longer does:
+  # `spec/sql_aggregation` builds every context from an owned `RenderContext` and passes
+  # identically with the module present or absent, which is what made the deletion a
+  # deletion rather than a rewrite.
+  #
+  # `ScopeBinding#bind` now answers `NONE` where it used to fall back. Nothing in
+  # production reaches that branch — every render has constructed a context from an
+  # explicit actor since T-26a — and answering NONE is the INV-1 position anyway.
 
   # The plugin id, spelled once. `Setting.plugin_<id>` and the settings partial both need
   # it, and two spellings of one identifier is how a settings read silently answers `{}`.
@@ -348,9 +353,12 @@ module RedmineReporterDashboards
     ReporterPresence.reset!
   end
 
+  # S-30: `PATCH_FILES` and nothing else. This used to append `REPORTER_GLUE_FILES` on a
+  # true `reporter_present?`, which was the ONE thing loaded on the detection's answer.
+  # Both patches here are this plugin's own (`project_patch`, `role_patch`), so what gets
+  # required no longer depends on whether the host plugin is installed.
   def load_patches
-    files = PATCH_FILES + (reporter_present? ? REPORTER_GLUE_FILES : [])
-    files.each { |file| require File.join(lib_root, file) }
+    PATCH_FILES.each { |file| require File.join(lib_root, file) }
   rescue LoadError, StandardError => e
     # A patch failing to load must never abort the after_plugins_loaded chain
     # (which would take the Liquid tag registration down with it).
@@ -459,12 +467,21 @@ module RedmineReporterDashboards
   # drop, which has neither accessor. `spec/liquid/retired_surface_spec.rb` pins the
   # deletion; `implementation-plan.md` §Findings F-11 records the window.
 
-  # Apply the performance patches to reporter's classes. Only called when
+  # Apply the performance patch to the host plugin's class. Only called when
   # reporter_present? is true, so absence is not a case handled here.
+  #
+  # S-30 REMOVED THE FIRST OF THE TWO. `IssueListReportTemplate` was patched by
+  # `Glue::Legacy::ReporterListPatch`, whose job was to park that plugin's `IssueQuery`
+  # in a thread-local so a Liquid tag could reach it — its `liquidize()` takes no
+  # registers argument to extend, so there was no other channel. The reader of that
+  # thread-local was `Glue::Legacy::ScopeResolution`, deleted in the same change, so the
+  # patch had nothing left to talk to.
+  #
+  # `reporter_report_content_patch` STAYS. It is a different thing: it hands the host
+  # plugin's own report generation a `base_scope` instead of a materialised Array, which
+  # is a straight performance fix on that plugin's path and does not depend on anything
+  # this plugin resolves. It is also the last consumer of `reporter_present?`.
   def apply_reporter_patches
-    apply_patch('IssueListReportTemplate',
-                'redmine_reporter_dashboards/glue/legacy/reporter_list_patch',
-                'RedmineReporterDashboards::Glue::Legacy::ReporterListPatch')
     apply_patch('ReportTemplatesController', 'reporter_report_content_patch', 'ReporterReportContentPatch')
   end
 

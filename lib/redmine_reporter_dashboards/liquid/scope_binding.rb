@@ -119,9 +119,20 @@ module RedmineReporterDashboards
           raw_params ||= {}
           render_context = RenderContext.from(liquid_context)
 
-          # No render context means no owned renderer produced this render, so this is
-          # a host-plugin install and the legacy glue is what knows how to read it.
-          return legacy_bind(raw_params, liquid_context) if render_context.nil?
+          # S-30: NO RENDER CONTEXT IS NOW `NONE`, not a fallback.
+          #
+          # This used to dispatch to `Glue::Legacy::ScopeResolution`, which resolved a
+          # scope from six ambient sources — an `issues` drop, three registers, an ivar
+          # on somebody else's drop, and a thread-local. That existed for renders the
+          # host plugin produced. After T-26a there are none: every widget, preview,
+          # schedule, share and mail render constructs a context from an explicit actor,
+          # so the branch was unreachable in production before it was deleted.
+          #
+          # Answering NONE rather than guessing is the INV-1 position: a scope resolved
+          # from whatever happened to be lying in the Liquid context has no named viewer
+          # behind it, and a tag that reports numbers under a heading without knowing
+          # whose numbers they are is the failure this whole layer exists to prevent.
+          return NONE if render_context.nil?
 
           if raw_params.key?('query_id')
             # An explicit query_id: names ONE query. If it cannot be resolved there is
@@ -166,45 +177,6 @@ module RedmineReporterDashboards
           (resolved || param).to_i
         end
 
-        # ----------------------------------------------------------------
-        # The legacy path
-        # ----------------------------------------------------------------
-
-        # One dispatch, and nothing else about the host plugin in the owned layer. The
-        # legacy module is a mixin expecting `@raw_params` (that is how the tags used it), so a
-        # throwaway host carries them rather than the module being rewritten — its
-        # behaviour is frozen by the scope fixture in
-        # test/unit/golden_scope_fixture_test.rb and a change to it would move an oracle
-        # that cannot be regenerated.
-        def legacy_bind(raw_params, liquid_context)
-          host = legacy_host(raw_params)
-          return NONE if host.nil?
-
-          Binding.new(scope: host.resolve_scope(liquid_context),
-                      query: host.resolve_query(liquid_context),
-                      source: :legacy)
-        end
-
-        def legacy_host(raw_params)
-          return nil unless legacy_available?
-
-          LegacyHost.new(raw_params)
-        end
-
-        # Asked, not rescued. `Glue::Legacy::ScopeResolution` is required only where
-        # the host plugin is present, and a swallowed NameError around a lookup like
-        # this is precisely how the vendor-gem coupling stayed invisible for a whole
-        # release (CLAUDE.md §5 lists it by name; this layer does not).
-        #
-        # `inherit: false` at every step. With the default, a module's const_defined?
-        # also searches Object, so an unrelated top-level `Glue` in some other plugin
-        # would answer yes here and the next line would raise.
-        def legacy_available?
-          RedmineReporterDashboards.const_defined?(:Glue, false) &&
-            RedmineReporterDashboards::Glue.const_defined?(:Legacy, false) &&
-            RedmineReporterDashboards::Glue::Legacy.const_defined?(:ScopeResolution, false)
-        end
-
         def log(message)
           return unless defined?(::Rails) && ::Rails.respond_to?(:logger) && ::Rails.logger
 
@@ -212,15 +184,6 @@ module RedmineReporterDashboards
         end
       end
 
-      # Defined lazily so this file can be loaded on an installation that has no legacy
-      # module at all — including the DB-less spec run, where neither reporter nor the
-      # glue exists.
-      class LegacyHost
-        def initialize(raw_params)
-          @raw_params = raw_params || {}
-          extend(RedmineReporterDashboards::Glue::Legacy::ScopeResolution)
-        end
-      end
     end
   end
 end

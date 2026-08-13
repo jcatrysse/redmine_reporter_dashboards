@@ -41,12 +41,9 @@ end
 
 require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 require_relative '../../lib/sql_aggregation/liquid_version_rollup_tag'
-# T-07: these examples exercise the LEGACY resolution path — a tag renders with no
-# RenderContext in its registers, so Liquid::ScopeBinding falls back to
-# Glue::Legacy::ScopeResolution. On a real install that module is loaded because
-# reporter is present (REPORTER_GLUE_FILES); here it has to be required explicitly,
-# and requiring it is the point: without it ScopeBinding correctly resolves nothing.
-require_relative '../../lib/redmine_reporter_dashboards/glue/legacy/scope_resolution'
+# S-30: the legacy resolution module is DELETED. These examples build every context
+# from an owned `RenderContext` (see `owned_registers` below), which is how every render
+# has been constructed since T-26a, so there is nothing left to require here.
 
 # AR-scope stub that satisfies ar_scope? (where/group/count).
 class RollupTagScope
