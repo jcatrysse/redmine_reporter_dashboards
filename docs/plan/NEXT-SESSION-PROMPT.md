@@ -209,11 +209,12 @@ job as the README's record of the old idiom). And the chart form has no "drill o
   three grouped calculations. **A release blocker by decision.**
 - **`<html lang>` is absent from both bindings.** Setting it needs a decision about whose locale
   a SCHEDULED report speaks.
-- **`ZERO_REPORTER_MODE=strict` is at 6 files.** T-27 took the decision: three are the detection,
+- **`ZERO_REPORTER_MODE=strict` is at 5 files** (T-27 left it at 6; S-30 took it to 5). Three are the detection,
   which stays until S-30 deletes the glue it gates. Two are comment-only historical records
   (`positioned.rb`, migration 001) still wanting a `[permanent]` marker or a reword — the
-  allowlist header makes the marker a CURATOR decision, so T-27 did not take it. The sixth is
-  S-30's, and going from 6 to 3 is what finishing S-30 buys.
+  allowlist header makes the marker a CURATOR decision, so neither session took it. Going
+  below 5 means retiring the detection, which means deciding the fate of
+  `reporter_report_content_patch` — see the S-30 review note in "Open for the curator".
 - **`manage_public_reporter_dashboards_templates` is flagged as code execution and cannot
   author.** T-40 marks it `authoring: true`, and its own comment says a role holding only it is
   refused at `#create` by a second guard. T-27's diagnostic reads the flag faithfully, so such a

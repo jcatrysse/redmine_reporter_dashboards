@@ -1925,7 +1925,8 @@ a role keeps the base plugin's authoring permission after that plugin is uninsta
 on the roles screen, which renders `setable_permissions`. A diagnostic gated on detection would
 print an empty list in exactly the case it exists for. So `Permissions::AuthoringAudit` reads
 Redmine's own permission tables and asks the registry nothing; `ReporterPresence` keeps its one
-real consumer (gating the `REPORTER_GLUE_FILES` require) and is documented as not being the
+real consumer (which S-30 then deleted — see §Status; `apply_reporter_patches` is what asks
+now) and is documented as not being the
 diagnostic's input. **Do not wire the two together later "for consistency".**
 
 **AND BE PRECISE ABOUT WHAT THE DANGLING GRANT DOES**, because the first version of that
@@ -1936,14 +1937,25 @@ plugin declares the permission inside a `project_module`. So while that plugin i
 grant authorises **nothing**; it re-arms on reinstall. Stale data worth surfacing, not a live
 code-execution path — and the diagnostic's justification never needed the stronger claim.
 
-**`ZERO_REPORTER_MODE=strict` IS STILL AT 6 FILES AND T-27 DID NOT MOVE IT.** Three are the
-detection, which is now argued to stay until S-30 deletes the glue. Two are comment-only
-historical records (`positioned.rb`, migration 001) still wanting a `[permanent]` marker or a
-reword — the allowlist header makes the marker a **curator decision**, so this session did not
-take it. The sixth is S-30. The new diagnostic deliberately names the base plugin NOWHERE (it
-matches the permission name, which carries no plugin id), because `zero_reporter.sh` searches
-`config` and nine locale files naming it would have added nine entries to the list T-27 exists
-to shrink.
+**`ZERO_REPORTER_MODE=strict` IS AT 5 FILES.** T-27 did not move it (6); **S-30 took it to
+5** by deleting `scope_resolution.rb`. What is left: three are the detection
+(`reporter_presence.rb`, `lib/redmine_reporter_dashboards.rb`, `init.rb`) and two are
+comment-only historical records (`positioned.rb`, migration 001) still wanting a
+`[permanent]` marker or a reword — the allowlist header makes that marker a **curator
+decision**, so neither session took it.
+
+**T-27 predicted the detection would go with the glue and it did not.** `reporter_present?`
+has a SECOND consumer, `apply_reporter_patches`, which after S-30 installs exactly one
+thing — `reporter_report_content_patch`. So retiring the detection is a curator decision
+about whether this plugin should still improve an installation running both plugins, not a
+tidy-up. **And read §Findings S-30's review notes before assuming that patch is harmless:
+its own header says it exists for "templates that only use `{% sql_aggregate %}`", which is
+the host-plugin render path S-30's safety argument did not cover.**
+
+Neither task's new surface joined the allowlist: T-27's diagnostic names the base plugin
+nowhere (it matches the permission NAME, which carries no plugin id), because
+`zero_reporter.sh` searches `config` and nine locale files naming it would have added nine
+entries to the list T-27 exists to shrink.
 
 **One thing T-37 leaves that is not a task:** `starter-gallery`, the CI job it added, is the only
 one with both a database and all three engines, and **it has never run**. Read it before trusting
@@ -2733,21 +2745,20 @@ changed by one line.
 |---|---|---|
 | owned | `liquid/scope_binding.rb` | **two**: `query_id:` → `IssueQuery.visible(actor)`, else `RenderContext#scope` |
 | owned | `liquid/render_context.rb` | — carries actor, scope, query. **An actor is required to construct one** |
-| legacy | `glue/legacy/scope_resolution.rb` | six, unchanged, moved |
-| legacy | `glue/legacy/reporter_list_patch.rb` | owns the thread-local, moved |
+| ~~legacy~~ | ~~`glue/legacy/scope_resolution.rb`~~ | **DELETED by S-30, 2026-08-13** |
+| ~~legacy~~ | ~~`glue/legacy/reporter_list_patch.rb`~~ | **DELETED by S-30** |
 
 **`enforce_visibility` was not ported, and that is the point.** It exists in the legacy
 module because five of its six sources have provenance it cannot vouch for — which is
 also why it has to fail OPEN. Both owned sources start from `Issue.visible`, so there is
 nothing left to defend. An invariant held by construction, not by a patch.
 
-**THE OWNED PATH IS NOT EXERCISED IN PRODUCTION YET, and must not be made to look as
-if it is.** Nothing builds a `RenderContext`: these tags only ever run inside the
-optional host plugin's renderer, and standalone T-06 degrades the widgets. So every
-real render still takes the legacy path, which is exactly what T-07's acceptance list
-asks for. T-10 is what fills it in. If you are tempted to have the glue synthesise a
-`RenderContext` from the host's registers to "finish" this — don't. It would run the
-same archaeology behind a new name and make the owned path look tested.
+**~~THE OWNED PATH IS NOT EXERCISED IN PRODUCTION YET~~ — TRUE WHEN WRITTEN, FALSE FROM
+T-23.** `Reporting::ReportRun#render_context` builds one per render, from an explicit
+actor. Kept struck through rather than deleted because the warning attached to it is
+still live: if you are tempted to have anything synthesise a `RenderContext` from a host
+plugin's Liquid registers to "finish" something — don't. It would run the same
+archaeology behind a new name and make the owned path look tested.
 
 What *is* exercised: `spec/liquid/scope_binding_spec.rb`, 25 examples, including one
 that stubs `User.current` to RAISE and asserts the owned path completes. INV-1 is the
@@ -2761,21 +2772,18 @@ F-2's decision is what bought the first one: closing the leak by construction in
 owned path, rather than patching the legacy module, means the frozen scope-fixture
 triple never moved.
 
-**A trap for the next mover.** The two tag specs and the scope-fixture test exercise
-the LEGACY path, so they must `require` `glue/legacy/scope_resolution` explicitly.
-On a real install it arrives via `REPORTER_GLUE_FILES`; in a spec process nothing loads
-it, and `ScopeBinding` then correctly resolves *nothing* — which reads as 40 broken
-examples rather than as a missing require.
-
-**`REPORTER_GLUE_FILES` is separate from `REPORTER_PATCH_FILES` on purpose.** The legacy
-module is loaded whenever the host plugin is present, not as a side effect of the
-`IssueListReportTemplate` prepend succeeding. Tying the two would mean one failed patch
-silently costing an install its scope resolution.
+**~~A trap for the next mover~~ — GONE WITH ITS SUBJECT (S-30).** This entry told you the
+two tag specs and the scope-fixture test had to `require` `glue/legacy/scope_resolution`
+explicitly, and that `REPORTER_GLUE_FILES` was deliberately separate from
+`REPORTER_PATCH_FILES`. All three files and both constants are deleted. The specs build
+owned `RenderContext`s now and require nothing of the sort.
 
 **The gate:** `script/gates/no_thread_local.sh`, wired into the `gates` job. It also
 catches `thread_variable_set`/`Fiber[]`, because swapping the spelling would satisfy a
-naive grep while changing nothing. Warn mode passes with two exemptions; strict mode
-fails today by design, and is what 1.0 must pass once `glue/legacy/` is gone.
+naive grep while changing nothing. **Since S-30 its exemption list is EMPTY and both modes
+pass**, so it asserts something absolute: no per-thread state under `app/` or `lib/`. It
+gained a scanned-file floor in the same change — emptying the list removed the stale-entry
+WARN that had been its only accidental guard against scanning nothing.
 
 **Still under `lib/` rather than `glue/`**, and deliberately left for a later mechanical
 move: `reporter_report_content_patch.rb`, `patches/report_patch.rb`,

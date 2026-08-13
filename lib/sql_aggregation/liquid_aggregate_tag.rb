@@ -105,8 +105,10 @@ module SqlAggregation
 
   class LiquidAggregateTag < Liquid::Tag
     # T-07: two resolution sources, both starting from Issue.visible. The six-source
-    # archaeology this replaced now lives in Glue::Legacy::ScopeResolution and is
-    # reached only when no RenderContext is present, i.e. on a reporter install.
+    # archaeology this replaced lived in Glue::Legacy::ScopeResolution and was DELETED by
+    # S-30 (2026-08-13). A render arriving with no RenderContext now resolves nothing
+    # unless the tag named a `query_id:`, which needs only an actor and gets one from
+    # TagContext.
     include RedmineReporterDashboards::Liquid::ScopeBinding
 
     # Matches: key: "quoted" | key: 'quoted' | key: bare_value
@@ -137,10 +139,13 @@ module SqlAggregation
       # sql_aggregate tag running a ninety-second query costs exactly one render-score
       # point, and no resource limit will ever notice it.
       #
-      # A no-op today on every existing install: these tags still run inside the host
-      # plugin's renderer, which binds no budget, and `Budget.from` answers a null
-      # object rather than nil precisely so this call site is safe to add before the
-      # owned renderer exists. When `TemplateRenderer` is the one rendering, this same
+      # STALE UNTIL S-30 CORRECTED IT: this used to say "a no-op today on every existing
+      # install: these tags still run inside the host plugin's renderer". `TemplateRenderer`
+      # has been the renderer for every report this plugin produces since T-23, and it
+      # binds a budget. The sentence survives as a note on the OTHER case — a template
+      # rendered by the host plugin binds no budget, and `Budget.from` answers a null
+      # object rather than nil precisely so this call site is safe there. When
+      # `TemplateRenderer` is the one rendering, this same
       # line is what stops a slow template.
       RedmineReporterDashboards::Liquid::Budget.from(context).check!('sql_aggregate')
 

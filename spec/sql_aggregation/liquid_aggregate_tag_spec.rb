@@ -86,7 +86,11 @@ class LiquidTagScopeStub
   def unscope(*); self; end
   def count(*);  0;   end
   def base_scope; self; end
-  # ScopeResolution intersects a drop-resolved scope with Issue.visible.
+  # KEPT AFTER S-30 DELETED ITS REASON, deliberately. `ScopeResolution` used to intersect
+  # a drop-resolved scope with `Issue.visible` and this stub answered that call; nothing
+  # calls it now. It stays because a scope double that cannot answer `merge` would fail
+  # for a confusing reason the first time any code legitimately merges a relation, and
+  # one no-op method is cheaper than that debugging session.
   def merge(*); self; end
 end
 
@@ -341,8 +345,12 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   # Deleted, with what each covered:
   #
   #   * `scope resolution from issues drop` (4) — an `issues` assign holding a drop with an
-  #     `@issues` ivar. The `from:` parameter selected which assign to read.
-  #   * `scope resolution from context registers` (10) — `:sql_issue_query`, `:container`
+  #     `@issues` ivar. The `from:` parameter selected which assign to read. **THREE OF THE
+  #     FOUR WERE HARNESS, NOT SUBJECT**, and deleting them lost real coverage: the
+  #     `assign_to` default and the empty-string return are restored under
+  #     `parameter parsing`, after a review caught it and a mutation confirmed it
+  #     (`default: 'stats'` → `'MUTANT'` left the whole suite green).
+  #   * `scope resolution from context registers` (7) — `:sql_issue_query`, `:container`
   #     and `:controller`, and the PRECEDENCE between them.
   #   * `scope resolution from drop @sql_base_scope ivar` (1) — the base plugin's
   #     "Strategy A" patch, which set that ivar on its own drop.
@@ -350,8 +358,17 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   #     intersected with `Issue.visible(User.current)`, because a drop could hand over any
   #     relation at all. Two of its examples covered the register and query_id paths NOT
   #     doing that, which is finding F-2.
-  #   * `#resolve_query` (12) — resolving an `IssueQuery` for drill-through from the same
+  #   * `#resolve_query` (19) — resolving an `IssueQuery` for drill-through from the same
   #     six sources plus a thread-local the base plugin's patch set.
+  #   * `a scope over a table this kernel does not count` (1) — "the legacy path carries no
+  #     source at all", a case that cannot arise without a context-less producer.
+  #   * `drill: true > the query source` (1) — the thread-local as a query source.
+  #
+  # **38 examples, and that total is COUNTED FROM THE DIFF rather than estimated.** The
+  # first version of this list said 32 and named two blocks at the wrong size (10 and 12
+  # against a real 7 and 19). A justification artefact that does not add up is not a
+  # justification, and this one is the whole argument for the deletion — so it is
+  # reconciled: 206 `it` blocks before, 170 after, minus the 2 restored above = 38 gone.
   #
   # NONE OF THIS IS A VISIBILITY REGRESSION, and that is the load-bearing claim.
   # `enforce_visibility` existed because a legacy source could produce an arbitrary
@@ -704,6 +721,36 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       obj = Object.new
       obj.instance_variable_set(:@issues, scope)
       obj
+    end
+
+    # --- S-30 RESTORED THIS, AND IT WAS A REAL LOSS ------------------------------------
+    #
+    # `assign_to` defaults to `'stats'`, and the example covering that lived in the
+    # `scope resolution from issues drop` block — which S-30 deleted whole, on the stated
+    # ground that every example in it had the deleted resolution as its SUBJECT. Three of
+    # its four did not: they were about the TAG and merely used the drop as a harness.
+    #
+    # An independent review caught it and MUTATION CONFIRMED it: changing
+    # `default: 'stats'` to `default: 'MUTANT'` in `liquid_aggregate_tag.rb:149` left
+    # 2872 examples, 0 failures. Every markup string in this file carries an explicit
+    # `assign_to:`, so nothing else could see it. A legacy template that omits the
+    # parameter writes into `''` and renders nothing, silently.
+    it 'defaults assign_to to "stats" when the parameter is omitted' do
+      ctx = build_context({}, owned_registers(scope: scope))
+      allow(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
+
+      build_tag('from: issues').render(ctx)
+
+      expect(ctx.scopes.last).to have_key('stats')
+    end
+
+    # The side-effect contract, also lost with that block: the tag ASSIGNS and emits
+    # nothing, so `{% sql_aggregate %}` on its own line leaves no stray output.
+    it 'returns an empty string, so no output appears in the template' do
+      ctx = build_context({}, owned_registers(scope: scope))
+      allow(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
+
+      expect(build_tag('from: issues').render(ctx)).to eq('')
     end
 
     it 'parses period as a string' do

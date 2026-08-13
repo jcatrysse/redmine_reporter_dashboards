@@ -32,8 +32,11 @@
 # checks read the actor rather than ignoring it. That is what makes INV-1 and INV-2
 # testable at VALUE level: the same call with a different actor returns different
 # numbers, or is refused. What is deliberately NOT here is Issue.visible — the
-# viewer's issue scope is Redmine's own SQL, so it is frozen by the scope fixture in
-# test/unit/golden_scope_fixture_test.rb, where a real IssueQuery exists.
+# viewer's issue scope is Redmine's own SQL, and it WAS frozen by the scope fixture in
+# test/unit/golden_scope_fixture_test.rb, where a real IssueQuery existed. S-30 deleted
+# that test with its subject; the frozen answers survive as a record under
+# spec/golden/scope/ and the live per-actor coverage is
+# test/unit/multi_actor_visibility_test.rb, which uses a real Role#issues_visibility.
 #
 # --- Running them ---
 #

@@ -22,18 +22,20 @@ module RedmineReporterDashboards
     #
     # --- Who builds one ---
     #
-    # Nobody yet, and that is correct rather than an omission. These Liquid tags only
-    # ever run inside the optional host plugin's renderer; standalone, T-06 makes the
-    # report widgets degrade and `report_pdf` 404. T-10 onward builds the owned render
-    # path and is what will fill this in. Until then such an install resolves through
-    # `Glue::Legacy::ScopeResolution`, which is exactly what T-07's acceptance list
-    # asks for: drill-through keeps working on installs that still have the host
-    # plugin. The owned layer names it nowhere — that is what gate G8 measures.
+    # `Reporting::ReportRun#render_context`, and nothing else. It is built per render
+    # from an explicit actor and the scope `Reporting::ReportScope.build` produced from
+    # that actor's own visible scope.
     #
-    # Inventing a producer now — having the glue synthesise one from the host's Liquid
-    # registers — would make the owned path *look* exercised while the archaeology it
-    # replaces still ran. An empty path is honest; a path that launders the old one is
-    # not.
+    # THIS PARAGRAPH USED TO SAY "NOBODY YET", which was true when the file was written
+    # and false from T-23 onward; S-30 is what finally corrected it. It also said an
+    # install without an owned renderer "resolves through `Glue::Legacy::ScopeResolution`"
+    # — that module is deleted. A render arriving with no context now resolves nothing
+    # unless the tag named a `query_id:`.
+    #
+    # The warning the old text carried is still worth keeping: inventing a producer that
+    # synthesises a context from a host plugin's Liquid registers would make the owned
+    # path *look* exercised while the archaeology it replaced still ran. An empty path is
+    # honest; a path that launders the old one is not.
     #
     # --- Why a register and not an argument ---
     #
@@ -215,8 +217,9 @@ module RedmineReporterDashboards
       end
 
       # The one register lookup the owned path performs. Returns nil when there is no
-      # render context, which is how ScopeBinding knows to fall back to the legacy
-      # glue — so this must not raise on a context that has no registers at all.
+      # render context — since S-30 that tells `ScopeBinding` there is no named viewer,
+      # so it resolves nothing rather than falling back anywhere. It must not raise on a
+      # context that has no registers at all.
       #
       # Type-checked rather than duck-typed: something else answering to `scope` is
       # exactly the accident `ScopeResolution`'s `ar_scope?` duck test institutionalised.

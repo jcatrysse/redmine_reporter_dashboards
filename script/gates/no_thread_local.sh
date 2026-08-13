@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Gate — T-07. No ambient per-thread state outside the legacy glue.
+# Gate — T-07, and since S-30 (2026-08-13) an ABSOLUTE one: no ambient per-thread
+# state under app/ or lib/, with no exemptions at all.
 #
 # `Thread.current` is how the plugin used to get an IssueQuery from reporter's renderer
 # into a Liquid tag: reporter's `liquidize()` takes no registers argument that can be
@@ -13,14 +14,16 @@ set -euo pipefail
 # The owned path carries the actor, the scope and the query in a RenderContext, which
 # is an argument. So the construct now has exactly one legitimate home — the glue that
 # exists only because reporter is installed, and which is deleted at 1.0 — and this
-# gate is what keeps it there. T-07's acceptance list asks for it in those words:
-# "a gate asserts `Thread.current` is absent from `lib/`/`app/` outside `glue/legacy/`".
+# gate is what keeps it there. T-07's acceptance list asked for "a gate asserts
+# `Thread.current` is absent from `lib/`/`app/` outside `glue/legacy/`" — and S-30
+# deleted `glue/legacy/`, so the "outside" clause has no subject and the rule is: nowhere.
 #
 # Mode:
 #   NO_THREAD_LOCAL_MODE=warn    (default) a reference outside the exempt paths fails;
 #                                an exempt path that no longer needs the exemption warns
-#   NO_THREAD_LOCAL_MODE=strict  ANY reference fails. What 1.0 must pass, because at 1.0
-#                                glue/legacy/ does not exist.
+#   NO_THREAD_LOCAL_MODE=strict  ANY reference fails. With EXEMPT empty the two modes
+#                                answer identically; strict is kept because the difference
+#                                returns the moment somebody adds an entry.
 #
 # Deliberately also catches Thread#[]= on an explicit thread and Fiber-local storage:
 # swapping `Thread.current[:k]` for `Thread.current.thread_variable_set` would satisfy a
@@ -76,8 +79,39 @@ matches() {
         exit 2
       fi
     fi
-  done < <(find "${SEARCH_PATHS[@]}" -name '*.rb' -type f 2>/dev/null | sort)
+  done < <(scanned_files)
 }
+
+# EVERY SEARCH PATH MUST EXIST, AND THE SET MUST HAVE A FLOOR.
+#
+# S-30 emptied EXEMPT, and an independent review measured what that cost: this gate's
+# ONLY protection against scanning nothing had been the stale-exemption arm, which
+# WARNed when a listed file went missing. With an empty list a scan of zero files
+# printed a clean OK — `find … 2>/dev/null` swallows "No such file or directory", so
+# running it from the wrong root certified the tree having read none of it. That is
+# HANDOVER §1's most-repeated failure, and emptying the list is what exposed it.
+#
+# Two checks replace the accidental canary, and the PASS line prints what it scanned so
+# "it read nothing" is visible rather than inferred.
+scanned_files() {
+  find "${SEARCH_PATHS[@]}" -name '*.rb' -type f | sort
+}
+
+for path in "${SEARCH_PATHS[@]}"; do
+  if [ ! -d "$path" ]; then
+    echo "no_thread_local: FAIL — search path '$path' does not exist, so this gate would" >&2
+    echo "                 report a clean tree having read nothing. Run it from the root." >&2
+    exit 2
+  fi
+done
+
+SCANNED="$(scanned_files | wc -l | tr -d ' ')"
+if [ "$SCANNED" -lt 100 ]; then
+  echo "no_thread_local: FAIL — only $SCANNED file(s) scanned under ${SEARCH_PATHS[*]}." >&2
+  echo "                 The plugin has hundreds; a set this small means the search is" >&2
+  echo "                 broken, not that the tree is clean." >&2
+  exit 2
+fi
 
 FOUND="$(matches | sort -u)"
 # `${EXEMPT[@]+...}` AND NOT A BARE `"${EXEMPT[@]}"`. S-30 emptied this array, and
@@ -91,7 +125,7 @@ UNLISTED="$(comm -23 <(echo "$FOUND") <(echo "$ALLOWED") | sed '/^$/d')"
 STALE="$(comm -13 <(echo "$FOUND") <(echo "$ALLOWED") | sed '/^$/d')"
 
 FOUND_COUNT="$(echo "$FOUND" | sed '/^$/d' | wc -l | tr -d ' ')"
-echo "no_thread_local: mode=$MODE  referencing files=$FOUND_COUNT  exempt=${#EXEMPT[@]}"
+echo "no_thread_local: mode=$MODE  scanned=$SCANNED  referencing files=$FOUND_COUNT  exempt=${#EXEMPT[@]}"
 
 STATUS=0
 
@@ -109,8 +143,8 @@ if [ -n "$UNLISTED" ]; then
   echo
   echo "The owned path carries the actor, the scope and the query in a"
   echo "Liquid::RenderContext, which is an argument rather than ambient state. If a new"
-  echo "reference is genuinely unavoidable, it belongs in glue/legacy/ with the reason —"
-  echo "and that is a decision to take in review, not a line to add to this file."
+  echo "reference is genuinely unavoidable there is nowhere left to put it — glue/legacy/"
+  echo "is deleted — so it is a decision to take in review, not a line to add to this file."
   STATUS=1
 fi
 
@@ -122,7 +156,7 @@ if [ -n "$STALE" ]; then
 fi
 
 if [ "$STATUS" -eq 0 ] && [ -z "$STALE" ]; then
-  echo "no_thread_local: OK — no per-thread state under app/ or lib/, and every exemption is used."
+  echo "no_thread_local: OK — $SCANNED files scanned, no per-thread state under app/ or lib/."
 fi
 
 exit "$STATUS"

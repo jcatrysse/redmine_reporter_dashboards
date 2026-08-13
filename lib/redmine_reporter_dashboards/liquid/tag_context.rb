@@ -34,10 +34,12 @@ module RedmineReporterDashboards
     # It does NOT synthesise a scope or a query. `HANDOVER.md` §6 warns against having
     # the glue rebuild a `RenderContext` from the host's Liquid registers — "it would run
     # the same archaeology behind a new name and make the owned path look tested" — and
-    # that warning is about SCOPE. Scope still comes from `ScopeBinding`, which still
-    # dispatches to `Glue::Legacy::ScopeResolution` on this path. The context built here
-    # carries an actor and nothing else: `scope` and `query` are deliberately nil, so a
-    # drop that tried to read one gets nothing rather than something plausible.
+    # that warning is about SCOPE. Scope comes from `ScopeBinding`, which until S-30
+    # dispatched to `Glue::Legacy::ScopeResolution` on this path and now resolves nothing
+    # unless the tag named a `query_id:` — for which this module supplies the actor. The
+    # context built here carries an actor and nothing else: `scope` and `query` are
+    # deliberately nil, so a drop that tried to read one gets nothing rather than
+    # something plausible.
     #
     # `owned?` is how a reader (and a spec) can tell the two apart without inferring it.
     module TagContext

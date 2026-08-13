@@ -5,10 +5,11 @@ require_relative '../../lib/redmine_reporter_dashboards/liquid/scope_binding'
 
 # T-07's owned path, DB-less.
 #
-# The legacy path is covered where it always was — the 46-triple oracle in
-# test/unit/golden_scope_fixture_test.rb and the two tag specs, which now reach it
-# through this dispatch. What is asserted here is what the owned path is FOR: two
-# sources, an explicit actor, and no way to reintroduce the third.
+# S-30 DELETED THE LEGACY PATH, and this header used to say it was "covered where it
+# always was — the 46-triple oracle in test/unit/golden_scope_fixture_test.rb". That test
+# is deleted with its subject; the oracle itself survives as a historical record under
+# spec/golden/scope/ (see spec/golden/README.md). What is asserted here is what the owned
+# path is FOR: two sources, an explicit actor, and no way to reintroduce the other six.
 #
 # The sharpest example in the file is `it 'never reads User.current'`. INV-1 is the
 # easiest invariant in this project to lose silently, so it is tested by making the
@@ -288,6 +289,63 @@ RSpec.describe RedmineReporterDashboards::Liquid::ScopeBinding do
 
       expect(binding.scope).to be_nil
       expect(binding.source).to eq(:none)
+    end
+
+    # INV-4: THE BRANCH THAT TURNS A RESOLVING RENDER INTO AN EMPTY ONE MUST SAY SO.
+    # Every other refusal in this file logs; the first version of S-30 added this one
+    # silently, and an independent review was right that a silent refusal is the failure
+    # mode the rest of the module is written against. No degradation can be recorded —
+    # there is no context to record it on — which is the argument for the log line, not
+    # against it.
+    it 'says why it resolved nothing' do
+      # `Rails` IS STUBBED HERE, and that is the point rather than a convenience.
+      # `ScopeBinding.log` guards with `defined?(::Rails)`, so in this DB-less process
+      # the line is a no-op — an assertion written without this stub would pass against
+      # a `log` call that had been deleted. In a real install (host plugin or not) Rails
+      # is always defined, so the branch this covers does log.
+      logger = double('Logger')
+      stub_const('Rails', Class.new { def self.logger; @logger; end
+                                      def self.logger=(l); @logger = l; end })
+      Rails.logger = logger
+
+      expect(logger).to receive(:warn).with(/no render context and no query_id/)
+
+      described_class.bind({}, FakeLiquidContext.new)
+    end
+
+    # --- AND THE ONE SOURCE THAT STILL WORKS WITHOUT AN OWNED CONTEXT ----------------
+    #
+    # `query_id:` NAMES its query and resolves it through `IssueQuery.visible(actor)`, so
+    # the only thing it ever needed from a render context is the ACTOR. The first version
+    # of S-30 put the nil-context return ABOVE this branch and silently withdrew a
+    # documented feature — the README's "When the Reporter plugin exposes `query_id` in
+    # the template context" — from every render this plugin does not produce. Found by an
+    # independent review; these two examples are the regression test.
+    it 'still resolves query_id: with no render context' do
+      base = double('base_scope')
+      found = double('IssueQuery', id: 7, base_scope: base)
+      stub_issue_query(found: { 7 => found })
+      stub_const('User', Class.new { def self.current; :ambient_actor; end })
+
+      binding = described_class.bind({ 'query_id' => '7' }, FakeLiquidContext.new)
+
+      expect(binding.scope).to be(base)
+      expect(binding.query).to be(found)
+      expect(binding.source).to eq(:query_id)
+    end
+
+    it 'scopes that lookup to the ambient actor rather than skipping visibility' do
+      found = double('IssueQuery', id: 7, base_scope: double)
+      klass = stub_issue_query(found: { 7 => found })
+      stub_const('User', Class.new { def self.current; :ambient_actor; end })
+
+      described_class.bind({ 'query_id' => '7' }, FakeLiquidContext.new)
+
+      # The ONE ambient read, and it is still visibility-scoped. Reading User.current
+      # here is not an INV-1 breach: it happens in TagContext, which is the single named
+      # place this plugin is allowed to do it, and the result is passed EXPLICITLY into
+      # IssueQuery.visible rather than consulted again downstream.
+      expect(klass.seen_actors).to eq([:ambient_actor])
     end
   end
 
