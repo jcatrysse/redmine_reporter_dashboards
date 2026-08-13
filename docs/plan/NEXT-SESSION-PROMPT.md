@@ -192,6 +192,38 @@ job as the README's record of the old idiom). And the chart form has no "drill o
 
 ## Open for the curator
 
+- **DECIDE FIRST: are renders by the `redmine_reporter` plugin still supported?** S-30's
+  independent review found this and it is the one open item with a behaviour change behind
+  it. The deletion's safety argument was *"after T-26a every render constructs a
+  RenderContext"* — true of **this plugin's** renders, and the tags are registered
+  **process-wide** (`::Liquid::Template.register_tag`). The host plugin renders its own
+  templates through `generate_reports`, with no RenderContext, and **this plugin still
+  ships `lib/reporter_report_content_patch.rb`, whose own header says it exists so "no
+  Issue objects are loaded for templates that only use `{% sql_aggregate %}`"** — i.e. we
+  optimise that path while having removed what made it resolve.
+
+  **Effect today:** on an install with both plugins, a host-rendered template using
+  `{% sql_aggregate %}` or `{% version_rollup %}` resolves nothing unless it names a
+  `query_id:` — it renders structurally intact with zero figures. It fails CLOSED (no
+  leak) and it now logs a warn line, and `query_id:` was restored precisely to narrow
+  this. But `technical-spec.md` §7 makes simultaneous installation a design goal, so this
+  is a supported configuration changing behaviour.
+
+  Three ways out, and the choice is yours:
+  1. **Host renders stay supported** — give them a scope. The honest shape is a narrow,
+     named source (not the six ambient ones), e.g. requiring `query_id:` and saying so in
+     the README, which is close to where the code already is.
+  2. **Host renders are withdrawn** — then finish it in one change: delete
+     `reporter_report_content_patch.rb` and its `apply_reporter_patches` call, delete
+     `TagContext`'s ambient-actor fallback, retire `ReporterPresence` (strict 5 → 2), and
+     correct the README sections that tell authors to put these tags in a Reporter
+     template.
+  3. **Leave as is** — accept zeros-with-a-log-line for that configuration, and say so in
+     the README so an operator is not debugging it.
+
+  Option 2 is the only one that also closes the strict list; option 1 is the only one that
+  keeps the A/B argument in §7 true. **Do not let a future session pick one by inference.**
+
 - **`group_by: user` CANNOT BE EXPRESSED on the spent-time source, and quoting does not help.**
   Found by T-37's own gallery harness. A bare tag parameter is resolved as a Liquid variable
   (`str_param` → `context[value]`), `user` and `project` are ALWAYS assigned in a report, and

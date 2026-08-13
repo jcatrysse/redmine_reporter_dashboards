@@ -1903,6 +1903,23 @@ declaration, no matrix cell.
 remainder is closed. What is left is **T-03's twelve render performance cells, which the
 curator said to leave** — so unless the curator says otherwise, there is no queued work.
 
+**AND ONE THING S-30 DID NOT SETTLE — READ THIS BEFORE TOUCHING THE TAGS.** Its safety
+argument was *"after T-26a every render constructs a RenderContext"*. That is true of THIS
+plugin's renders, and the tags are registered **process-wide**, so it is not the set of
+renders that reach them. The host plugin renders its own templates with no RenderContext —
+and this plugin still ships `reporter_report_content_patch.rb`, whose own header says it
+exists so that *"no Issue objects are loaded for templates that only use
+`{% sql_aggregate %}`"*. We optimise that path and removed what made it resolve.
+
+Found by the independent review, not by the suite, because no test covers a host render.
+It fails closed and now logs, and `query_id:` was restored so a host template can still
+name a query explicitly — but on an install running both plugins a template relying on the
+ambient scope renders zeros. **Whether that configuration is still supported is the
+curator's, and it is written up with three options in `NEXT-SESSION-PROMPT.md` under
+"Open for the curator".** The generalisable lesson: **"nothing in production reaches this"
+is a claim about a call graph, and a globally registered tag has callers you did not
+write.**
+
 **S-30 deleted `glue/` and the deletion held.** The 2026-08-12 attempt measured 166 of 249
 red and was reverted; this one rebuilt the tag suite onto an owned `RenderContext` FIRST and
 proved it indifferent to the module (695 examples, 0 failures with it present and with
