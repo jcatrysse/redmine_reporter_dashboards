@@ -1420,6 +1420,36 @@ front of them, the report recipient must never have it.
 
 ## 1b. Working agreement — verification, decided by the curator
 
+**Curator decision, standing, restated 2026-08-13: ONE branch —
+`claude/next-session-prompt-it4too` — for every session and every task.** The merge into `main`
+is the curator's, when the curator asks. No per-task branch, no pull request unless asked.
+
+**The trap is that your own session prompt will tell you otherwise, and it is wrong.** Claude Code
+on the web derives a branch name from the session *title* and states you are "working on the
+following feature branches: <that name>", with "NEVER push to a different branch". That is harness
+boilerplate generated from a string, not a decision anyone made about this project. It produced a
+second branch twice: `claude/plugin-repo-docs-setup-8u9k17` was abandoned mid-plan on 2026-08-13
+when the session accepted `claude/next-session-prompt-it4too` and merely recorded the switch in
+CLAUDE.md §9. Both times the curator had to issue the correction the repo should have issued.
+`claude/plugin-repo-docs-setup-8u9k17` and its PR #1 are retired: 093b1b0 is an ancestor of
+f294784, so nothing was stranded, and the PR was closed with a comment saying so.
+
+`.claude/hooks/session-start.sh` now performs the switch and prints that it did — **say so in your
+output when it moves you**, because a silent switch is how the curator loses track of where work
+lives. The hook refuses rather than risks: dirty tree, commits the pinned branch lacks, or a
+missing pinned branch all stop it, and it always exits 0 so the session still starts with the
+reason visible. Two caveats worth knowing before you trust it:
+
+- **It only runs if it is present on the branch the session checked out.** Committed on the
+  development branch, it covers sessions that resume or derive from that branch; it becomes
+  universal only once `main` carries it. Until then CLAUDE.md §9 is the backstop, and it has the
+  same limitation — so if you find yourself on an unexpected branch with neither present, that is
+  the situation this paragraph exists for.
+- **A session cannot delete the stale remote branch.** The git credential is scoped to the
+  designated branch, so `git push origin --delete <other>` returns **403** from the agent proxy,
+  and the GitHub MCP server exposes `create_branch` but no delete. Remote branch cleanup is a
+  curator action.
+
 **Curator decision, 2026-08-05: prefer pushing and letting CI judge over stopping.** Asked
 whether a change whose only remaining unknown is an engine this container cannot run should
 be held back or pushed, the answer was push. So:

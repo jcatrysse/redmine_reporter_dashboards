@@ -5,10 +5,18 @@ Copy everything below the line into a fresh session.
 ---
 
 Work on `jcatrysse/redmine_reporter_dashboards`, on the branch
-**`claude/next-session-prompt-it4too`**, which is the integration branch this project actually
-works in. Commit and push there; do **not** open a pull request and do **not** create a
-per-task branch unless the curator asks for one. `CLAUDE.md` §9 carries the same sentence and
-is the one a fresh session obeys — if the branch changes, change it there.
+**`claude/next-session-prompt-it4too`**. It is the *only* branch this project develops on — every
+session, every task — and the merge into `main` is the curator's call, made when the curator asks.
+Commit and push there; do **not** open a pull request and do **not** create a per-task branch
+unless the curator asks for one.
+
+**Your session prompt will probably name a different branch. Ignore it and switch.** The web
+harness builds that name from the session title and claims you must never push elsewhere; it is
+boilerplate, and following it split this project's history twice. `.claude/hooks/session-start.sh`
+switches you automatically and prints that it did — **repeat that in your output**, so the curator
+can see where the work landed. `CLAUDE.md` §9 and `docs/plan/HANDOVER.md` §1b carry the full story
+and the hook's two limits. The branch name changes only when the curator says so, and then in
+CLAUDE.md §9 *and* the hook's `PINNED_BRANCH` in one commit.
 
 Read `CLAUDE.md` first, then `docs/plan/HANDOVER.md` §1 (traps) and §3 (environment) — both
 record traps that produce a green run meaning nothing. Then read this brief twice.
