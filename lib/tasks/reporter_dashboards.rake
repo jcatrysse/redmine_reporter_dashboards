@@ -313,6 +313,27 @@ namespace :reporter_dashboards do
     exit 1 if RedmineReporterDashboards::LintReport.failed?(entries)
   end
 
+  # T-37 / FR-72 — regenerate the drop reference.
+  #
+  # `:environment` is NOT a dependency, and that is the interesting property: the drops need
+  # the Liquid gem and their own files, nothing else. So this runs on a checkout with no
+  # database and no Redmine configured, which is what lets `drop_reference_parity.sh` compare
+  # its output in the `gates` job rather than needing the full app.
+  #
+  # It WRITES A FILE, deliberately and only one. `docs/drop-reference.md` is a generated
+  # artefact under G9's rule — committed, and asserted to equal a fresh generation — so the
+  # write is the point rather than a side effect. Reading it out on stdout would leave the
+  # regeneration to whoever remembers the shell redirection.
+  desc 'Regenerate docs/drop-reference.md from the drop classes (FR-72; needs no database)'
+  task :drop_reference do
+    require File.expand_path('../redmine_reporter_dashboards/liquid/drop_reference', __dir__)
+
+    reference = RedmineReporterDashboards::Liquid::DropReference
+    path = File.expand_path('../../docs/drop-reference.md', __dir__)
+    File.write(path, reference.markdown)
+    warn "wrote #{path} — #{reference.sections.length} drops"
+  end
+
   namespace :render do
     # T-14. Same shape as `import:plan` and for the same reason: the decisions —
     # which engines, what the exit code means, what happens when there are none —

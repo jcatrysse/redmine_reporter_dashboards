@@ -97,3 +97,22 @@
   max-width: 100%;
   word-break: break-all;
 }
+
+/* T-37 - the drop reference in the sidebar (FR-72). LAYOUT ONLY; see the note on the lint
+   excerpt above for what this file may not contain and which gate enforces it.
+
+   A sidebar is narrow and an accessor list is long, so each entry wraps as a block with its
+   snippet, its type and its note under one another rather than being cut off at the edge.
+   `word-break` is for the same reason as the lint excerpt: `{{ issue.total_estimated_hours }}`
+   has no space in it. */
+.reporter-drop-reference summary { cursor: pointer; }
+.reporter-drop-reference-list { list-style: none; margin: 0; padding: 0; }
+.reporter-drop-reference-list li { display: block; margin-bottom: 0.4em; }
+.reporter-drop-reference-list code { display: block; word-break: break-all; }
+.reporter-drop-reference-type,
+.reporter-drop-reference-note { display: block; }
+/* NO BADGE STYLING, and the gate is why rather than taste: `border: 1px solid` is a
+   colour-bearing property (it resolves to currentColor) and chrome_no_design_tokens.sh
+   refuses it here — correctly. The batch marker is the translated WORD after the type,
+   which needs no box to be read and cannot be wrong in a dark theme. */
+.reporter-drop-reference-batch { display: inline; }

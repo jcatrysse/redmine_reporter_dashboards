@@ -45,3 +45,11 @@
     `@lint` is set by every action that renders this partial — see the controller's
     `lint_editor`, which is the one place it is computed. %>
 <%= render partial: 'lint', locals: { analysis: @lint } %>
+
+<%# FR-72's reference, in Redmine's own sidebar slot rather than in a box of our own.
+    `content_for` is used here — in the shared partial — for the same reason the buttons are:
+    three pages would otherwise each have to remember it, and the one that forgot would be
+    the one where an author is looking something up. %>
+<% content_for :sidebar do %>
+  <%= render partial: 'drop_reference' %>
+<% end %>

@@ -108,6 +108,22 @@ jobs:
         run: bundle install --jobs 4
         working-directory: redmine
 
+      # FR-72's parity gate (T-37) runs HERE and not in the `gates` job, and the reason is
+      # mechanical: "what can a template reach" is `Liquid::Drop.invokable_methods` asked of a
+      # loaded class, so this gate needs the Liquid gem — and the `gates` job installs no gems
+      # at all, deliberately, because every other gate there is a grep or a parse. Running it
+      # after `bundle install` here costs nothing, uses the LOCKED Liquid rather than whatever
+      # `gem install` would fetch, and exercises it on all four Redmine branches and three
+      # Rubies instead of one.
+      #
+      # BEFORE the specs, so that a stale `docs/drop-reference.md` is reported by the gate's
+      # own message rather than as one red example among 2 800.
+      - name: drop_reference_parity
+        run: |
+          BUNDLE_GEMFILE="$PWD/Gemfile" \
+            ./plugins/redmine_reporter_dashboards/script/gates/drop_reference_parity.sh
+        working-directory: redmine
+
       - name: Run plugin specs
         run: |
           bundle exec rspec \

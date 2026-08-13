@@ -120,6 +120,11 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporting/snapsho
 # before, through `require_relative` from `import/survey`, so a controller naming it would
 # have depended on a task having run first.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/template_linter'
+# T-37 / FR-72 — the drop reference, required at boot because the editor's sidebar renders it
+# on every request. It reads the drop classes' own `invokable_methods`, so it must be loaded
+# AFTER them; `liquid/drop_reference` requires `liquid/drops` itself rather than relying on
+# this file's ordering, because a reference that loaded first would describe an empty surface.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/liquid/drop_reference'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards

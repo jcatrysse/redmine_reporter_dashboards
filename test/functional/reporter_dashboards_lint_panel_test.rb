@@ -287,6 +287,52 @@ class ReporterDashboardsLintPanelTest < ActionController::TestCase
                        response.body
   end
 
+  # ------------------------------------------------------------------ FR-72's sidebar
+
+  # THE REFERENCE IS RENDERED AT RUNTIME, and these are the assertions that say so from the
+  # outside. `spec/liquid/drop_reference_spec.rb` proves the generator; what it cannot reach
+  # is whether the sidebar slot is actually filled on the three pages an author uses — a
+  # `content_for` in a partial that nobody renders is invisible in every unit test.
+  def test_the_drop_reference_is_in_the_sidebar_of_the_editor
+    template = create_template
+
+    get :edit, params: { project_id: @project.identifier, id: template.id }
+
+    assert_select '#sidebar details.reporter-drop-reference', minimum: 10
+    assert_select '#sidebar h3', text: l(:label_reporter_drop_reference)
+  end
+
+  def test_the_drop_reference_is_on_the_new_form_and_on_the_preview
+    get :new, params: { project_id: @project.identifier }
+    assert_select '#sidebar details.reporter-drop-reference', minimum: 10
+
+    post :preview, params: { project_id: @project.identifier, template: template_params }
+    assert_select '#sidebar details.reporter-drop-reference', minimum: 10
+  end
+
+  # EVERY ACCESSOR THE GENERATOR REPORTS IS IN THE PAGE, compared as a set rather than by
+  # spot-checking three of them: a view that dropped the loop's last section, or printed the
+  # name without the snippet, would pass a "does it mention issue.subject" test.
+  def test_the_sidebar_carries_the_whole_generated_surface
+    get :new, params: { project_id: @project.identifier }
+
+    RedmineReporterDashboards::Liquid::DropReference.sections.each do |section|
+      section.accessors.each do |accessor|
+        assert_include ERB::Util.html_escape(accessor.snippet(section.variable)), response.body,
+                       "#{section.klass}##{accessor.name} is missing from the sidebar"
+      end
+    end
+  end
+
+  # The one piece of metadata an author cannot guess from a name, and the reason the table
+  # has a third column at all.
+  def test_the_sidebar_marks_a_batch_accessor_and_says_what_that_means
+    get :new, params: { project_id: @project.identifier }
+
+    assert_select '#sidebar .reporter-drop-reference-batch', minimum: 1
+    assert_include ERB::Util.html_escape(l(:text_reporter_drop_reference_batch)), response.body
+  end
+
   # ------------------------------------------------------------------ the editor on the preview
 
   # §9b.2: the diagnostics belong *"in the editor, next to the code"*. Before T-37 the
