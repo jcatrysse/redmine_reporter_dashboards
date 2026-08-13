@@ -544,4 +544,163 @@ class ReporterPreflightControllerTest < ActionController::TestCase
   def test_the_deferral_label_table_covers_every_shipped_locale
     assert_equal SHIPPED_LOCALES, DEFERRAL_LABEL.keys.sort
   end
+
+  # --- T-27 · THE UPGRADE DIAGNOSTIC ------------------------------------------------
+  #
+  # `spec/permissions/authoring_audit_spec.rb` owns the RULES and runs without a
+  # database. What only a functional test can reach is the half that is about being a
+  # Redmine page: that it reads REAL `Role` rows, that it renders on the GET rather than
+  # behind the POST, that it survives the POST, and that it is behind `require_admin`
+  # like everything else on this controller.
+  #
+  # These use real roles from the fixtures rather than stubs, because the thing being
+  # checked is precisely that `Role#permissions` round-trips through ActiveRecord's
+  # serialized column the way the audit expects. A stubbed role would assert nothing
+  # about that.
+
+  BASE_AUTHORING = RedmineReporterDashboards::Permissions::AuthoringAudit::BASE_AUTHORING.first
+
+  def test_the_audit_lists_a_role_holding_the_base_plugin_authoring_permission
+    @request.session[:user_id] = @admin.id
+    role = Role.find(1)
+    role.permissions = [BASE_AUTHORING]
+    role.save!
+
+    get :show
+
+    assert_response :success
+    rows = assigns(:authoring_audit)
+    assert_equal [role.name], rows.map(&:role_name)
+    assert rows.first.only_base?, 'holds theirs and not ours'
+    # The permission NAME is on the page: "Manager holds authoring" is not actionable
+    # and the identifier is what an administrator greps for.
+    assert_select 'td', text: BASE_AUTHORING.to_s
+  end
+
+  # THE `Accept:` CASE: A ROLE THAT HOLDS OURS AND NOT THEIRS.
+  #
+  # Core's `DefaultData::Loader` grants Manager every setable permission on a fresh
+  # install, so this is the shape an install arrives in without anybody choosing it —
+  # and this page is the only thing that says so.
+  def test_the_audit_lists_a_role_holding_ours_and_not_theirs
+    @request.session[:user_id] = @admin.id
+    role = Role.find(1)
+    role.permissions = [:add_reporter_dashboards_templates]
+    role.save!
+
+    get :show
+
+    rows = assigns(:authoring_audit)
+    assert_equal [role.name], rows.map(&:role_name)
+    assert rows.first.only_own?, 'holds ours and not theirs'
+    assert_select 'td', text: 'add_reporter_dashboards_templates'
+  end
+
+  # THE `Accept:` CASE: THE BASE PLUGIN IS ABSENT — "the list is empty, not an error".
+  #
+  # Absence is not asked of the plugin registry, which is the decision T-27 owed: a
+  # grant outlives the plugin that registered it, so the audit reads the permission
+  # tables and nothing else. Here no role holds either side, and the page must say so in
+  # a sentence rather than render a blank region.
+  def test_the_audit_is_an_empty_sentence_when_no_role_holds_authoring
+    @request.session[:user_id] = @admin.id
+    Role.all.each do |role|
+      role.permissions = [:view_issues]
+      role.save!
+    end
+
+    get :show
+
+    assert_response :success
+    assert_equal [], assigns(:authoring_audit)
+    assert_select 'p.nodata', text: I18n.t(:text_reporter_authoring_audit_none)
+    # And no table, so an empty answer cannot be read as a table that failed to fill.
+    assert_select 'td', text: BASE_AUTHORING.to_s, count: 0
+  end
+
+  # A builtin role CAN hold the base plugin's authoring permission — it is registered
+  # with no `require:`, so `setable_permissions` subtracts nothing for Non-member or
+  # Anonymous. That is the most alarming row this page can print, and reading
+  # `Role.givable` instead of `Role.all` would filter out exactly it.
+  def test_the_audit_reaches_builtin_roles
+    @request.session[:user_id] = @admin.id
+    anonymous = Role.anonymous
+    anonymous.permissions = [BASE_AUTHORING]
+    anonymous.save!
+
+    get :show
+
+    rows = assigns(:authoring_audit)
+    assert_includes rows.map(&:role_name), anonymous.name
+    assert rows.find { |row| row.role_name == anonymous.name }.builtin?,
+           'an anonymous role holding code execution must be flagged as builtin'
+  end
+
+  # It renders on the GET **and** survives the POST. Written in `show` alone, pressing
+  # the button would make the audit vanish — which is the one moment an administrator is
+  # definitely looking at this page.
+  def test_the_audit_is_present_after_running_the_preflight
+    @request.session[:user_id] = @admin.id
+    role = Role.find(1)
+    role.permissions = [BASE_AUTHORING]
+    role.save!
+
+    with_engine(:stub, StubAdapter) do
+      post :run
+
+      assert_response :success
+      assert_equal [role.name], assigns(:authoring_audit).map(&:role_name)
+    end
+  end
+
+  # Same guard as every other action here. The audit names roles and permissions, which
+  # is reconnaissance for anybody deciding what to attack.
+  def test_a_non_admin_never_sees_the_audit
+    @request.session[:user_id] = users(:users_002).id
+
+    get :show
+
+    assert_response :forbidden
+    assert_nil assigns(:authoring_audit)
+  end
+
+  # Every key the section renders exists in every locale the plugin ships. An absent key
+  # falls back to English silently, which reads as a bug to a Russian administrator and
+  # hides the gap from review (CLAUDE.md §10).
+  AUDIT_KEYS = %i[
+    label_reporter_authoring_audit
+    text_reporter_authoring_audit_intro
+    text_reporter_authoring_audit_none
+    label_reporter_authoring_audit_role
+    label_reporter_authoring_audit_base
+    label_reporter_authoring_audit_own
+    label_reporter_authoring_audit_verdict
+    text_reporter_authoring_audit_both
+    text_reporter_authoring_audit_only_base
+    text_reporter_authoring_audit_only_own
+    text_reporter_authoring_audit_builtin
+  ].freeze
+
+  def test_every_audit_key_is_translated_in_every_shipped_locale
+    missing = []
+    SHIPPED_LOCALES.each do |locale|
+      AUDIT_KEYS.each do |key|
+        value = ::I18n.t(key, locale: locale, default: '')
+        missing << "#{locale}.#{key}" if value.to_s.strip.empty?
+      end
+    end
+
+    assert_equal [], missing, 'these locale keys are missing or empty'
+  end
+
+  # AND THE VALUES ARE ACTUALLY TRANSLATED, not the English string pasted in nine times.
+  # §10 forbids that explicitly, and a parity check on key PRESENCE cannot see it.
+  def test_the_audit_heading_is_not_the_english_string_in_every_locale
+    english = ::I18n.t(:label_reporter_authoring_audit, locale: 'en')
+    untranslated = (SHIPPED_LOCALES - ['en']).select do |locale|
+      ::I18n.t(:label_reporter_authoring_audit, locale: locale) == english
+    end
+
+    assert_equal [], untranslated, 'these locales carry the English heading verbatim'
+  end
 end

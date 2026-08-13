@@ -37,6 +37,18 @@ class ReporterPreflightController < ApplicationController
   # is not good enough.
   before_action :require_admin
 
+  # T-27 — THE UPGRADE DIAGNOSTIC, ON EVERY RENDER OF THIS PAGE.
+  #
+  # A `before_action` and not a line in `show`, because `run` renders the same template:
+  # written in `show` alone, pressing the button would make the audit vanish, which is
+  # the one moment an administrator is definitely looking at this page.
+  #
+  # It is deliberately NOT behind the POST. `run` is a POST because it spawns a browser
+  # (see below); this costs one `SELECT` over a table with a handful of rows, and the
+  # failure it exists to catch is a grant nobody went looking for — so it has to be on
+  # the page an administrator lands on, not behind an action they must choose.
+  before_action :load_authoring_audit
+
   helper :reporter_preflight
 
   def show
@@ -79,6 +91,24 @@ class ReporterPreflightController < ApplicationController
   end
 
   private
+
+  # `Role.all` and NOT `Role.givable`, which is the one decision in this method.
+  #
+  # `Role.givable` excludes the builtin Non-member and Anonymous roles — and a builtin
+  # role CAN hold the base plugin's authoring permission, because
+  # `:manage_report_templates` is registered with no `require:` at all, so
+  # `Role#setable_permissions` subtracts nothing for either of them and an administrator
+  # can tick it on Anonymous. That is the most alarming row this page can print, and
+  # `givable` would filter out exactly it. Ours cannot land there — `Entry#requires`
+  # derives `:member` from `authoring` — which is the asymmetry the page reports.
+  #
+  # `order(:id)` because the audit sorts by name and needs a deterministic tiebreak on a
+  # duplicate name; an unordered read gives Postgres, MySQL and MariaDB three different
+  # answers (CLAUDE.md §6).
+  def load_authoring_audit
+    @authoring_audit =
+      RedmineReporterDashboards::Permissions::AuthoringAudit.rows(Role.order(:id).to_a)
+  end
 
   # The port `render/**` may not reach for itself — mechanism E5, and the boundary
   # `layer_purity.sh` enforces. This controller is application code, so it is allowed to

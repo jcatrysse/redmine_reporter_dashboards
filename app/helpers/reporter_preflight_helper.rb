@@ -97,6 +97,49 @@ module ReporterPreflightHelper
     STATE_CLASSES.fetch(state.to_sym, '')
   end
 
+  # --- T-27, the upgrade diagnostic -------------------------------------------------
+  #
+  # One row's verdict, as a locale key. A CLOSED map over the three states, for the same
+  # reason `CHECK_LABELS` above is one: a computed `"..._#{state}"` turns a state nobody
+  # thought about into `translation missing:` on an administrator's screen.
+  #
+  # The three states are not decoration — they are three different actions:
+  #
+  #   both      the role authors in both plugins. Nothing to do; it is here so the list
+  #             is the whole answer rather than a filtered one.
+  #   only_base authoring in the base plugin and not here. THE UPGRADE QUESTION: these
+  #             people author today and will not after the switch.
+  #   only_own  authoring here and not there. Usually core's `DefaultData::Loader`
+  #             handing Manager every setable permission on a fresh install — a
+  #             code-execution grant nobody chose.
+  AUDIT_VERDICTS = {
+    both: :text_reporter_authoring_audit_both,
+    only_base: :text_reporter_authoring_audit_only_base,
+    only_own: :text_reporter_authoring_audit_only_own
+  }.freeze
+
+  def reporter_authoring_audit_verdict(row)
+    return l(AUDIT_VERDICTS[:both]) if row.both?
+    return l(AUDIT_VERDICTS[:only_base]) if row.only_base?
+
+    l(AUDIT_VERDICTS[:only_own])
+  end
+
+  # Permission NAMES, joined. Not translated, and the reason is the same one the class
+  # comment gives for `Check#detail`: these are the identifiers on the roles screen and
+  # in `roles.permissions`, so they are what an administrator greps for and what they
+  # paste into an issue. A localised alias would be a second name for a thing that has
+  # exactly one.
+  def reporter_authoring_audit_permissions(names)
+    names.map(&:to_s).join(', ')
+  end
+
+  # A builtin role holding code execution is the one row on this table that is a finding
+  # rather than a fact, so it gets Redmine's warning icon and every other row gets none.
+  def reporter_authoring_audit_row_class(row)
+    row.builtin? ? 'icon icon-warning' : ''
+  end
+
   # One sentence an administrator can act on, and never a bare "OK" when something did
   # not run — the same rule `Report#headline` states for the terminal.
   def reporter_preflight_summary(report)

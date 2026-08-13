@@ -7,6 +7,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
 # permission set failed to load would boot with an authorize call that permits nobody,
 # which looks exactly like a misconfigured role.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions'
+# T-27's upgrade diagnostic. Required next to the permission model it reads, and NOT
+# behind `reporter_present?`: a `manage_report_templates` grant outlives the plugin that
+# registered it, so the case this exists for is the one where that plugin is gone.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions/authoring_audit'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/report_frame'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'

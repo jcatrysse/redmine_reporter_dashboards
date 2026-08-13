@@ -16,6 +16,55 @@
   <p><em><%= l(:text_reporter_preflight_takes_a_moment) %></em></p>
 </div>
 
+<%#
+  T-27 — WHO HOLDS CODE EXECUTION OVER REPORT TEMPLATES (INV-9).
+
+  ABOVE the engine section on purpose. This is the only surface in the plugin that
+  answers "did an upgrade, or Redmine's own default data, hand somebody the right to
+  run server-side code", and a section below a table an administrator has to press a
+  button to fill is a section nobody reads.
+
+  It renders on the GET, so landing here is enough. The empty state is a SENTENCE and
+  not a blank table: "no role holds one" is the good answer and has to be legible as
+  one, or an empty region reads as a page that failed to load.
+%>
+<h3><%= l(:label_reporter_authoring_audit) %></h3>
+
+<div class="box">
+  <p><%= l(:text_reporter_authoring_audit_intro) %></p>
+
+  <% if @authoring_audit.empty? %>
+    <p class="nodata"><%= l(:text_reporter_authoring_audit_none) %></p>
+  <% else %>
+    <table class="list">
+      <thead>
+        <tr>
+          <th><%= l(:label_reporter_authoring_audit_role) %></th>
+          <th><%= l(:label_reporter_authoring_audit_base) %></th>
+          <th><%= l(:label_reporter_authoring_audit_own) %></th>
+          <th><%= l(:label_reporter_authoring_audit_verdict) %></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @authoring_audit.each do |row| %>
+          <tr>
+            <td>
+              <span class="<%= reporter_authoring_audit_row_class(row) %>"></span>
+              <%= row.role_name %>
+              <% if row.builtin? %>
+                <span class="nodata"><%= l(:text_reporter_authoring_audit_builtin) %></span>
+              <% end %>
+            </td>
+            <td><%= reporter_authoring_audit_permissions(row.base) %></td>
+            <td><%= reporter_authoring_audit_permissions(row.own) %></td>
+            <td><%= reporter_authoring_audit_verdict(row) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</div>
+
 <%= form_tag(run_reporter_preflight_path, method: :post) do %>
   <%#
     THE ENGINE SELECTOR — §Findings E-27 row 6. Without it, an engine that needs a
