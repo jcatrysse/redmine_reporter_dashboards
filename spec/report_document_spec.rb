@@ -127,10 +127,37 @@ RSpec.describe RedmineReporterDashboards::ReportDocument do
   # PDF stop being the same document, and neither is visible in anything either module
   # RETURNS — it is visible in how many places emit one.
   describe 'there is one assembler and one stylesheet' do
+    # --- THE EXCLUSION IS THE PLUGIN'S OWN CLONE, AND `include?('/redmine/')` WAS NOT IT ---
+    #
+    # A local checkout keeps a Redmine clone at `<plugin>/redmine/` with a COPY of this plugin
+    # mirrored inside it, and these globs must not count that copy twice. The first version
+    # rejected any path containing `/redmine/` — which is every path in the world when the
+    # plugin is installed the way it actually ships: `redmine/plugins/redmine_reporter_dashboards`.
+    #
+    # CI RUNS IT THAT WAY, and that is how this was found: run 31694811039 failed all four
+    # `RSpec` jobs with *"render/engines/chromium_cdp.rb is exempt and does not exist any more"*
+    # and an emitter list of `[]`, while every one of them passed locally. Worse than the two
+    # red examples is the third, which PASSED — `wraps a report body … from exactly one place`
+    # asserts a list is EMPTY, and a glob that matched nothing satisfied it. A vacuous pass is
+    # the failure mode this file exists to prevent, in this file.
+    #
+    # The clone is excluded by its absolute path instead, which cannot mean something else
+    # depending on where the plugin is installed.
+    def clone_prefix
+      "#{File.expand_path('../redmine', __dir__)}/"
+    end
+
     def sources_under(*dirs)
       dirs.flat_map { |dir| Dir[File.expand_path("../#{dir}/**/*.{rb,erb}", __dir__)] }
-          .reject { |path| path.include?('/redmine/') }
+          .reject { |path| path.start_with?(clone_prefix) }
           .to_h { |path| [path, File.read(path, encoding: 'UTF-8')] }
+    end
+
+    # A GLOB THAT MATCHES NOTHING MUST NOT BE A PASS. Every example below asks a question about
+    # a set of files, and two of the three are satisfied by an empty set — so the set itself is
+    # asserted first, once, with a floor that is obviously below the real count.
+    it 'finds the sources it is asking about' do
+      expect(sources_under('lib', 'app').length).to be > 100
     end
 
     # Comments are stripped: `ReportFrame` and `ReportStylesheet` both DISCUSS `<style>` in
