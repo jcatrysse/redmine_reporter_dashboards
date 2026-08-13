@@ -18,6 +18,27 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**A GATE NEGATIVE-TESTED INTERACTIVELY IS TESTED AGAINST THE FORMS ITS AUTHOR THOUGHT OF,
+AND `no_html_safe.sh` SHIPPED WITH FOUR HOLES BECAUSE OF IT.** T-27's own, 2026-08-13. The
+gate was planted-and-watched for `html_safe`, `raw(`, a comment, and a stale allowlist entry
+— all four passed, and it was reported as negative-tested. An independent review then found:
+`exit 2` inside `search()` exited a **command substitution's subshell**, so a crashing search
+printed FAIL twice and then PASS and exited 0 (the trap `ci.yml` documents forty lines from
+where the gate is registered, now hit a third time); `find … 2>/dev/null` over a missing
+`app/` made a gate certifying INV-9 having read **no files**; and `<%==` plus `<%= raw ` were
+not matched at all, though `<%==` is exactly `<%= raw … %>`. Then the COMMITTED self-test
+caught two more within a minute of first running: `sed` without `-E` made the exemption's
+`(`/`|` literals so it matched nothing, and a widened `raw` pattern matched `raw = "…"`, an
+ordinary local variable, reporting 20 real files.
+
+Three rules. **Commit the arms** (`*_selftest.sh` — this repo already had the pattern twice
+and the new gate did not use it); the difference is not rigour on the day, it is that the
+arms re-run. **Give any gate whose subject is a file set a floor on that set and print the
+count** — `214 files scanned` in the PASS line is what makes "it read nothing" visible.
+And when you widen a pattern to close a hole, **count the new matches before believing the
+widening**: over-correction produces twenty false positives, which kills a gate faster than
+the hole did.
+
 **NEVER `git add -A` WHILE A SUBAGENT IS LIVE. A MUTATION HARNESS EDITS THE TREE BY DESIGN,
 AND A COMMIT CANNOT TELL A MUTATION FROM AN EDIT.** This reached the remote on 2026-08-09:
 `d57a744` shipped `request_geometry` hardcoded to A4/portrait with `margins_mm` dropped —
@@ -1878,13 +1899,39 @@ declaration, no matrix cell.
 
 ## 4b. What the next session should start with
 
-**T-37 LANDED ON 2026-08-13 AND WITH IT ALL 38 NUMBERED TASKS ARE DONE.** What is left is
-**T-27** (which owns a decision that has been waiting for it — what `ReporterPresence`'s
-detection is FOR, now that nothing is patched on its answer and its only consumers are a boot log
-and one glue require), the T-26 remainder (**S-30**, and read §Findings S-30 before touching it:
-the deletion was attempted, measured at 166 of 249 examples red, and reverted), and T-03's twelve
-render performance cells, which the curator said to leave. `docs/plan/NEXT-SESSION-PROMPT.md` is
-written for T-27 and carries the run recipes, including the two the gallery added.
+**T-27 LANDED ON 2026-08-13, so every numbered task is now done.** What is left is the T-26
+remainder (**S-30**, and read §Findings S-30 before touching it: the deletion was attempted,
+measured at 166 of 249 examples red, and reverted) and T-03's twelve render performance cells,
+which the curator said to leave. `docs/plan/NEXT-SESSION-PROMPT.md` is still written for T-27
+and is now stale in that respect; its run recipes are current and were all exercised.
+
+**THE DECISION T-27 OWED IS TAKEN, AND IT INVERTED THE BRIEF'S GUESS.** The brief said
+`init.rb`'s boot line was "the upgrade diagnostic in embryo", i.e. that the diagnostic would grow
+out of `ReporterPresence`. It must not, and the reason is a measurement: a permission grant is a
+string in `roles.permissions` and nothing reconciles that column against the plugin registry, so
+a role keeps the base plugin's authoring permission after that plugin is uninstalled — invisible
+on the roles screen, which renders `setable_permissions`. A diagnostic gated on detection would
+print an empty list in exactly the case it exists for. So `Permissions::AuthoringAudit` reads
+Redmine's own permission tables and asks the registry nothing; `ReporterPresence` keeps its one
+real consumer (gating the `REPORTER_GLUE_FILES` require) and is documented as not being the
+diagnostic's input. **Do not wire the two together later "for consistency".**
+
+**AND BE PRECISE ABOUT WHAT THE DANGLING GRANT DOES**, because the first version of that
+paragraph overstated it and shipped the overstatement into the README. `Role#allowed_to?` does
+answer true for it (`role.rb:304-311` applies no registry filter), but every project-scoped check
+returns false first at `Project#allows_to?` (`user.rb:777`, `project.rb:1311-1319`), and the base
+plugin declares the permission inside a `project_module`. So while that plugin is uninstalled the
+grant authorises **nothing**; it re-arms on reinstall. Stale data worth surfacing, not a live
+code-execution path — and the diagnostic's justification never needed the stronger claim.
+
+**`ZERO_REPORTER_MODE=strict` IS STILL AT 6 FILES AND T-27 DID NOT MOVE IT.** Three are the
+detection, which is now argued to stay until S-30 deletes the glue. Two are comment-only
+historical records (`positioned.rb`, migration 001) still wanting a `[permanent]` marker or a
+reword — the allowlist header makes the marker a **curator decision**, so this session did not
+take it. The sixth is S-30. The new diagnostic deliberately names the base plugin NOWHERE (it
+matches the permission name, which carries no plugin id), because `zero_reporter.sh` searches
+`config` and nine locale files naming it would have added nine entries to the list T-27 exists
+to shrink.
 
 **One thing T-37 leaves that is not a task:** `starter-gallery`, the CI job it added, is the only
 one with both a database and all three engines, and **it has never run**. Read it before trusting
