@@ -1,0 +1,106 @@
+<%#
+  T-37 / FR-73 — THE CHART FORM. *"a chart form that INSERTS the tag and stores no hidden
+  state."*
+
+  §9b.1 clause 4: *"`{% chart %}` has ~8 parameters. A small dialogue — type, source variable,
+  x, y, series, drill on/off — that inserts the tag rather than storing hidden state. The
+  author keeps a text template they can read, diff, export and paste into an issue; the
+  beginner never types the syntax. Rejected: a GUI report builder storing structured JSON —
+  it would fork the model, break `git`-style review of templates, and make FR-57's
+  byte-identical export round trip meaningless."*
+
+  So this writes ONE LINE OF LIQUID into the textarea and then has no further opinion. There
+  is no hidden field, nothing is stored, and the template the author saves is the template
+  they can read.
+
+  --- IT IS HIDDEN UNTIL THE SCRIPT ARRIVES, WHICH IS THE JS-OFF ANSWER ---
+
+  The editor is a plain `<textarea>` and works with JavaScript off BY CONSTRUCTION (there is
+  no enhanced version to fall back from — `[OQ-M]` closed the CodeMirror path). This form
+  cannot be: inserting text at a caret is what a script does. So the fieldset ships with
+  `hidden` and `chart_form.js` removes it — meaning that with no JavaScript the feature is
+  ABSENT rather than a button that does nothing. A dead control is worse than a missing one:
+  it tells the author the plugin is broken rather than that this convenience is unavailable.
+
+  The syntax it writes is documented in the README either way, so nothing here is the only
+  route to a chart.
+
+  --- WHY THERE IS NO "drill on/off" ---
+
+  §9b.1's list includes it, and a `{% chart %}` tag has no such parameter: drill-through URLs
+  come from the AGGREGATION — `{% sql_aggregate … drill: true %}` puts a URL on every bucket
+  and the chart carries whatever it is handed. A control that wrote `drill: true` into a chart
+  tag would emit a parameter the tag ignores, which is exactly the "stores state that is not
+  real" failure this whole clause exists to avoid. The note below says where the switch is
+  instead. Reported rather than quietly dropped (CLAUDE.md §11.3).
+%>
+<div class="box" id="reporter-chart-form" hidden>
+  <h3><%= l(:label_reporter_chart_form) %></h3>
+  <p><em class="info"><%= l(:text_reporter_chart_form_info) %></em></p>
+
+  <%#
+    NOT A `<form>`, and that is deliberate rather than an oversight: a nested form is invalid
+    HTML, and a sibling one would be a second submit target on a page whose whole point is the
+    one above. These are inputs the script reads; nothing here is ever posted, which is also
+    why none of them has a `name`.
+  %>
+  <div class="tabular">
+    <p>
+      <label for="rrd-chart-id"><%= l(:label_reporter_chart_form_id) %></label>
+      <input type="text" id="rrd-chart-id" value="chart1" size="20" maxlength="40">
+      <em class="info"><%= l(:text_reporter_chart_form_id_info) %></em>
+    </p>
+    <p>
+      <label for="rrd-chart-from"><%= l(:label_reporter_chart_form_from) %></label>
+      <input type="text" id="rrd-chart-from" value="stats" size="20" maxlength="60">
+      <em class="info"><%= l(:text_reporter_chart_form_from_info) %></em>
+    </p>
+    <p>
+      <label for="rrd-chart-type"><%= l(:label_reporter_chart_form_type) %></label>
+      <%# THE SIX FAMILIES FROM `ChartSpec::TYPES`, read from the constant rather than typed
+          here: an unsupported type is a `Degradation(:chart_type_unsupported)` at render
+          time, and a picker offering one would be a form that produces a degraded report. %>
+      <select id="rrd-chart-type">
+        <% RedmineReporterDashboards::Charts::ChartSpec::TYPES.each do |type| %>
+          <option value="<%= type %>"><%= type %></option>
+        <% end %>
+      </select>
+    </p>
+    <p>
+      <label for="rrd-chart-orientation"><%= l(:label_reporter_chart_form_orientation) %></label>
+      <select id="rrd-chart-orientation">
+        <% RedmineReporterDashboards::Charts::ChartSpec::ORIENTATIONS.each do |orientation| %>
+          <option value="<%= orientation %>"><%= orientation %></option>
+        <% end %>
+      </select>
+    </p>
+    <p>
+      <label for="rrd-chart-x"><%= l(:label_reporter_chart_form_x) %></label>
+      <input type="text" id="rrd-chart-x" size="20" maxlength="60" placeholder="label">
+      <em class="info"><%= l(:text_reporter_chart_form_x_info) %></em>
+    </p>
+    <p>
+      <label for="rrd-chart-y"><%= l(:label_reporter_chart_form_y) %></label>
+      <input type="text" id="rrd-chart-y" size="20" maxlength="120" placeholder="count">
+      <em class="info"><%= l(:text_reporter_chart_form_y_info) %></em>
+    </p>
+    <p>
+      <label for="rrd-chart-series"><%= l(:label_reporter_chart_form_series) %></label>
+      <input type="text" id="rrd-chart-series" size="20" maxlength="60">
+      <em class="info"><%= l(:text_reporter_chart_form_series_info) %></em>
+    </p>
+    <p>
+      <label for="rrd-chart-title"><%= l(:label_reporter_chart_form_title) %></label>
+      <input type="text" id="rrd-chart-title" size="40" maxlength="120">
+    </p>
+  </div>
+
+  <p>
+    <%# `type="button"`, so a press cannot submit the editor's form by accident — which is
+        what a bare `<button>` inside a page carrying one does on every browser. %>
+    <button type="button" id="rrd-chart-insert"><%= l(:button_reporter_chart_form_insert) %></button>
+    <span id="rrd-chart-preview"><code></code></span>
+  </p>
+
+  <p><em class="info"><%= l(:text_reporter_chart_form_drill) %></em></p>
+</div>

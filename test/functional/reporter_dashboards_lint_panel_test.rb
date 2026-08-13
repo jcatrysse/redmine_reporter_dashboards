@@ -287,6 +287,55 @@ class ReporterDashboardsLintPanelTest < ActionController::TestCase
                        response.body
   end
 
+  # ------------------------------------------------------------------ FR-73's chart form
+
+  # THE FORM SHIPS HIDDEN, and that is the JS-off answer rather than an oversight: inserting
+  # text at a caret is what a script does, so `chart_form.js` reveals its own fieldset. With no
+  # JavaScript the feature is ABSENT rather than a button that does nothing — a dead control
+  # tells an author the plugin is broken instead of telling them a convenience is unavailable.
+  def test_the_chart_form_is_present_and_hidden_until_the_script_reveals_it
+    get :new, params: { project_id: @project.identifier }
+
+    assert_response :success
+    assert_select 'div#reporter-chart-form[hidden]'
+    assert_select 'div#reporter-chart-form button#rrd-chart-insert[type=button]'
+  end
+
+  def test_the_chart_form_script_is_loaded_by_the_editor
+    get :new, params: { project_id: @project.identifier }
+
+    assert_select 'script[src*=?]', 'chart_form'
+  end
+
+  # THE TYPE PICKER IS READ FROM `ChartSpec::TYPES`, so a picker cannot offer a type the chart
+  # layer would degrade on. Asserted as a set rather than by spot-checking `bar`.
+  def test_the_type_picker_offers_exactly_the_supported_families
+    get :new, params: { project_id: @project.identifier }
+
+    expected = RedmineReporterDashboards::Charts::ChartSpec::TYPES.map(&:to_s)
+    assert_select 'select#rrd-chart-type option' do |options|
+      assert_equal expected, options.map { |option| option['value'] }
+    end
+  end
+
+  # NO HIDDEN STATE — FR-73's words. None of these inputs has a `name`, so none of them is ever
+  # posted: what the author saves is the text in the textarea and nothing else.
+  def test_the_chart_form_posts_nothing
+    get :new, params: { project_id: @project.identifier }
+
+    assert_select 'div#reporter-chart-form input[name]', false
+    assert_select 'div#reporter-chart-form select[name]', false
+    assert_select 'div#reporter-chart-form form', false
+  end
+
+  # Drill-through is a property of the AGGREGATION, not of the chart, so the form says where
+  # the switch really is instead of writing a parameter `{% chart %}` ignores.
+  def test_the_chart_form_says_where_drill_through_comes_from
+    get :new, params: { project_id: @project.identifier }
+
+    assert_include ERB::Util.html_escape(l(:text_reporter_chart_form_drill)), response.body
+  end
+
   # ------------------------------------------------------------------ FR-72's sidebar
 
   # THE REFERENCE IS RENDERED AT RUNTIME, and these are the assertions that say so from the

@@ -26,6 +26,14 @@
   route for exactly that reason; getting it wrong is a 404 on every press, which is what
   the first version of T-23's editor did.
 %>
+<%# T-37 — the chart form's script, and it is the ONLY JavaScript the authoring chrome loads.
+    The editor itself is a plain `<textarea>` and needs none: `[OQ-M]` closed the CodeMirror
+    path, so there is no enhanced editor to fall back FROM. This script reveals its own
+    fieldset, which is why the feature is absent rather than broken when it does not run. %>
+<% content_for :header_tags do %>
+  <%= javascript_include_tag 'chart_form', plugin: 'redmine_reporter_dashboards' %>
+<% end %>
+
 <%= labelled_form_for :template, @template,
                       url: url,
                       html: { method: method, id: 'reporter-template-form' } do |f| %>
@@ -45,6 +53,11 @@
     `@lint` is set by every action that renders this partial — see the controller's
     `lint_editor`, which is the one place it is computed. %>
 <%= render partial: 'lint', locals: { analysis: @lint } %>
+
+<%# FR-73's second half — a form that INSERTS the tag and stores nothing. Below the lint
+    panel rather than above it: what the template does wrong is more urgent than a
+    convenience for adding to it. %>
+<%= render partial: 'chart_form' %>
 
 <%# FR-72's reference, in Redmine's own sidebar slot rather than in a box of our own.
     `content_for` is used here — in the shared partial — for the same reason the buttons are:
