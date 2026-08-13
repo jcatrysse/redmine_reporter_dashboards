@@ -26,14 +26,17 @@ leave.
 Verified at HEAD, on Redmine **7.0-stable** with **PostgreSQL 16**, standalone (no
 `redmine_reporter`, no `redmineup` gem):
 
-    minitest             1038 runs, 5088 assertions, 0 failures, 0 errors, 0 skips
-    rspec                2876 examples, 0 failures, 136 pending
+    minitest             1048 runs, 5152 assertions, 0 failures, 0 errors, 0 skips
+    rspec                2899 examples, 0 failures, 136 pending — and 2899 / 0 / 146 in the
+                         CI SHAPE (from redmine/, plugin mirrored under plugins/), which is
+                         the invocation that found T-38's four red RSpec jobs
+    twelve gates rc=0    plus the CVE gate in its CI form; sweep the status on its OWN line
     spec_liquid          346 examples, 0 failures on Liquid 4.0.4 AND 5.13.0
     spec/golden          167 examples, 0 failures, 0 pending          <- G7 RAN
     conformance corpus   109 examples, 0 failures — chromium_cdp 23/0/0, gotenberg 22/0/1,
                          wkhtmltopdf (PATCHED qt) 21/0/2
     starter gallery      15 of 15 — five starters x three engines, measured locally
-    fourteen gates rc=0, script/migrate_updown.sh rc=0 (G11), .codex/check_ruby_floor.sh rc=0
+    script/migrate_updown.sh rc=0 (G11), .codex/check_ruby_floor.sh rc=0
 
 **CI HAS BEEN READ, AND IT WAS NOT GREEN.** T-38's run (31694811039, `1324c5a`) was 22 of 26
 jobs green with **all four `RSpec` jobs red** — a source-level spec whose glob rejected any path
