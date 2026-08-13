@@ -41,6 +41,27 @@ reason only: the tree had been COMMITTED before mutating, so `git diff HEAD` nam
 `git checkout HEAD --` undid it. Two rules, and the first is the cheap one. Commit before you
 mutate. And run each command in a SUBSHELL — `( eval "$cmd" )` — so a `cd` cannot outlive it.
 
+**`path.include?('/redmine/')` EXCLUDES EVERY PATH IN THE WORLD ONCE THE PLUGIN IS
+INSTALLED.** T-38's source-level spec, found by reading CI for the first time on 2026-08-13.
+A local checkout keeps a Redmine clone at `<plugin>/redmine/` and the glob was told to skip it;
+CI mirrors the plugin to `redmine/plugins/redmine_reporter_dashboards`, so the same test
+rejected **everything**. Two examples failed on all four Redmine branches — and a third
+**PASSED**, because it asserts a list is EMPTY and an empty glob satisfies that. Exclude a
+directory by its ABSOLUTE path, and give any example whose subject is a file set a floor
+assertion on the size of that set: a glob that matches nothing must never be a pass.
+
+**THE RSPEC JOB CAN BE REPRODUCED EXACTLY, and it is worth doing before pushing.** CI runs the
+suite from `redmine/` with the plugin mirrored under `plugins/`, which is a different CWD, a
+different `__dir__` and a path containing `/redmine/`:
+
+    rsync -a --delete --exclude redmine/ --exclude .git/ ./ redmine/plugins/redmine_reporter_dashboards/
+    cd redmine && LANG=C.UTF-8 bundle exec rspec \
+      -I plugins/redmine_reporter_dashboards/spec plugins/redmine_reporter_dashboards/spec
+
+  2899 examples, 0 failures, 146 pending — ten more pendings than the plugin-root run, because
+  the mirror has no `.git` and the G7 golden examples skip there. That difference is the
+  documented G7 trap, not a regression, and it is why CI has a separate `corpus` job.
+
 **`out=$(cmd); echo "$(basename $f): rc=$?"` REPORTS `basename`'S STATUS, NOT THE COMMAND'S.**
 T-37's own gate sweep, 2026-08-13. It printed `rc=0` for all thirteen gates while
 `zero_reporter.sh` was FAILING — a new file mentioned the base plugin's id in a comment and was

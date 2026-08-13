@@ -35,10 +35,13 @@ Verified at HEAD, on Redmine **7.0-stable** with **PostgreSQL 16**, standalone (
     starter gallery      15 of 15 — five starters x three engines, measured locally
     fourteen gates rc=0, script/migrate_updown.sh rc=0 (G11), .codex/check_ruby_floor.sh rc=0
 
-**CI HAS NOT BEEN READ FOR THESE COMMITS.** The curator believes it is green; confirm before
-claiming any Redmine other than 7.0 or any engine other than PostgreSQL. That is INV-7 and it is
-this project's oldest broken promise. **T-37 added a job** — `starter-gallery`, the only one with
-both a database and all three engines — and **it has never run**. Read it before trusting it.
+**CI HAS BEEN READ, AND IT WAS NOT GREEN.** T-38's run (31694811039, `1324c5a`) was 22 of 26
+jobs green with **all four `RSpec` jobs red** — a source-level spec whose glob rejected any path
+containing `/redmine/`, which is every path once the plugin is installed the way CI installs it.
+Fixed in `a321ab9`, and the fix is verified in BOTH invocations. **Read the run for the head you
+inherit rather than trusting this paragraph**, and reproduce the rspec job locally before you
+push — the recipe is in HANDOVER §1. **T-37 also added a job**, `starter-gallery`, the only one
+with both a database and all three engines, and it had never run when this was written.
 
 ## T-27, and the decision it owns
 
