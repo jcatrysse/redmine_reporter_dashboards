@@ -83,7 +83,7 @@ README already says so for a spent-time template and it is in fact true everywhe
 README examples still write it. Whether to keep it as harmless documentation-of-intent or to
 strip it is a curator call; nothing depends on it either way.
 
-Verified at HEAD (`ea9c4fb`, 2026-08-14), on Redmine **7.0-stable** with **PostgreSQL 16**,
+Verified at HEAD (`27865db`, 2026-08-14), on Redmine **7.0-stable** with **PostgreSQL 16**,
 standalone (no `redmine_reporter`, no `redmineup` gem):
 
     minitest             1042 runs, 5084 assertions, 0 failures, 0 errors, 0 SKIPS
@@ -91,32 +91,48 @@ standalone (no `redmine_reporter`, no `redmineup` gem):
                          counted with `grep -c '^  def test_'` rather than trusted.
                          0 skips only because poppler-utils is installed here — a run
                          without it reports 4, each with a reason)
-    rspec                2934 examples, 0 failures, 136 pending
-                         (2880 before; +54. **193 pending on the first run of this
+    rspec                2948 examples, 0 failures, 136 pending
+                         (2880 before; +68. **193 pending on the first run of this
                          session, and that was poppler's absence, not a regression** —
                          diff the pending LISTS before attributing a move)
     spec/golden          173 examples, 0 failures, 0 pending          <- G7 RAN
-    spec_liquid          346 examples, 0 failures on Liquid 4.0.4 AND 5.13.0
-    eleven gates rc=0    plus three *_selftest.sh; `drop_reference_parity.sh` needs
+    spec_liquid          358 examples, 0 failures on Liquid 4.0.4 AND 5.13.0
+                         (346 before; the 12 new ones are the quoting rule against the
+                         REAL gem, which is where it had never been run)
+    fourteen gates rc=0  including all three *_selftest.sh; `drop_reference_parity.sh` needs
                          `BUNDLE_GEMFILE=$PWD/redmine/Gemfile` or it exits 2 with
                          "the Liquid gem is not loadable" — which is the gate being
                          honest, not a failure. Sweep each status on its OWN line
     script/migrate_updown.sh rc=0 both arms (G11), .codex/check_ruby_floor.sh rc=0
-    locale parity        395 keys x 9 files, verified by PARSING each file
+    locale parity        396 keys x 9 files, verified by PARSING each file, with the
+                         placeholders of the changed keys compared across all nine
 
 **NOT VERIFIED HERE, and #2 is the one that matters:** MariaDB. The engine defect #2 fixes
 is not reproducible in this container — MariaDB is not installable beside the MySQL client
 — so the `adapter (MariaDB 11)` CI cell is the only thing that can answer it. **Read that
 cell.** Also unrun: the conformance corpus and the starter gallery (no Chromium/Gotenberg/
-wkhtmltopdf set up here), and CI has not run on any of `880c783`..`ea9c4fb`.
+wkhtmltopdf set up here), and CI has not run on any of `880c783`..`27865db`.
 
-**AND THE INDEPENDENT REVIEW OF THIS WORK DID NOT COMPLETE.** Two subagents were briefed to
-reject it; the first died on an API spend limit mid-run (leaving a mutation in the tree —
-HANDOVER §1's new first entry), the second was still running when the session ended. What
-stands in for it is twelve MUTATIONS against the new code, six of which survived and five
-of which were real holes now closed. That is weaker evidence than a review and is recorded
-as weaker rather than implied. **Re-running the review over `880c783..ea9c4fb` is a
-reasonable first act.**
+**THE INDEPENDENT REVIEW RAN AND IT FOUND A BLOCKER**, which is the reason to keep briefing
+one. Two subagents were used: the first died on an API spend limit mid-run and left a
+mutation in the tree (HANDOVER §1's new first entry); the second completed, verified rather
+than read — it reproduced the blocker and mutation-tested the controller test it was asked
+to suspect of being vacuous — and returned **1 blocker, 5 majors, 8 minors**. All are closed
+in `27865db`; that commit message is the list.
+
+**The blocker is worth knowing even if you never touch tags**, because it is the shape this
+project keeps producing: `query_id: "qid"` became a literal, `to_i`'d to zero, and returned
+nil BEFORE the branch that logs — so a report rendered complete, showed no diagnostics panel
+and read zero. My own example missed it because it used `query_id: "42"`, a NUMERIC literal
+whose outcome is identical under both rules. **An example that exercises the changed line is
+not the same as one that discriminates.**
+
+**And the rule had only ever run against the STUB Liquid context.** `spec/spec_helper.rb`'s
+`Context#[]` is a plain scope lookup; the real one parses its key as an EXPRESSION, so
+`"7"`, `"true"`, `"nil"` and `a.b` all have real answers the stub returns nil for — several
+examples were passing for the wrong reason. `spec_liquid/tag_params_spec.rb` now runs the
+rule against the real gem on both majors. No difference found; established rather than
+assumed.
 
 **A CLOUD SESSION STARTS SHALLOW AND THAT FAILS G7 LIKE A REAL BREACH.** `git fetch
 --unshallow origin` first, before concluding anything from `spec/golden`. And **`rspec spec`

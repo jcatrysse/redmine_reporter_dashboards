@@ -18,13 +18,18 @@ option 2, the full withdrawal.
 | | landed | where |
 |---|---|---|
 | #2 MariaDB grouped sum/avg/distinct | 2026-08-13 | `2c22c74` |
-| #3 quoted parameters are literal | 2026-08-14 | `880c783`, `160dc67` |
-| #4 narrow the diagnostic | 2026-08-14 | `f77dde4` |
+| #3 quoted parameters are literal | 2026-08-14 | `880c783`, `160dc67`, `9122ceb`, `27865db` |
+| #4 narrow the diagnostic | 2026-08-14 | `f77dde4`, `27865db` (the page's copy) |
 | #5 `[permanent]` on the two comment-only files | 2026-08-14 | `f77dde4` |
 | #6 the README's spent-time table | 2026-08-14 | `f77dde4` |
-| #7 `<html lang>` from the installation default | 2026-08-14 | `f77dde4`, `ea9c4fb` |
-| #8 FR-50 renumbered in nine locale headers | 2026-08-14 | `f77dde4` |
+| #7 `<html lang>` from the installation default | 2026-08-14 | `f77dde4`, `ea9c4fb`, `27865db` |
+| #8 FR-50 renumbered | 2026-08-14 | `f77dde4` (nine locale headers), `27865db` (the seventeen CODE files it had missed) |
 | **#1 withdraw host-plugin renders** | **NOT STARTED** | — |
+
+**An independent review of #3-#8 found 1 blocker, 5 majors and 8 minors; all are closed
+in `27865db`.** The blocker was #3's own acceptance condition failing on `query_id:` — a
+report that rendered complete and read zero, with nothing on the page. Read that commit
+message before assuming the decisions landed cleanly.
 
 **#1 was left deliberately, not forgotten.** It is the item this file's own closing
 section puts last, it is the only one with an irreversible deletion in it, and S-30's

@@ -18,6 +18,24 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**AN EXAMPLE THAT EXERCISES THE CHANGED LINE IS NOT THE SAME AS ONE THAT DISCRIMINATES,
+AND THAT IS HOW A BLOCKER SHIPPED PAST TWELVE MUTATIONS.** Decision #3's own, 2026-08-14.
+The quoting rule was covered at `query_id:` by an example reading `query_id: "42"` — which
+runs the changed line, and whose answer is IDENTICAL under both rules, because `"42".to_i`
+is 42 either way. The case that changes is a quoted VARIABLE NAME: `query_id: "qid"` is now
+the literal `qid`, `to_i` is **0**, and `visible_query` returned nil BEFORE the branch that
+logs — so the report rendered complete, showed no diagnostics panel and read zero. An
+independent review found it; fourteen mutations had not, because the mutations asked *"is
+this line covered?"* and the answer was yes.
+
+The general rule is to pick the example by what it SEPARATES rather than by what it
+touches: for a rule change, the discriminating input is one whose old and new answers
+differ, and a numeric literal is exactly the input for which they do not. Two habits close
+it. When covering a behaviour CHANGE, write down what the old code would have answered for
+your input — if it is the same, the example is documentation, not a test. And note that
+mutation testing cannot find this class at all: it measures whether a line is observed, not
+whether the observation is the interesting one.
+
 **A REVIEW SUBAGENT LEFT A MUTATION IN THE WORKING TREE, AND THE HARNESS ANNOUNCED IT AS AN
 INTENTIONAL EDIT.** 2026-08-14, decision #3. A fresh reviewer was briefed to reject the
 change; to check whether the new tests bite it edited `tag_params.rb` so `quoted?` answered
