@@ -318,7 +318,38 @@ job as the README's record of the old idiom). And the chart form has no "drill o
 - **`hu`, `pl`, `zh`** values were written by a model, not a native speaker; T-37 added 49 more
   keys in each. The curator's answer was "don't care, leave it" — recorded so it is not
   re-raised.
-- **Three accepted CVEs** in the pinned Gotenberg image, review date **2026-09-09**.
+- **THE NIGHTLY GOTENBERG CVE SCAN IS RED, AND IT IS A CURATOR DECISION RATHER THAN A BUG.**
+  Read 2026-08-14 while reading CI for #1; red on every commit that day, so it PREDATES the
+  decision work and none of it is caused by it. Three CVEs are accepted with review date
+  2026-09-09, and that count is what this line used to say. The scan now reports **38
+  unaccepted fixable HIGH findings** — measured, from run 35's job log:
+
+      accepted: CVE-2026-19155 CVE-2026-46602 CVE-2026-56852
+      found:    41 ids, of which 38 are on no list
+      cve_accepted_diff: FAIL — NEW fixable HIGH/CRITICAL findings in the pinned image
+
+  Mostly a wave of Chromium advisories (CVE-2026-19137…19177 and 19556…19560: sandbox
+  escapes, use-after-free in Blink/TabStrip, arbitrary code execution via extensions) plus
+  two Go stdlib ones in `usr/bin/gotenberg` and `usr/bin/pdfcpu` (CVE-2026-39821,
+  CVE-2026-46600). The allowlist's own header records that on 2026-08-10 the same digest had
+  **five** fixable HIGH findings across four advisories, so the image did not change — the
+  vulnerability database did, which is the mechanism that file already documents once (see
+  the deleted CVE-2026-46604 note).
+
+  **The digest cannot move**: `pinned` and what `gotenberg/gotenberg:8` resolves to are the
+  SAME (`sha256:a16a14e1…`), which is the branch of the workflow's own message that says
+  *"there is nowhere to move to and the decision is a human one"*. So the options are the
+  gate's own: accept each with a reason and a valid-through date (the gate caps expiry at 90
+  days and refuses a malformed record), or stop recommending the container. **Do not delete
+  the gate, and do not make it advisory** — CLAUDE.md §7 forbids the second and the
+  allowlist header forbids the first.
+
+  Not touched by the 2026-08-14 session: 38 individual acceptances about a security posture
+  is exactly the judgement CLAUDE.md §11 says to report rather than take. Note the
+  containment argument is already written down in the allowlist and in
+  `docker-compose.gotenberg.yml` (`internal: true`, non-root, Chromium's sandbox left on,
+  read-only root, `cap_drop: ALL`, PDF-engine routes off) — it decides what an attacker
+  reaches after an escape, and it fixes none of them.
 - **FR numbering**: the engine-selection screen is cited as FR-50 in nine locale-file headers
   while `functional-spec.md` defines FR-50 as the generated support matrix (§Findings E-29 row 8).
 
