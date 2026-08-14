@@ -167,6 +167,39 @@ RSpec.describe RedmineReporterDashboards::Liquid::Tags::ChartTag do
 
       expect(render_context.charts['v1'].title).to be_nil
     end
+
+    # `TagParams::Value` MUST NOT LEAVE THE TAG LAYER, asserted MECHANICALLY rather than
+    # by tracing.
+    #
+    # `Value` is a String subclass carrying one ivar, which is what lets every existing
+    # reader keep working. `TagParams.resolve` returns a plain String, but this tag also
+    # reads several parameters WITHOUT resolving them — `type:`, `orientation:`, and
+    # `y:`/`x:`/`series_label:` inside `SeriesReader`, which become a Hash key and a series
+    # label. Each of those happens to be normalised downstream (`Series#initialize` does
+    # `label.to_s`, `chart_id` does `.to_s`), and "happens to be" is exactly the kind of
+    # claim that stops being true in a later edit.
+    #
+    # So this walks the whole recorded structure instead of naming the paths: a chart drawn
+    # from markup where EVERY parameter is quoted, and nothing anywhere in `to_h` may be a
+    # `Value`. A new parameter that forgets to normalise fails here without anyone
+    # remembering to add an example for it.
+    it 'lets no TagParams::Value reach the recorded chart data' do
+      render('id: v1, from: stats, type: "bar", orientation: "vertical", ' \
+             'y: "count", x: "label", series_label: "Issues", title: "T", ' \
+             'x_title: "X", y_title: "Y", width: "640", height: "480"')
+
+      offenders = []
+      walk = lambda do |node, path|
+        case node
+        when RRD::Liquid::TagParams::Value then offenders << "#{path} (#{node.inspect})"
+        when Hash  then node.each { |k, v| walk.call(k, "#{path}/key"); walk.call(v, "#{path}/#{k}") }
+        when Array then node.each_with_index { |v, i| walk.call(v, "#{path}[#{i}]") }
+        end
+      end
+      walk.call(render_context.charts['v1'].to_h, 'spec')
+
+      expect(offenders).to be_empty, "TagParams::Value leaked into: #{offenders.join(', ')}"
+    end
   end
 
   describe 'when it cannot draw' do
