@@ -958,7 +958,7 @@ jobs:
   # Non-test gates. A green suite says nothing about any of these.
   # ------------------------------------------------------------------
   gates:
-    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, no_html_safe, single_parse, migration_reversibility, gotenberg_accepted_cves)
+    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, vendor_integrity, no_html_safe, single_parse, migration_reversibility, gotenberg_accepted_cves)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1003,6 +1003,24 @@ jobs:
       # `Redmine::VERSION` outside compat, and prints the compat LOC.
       - name: compat_size
         run: ./script/gates/compat_size.sh
+
+      # T-33 / INV-8 — nothing shipped fetches a library over the network, and every vendored
+      # file is the one `THIRD_PARTY.md` records.
+      #
+      # THIS GATE EXISTED FOR MONTHS AND NO JOB CALLED IT. An independent review found it
+      # (R-04): it was correct, it reported two real violations — both shipped examples
+      # fetched Chart.js 2.8 from cdnjs — and it exited 0, because `warn` is its default and
+      # nothing here overrode it. A gate nothing runs is not a gate, and one that reports
+      # violations while exiting zero is worse: its output reads as evidence.
+      #
+      # STRICT, because §6 rejects CDN-with-SRI outright — integrity proves the bytes and does
+      # nothing about the egress, and denying egress is what kills the SSRF value. The two
+      # examples were retired rather than rewritten; `spec/shipped_templates_lint_spec.rb`
+      # asserts they stay gone.
+      - name: vendor_integrity
+        run: ./script/gates/vendor_integrity.sh
+        env:
+          VENDOR_INTEGRITY_MODE: strict
 
       # T-38 — §9b's "no design language of its own for chrome", enforced. Fails on a
       # colour, a typeface, a font size, a line height, a custom property or an
@@ -1086,6 +1104,15 @@ jobs:
           ./script/gates/cve_accepted_diff_selftest.sh
           ./script/gates/cve_accepted_diff.sh --validate-only --expiry-advisory \
             script/gates/gotenberg_accepted_cves.allowlist
+
+      # THE GATES ABOVE STAY INDIVIDUAL STEPS so a failure names itself in the Actions UI.
+      # `script/gates/release.sh` is the same list at the same modes, in one command, for a
+      # human cutting a release — and the two lists drifting is how a gate stops being run,
+      # which is exactly what happened to `vendor_integrity` above. `--coverage-only` runs no
+      # gate; it asserts that the wrapper accounts for every script under `script/gates/`, so
+      # a gate added here and forgotten there fails at the moment it is added.
+      - name: release wrapper covers every gate
+        run: ./script/gates/release.sh --coverage-only
 
       # Not a gate, and deliberately not failing the build: the number that has to
       # reach zero by 1.0, printed where a reviewer sees it move.

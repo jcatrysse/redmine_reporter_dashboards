@@ -2490,7 +2490,7 @@ One row per target version (a nil version → name `None`), sorted by name. Stri
 | `.start_date` `.due_date` | date / nil | MIN start / MAX due over the version's issues |
 | `.cost` | hash | `{ "<field_id>" => float }` summed per numeric custom field |
 
-Cost sums mirror Redmine's own numeric custom-field totalling (`joins(:custom_values)`, empty values skipped, `CAST(... AS decimal)`), so they are correct on PostgreSQL and MySQL. On any error the tag assigns an empty Array so the template never crashes. See [`examples/version_status_dashboard.liquid`](examples/version_status_dashboard.liquid) for a full dashboard built on this tag.
+Cost sums mirror Redmine's own numeric custom-field totalling (`joins(:custom_values)`, empty values skipped, `CAST(... AS decimal)`), so they are correct on PostgreSQL and MySQL. On any error the tag assigns an empty Array so the template never crashes. See [`starters/version-status.liquid`](starters/version-status.liquid) for a report built on this tag — it is also available from the **New from starter** picker in the template editor.
 
 ## `issue.target_version` in report templates
 
@@ -2526,7 +2526,7 @@ One consequence worth stating plainly, because it is a real gap rather than a de
 | `.issues_url` / `.open_issues_url` / `.closed_issues_url` | Absolute issue-list links filtered by this version (all / open / closed) |
 | `.time_url` | Absolute time-entries link filtered by this version |
 
-`issue.target_version` is `nil` when the issue has no target version, so guard with `{% if issue.target_version %}`. See [`examples/sample_report_template.liquid`](examples/sample_report_template.liquid) for it in a full template alongside `{% sql_aggregate %}` and a Chart.js chart.
+`issue.target_version` is `nil` when the issue has no target version, so guard with `{% if issue.target_version %}`. See [`starters/issue-document.liquid`](starters/issue-document.liquid) for per-issue accessors in a full template, and [`starters/chart-report.liquid`](starters/chart-report.liquid) for `{% sql_aggregate %}` alongside a chart.
 
 ## `issue.custom_field_value[id]` in report templates
 
@@ -2544,7 +2544,7 @@ The id can be an integer literal, a string, or a Liquid variable. The **raw stor
 {% if cost > 0 %}Cost: {{ cost | round: 0 }}{% endif %}
 ```
 
-Under the hood it reads `Issue#custom_field_value(id)` (Redmine's `Acts::Customizable`). See [`examples/version_status_dashboard.liquid`](examples/version_status_dashboard.liquid), which sets two field ids at the top (`cf_est_cost` / `cf_actual_cost`) and uses this accessor to drive a per-version budget bar, badge, KPI tile and chart.
+Under the hood it reads `Issue#custom_field_value(id)` (Redmine's `Acts::Customizable`). Assign the field ids once at the top of the template (`{% assign cf_est_cost = 20 %}`) rather than repeating the literal, so a template moved to another install has one line to change. For per-version cost totals, prefer `{% version_rollup %}`'s `.cost` hash above — it sums in SQL, where this accessor reads one issue at a time.
 
 ## Exporting a report widget to PDF
 
@@ -2608,9 +2608,12 @@ PDF:
    (`window.closed` is a read-only boolean), so `closed[i]` becomes `undefined`
    and the data turns to `NaN`. Function scope avoids this entirely.
 
-A complete, self-contained example that combines `{% sql_aggregate %}`,
-`{% geo_version_map %}`, `issue.target_version` and a PDF-safe Chart.js chart is in
-[`examples/sample_report_template.liquid`](examples/sample_report_template.liquid).
+Complete, self-contained examples live in [`starters/`](starters/) and are offered by the
+**New from starter** picker in the template editor:
+[`chart-report.liquid`](starters/chart-report.liquid) combines `{% sql_aggregate %}` with
+PDF-safe charts, [`version-status.liquid`](starters/version-status.liquid) covers
+`{% version_rollup %}`, and [`issue-document.liquid`](starters/issue-document.liquid) covers
+the per-issue accessors.
 
 ## Questions or issues?
 

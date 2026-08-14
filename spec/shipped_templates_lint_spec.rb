@@ -19,15 +19,29 @@
 # used to TEACH. This file is what makes the fix permanent: an example that regains an
 # unescaped interpolation fails the build.
 #
-# --- WHY ONLY THE FR-19 RULE, AND NOT EVERY RULE ---
+# --- THE RATCHET IS GONE, BECAUSE THE DEBT IT HELD IS GONE ---
 #
-# Both examples still carry Chart.js 2 idioms and the old `window.status` handshake, and
-# those are deliberately NOT fixed here. They belong to T-16 (the chart layer) and T-11
-# (readiness), which rewrite that code rather than patching it — fixing it now would be
-# work thrown away, and worse, it would be a chart rewrite hidden inside a filter task
-# (CLAUDE.md §11.5). So this file pins the escaping rule to ZERO and pins the others to a
-# RATCHET, which is the honest way to hold a debt: it cannot grow, it is visible, and the
-# number goes down when its owner arrives.
+# This file used to lint three examples and hold two of them behind a RATCHET: they carried
+# Chart.js 2 idioms and the old `window.status` handshake, owned by T-16 (the chart layer)
+# and T-11 (readiness), which were going to rewrite that code rather than patch it. The
+# ratchet was the honest way to hold that debt — it could not grow, and it went down when
+# its owner arrived.
+#
+# Its owner arrived as a deletion. `examples/sample_report_template.liquid` (202 lines) and
+# `examples/version_status_dashboard.liquid` (598 lines) taught three things this plugin no
+# longer does: they fetched Chart.js 2.8 FROM A CDN — which `script/gates/vendor_integrity.sh`
+# reported and which contradicts the bundled/no-egress default outright — they drove
+# `<canvas>` with a Chart.js 2 configuration the vendored Chart.js 4.5.0 cannot execute, and
+# they signalled readiness to wkhtmltopdf through `window.status`. Rewriting them would have
+# produced a second, worse copy of `starters/chart-report.liquid` and
+# `starters/version-status.liquid`, which already teach the same reports with `{% chart %}`
+# and `{% version_rollup %}`. Found by an independent review (C-04/R-04).
+#
+# They survive as evidence, not as deliverables: `FROZEN_EVIDENCE` below still points at the
+# copies under `docs/plan/reference/`, which is where the escaping experiment's line numbers
+# resolve.
+#
+# What is left is one example, held at ZERO on every rule.
 
 require_relative 'spec_helper'
 require_relative '../lib/redmine_reporter_dashboards/template_linter'
@@ -37,17 +51,20 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
 
   # The templates an install actually gets.
   EXAMPLES = %w[
-    examples/sample_report_template.liquid
-    examples/version_status_dashboard.liquid
     examples/chart_tag_showcase.liquid
   ].freeze
 
-  # The `{% chart %}` example is held at ZERO, not at a ratchet, and it is the only one
-  # that can be. The other two draw their charts by hand — a `<canvas>`, a Chart.js 2
-  # config and a `window.status` handshake — and every finding they carry is owned by a
-  # task that rewrites that code. This one writes no markup at all, so there is nothing
-  # for a rule to find, and that is the point of it rather than a happy accident.
+  # The `{% chart %}` example is held at ZERO. It writes no markup at all, so there is
+  # nothing for a rule to find, and that is the point of it rather than a happy accident —
+  # it is why the two hand-built examples could be retired rather than rewritten.
   CHART_TAG_EXAMPLE = 'examples/chart_tag_showcase.liquid'
+
+  # THE RETIRED ONES, ASSERTED AS ABSENT. A deletion that only shows up as a shorter list
+  # above is a deletion the next author undoes by restoring a file. This says why they went.
+  RETIRED = %w[
+    examples/sample_report_template.liquid
+    examples/version_status_dashboard.liquid
+  ].freeze
 
   # NOT LINTED, DELIBERATELY. `docs/plan/reference/example-template-*.liquid` are frozen
   # EVIDENCE: they are the templates as they were when the escaping experiment was run,
@@ -61,11 +78,9 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
 
   FR19 = 'script.unfiltered_interpolation'
 
-  # The ratchet, per file, for the rules whose owner is another task. Down is fine, up is
-  # a failure. Reduce these numbers as T-16 and T-11 land; never raise one.
+  # What is left of the ratchet: one file, at zero. Down is fine, up is a failure, and there
+  # is no longer anywhere for it to go down to.
   OTHER_RULES_RATCHET = {
-    'examples/sample_report_template.liquid' => 12,
-    'examples/version_status_dashboard.liquid' => 44,
     CHART_TAG_EXAMPLE => 0
   }.freeze
 
@@ -79,6 +94,23 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
 
   def fr19_count(body)
     findings(body).select { |f| f.rule == FR19 }.sum(&:count)
+  end
+
+  describe 'the retired examples' do
+    RETIRED.each do |path|
+      # AN ABSENCE IS A DELIVERABLE HERE, so it is asserted rather than assumed. Restoring
+      # either file brings back a CDN fetch (`script/gates/vendor_integrity.sh` fails on it),
+      # a Chart.js 2 configuration the vendored 4.5.0 cannot run, and a `window.status`
+      # handshake for an engine on its way out. `starters/chart-report.liquid` and
+      # `starters/version-status.liquid` are what an author should be sent to instead.
+      it "#{path} is gone and stays gone" do
+        expect(File.exist?(File.join(ROOT, path))).to be(false),
+                                                      "#{path} is back. It was retired because it " \
+                                                      'taught a CDN fetch, a Chart.js 2 config and ' \
+                                                      'a wkhtmltopdf readiness handshake. Send ' \
+                                                      'authors to starters/ instead.'
+      end
+    end
   end
 
   describe 'the shipped examples' do
@@ -95,14 +127,13 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
                              }
       end
 
-      it "#{path} does not regain a finding owned by another task" do
+      it "#{path} does not regain a finding of any kind" do
         total = findings(read(path)).sum(&:count)
         allowed = OTHER_RULES_RATCHET.fetch(path)
 
         expect(total).to be <= allowed,
-                         "#{path} now has #{total} findings, up from #{allowed}. The Chart.js and " \
-                         'readiness findings belong to T-16 and T-11; this number may go DOWN when ' \
-                         'they land, never up.'
+                         "#{path} now has #{total} findings, up from #{allowed}. This number may " \
+                         'go DOWN, never up.'
       end
 
       # `| json` is not merely present — it is what the chart data goes through. Asserted

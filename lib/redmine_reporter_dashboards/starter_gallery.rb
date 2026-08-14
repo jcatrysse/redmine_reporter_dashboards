@@ -34,10 +34,17 @@ module RedmineReporterDashboards
   # So the gallery is five PURPOSE-BUILT starters under `starters/`, each short enough to
   # read in one sitting, each lint-clean at zero rather than at a ratchet, and each using the
   # modern surface — `{% sql_aggregate %}`, `{% chart %}`, `{% version_rollup %}` and T-38's
-  # three public classes. The legacy examples stay where they are, with their ratchet and
-  # their role. **Reported rather than absorbed** (CLAUDE.md §11.3): this is a deviation from
-  # §9b.1's literal list, the reason is above, and retiring the two legacy files once the
-  # gallery covers their ground is a later decision, not this task's.
+  # three public classes.
+  #
+  # THE LATER DECISION THIS PARAGRAPH DEFERRED HAS SINCE BEEN TAKEN, and it went the way the
+  # deferral expected: the two legacy files are retired. What forced it was not tidiness but
+  # the CDN script tag named above — an independent review's C-04/R-04 — which contradicts the
+  # bundled/no-egress asset default the plugin ships with and which
+  # `script/gates/vendor_integrity.sh` now fails on in CI. The gallery covers their ground
+  # (`starters/chart-report.liquid`, `starters/version-status.liquid`), the frozen evidence
+  # under `docs/plan/reference/` still holds the copies a verification document cites, and
+  # `spec/shipped_templates_lint_spec.rb` asserts the absence so a future edit cannot quietly
+  # restore one.
   #
   # --- THE IDS ARE A CLOSED SET AND THE PATHS ARE CONSTANTS ---
   #
