@@ -25,10 +25,15 @@ record traps that produce a green run meaning nothing. Then read this brief twic
 Everything below about *running* things is current and was exercised end to end; the task
 sections are kept as the record of what each decided.
 
-**There is no queued work.** Every numbered task is done, the T-26 remainder is closed, and
-T-03's twelve render performance cells are the curator's to release. **Ask the curator what
-to do before starting anything** — and read "Open for the curator" below first, because that
-list is where the next task will come from.
+**There is no queued work, and the next step is a DECISION, not a task.**
+`docs/plan/DECISIONS-PENDING.md` states the eleven open items in plain language, each with
+options, costs and a recommendation, and each with a `Decision:` line for the curator to
+fill in. **If those lines are still blank, your job is to walk the curator through them —
+not to pick answers.** If they are filled in, implement them in the order that file's last
+section gives.
+
+The technical detail behind each item is in "Open for the curator" below; the decisions
+file is the readable version of the same list.
 
 ## Where the work stands
 
