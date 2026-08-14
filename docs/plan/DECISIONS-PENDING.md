@@ -8,6 +8,11 @@ thing `CLAUDE.md` §11 forbids.
 Answer them by editing the **Decision:** line under each item — `Decision: 2` or
 `Decision: leave it` is enough. A session can then implement the lot without asking again.
 
+**STATUS 2026-08-13: the curator answered "follow the recommendation everywhere except
+where I say otherwise", and said #3 is to be fixed NOW rather than in 1.1.** Nine items are
+settled below. **#1 is NOT**, because the recommendation for it was conditional on a fact
+only the curator has — see its Decision line.
+
 Ordered by what it costs you to get it wrong, not by effort.
 
 ---
@@ -51,7 +56,10 @@ confusion. If you cannot confirm that, take option 1 — it is cheap and honest.
 take option 3**: it is option 2 without the tidying, and the next person will rediscover
 it as a bug.
 
-**Decision:**
+**Decision:** *pending one fact from the curator* — "follow the recommendation" was given,
+but the recommendation is CONDITIONAL: option 2 only if no customer runs both plugins with
+shared templates, otherwise option 1. That is not something a session can look up. **Do not
+implement either until this line names a number.**
 
 ---
 
@@ -76,7 +84,7 @@ PostgreSQL and MySQL are unaffected. The plan already labels this a release bloc
 measured to be *faster*, not slower. Option 2 throws away a supported database for one
 bug; option 3 is a footgun with a note next to it.
 
-**Decision:**
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
 
 ---
 
@@ -104,7 +112,12 @@ answer and it is a breaking change; bundling a breaking change into the release 
 removes the old dependency makes it impossible to tell which change broke somebody. Ship
 1.0 with option 3, do option 1 in 1.1 with a note.
 
-**Decision:**
+**Decision: 1, NOW — in 1.0** (curator, 2026-08-13, overriding the recommended timing).
+The fix itself is what I recommended; only the release it lands in changed. Two things
+follow and neither is optional: the change needs an **upgrade note** saying quoted tag
+parameters now mean literal text, and it needs a test proving an existing template that
+relied on the old behaviour fails **visibly** rather than silently reporting different
+numbers. 23 call sites go through `str_param`; that is the blast radius to cover.
 
 ---
 
@@ -128,7 +141,7 @@ which is the one thing that page must not do.
 permission contract. Option 1 changes what an installed permission means, which is a
 migration and an upgrade note for a cosmetic gain.
 
-**Decision:**
+**Decision: 2** (curator, 2026-08-13 — "follow the recommendation").
 
 ---
 
@@ -147,7 +160,8 @@ loses the searchable name of the thing that was replaced. 3. Leave it.
 **My recommendation: option 1.** The comments are worth keeping; that is exactly what the
 permanent marker is for.
 
-**Decision:**
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation"). This is the marker the
+allowlist header reserves to the curator, so this line is the authority for it.
 
 ---
 
@@ -160,7 +174,7 @@ through to. The README was not updated.
 
 **My recommendation: option 1.** They were removed for a reason that still holds.
 
-**Decision:**
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
 
 ---
 
@@ -176,7 +190,7 @@ correct, most work — one render per language).
 **My recommendation: option 1** for 1.0. It is one line, it is right for most installs,
 and it can be refined later without breaking anything.
 
-**Decision:**
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
 
 ---
 
@@ -190,7 +204,7 @@ to the generated support matrix in the specification. Purely a documentation mix
 **My recommendation: option 1.** The specification is the reference; the comments should
 follow it.
 
-**Decision:**
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
 
 ---
 
@@ -218,10 +232,11 @@ look only if a real installation shows a long list.
 A session can implement all of Part 1 and Part 2 in one pass. Suggested order, because
 some answers touch the same files:
 
-1. #2 (MariaDB) — self-contained, and it is the release blocker.
-2. #1 (old-plugin renders) — largest blast radius; everything else is easier once the
-   shape of the plugin is settled.
-3. #4, #5, #6, #7, #8 — small and independent.
-4. #3 — only if you chose to do it now rather than in 1.1.
+1. **#2 (MariaDB)** — self-contained, the release blocker, and settled. Start here.
+2. **#3 (quoted parameters)** — now in scope for 1.0 by curator decision, and the only
+   breaking change in the set. Do it early, while there is room to react to what it breaks.
+3. **#4, #5, #6, #7, #8** — small and independent.
+4. **#1 (old-plugin renders)** — largest blast radius, and still awaiting the curator's
+   answer. Do not infer it.
 
 Then: run the full test suite, read CI, bump the version from 0.5.0 to 1.0.
