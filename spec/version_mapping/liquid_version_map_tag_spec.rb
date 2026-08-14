@@ -166,6 +166,27 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
       expect(ctx.scopes.last).not_to have_key('geo_versions')
     end
 
+    # CURATOR DECISION #3 — A QUOTED PARAMETER IS LITERAL TEXT, ON THE DEPRECATED TAG TOO.
+    #
+    # This tag has exactly one parameter that goes through the lookup, and reverting it to
+    # the old unconditional one left 816 examples green — so the rule was untested here.
+    # It ships for one more minor version, so it gets the same rule and the same proof
+    # rather than an exemption nobody wrote down.
+    it 'assigns under a quoted name itself, not under a variable of that name' do
+      ctx = build_context('versions_by_name' => 'somewhere_else')
+      build_tag('assign_to: "versions_by_name"').render(ctx)
+
+      expect(ctx.scopes.last['versions_by_name']).to be_a(Hash)
+      expect(ctx.scopes.last).not_to have_key('somewhere_else')
+    end
+
+    it 'still resolves a bare assign_to from a variable' do
+      ctx = build_context('target' => 'somewhere_else')
+      build_tag('assign_to: target').render(ctx)
+
+      expect(ctx.scopes.last['somewhere_else']).to be_a(Hash)
+    end
+
     it 'returns an empty string (side-effect tag)' do
       ctx = build_context
       expect(build_tag('assign_to: geo_versions').render(ctx)).to eq('')

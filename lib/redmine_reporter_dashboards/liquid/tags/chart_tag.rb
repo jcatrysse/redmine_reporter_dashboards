@@ -171,8 +171,13 @@ module RedmineReporterDashboards
         # ------------------------------------------------------------------
 
         # QUOTED MEANS LITERAL, BARE MEANS A VARIABLE — decided once, in `TagParams`.
-        # `nil` rather than `''` for an absent parameter, because `ChartSpec` treats "no
-        # title" and "an empty title" differently.
+        #
+        # `default: nil` KEEPS THE OLD SPELLING AND IS AN EQUIVALENT MUTANT, which is worth
+        # saying so the next reader does not "fix" it either way. Changing it to `''`
+        # survives the whole suite, and it is not a coverage gap: `ChartSpec#initialize`
+        # runs both through `presence`, and two specs built with `title: nil` and with
+        # `title: ''` were CONSTRUCTED and compared — `to_h` equal, both titles nil.
+        # `nil` stays because it is what this method answered before.
         def str_param(name, context)
           TagParams.resolve(@raw_params[name], context, default: nil)
         end

@@ -831,6 +831,32 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       build_tag('group_by: status, limit: "5", assign_to: stats').render(ctx)
     end
 
+    # AND THE EXAMPLE ABOVE DOES NOT DISCRIMINATE ON ITS OWN — found by mutation, which is
+    # why this one exists. `"5"` matches `int_param`'s plain-integer-literal shortcut, so
+    # deleting the quoting check entirely left it green. A quoted NON-numeric is the case
+    # that separates the two: the old code resolved the variable `n`, the rule says the
+    # text `n`, and `"n".to_i` is zero — which `int_param` reads as "not given" and answers
+    # with the default. It is a nonsense spelling either way; what matters is that it
+    # cannot silently become somebody else's number.
+    it 'does NOT resolve a variable behind a quoted integer parameter' do
+      ctx = build_context({ 'n' => 999 }, owned_registers(scope: scope))
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(limit: 0)).and_return(dimension_result)
+
+      build_tag('group_by: status, limit: "n", other_label: "Rest", assign_to: stats')
+        .render(ctx)
+    end
+
+    # ...while the BARE spelling still resolves it, which is the half that is unchanged.
+    it 'still resolves a bare integer parameter from a variable' do
+      ctx = build_context({ 'n' => 999 }, owned_registers(scope: scope))
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(limit: 999)).and_return(dimension_result)
+
+      build_tag('group_by: status, limit: n, other_label: "Rest", assign_to: stats')
+        .render(ctx)
+    end
+
     # `list_param` and `bool_param` route through `str_param`, so they inherit the rule —
     # asserted rather than assumed, because "it routes through" is exactly the kind of
     # claim that stops being true in a later refactor.

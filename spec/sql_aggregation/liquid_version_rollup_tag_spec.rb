@@ -239,6 +239,42 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
       build_tag('from: issues, assign_to: my_versions').render(ctx)
       expect(ctx.scopes.last['my_versions']).to be_an(Array)
     end
+
+    # CURATOR DECISION #3 — A QUOTED PARAMETER IS LITERAL TEXT, ON THIS TAG TOO.
+    #
+    # Added after a mutation: reverting this tag's `str_param` to the old unconditional
+    # lookup left 813 examples green, so the rule was provably untested here. The two
+    # examples above use quoted values and pass either way, because neither text happens
+    # to be an assigned variable — which is exactly the "right by accident" the decision
+    # replaces with "right by rule".
+    it 'does not look a quoted status list up, even when it collides with a variable' do
+      ctx = build_context({ 'Closed;Rejected' => 'SHOULD NOT WIN' },
+                          owned_registers(scope: scope))
+      expect(SqlAggregation::QueryAggregator).to receive(:version_rollup)
+        .with(scope, closed_statuses: %w[Closed Rejected], cost_field_ids: [])
+        .and_return(rollup_rows)
+
+      build_tag('from: issues, closed_statuses: "Closed;Rejected"').render(ctx)
+    end
+
+    it 'assigns under the quoted name itself, not under a variable of that name' do
+      ctx = build_context({ 'my_versions' => 'somewhere_else' },
+                          owned_registers(scope: scope))
+
+      build_tag('from: issues, assign_to: "my_versions"').render(ctx)
+
+      expect(ctx.scopes.last['my_versions']).to be_an(Array)
+      expect(ctx.scopes.last).not_to have_key('somewhere_else')
+    end
+
+    # ...and BARE still resolves, which is the half that does not change.
+    it 'still resolves a bare assign_to from a variable' do
+      ctx = build_context({ 'target' => 'somewhere_else' }, owned_registers(scope: scope))
+
+      build_tag('from: issues, assign_to: target').render(ctx)
+
+      expect(ctx.scopes.last['somewhere_else']).to be_an(Array)
+    end
   end
 
   describe 'error handling' do

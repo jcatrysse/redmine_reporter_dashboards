@@ -136,6 +136,37 @@ RSpec.describe RedmineReporterDashboards::Liquid::Tags::ChartTag do
 
       expect(render_context.charts['v1'].series.first.values).to eq([42.5])
     end
+
+    # CURATOR DECISION #3 — A QUOTED PARAMETER IS LITERAL TEXT, HERE TOO.
+    #
+    # This tag reads three of its parameters through the context, and a chart title is
+    # the likeliest of all of them to collide with a variable — every report assigns
+    # `user` and `project`, and a title is a plain word. Added after a mutation:
+    # replacing this tag's `TagParams.parse` with one that throws the quoting away left
+    # the whole suite green, so the rule was provably untested on this tag.
+    it 'takes a quoted title as the text, not as a variable of that name' do
+      render('id: v1, from: stats, title: "project"',
+             context({ 'stats' => buckets, 'project' => 'eCookbook' }))
+
+      expect(render_context.charts['v1'].title).to eq('project')
+    end
+
+    it 'still resolves a BARE title from a variable, which is unchanged' do
+      render('id: v1, from: stats, title: heading',
+             context({ 'stats' => buckets, 'heading' => 'Open issues' }))
+
+      expect(render_context.charts['v1'].title).to eq('Open issues')
+    end
+
+    # THE ABSENT CASE, which had no example at all and is why a `default:` had to be
+    # chosen when this tag moved onto `TagParams`. `ChartSpec` normalises `''` and nil
+    # through `presence`, so the two are indistinguishable downstream — this asserts the
+    # observable, not the spelling.
+    it 'leaves the title unset when the parameter is absent' do
+      render('id: v1, from: stats')
+
+      expect(render_context.charts['v1'].title).to be_nil
+    end
   end
 
   describe 'when it cannot draw' do
