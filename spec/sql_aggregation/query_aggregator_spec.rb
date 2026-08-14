@@ -166,7 +166,7 @@ class ScopeStub
   # rows a positional read gets back.
   def pluck(*expressions)
     @pluck_expressions.concat(expressions)
-    return grouped_pluck_rows if @grouped
+    return grouped_pluck_rows(expressions.last) if @grouped
 
     answer = @pluck_rows.respond_to?(:call) ? @pluck_rows.call(expressions) : @pluck_rows
     row    = Array(answer).first(expressions.length)
@@ -234,10 +234,48 @@ class ScopeStub
 
   # {group value => count} as the rows a positional read gets back: the group values
   # first, in the order they were grouped, then the count.
-  def grouped_pluck_rows
-    grouped_count.map do |key, count|
-      (@group_fields.length == 1 ? [key] : key.dup) + [count]
+  # A GROUPED PLUCK NOW CARRIES ITS AGGREGATE, and this stub has to read it.
+  #
+  # Since the second half of defect D-1 (curator decision #2, 2026-08-13) the kernel
+  # reads `sum`, `avg` and `distinct` positionally too, not just counts — so a grouped
+  # `pluck` is no longer always the counted axis. The last expression says which
+  # aggregate was asked for, and the fixture to answer from follows from it. Reading the
+  # fixture by aggregate rather than always answering counts is what stopped two
+  # examples ("sums a core numeric column per bucket", "rounds to two decimals in Ruby")
+  # from measuring the count fixture and reporting a plausible wrong number.
+  def grouped_pluck_rows(aggregate = nil)
+    fixture = grouped_fixture_for(aggregate)
+    fixture.map do |key, value|
+      (@group_fields.length == 1 ? [key] : key.dup) + [value]
     end
+  end
+
+  # `COUNT(DISTINCT issues.id)` is the counted axis; anything else is a measure and its
+  # values come from the measure fixtures. Matched on the aggregate function rather than
+  # on the column, because the column is whatever the example chose.
+  def grouped_fixture_for(aggregate)
+    text = aggregate.to_s
+    return grouped_count if text.empty? || text.include?('COUNT(DISTINCT issues.id')
+
+    # `COUNT(DISTINCT <something else>)` is the `distinct` measure. This stub has never
+    # had a fixture of its own for it — it answered through the count path — so it keeps
+    # doing that, and only `sum`/`avg` read their own fixtures.
+    fixture = case text
+              when /\ASUM\(/ then @sums
+              when /\AAVG\(/ then @averages
+              end
+    resolved = answer_for_grouped(fixture, text)
+    resolved.is_a?(Hash) ? resolved : grouped_count
+  end
+
+  # The same fixture shapes `answer` accepts — keyed by expression, by `:any`, or bare —
+  # but always resolved to the per-group Hash, because a grouped read has one.
+  def answer_for_grouped(fixture, expression)
+    return nil if fixture.nil?
+    return fixture unless fixture.is_a?(Hash)
+
+    inner = fixture.key?(expression) ? fixture[expression] : fixture[:any]
+    inner.is_a?(Hash) ? inner : fixture
   end
 
   # A fixture keys on the aggregate expression, on :any, or is the bare value. A

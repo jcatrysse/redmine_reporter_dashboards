@@ -76,6 +76,23 @@ module RrdGolden
     # `execute_grouped_calculation` overwrites the relation's select list unless there
     # is a HAVING clause, so `.select("… AS x").group("x")` raises.
     #
+    # --- WHY THIS IS STILL ONE HUNK, AND NOT A SECOND ONE (2026-08-13) ---
+    #
+    # The measures were left exposed by T-08 deliberately and written down as such, here
+    # and in the README's database section. The curator's decision #2 closed them, and
+    # the fix is the same fix — same defect, same mechanism, same method region. So this
+    # entry GREW rather than gaining a sibling, and RATCHET stays 1.
+    #
+    # That is not a way of hiding a change: reconstruction is byte-exact, so the new
+    # methods are in the recorded `current` fragment where a reviewer reads them. It is
+    # also the only shape that works — hunks apply in order against the BASELINE, and a
+    # second entry covering this region would look for baseline text that the first
+    # entry had already replaced, which `expected_for` refuses by design.
+    #
+    # It also keeps the S-13 decision intact. That said "the kernel stays frozen — no
+    # second G7 hunk", in the context of time entries getting an owned sibling module
+    # instead of a kernel change. There is still no second hunk.
+    #
     # Counting each bucket with its own conditional aggregate and dropping the GROUP BY
     # was written, pushed, and MEASURED WORSE: that shape costs ~25-50s per call on
     # MariaDB at 10 000 issues (the `completeness.seven` cells in the same CI job say
@@ -89,9 +106,15 @@ module RrdGolden
                 'back BY POSITION — instead of ActiveRecord\'s grouped `.count`, which ' \
                 'looks each key up by a column alias derived from the expression\'s text ' \
                 'and that MariaDB truncates at 256 characters. Same statement, same ' \
-                'query count; only the read changes. Measures (sum/avg/distinct) still ' \
-                'go through `.count`/`.sum`/`.average` and are still exposed — README, ' \
-                'database section.' }
+                'query count; only the read changes. EXTENDED 2026-08-13 (curator ' \
+                'decision #2) to the three GROUPED MEASURES: `sum`, `avg` and ' \
+                '`distinct` went on calling `.sum`/`.average`/`.count` on a grouped ' \
+                'relation and so went on keying by the same truncated alias. ' \
+                '`grouped_measure` plucks them positionally, exactly as ' \
+                '`grouped_counts` does. Still ONE hunk and RATCHET stays 1 — the new ' \
+                'methods sit inside the region this entry already licenses, and a ' \
+                'second entry could not work anyway: its baseline text would no longer ' \
+                'be present once this one had been applied.' }
     ].freeze
 
     # The ratchet. Like AdapterOverlay's, it is the COMMITTED SIZE of ENTRIES and not a

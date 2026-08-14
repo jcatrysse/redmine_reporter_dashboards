@@ -952,12 +952,51 @@ module SqlAggregation
     def self.measure_groups(relation, measure)
       return grouped_counts(relation) if measure.nil? || measure.kind == :count
 
-      raw = raw_measure(relation, measure)
-      return {} unless raw.is_a?(Hash)
-
-      raw.each_with_object({}) { |(key, value), out| out[key] = measure_number(value, measure) }
+      grouped_measure(relation, measure)
     end
     private_class_method :measure_groups
+
+    # DEFECT D-1, SECOND HALF. `grouped_counts` below fixed the COUNTED axis by reading
+    # the GROUP BY positionally; this does the same for `sum`, `avg` and `distinct`,
+    # which went on calling `.sum`/`.average`/`.count` on a grouped relation and so went
+    # on keying their result Hash by the group expression's own TEXT — the alias MariaDB
+    # truncates at 256 characters. The `grouped_counts` comment argues the whole
+    # mechanism and every word of it applies here; the only reason the two are separate
+    # methods is that the aggregate differs.
+    #
+    # It was left exposed deliberately in T-08 and written down as such, in the README's
+    # database section and in this file's own G7 exception entry. A `SUM(hours)` over an
+    # age axis is exactly the shape that crosses the limit, so "documented" was never
+    # going to be the end state.
+    #
+    # `measure_number` is applied per row rather than to a Hash afterwards because the
+    # rows arrive as [key..., value] tuples, which is the same shape `grouped_counts`
+    # folds — one reading pattern in this file, not two.
+    def self.grouped_measure(relation, measure)
+      expressions = relation.group_values
+      return {} if expressions.empty?
+
+      rows = relation.pluck(*expressions, Arel.sql(grouped_aggregate_sql(measure)))
+      rows.each_with_object({}) do |row, out|
+        *key, value = row
+        out[expressions.length == 1 ? key.first : key] = measure_number(value, measure)
+      end
+    end
+    private_class_method :grouped_measure
+
+    # The aggregate `grouped_measure` selects, spelled to match what `raw_measure` asks
+    # ActiveRecord for on the UNGROUPED path — `.sum(expr)` emits `SUM(expr)`,
+    # `.average(expr)` emits `AVG(expr)`, and `.count("DISTINCT expr")` emits
+    # `COUNT(DISTINCT expr)`. The scalar and grouped paths must not compute different
+    # things, and this is the one place that could make them diverge.
+    def self.grouped_aggregate_sql(measure)
+      case measure.kind
+      when :distinct then "COUNT(DISTINCT #{measure.expression})"
+      when :sum      then "SUM(#{measure.expression})"
+      when :avg      then "AVG(#{measure.expression})"
+      end
+    end
+    private_class_method :grouped_aggregate_sql
 
     # The counted axis, read back BY POSITION — defect D-1's fix.
     #
