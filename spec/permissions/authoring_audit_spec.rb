@@ -45,7 +45,9 @@ RSpec.describe RedmineReporterDashboards::Permissions::AuthoringAudit do
   # The names, read once from the model rather than retyped. A test that hardcodes
   # `:add_reporter_dashboards_templates` keeps passing after the model renames it, which
   # is the failure mode this whole file exists to prevent one level up.
-  let(:own_authoring) { RedmineReporterDashboards::Permissions.authoring_names }
+  # `own_authoring` is the AUDIT'S set, which is narrower than the permission model's
+  # `authoring_names` — see curator decision #4 and `NOT_AUTHORING_IN_PRACTICE`.
+  let(:own_authoring) { described_class.own_authoring }
   let(:base_authoring) { described_class::BASE_AUTHORING.first }
 
   describe 'what counts as authoring' do
@@ -59,6 +61,50 @@ RSpec.describe RedmineReporterDashboards::Permissions::AuthoringAudit do
       expect(own_authoring).to include(:add_reporter_dashboards_templates,
                                        :edit_reporter_dashboards_templates)
       expect(own_authoring).not_to include(:view_reporter_dashboards_reports)
+    end
+
+    # CURATOR DECISION #4, 2026-08-13 — NARROW THE DIAGNOSTIC, DO NOT CHANGE THE FLAG.
+    #
+    # `manage_public_reporter_dashboards_templates` carries `authoring: true` and cannot
+    # write a template: the controller additionally requires `add_…` for new/create and an
+    # edit permission for edit/update, and a functional test holds this permission ALONE
+    # and asserts 403 on both. Reporting it made this page warn about people who cannot
+    # author — the cry-wolf failure it exists to avoid.
+    it 'excludes the public-visibility permission, which cannot author' do
+      expect(RedmineReporterDashboards::Permissions.authoring_names)
+        .to include(:manage_public_reporter_dashboards_templates)
+      expect(own_authoring).not_to include(:manage_public_reporter_dashboards_templates)
+    end
+
+    # THE SUBTRACTION NAMES WHAT IT EXCLUDES, so a fifth authoring permission added later
+    # is reported by DEFAULT. A hand-typed list of three would silently stop covering one.
+    it 'is the authoring flag minus exactly the excluded set, and nothing else' do
+      expect(own_authoring)
+        .to eq(RedmineReporterDashboards::Permissions.authoring_names -
+               described_class::NOT_AUTHORING_IN_PRACTICE)
+      expect(described_class::NOT_AUTHORING_IN_PRACTICE)
+        .to eq(%i[manage_public_reporter_dashboards_templates])
+    end
+
+    # AND THE CONSEQUENCE ON A ROW, because the constant alone is not the behaviour: a
+    # role holding ONLY that permission must produce no row at all.
+    it 'emits no row for a role holding only the public-visibility permission' do
+      roles = [role(id: 1, name: 'Publisher',
+                    permissions: [:manage_public_reporter_dashboards_templates])]
+
+      expect(described_class.rows(roles)).to be_empty
+      expect(described_class.any?(roles)).to be(false)
+    end
+
+    # ...while the same role holding a real authoring permission as well is still
+    # reported, and the public one is NOT listed beside it — the row prints what it holds,
+    # and printing a permission the page has decided is not authoring would undo the fix.
+    it 'reports a role holding both, listing only the authoring one' do
+      roles = [role(id: 1, name: 'Publisher',
+                    permissions: %i[manage_public_reporter_dashboards_templates
+                                    add_reporter_dashboards_templates])]
+
+      expect(described_class.rows(roles).first.own).to eq(%i[add_reporter_dashboards_templates])
     end
   end
 

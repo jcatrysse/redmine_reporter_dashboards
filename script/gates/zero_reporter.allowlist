@@ -61,8 +61,21 @@ init.rb                                                logs which mode the plugi
 # --- Nothing in this plugin PATCHES the base plugin any more.
 
 # --- Historical record. Comments only; no executable reference.
-lib/redmine_reporter_dashboards/positioned.rb          comments naming the vendor gem method it replaced
-db/migrate/001_create_reporter_dashboards_tables.rb    migration comment referring to the original coupling
+#
+# MARKED `[permanent]` BY THE CURATOR, 2026-08-13 — decision #5 in
+# `docs/plan/DECISIONS-PENDING.md`, which is the authority this file's header reserves to
+# them ("adding it to anything else is a curator decision"). The options were to mark both
+# permanent, to reword the comments until the name disappears, or to leave the gate red;
+# the curator took the first, on the ground that the comments are worth keeping and that
+# is what the marker is for.
+#
+# Neither file references anything: both name `up_acts_as_list` / the base plugin inside a
+# COMMENT, recording what a method replaced and what a migration used to couple to. Rewording
+# them would lose the searchable name of the thing that was replaced, which is the one thing
+# those comments are for. Strict is a claim about COUPLING, and a historical note is not
+# coupling.
+lib/redmine_reporter_dashboards/positioned.rb          [permanent] comments naming the vendor gem method it replaced
+db/migrate/001_create_reporter_dashboards_tables.rb    [permanent] migration comment referring to the original coupling
 
 # --- THE IMPORTER (T-02 onward). A different category from everything above, and the
 # --- one entry in this file that this gate's own "empty at 1.0" goal cannot absorb.

@@ -34,13 +34,66 @@ RSpec.describe RedmineReporterDashboards::ReportDocument do
       document = described_class.wrap(body)
 
       expect(document).to start_with('<!DOCTYPE html>')
-      expect(document).to include('<html><head>')
+      expect(document).to include('<html lang="en"><head>')
       expect(document).to include('</head><body>')
       expect(document).to end_with("</body></html>\n")
     end
 
     it 'declares an encoding, because an engine that guesses one gets it wrong' do
       expect(described_class.wrap(body)).to include('<meta charset="utf-8">')
+    end
+
+    # --- `<html lang>` — CURATOR DECISION #7, 2026-08-13 ------------------------------
+    #
+    # This module's header used to record the attribute as deliberately ABSENT, because a
+    # locale is a property of a request and a scheduled render has none. The curator
+    # answered the question that left open — whose language a scheduled report speaks —
+    # with the INSTALLATION DEFAULT, and these examples are that answer.
+    #
+    # A screen reader announces the document in this language and a PDF engine hyphenates
+    # with it. `dir` is deliberately not emitted: all nine shipped locales are LTR.
+    describe 'the language it declares' do
+      it 'declares one at all' do
+        expect(described_class.wrap(body)).to match(/<html lang="[a-zA-Z-]+">/)
+      end
+
+      it 'takes it from the installation default, not from the ambient request locale' do
+        stub_const('Setting', Class.new { def self.default_language; 'pt-BR'; end })
+
+        expect(described_class.wrap(body)).to include('<html lang="pt-BR">')
+      end
+
+      # THE SETTING IS A PLAIN STRING COLUMN AND AN ADMINISTRATOR CAN EMPTY IT. A blank
+      # `lang` is worse than no attribute at all — it tells a screen reader "no language"
+      # explicitly — so it falls back rather than being emitted.
+      it 'falls back when the setting is blank' do
+        stub_const('Setting', Class.new { def self.default_language; ''; end })
+
+        expect(described_class.wrap(body))
+          .to include(%(<html lang="#{described_class::FALLBACK_LANGUAGE}">))
+      end
+
+      it 'falls back when Redmine is not loaded at all, which is this spec run' do
+        expect(described_class.wrap(body)).to include('<html lang="en">')
+      end
+
+      # THE ONE VALUE THIS MODULE INTERPOLATES INTO AN ATTRIBUTE, so it is bounded rather
+      # than escaped-and-hoped. A setting that is not a language tag cannot reach the
+      # document — checked with a value that would break out of the attribute if it did.
+      it 'refuses a setting that is not a language tag' do
+        stub_const('Setting', Class.new { def self.default_language; '" onload="x'; end })
+
+        document = described_class.wrap(body)
+
+        expect(document).to include('<html lang="en">')
+        expect(document).not_to include('onload')
+      end
+
+      it 'refuses one that merely looks close' do
+        stub_const('Setting', Class.new { def self.default_language; 'en_US'; end })
+
+        expect(described_class.wrap(body)).to include('<html lang="en">')
+      end
     end
 
     it 'carries the report stylesheet' do

@@ -2100,12 +2100,24 @@ saved **spent-time** query.
 
 | On the entry itself | Through the entry's issue |
 |---|---|
-| `activity` · `user` · `project` · `issue` | `tracker` · `status` · `priority` · `author` · `assignee` · `version` · `category` |
+| `activity` · `user` · `project` · `issue` | `tracker` · `status` · `version` · `category` |
 
 `activity` and `user` do not exist on the issue path at all — they are the two an hours
-report is usually about. The seven on the right need the entry to be joined to its issue,
+report is usually about. The four on the right need the entry to be joined to its issue,
 which a saved spent-time query provides; without one they are refused and the page says so
 rather than reporting a wrong number.
+
+**These eight are Redmine's own** (`lib/redmine/helpers/time_report.rb`, `load_available_criteria`),
+and the set is deliberately not wider. `priority`, `author` and `assignee` were listed here
+for a while and are not available: none of them has a `TimeEntryQuery` filter to drill into,
+and `author` is the trap — `author_id` *is* a spent-time filter and it means **who recorded
+the entry**, not the issue's author, so a drill-through built from it would land on a
+plausible, wrong set of rows. Asking for one of the three is refused visibly.
+
+**Quote them or not?** Unquoted, like every example here — except `user` and `project`,
+which are also the names of variables every report assigns, so write those two as
+`group_by: "user"` and `group_by: "project"`. See
+[Quoted or unquoted](#quoted-or-unquoted--they-mean-different-things).
 
 An entry with no activity, or logged against a project rather than an issue, lands in the
 `(none)` bucket — never folded into `(other)`, however tight the `limit:` — and its filter

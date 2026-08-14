@@ -258,6 +258,30 @@ All notable changes to this plugin are documented in this file.
   `reporter_dashboards_mail_send_recipients`) in migration 009, which reverses like every
   other migration in this plugin.
 
+- **Reports now declare their language**, as `<html lang="…">` on every report — the HTML
+  view and the PDF alike. It is taken from the **installation's default language**
+  (*Administration → Settings → Display*), deliberately rather than from whoever happens
+  to be looking: a scheduled report has no viewer, and a report that announced itself in a
+  different language depending on who triggered it would be worse than one that is
+  consistent. Screen readers announce the document correctly and PDF engines hyphenate
+  with the right rules. Reading direction is not set, because every language this plugin
+  ships is left-to-right.
+
+- **The *Manage public report templates* permission no longer triggers a code-execution
+  warning on the diagnostics page.** That permission cannot create or edit a template — a
+  role holding only it is refused — so warning *"check that this was intended"* about the
+  people who hold it was crying wolf on the one page that must not. The permission itself
+  is unchanged; only what the diagnostic reports about it is narrower. The three
+  permissions that genuinely write a template are still reported, and a permission added
+  later is reported by default.
+
+- **The spent-time documentation listed eleven groupings; there are eight.** `priority`,
+  `author` and `assignee` were removed during review because none of them has a
+  spent-time filter to click through to — `author` most of all, because a spent-time
+  `author` means *who recorded the entry*, not the issue's author, so a drill-through
+  built from it would land on a plausible, wrong set of rows. The README now lists the
+  eight that exist and says why those three are not among them.
+
 ### Fixed
 
 - **The report and preview pages answered a 500 for any render by the compatibility

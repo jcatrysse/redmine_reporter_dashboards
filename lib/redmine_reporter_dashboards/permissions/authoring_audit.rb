@@ -95,6 +95,30 @@ module RedmineReporterDashboards
       # if a later version of that plugin splits it.
       BASE_AUTHORING = %i[manage_report_templates].freeze
 
+      # OURS, AND NARROWER THAN `Permissions.authoring_names` — curator decision #4,
+      # 2026-08-13.
+      #
+      # `authoring: true` marks four permissions, and one of them —
+      # `manage_public_reporter_dashboards_templates` — cannot actually write a template.
+      # Its own entry says so: it maps `#new`/`#create`/`#edit`/`#update` so that Redmine's
+      # `authorize` passes, and the controller then additionally requires `add_…` for
+      # new/create and an edit permission for edit/update, with a functional test that holds
+      # this permission ALONE and asserts 403 on both. So a role holding only it printed
+      # *"Check that this was intended"* about somebody who cannot author — the cry-wolf
+      # failure this page exists to avoid, found by T-27's independent review.
+      #
+      # The curator's two options were to change the FLAG or to narrow the DIAGNOSTIC, and
+      # they took the second: the flag is T-40's contract and it also derives `require:
+      # :member`, so relaxing it would let an administrator grant this to Non-member and
+      # Anonymous — a migration and an upgrade note for a cosmetic gain. Narrowing is one
+      # constant in one file and touches no permission contract.
+      #
+      # DERIVED FROM THE FLAG RATHER THAN TYPED OUT, and that is the part that has to keep
+      # working: a fifth authoring permission added later must appear here by default, so
+      # the subtraction names what it EXCLUDES and a spec pins the excluded set. A hand-typed
+      # list of three would silently stop covering a new one.
+      NOT_AUTHORING_IN_PRACTICE = %i[manage_public_reporter_dashboards_templates].freeze
+
       # One role's holdings. `base` and `own` are the permission names actually held, not
       # booleans, because the page prints them: "Manager holds authoring" is not actionable
       # and "Manager holds edit_reporter_dashboards_templates" is.
@@ -168,12 +192,24 @@ module RedmineReporterDashboards
           !rows(roles).empty?
         end
 
+        # Ours that genuinely create or edit a template BODY: the `authoring: true` set
+        # minus the ones a second guard refuses at the controller. Computed rather than
+        # listed — see `NOT_AUTHORING_IN_PRACTICE`.
+        #
+        # PUBLIC, so a spec can assert the set itself rather than infer it from a row that
+        # happens not to appear. "This permission is excluded" is unobservable through
+        # `rows` alone: a role holding only it produces no row, and so does a role holding
+        # nothing at all.
+        def own_authoring
+          Permissions.authoring_names - NOT_AUTHORING_IN_PRACTICE
+        end
+
         private
 
         def row_for(role)
           held = permission_names(role)
           base = BASE_AUTHORING & held
-          own = Permissions.authoring_names & held
+          own = own_authoring & held
           return nil if base.empty? && own.empty?
 
           Row.new(role_id: role.id, role_name: role.name, builtin: role.builtin,

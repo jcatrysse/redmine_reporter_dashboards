@@ -414,7 +414,12 @@ ru:
   error_reporter_adhoc_render_failed: "Отчёт не удалось построить, поэтому ничего не отправлено. Подробности приведены ниже."
   error_reporter_adhoc_recipients_not_permitted: "Один или несколько получателей не имеют права просматривать отчёты в этом проекте, поэтому ничего не отправлено."
 
-  # --- FR-50 / technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  # --- FR-27 / FR-74 · technical-spec.md §5.2 clause 4: which engine this install renders with ---
+  # CORRECTED 2026-08-14 (curator decision #8). This block said FR-50 in all nine locale
+  # files, and `functional-spec.md:275` defines FR-50 as the GENERATED SUPPORT MATRIX. The
+  # screen these keys label is FR-27 — "the engine is selected by configuration with an
+  # auto-detect default" (:205) — and its comparison table is FR-74 (:264). The spec is the
+  # reference; the comments follow it.
   label_reporter_render_settings: "Рендеринг отчётов"
   label_reporter_render_engine: "Механизм рендеринга"
   label_reporter_render_engine_default: "Выбирает плагин (%{engine})"
