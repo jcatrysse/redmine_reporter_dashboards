@@ -130,6 +130,29 @@ allowlist, none the seam. Two controls, two inputs, one of them untested and rea
 as if it were redundant. When a mutation survives against something with a security-shaped
 name, check what each control's INPUT actually is before writing it off as equivalent.
 
+**`set -euo pipefail` MAKES A GATE'S OWN FLOOR CHECK UNREACHABLE IN EXACTLY THE SITUATION THE
+FLOOR EXISTS FOR, AND THE GATE THEN EXITS 1 WITH NO OUTPUT AT ALL.** Decision #1's, 2026-08-14,
+and it is the fourth variant of this file's most-repeated lesson.
+
+`single_parse.sh` was widened to scan `.rake` and `.erb` as well as `.rb` (it had been leaving
+**55 files under `app/` and `lib/` invisible** to a gate that certifies "one parse site in this
+repository" — found while decision #1 was leaning on it as a mechanical guarantee). A floor plus
+a printed count came with it, per this file's own `no_html_safe.sh` rule. Then the floor was
+negative-tested from a tree with no `app/` or `lib/`, and the gate answered **exit 1, zero lines
+of output** — not the `exit 2` and the reason it was written to print.
+
+Cause: `find app lib …` exits 1 when those directories are absent, `pipefail` propagates that
+through `| wc -l`, and `set -e` kills the script at the `FILE_COUNT=$(…)` assignment — *above*
+the `if [ "$FILE_COUNT" -lt "$GATE_FILE_FLOOR" ]` that was supposed to report it. The fix is
+`|| true` on the `find`, which is safe **only because the floor exists**: a swallowed failure
+cannot hide, it lands as a count of 0 and exits 2.
+
+Two rules. **A floor check must be reachable when the thing it measures is zero** — write it,
+then run the gate in a tree where the count really is zero, because that path is the one `set -e`
+is most likely to have eaten. And **`|| true` on a search is a defect (this file says so twice)
+unless a floor makes the swallowed failure observable** — which is the one condition under which
+the two rules do not contradict each other.
+
 **A GUARD ADDED INSIDE A METHOD WITH A METHOD-LEVEL `rescue` IS SWALLOWED BY IT, AND THEN DIES
 SOMEWHERE ELSE WITH THE WRONG EXCEPTION CLASS.** Decision #1's, 2026-08-14.
 

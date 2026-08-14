@@ -134,7 +134,10 @@ module RedmineReporterDashboards
       #   1. `Liquid::Context` is constructed in exactly ONE place in this repository:
       #      `build_context` below.
       #   2. `Liquid::Template.parse` likewise, in `parse` below — and that one is already
-      #      MECHANICAL, enforced by `script/gates/single_parse.sh` over `app/` and `lib/`.
+      #      MECHANICAL, enforced by `script/gates/single_parse.sh`. **That gate was widened in
+      #      the same change**: it scanned only `*.rb`, so 55 `.erb` and `.rake` files under
+      #      `app/` and `lib/` were invisible to the guarantee this comment leans on. It now
+      #      scans all three extensions, prints the count, and refuses below a floor.
       #   3. `#render` has exactly ONE caller in `app/` + `lib/`:
       #      `Reporting::ReportRun#render_section`, which always passes a context.
       #

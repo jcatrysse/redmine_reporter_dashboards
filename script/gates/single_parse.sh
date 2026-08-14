@@ -48,6 +48,46 @@ OWNED_LIQUID="$BASE/liquid"
 # Exit status is three-valued: 0 = matches, 1 = no matches, anything else = the search
 # itself failed and this gate knows nothing, which must be loud. `|| true` here would
 # make "clean" and "did not run" the same answer.
+# --- THE FILE SET, AND WHY IT IS NOT JUST `*.rb` (2026-08-14) --------------------
+#
+# It WAS `-name '*.rb'`, and that left **55 files under app/ and lib/ invisible to this
+# gate**: every `.erb` view and every `.rake` task. Nothing exploited it — the widening
+# found zero new hits — but the hole was found while decision #1 was leaning on this gate
+# as the mechanical half of "there is exactly one parse site in this repository", and a
+# guarantee is worth what its enforcement covers. An `.erb` partial or a rake formatter can
+# call `Liquid::Template.parse` exactly as easily as a `.rb`, and a rake task is the most
+# likely place somebody would reach for a second parser ("just render this template to
+# stdout").
+#
+# `.yml` is deliberately NOT included: `config/capabilities.yml` and friends are data, the
+# gate does not scan `config/` at all, and a YAML file cannot call a method.
+#
+# AND THE COUNT IS PRINTED, which is `HANDOVER.md` §1's rule for any gate whose subject is a
+# file set: "a gate certifying INV-9 having read no files" is how `no_html_safe.sh` shipped
+# with four holes. There is a FLOOR too — below it the gate exits 2 rather than reporting a
+# clean run, because `find` answering nothing looks exactly like nothing to find.
+GATE_FILE_FLOOR=100
+
+# `|| true` ON THE `find`, AND THE FLOOR BELOW IT WOULD OTHERWISE BE UNREACHABLE — measured,
+# on the first attempt to negative-test it. With `set -euo pipefail` and a bare `find app lib`,
+# a tree missing those directories makes `find` exit 1, `pipefail` propagates it to the
+# `FILE_COUNT=$(...)` assignment, and `set -e` kills the script THERE: **exit 1 with not one
+# line of output**, which is `HANDOVER.md`'s "a check that could not run looks exactly like a
+# check that passed" in its worst form — the gate reporting nothing and a caller reading it as
+# an ordinary violation. The `|| true` is safe here precisely BECAUSE the floor exists: a
+# swallowed `find` failure cannot hide, it lands as a count below the floor and exits 2.
+gate_files() {
+  find app lib \( -name '*.rb' -o -name '*.rake' -o -name '*.erb' \) -type f 2>/dev/null || true
+}
+
+FILE_COUNT="$(gate_files | wc -l | tr -d ' ')"
+if [ "$FILE_COUNT" -lt "$GATE_FILE_FLOOR" ]; then
+  echo "single_parse: FAIL — only $FILE_COUNT files to scan, below the floor of" >&2
+  echo "              $GATE_FILE_FLOOR. This gate knows nothing; it did not run over the" >&2
+  echo "              tree it certifies. Check the working directory." >&2
+  exit 2
+fi
+
 search() {
   local pattern="$1" file rc out=''
   while IFS= read -r file; do
@@ -61,7 +101,7 @@ search() {
         exit 2
       fi
     fi
-  done < <(find app lib -name '*.rb' -type f 2>/dev/null | sort)
+  done < <(gate_files | sort)
   printf '%s' "$out"
 }
 
@@ -100,6 +140,7 @@ else
 fi
 
 PARSE_COUNT="$(echo "$PARSE_HITS" | sed '/^$/d' | wc -l | tr -d ' ')"
-echo "single_parse: mode=$MODE  parse site(s)=$PARSE_COUNT  all under $OWNED_LIQUID/"
+echo "single_parse: mode=$MODE  parse site(s)=$PARSE_COUNT  all under $OWNED_LIQUID/" \
+     "  files scanned=$FILE_COUNT (.rb/.rake/.erb under app/ lib/)"
 
 exit "$STATUS"
