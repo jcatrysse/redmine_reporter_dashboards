@@ -30,8 +30,15 @@ require File.dirname(__FILE__) + '/lib/redmine_reporter_dashboards'
 Redmine::Plugin.register :redmine_reporter_dashboards do
   name 'Redmine Reporter Dashboards plugin'
   author 'Jan Catrysse'
-  description 'Dashboard extension for the Redmine Reporter plugin, adding project dashboards, ' \
-              'SQL-based issue statistics and Liquid aggregation tags.'
+  # THE ADMINISTRATION PAGE IS WHERE SOMEBODY DECIDES WHETHER THIS PLUGIN NEEDS ANOTHER ONE.
+  # This said "Dashboard extension for the Redmine Reporter plugin" long after reporter
+  # became optional (`requires_redmine_plugin` is absent below for that reason, and the boot
+  # log two lines further down says so), which made a standalone install look like it was
+  # missing a dependency. The migration relationship is real and is documented in the README,
+  # which is where a reader can be told that it is an import path and not a requirement.
+  description 'Project dashboards, report templates and scheduled reporting for Redmine: ' \
+              'SQL-based issue and time-entry statistics, Liquid aggregation tags, charts, ' \
+              'HTML/PDF rendering, mail delivery and expiring share links.'
   version '0.5.0'
   url 'https://github.com/jcatrysse/redmine_reporter_dashboards'
   author_url 'https://github.com/jcatrysse'

@@ -2,10 +2,25 @@
 
 ## Development setup
 
-The plugin has two hard dependencies:
+> **Do not run `bundle` in this checkout.** The `Gemfile` here declares the plugin's gems
+> for *Redmine's* bundle and deliberately has no `source` line — Redmine's own `Gemfile`
+> supplies one when it evaluates plugin Gemfiles. Run Bundler here and you get
+> `bundler: command not found: rspec`, then `Could not find gem 'liquid (>= 4.0, < 6.0)'
+> in locally installed gems` from `bundle install`: a source-less Gemfile resolves against
+> installed gems only. That looks like a broken suite and is not one, and adding a
+> `source` or committing a lockfile to make it go away would break the real bundle. Use
+> the `.codex/` scripts below, which run every suite the way CI does.
+
+The plugin has one hard dependency:
 
 - **Redmine** — a checkout is needed to run the minitest suite
-- **redmine_reporter** — a private plugin; see below for how to make it available
+
+`redmine_reporter` is **optional**. The plugin is standalone: nothing here requires it at
+runtime, and both the RSpec and minitest suites run without it — which is the
+configuration CI proves. It matters only for the migration/import path and for four
+report-widget tests, which skip with a reason when it is absent. See
+[The `redmine_reporter` dependency — optional](#the-redmine_reporter-dependency--optional)
+below if you need it available.
 
 ### Local
 
