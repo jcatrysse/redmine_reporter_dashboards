@@ -178,14 +178,49 @@ class ReporterDashboardsMailer < Mailer
          subject: adhoc_subject(template, subject)
   end
 
+  # Rails' OWN `deliver_mail`, captured so `.deliver_mail` below can reach it past Redmine's
+  # override. Not a reimplementation: the instrumentation payload this builds is Rails' and
+  # stays Rails' across every supported branch.
+  ACTION_MAILER_DELIVER_MAIL = ::ActionMailer::Base.method(:deliver_mail).unbind
+
   class << self
+    # AN SMTP FAILURE ON *THIS* MAILER RAISES, AND IT DOES SO WITHOUT TOUCHING ANY GLOBAL.
+    #
+    # Redmine's `Mailer.deliver_mail` sets `raise_delivery_errors` on the message and then
+    # decides, in its own `rescue`, whether to re-raise or log — by reading the CLASS
+    # ATTRIBUTE `ActionMailer::Base.raise_delivery_errors`. Both delivery paths used to flip
+    # that attribute around their sends, restoring it in an `ensure`.
+    #
+    # That is defensible in the scheduler, which is a rake process. It is a defect in the
+    # ad-hoc path, which runs inside a web request: on a threaded application server two
+    # overlapping sends read and restore each other's value, and the interleaving that ends
+    # with the `ensure` of the first thread writing the value the second thread had already
+    # replaced leaves `true` set for the life of the process. Every unrelated Redmine
+    # notification then raises where it used to log. Found by an independent review.
+    #
+    # SO THE FLAG IS NOT WHERE THE DECISION LIVES ANY MORE. This override is Redmine's
+    # method with the `rescue` deleted, which makes "errors from a report mail reach the
+    # caller" a property of this mailer class rather than of a moment in time. Nothing else
+    # in the process is affected, because nothing else delivers through this class.
+    #
+    # The blank-recipient guard is kept deliberately — the class comment above names it as
+    # one of the four `Mailer` behaviours a plugin must not lose — and it keeps returning
+    # `false` rather than raising, so a caller that reached here with an empty `to` sees
+    # exactly what it saw before.
+    def deliver_mail(mail, &block)
+      return false if mail.to.blank? && mail.cc.blank? && mail.bcc.blank?
+
+      mail.raise_delivery_errors = true
+      ACTION_MAILER_DELIVER_MAIL.bind(self).call(mail, &block)
+    end
+
     # `deliver_now`, NOT `deliver_later`, and the difference is what the run row means.
     #
     # An enqueued mail is a promise; the scheduler records a fact. With `deliver_later` the
     # run row would say `success` the instant the job was queued, and a queue that is not
     # being worked — which is the default on an install with no background worker — turns
-    # every scheduled report into a green row and an empty inbox. `ScheduledDelivery` wraps
-    # these calls in `raise_delivery_errors` so an SMTP failure reaches the run row too.
+    # every scheduled report into a green row and an empty inbox. `.deliver_mail` above is
+    # what makes an SMTP failure reach the run row too.
     def deliver_scheduled_report(user, schedule, occurrence_date, attachments, rendered_as,
                                  correlation_id)
       scheduled_report(user, schedule, occurrence_date, attachments, rendered_as,

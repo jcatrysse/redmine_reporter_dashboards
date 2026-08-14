@@ -266,12 +266,14 @@ module RedmineReporterDashboards
         #
         # `Mailer.deliver_mail` rescues and logs unless `raise_delivery_errors` is set, so
         # an SMTP server that is down produces a log line nobody reads and a run row that
-        # says `success`. `Mailer.deliver_test_email` sets the same flag for the same
-        # reason, and this is Redmine's own pattern rather than an invention.
+        # says `success`.
         #
-        # It is a class attribute, so this is process-global for the duration. Acceptable
-        # here and stated rather than hidden: the scheduler is a rake-task component, and
-        # the window is one occurrence's sends. It is restored in an `ensure`.
+        # This used to be bought by flipping `ActionMailer::Base.raise_delivery_errors`
+        # around the sends and restoring it in an `ensure`. That is a class attribute, so it
+        # was process-global for the duration — defensible in a rake process, and copied
+        # from here into the ad-hoc path, where a web request made it a race. Both paths now
+        # get the behaviour from `ReporterDashboardsMailer.deliver_mail`, which is a
+        # property of the mailer class rather than of a moment in time.
         # THE PARTIAL COUNT SURVIVES A FAILURE HALFWAY DOWN THE LIST, and it has to.
         #
         # If the relay refuses recipient 5 of 20, the run row must be able to say that four
@@ -281,12 +283,10 @@ module RedmineReporterDashboards
         # nulls and the row said only "failed".
         sent = 0
         begin
-          with_delivery_errors_raised do
-            recipients.each do |recipient|
-              mailer.deliver_scheduled_report(recipient, schedule, occurrence_date,
-                                              attachments, actor, correlation_id)
-              sent += 1
-            end
+          recipients.each do |recipient|
+            mailer.deliver_scheduled_report(recipient, schedule, occurrence_date,
+                                            attachments, actor, correlation_id)
+            sent += 1
           end
         rescue StandardError => e
           notify_failure(schedule, occurrence_date,
@@ -306,14 +306,6 @@ module RedmineReporterDashboards
                       document_count: outcome.documents.length,
                       bytes_total: bytes,
                       correlation_id: correlation_id)
-      end
-
-      def with_delivery_errors_raised
-        previous = ::ActionMailer::Base.raise_delivery_errors
-        ::ActionMailer::Base.raise_delivery_errors = true
-        yield
-      ensure
-        ::ActionMailer::Base.raise_delivery_errors = previous
       end
 
       # FR-43. The OWNER is told, with the correlation id; the recipients are told nothing.
@@ -349,10 +341,8 @@ module RedmineReporterDashboards
         owner = schedule.author
         return unless owner&.active? && owner.mail.present?
 
-        with_delivery_errors_raised do
-          mailer.deliver_scheduled_report_failure(owner, schedule, occurrence_date,
-                                                  diagnostic)
-        end
+        mailer.deliver_scheduled_report_failure(owner, schedule, occurrence_date,
+                                                diagnostic)
       rescue StandardError => e
         # The report failed AND the notice could not be sent. Both facts belong in the log,
         # because "we told the owner" and "we could not tell anybody" are different

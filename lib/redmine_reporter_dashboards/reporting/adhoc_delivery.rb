@@ -242,7 +242,7 @@ module RedmineReporterDashboards
 
       def deliver(template, actor, outcome, recipients, addresses, subject, correlation_id,
                   mail_send, started)
-        attachments = attachments_for(template, outcome)
+        attachments = attachments_for(template, outcome, actor)
         bytes = attachments.sum { |_name, data| data.bytesize }
 
         if bytes > MAX_ATTACHMENT_BYTES
@@ -254,21 +254,25 @@ module RedmineReporterDashboards
         sent = 0
         external_sent = 0
         begin
-          # THE SAME `raise_delivery_errors` WINDOW THE SCHEDULED PATH USES, and for the
-          # same reason: Redmine rescues and logs by default, so an SMTP server that is down
-          # would produce an audit row saying `success` and an empty mailbox.
-          with_delivery_errors_raised do
-            recipients.each do |recipient|
-              mailer.deliver_adhoc_report(recipient, template, actor, attachments, subject,
-                                          correlation_id)
-              sent += 1
-            end
-            addresses.each do |address|
-              mailer.deliver_adhoc_report_to_address(address, template, actor, attachments,
-                                                     subject, correlation_id)
-              sent += 1
-              external_sent += 1
-            end
+          # AN SMTP FAILURE RAISES, and there is no window here in which it does so.
+          #
+          # Redmine rescues and logs by default, so a relay that is down would produce an
+          # audit row saying `success` and an empty mailbox. This path used to buy the
+          # exception by flipping `ActionMailer::Base.raise_delivery_errors` — a CLASS
+          # ATTRIBUTE, in a web request, where two overlapping sends corrupt each other's
+          # restore and can leave the flag set for the whole process. It is now a property
+          # of `ReporterDashboardsMailer.deliver_mail`, which is per-class and therefore
+          # cannot be raced. See the comment there.
+          recipients.each do |recipient|
+            mailer.deliver_adhoc_report(recipient, template, actor, attachments, subject,
+                                        correlation_id)
+            sent += 1
+          end
+          addresses.each do |address|
+            mailer.deliver_adhoc_report_to_address(address, template, actor, attachments,
+                                                   subject, correlation_id)
+            sent += 1
+            external_sent += 1
           end
         rescue StandardError => e
           # THE PARTIAL COUNT SURVIVES, exactly as it must on the scheduled path: if the
@@ -299,18 +303,10 @@ module RedmineReporterDashboards
                    correlation_id: correlation_id)
       end
 
-      def with_delivery_errors_raised
-        previous = ::ActionMailer::Base.raise_delivery_errors
-        ::ActionMailer::Base.raise_delivery_errors = true
-        yield
-      ensure
-        ::ActionMailer::Base.raise_delivery_errors = previous
-      end
-
       # `[[filename, bytes], …]` and not a Hash — a per-record run can produce two documents
       # whose names collide, and a Hash keeps one of them without saying so.
-      def attachments_for(template, outcome)
-        base = attachment_base_name(template)
+      def attachments_for(template, outcome, actor)
+        base = attachment_base_name(template, actor)
         single = outcome.documents.length == 1
 
         outcome.documents.each_with_index.map do |document, index|
@@ -322,11 +318,22 @@ module RedmineReporterDashboards
       # The scheduled path dates its attachment by the occurrence. An ad-hoc send has no
       # occurrence, so it is dated by the day it was made — which is what the recipient
       # needs to tell two of them apart in a mailbox.
-      def attachment_base_name(template)
+      #
+      # `actor.today` AND NOT `Date.today`, which is what this was. `Date.today` is the
+      # SERVER's day: between 23:00 in Brussels and midnight UTC it names yesterday, so the
+      # requester pressed Send on the 15th and received `report-2026-08-14.pdf` — a filename
+      # disagreeing with the page they were looking at, and with every other date in this
+      # plugin. `User#today` is Redmine's own answer to "what day is it for this person", and
+      # it is the one `Occurrences` and the aggregator's `Time.zone.today` already use.
+      # `Date.current` is the fallback for an actor with no time zone set, which is what
+      # `User#today` itself falls back to.
+      def attachment_base_name(template, actor)
         slug = template&.name.to_s.parameterize
         slug = "report-#{template&.id}" if slug.empty?
 
-        "#{slug}-#{Date.today.strftime('%Y-%m-%d')}"
+        today = actor.respond_to?(:today) ? actor.today : ::Date.current
+
+        "#{slug}-#{today.strftime('%Y-%m-%d')}"
       end
 
       # --- outcomes ------------------------------------------------------------------

@@ -547,9 +547,9 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
   def test_a_delivery_error_becomes_a_recorded_failure_rather_than_a_log_line
     # Redmine's `Mailer.deliver_mail` swallows delivery errors unless `raise_delivery_errors`
     # is set, so an SMTP server that is down produces a log line nobody reads and a run row
-    # that says success. `ScheduledDelivery` sets the flag the way `deliver_test_email` does,
-    # then turns the exception into a `Delivered` carrying the partial count — an escaping
-    # raise would lose the one number an operator needs before re-running.
+    # that says success. `ReporterDashboardsMailer.deliver_mail` is what makes the exception
+    # arrive; `ScheduledDelivery` turns it into a `Delivered` carrying the partial count — an
+    # escaping raise would lose the one number an operator needs before re-running.
     add_recipient(@recipient)
 
     result = deliver(mailer: RecordingMailer.new(raising: true))
@@ -560,18 +560,31 @@ class ReporterDashboardsScheduledDeliveryTest < ActiveSupport::TestCase
     assert_equal 0, result.recipients_count, 'nobody got it'
   end
 
-  def test_the_delivery_errors_flag_is_restored_afterwards
+  # THESE TWO USED TO ASSERT THAT A GLOBAL WAS RESTORED. It is no longer written, so they
+  # assert that it is never written — which is a stronger statement and the one an independent
+  # review's finding actually asks for. `reporter_dashboards_mail_delivery_errors_test.rb`
+  # holds the rest of it, including the two threaded cases this file cannot express.
+  def test_delivery_never_writes_the_global_delivery_errors_flag
     add_recipient(@recipient)
     before = ActionMailer::Base.raise_delivery_errors
+    seen_inside = nil
 
-    deliver(mailer: RecordingMailer.new(raising: true))
+    mailer = Object.new
+    mailer.define_singleton_method(:deliver_scheduled_report) do |*|
+      seen_inside = ActionMailer::Base.raise_delivery_errors
+      raise Net::SMTPFatalError, 'relay refused'
+    end
+    mailer.define_singleton_method(:deliver_scheduled_report_failure) { |*| nil }
 
+    deliver(mailer: mailer)
+
+    assert_equal before, seen_inside, 'the flag was changed for the duration of the send'
     assert_equal before, ActionMailer::Base.raise_delivery_errors
   end
 
-  def test_the_delivery_errors_flag_is_restored_when_the_block_raises_past_the_rescue
-    # `with_delivery_errors_raised`'s own `ensure`, exercised by something the recipient
-    # loop's `rescue StandardError` does not catch.
+  def test_the_global_flag_is_untouched_when_the_send_raises_past_the_rescue
+    # Something the recipient loop's `rescue StandardError` does not catch. There is no
+    # `ensure` left to get wrong, and this proves there is nothing that needs one.
     add_recipient(@recipient)
     before = ActionMailer::Base.raise_delivery_errors
     exploding = Object.new
