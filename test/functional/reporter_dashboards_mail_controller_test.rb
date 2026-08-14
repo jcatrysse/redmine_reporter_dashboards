@@ -367,6 +367,39 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
     assert_equal 1, mail.attachments.length
   end
 
+  # --- the attachment is dated in the REQUESTER'S day, not the server's --------------------
+
+  # An independent review's C-03. `attachment_base_name` used a bare `Date.today`, which is
+  # the SERVER's day — and this plugin says everywhere else that a date belongs to somebody:
+  # `Occurrences` has a comment forbidding `Date.today` outright, and the aggregator's
+  # `reference_date` reaches for `Time.zone.today` for exactly this reason.
+  #
+  # The two tests below are the same instant seen from two zones. 2026-08-14 22:30 UTC is
+  # already the 15th in Tokyo and still the 14th in New York, so an implementation reading the
+  # server clock cannot satisfy both of them however the CI runner is configured — which is
+  # the property that makes this a test and not a coincidence.
+  ACROSS_MIDNIGHT = Time.utc(2026, 8, 14, 22, 30)
+
+  def test_the_attachment_is_dated_in_the_requesters_timezone_ahead_of_utc
+    set_requester_time_zone('Tokyo')
+
+    travel_to(ACROSS_MIDNIGHT) do
+      with_engine { post :create, params: send_params }
+    end
+
+    assert_equal '2026-08-15', attachment_date, 'the attachment was dated in the server day'
+  end
+
+  def test_the_attachment_is_dated_in_the_requesters_timezone_behind_utc
+    set_requester_time_zone('America/New_York')
+
+    travel_to(ACROSS_MIDNIGHT) do
+      with_engine { post :create, params: send_params }
+    end
+
+    assert_equal '2026-08-14', attachment_date, 'the attachment was dated in the server day'
+  end
+
   # THE ABSENCE OF A PARAMETER IS THE MECHANISM, so it is asserted as an absence. A future
   # edit adding a `from:` to either mailer action has to delete this test to pass.
   def test_no_mailer_action_takes_anything_a_sender_could_travel_in
@@ -989,6 +1022,28 @@ class ReporterDashboardsMailControllerTest < Redmine::ControllerTest
   end
 
   private
+
+  # ON `pref`, NOT ON `users`. Redmine keeps the zone in `UserPreference` and `User#time_zone`
+  # MEMOISES it, so the row has to be written before the request loads its own copy of the
+  # user — which it does, from the database, which is why writing the test's instance is not
+  # enough on its own.
+  def set_requester_time_zone(zone)
+    @requester.pref.update!(time_zone: zone)
+    @requester.reload
+  end
+
+  # The `YYYY-MM-DD` that `attachment_base_name` put in the filename of the message that was
+  # actually delivered. Read off the message rather than off the method, because the filename
+  # is what the recipient sees and the method is an implementation detail.
+  def attachment_date
+    assert_response :redirect
+    mail = ActionMailer::Base.deliveries.last
+    assert mail, 'nothing was delivered'
+    name = mail.attachments.first&.filename.to_s
+    assert_match(/-(\d{4}-\d{2}-\d{2})\.pdf\z/, name, "unexpected attachment name #{name.inspect}")
+
+    name[/-(\d{4}-\d{2}-\d{2})\.pdf\z/, 1]
+  end
 
   # A mailer that records instead of sending, so a delivery-level example can assert that
   # NOTHING went out. `ActionMailer::Base.deliveries` cannot distinguish "refused" from
