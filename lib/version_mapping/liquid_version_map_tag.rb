@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
-require_relative '../redmine_reporter_dashboards/liquid/tag_context'
+require_relative '../redmine_reporter_dashboards/liquid/render_context'
 require_relative '../redmine_reporter_dashboards/liquid/tag_params'
 
 module VersionMapping
@@ -90,6 +90,35 @@ module VersionMapping
       assign_to = str_param(@raw_params['assign_to'], context, default: 'geo_versions')
       self.class.notice_deprecation
 
+      # HOST-PLUGIN RENDERS ARE WITHDRAWN (curator decision #1, 2026-08-13), AND THIS TAG IS
+      # THE ONE THAT HAD TO CHANGE FOR IT.
+      #
+      # The two aggregation tags resolve a SCOPE, so a context-less render already reached
+      # them as `scope == nil` and they already assigned the empty result. This one resolves
+      # no scope at all: it asks `Version.visible(actor)` directly, and its actor came from
+      # `TagContext`'s ambient `User.current` — the read decision #1 deletes. So the refusal
+      # has to be written here rather than inherited.
+      #
+      # WHY REFUSING RATHER THAN PASSING NIL, MEASURED: `Version.visible` is
+      # `where(Project.allowed_to_condition(args.first || User.current, :view_issues))`
+      # (`app/models/version.rb:161` on 7.0-stable, and the same line on 5.1, 6.0 and 6.1 —
+      # checked on all four). A nil actor therefore does not narrow the map, it reads the
+      # ambient one inside Redmine core, which is the exact read this change removes wearing
+      # a place no gate can see. An empty map is the fail-closed answer (INV-3).
+      if RedmineReporterDashboards::Liquid::RenderContext.from(context).nil?
+        # Named by MECHANISM and not by plugin, for the reason `ScopeBinding` spells out at
+        # its own refusal: `zero_reporter.sh` matches the base plugin's id inside a string as
+        # readily as inside a require, and taking that gate to zero is decision #1's
+        # deliverable.
+        Rails.logger.warn('[geo_version_map] no render context — this render was not ' \
+                          'produced by this plugin\'s own TemplateRenderer, and rendering ' \
+                          'these tags through another plugin\'s renderer is no longer ' \
+                          'supported (curator decision #1). There is no named viewer to ' \
+                          'scope visible versions for (INV-1), so the map is empty.')
+        context.scopes.last[assign_to] = {}
+        return ''
+      end
+
       map = {}
       resolve_versions(context).each do |version|
         map[version.name] = {
@@ -110,13 +139,19 @@ module VersionMapping
 
     private
 
-    # THE ACTOR IS ASKED FOR, NOT ASSUMED (INV-1). `TagContext` is the one place that
-    # decision is made — the owned renderer's actor when there is one, the ambient one
-    # when a host-plugin render produced this. Delegated rather than repeated: a second
-    # copy of "who is this render for" is a second place for the answer to drift, and
-    # this tag and `{% version_rollup %}` must not disagree about it inside one document.
+    # THE ACTOR IS ASKED FOR, NOT ASSUMED (INV-1) — and there is now only one place it can
+    # come from. This used to delegate to `TagContext.actor`, which answered the owned
+    # renderer's actor when there was one and `User.current` when there was not; curator
+    # decision #1 deleted that fallback along with the render path it existed for, so the
+    # question has a single answer and `RenderContext.from` is it.
+    #
+    # NEVER NIL HERE, and mechanically so rather than by inspection: `render` refuses and
+    # returns before this is reached when there is no context (see the block above the map
+    # build). No `&.`, for the reason `HANDOVER.md` §1 gives about controls with no negative
+    # case — a nil-tolerant spelling here would make the refusal above look optional, and a
+    # nil actor does not fail closed in `Version.visible`, it reads `User.current`.
     def actor(context)
-      RedmineReporterDashboards::Liquid::TagContext.actor(context)
+      RedmineReporterDashboards::Liquid::RenderContext.from(context).actor
     end
 
     # `project:` narrows to that project's shared versions; otherwise every version the

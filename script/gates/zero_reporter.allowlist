@@ -24,35 +24,38 @@
 #
 # Format: <path><TAB or spaces><reason>
 
-# --- Detection and the ONE thing still loaded on its answer.
+# --- THE DETECTION IS GONE (curator decision #1, 2026-08-14), AND SO ARE ITS THREE ENTRIES.
 #
-# T-27 DECIDED WHAT THE DETECTION IS FOR (2026-08-13); S-30 then took away the consumer
-# it named, and ONE other remains — so these three entries stay, for a smaller reason
-# than before, written out so the next reader does not have to re-derive it.
+# This section listed `reporter_presence.rb`, `lib/redmine_reporter_dashboards.rb` and
+# `init.rb`. It shrank twice on its way out and the history is worth two lines, because both
+# steps were sessions predicting the arithmetic and getting it wrong:
 #
-# T-27's answer was "`load_patches` requires REPORTER_GLUE_FILES only on a true answer".
-# That is gone: `glue/` is deleted and `load_patches` now requires this plugin's own two
-# patches unconditionally. What still asks `reporter_present?` is
-# `apply_reporter_patches`, and after S-30 it installs exactly one thing —
-# `reporter_report_content_patch`, which hands the host plugin's own report generation a
-# `base_scope` instead of a materialised Array. That is a performance fix on THAT
-# plugin's path, it depends on nothing this plugin resolves, and it obviously cannot run
-# when that plugin is absent.
+#   T-27 (2026-08-13) decided what the detection was FOR — "`load_patches` requires
+#   REPORTER_GLUE_FILES only on a true answer" — and predicted the strict count would go
+#   6 -> 3 when the glue went.
 #
-# So the detection is now a one-question thing: may we patch the host plugin's
-# controller? These three go when that patch does, and that is a curator decision about
-# whether this plugin still improves an installation that has both — not a tidy-up.
+#   S-30 deleted the glue and it went 6 -> 5, not 6 -> 3, because `reporter_present?` had a
+#   SECOND consumer nobody had enumerated: `apply_reporter_patches`, installing
+#   `reporter_report_content_patch` — a performance fix on the host plugin's own
+#   `report_content` action. Decision #5 then marked two comment-only files `[permanent]`,
+#   which took the strict-relevant count to 3.
 #
-# The task's own new surface deliberately does NOT join this list. T-27's upgrade
-# diagnostic (`permissions/authoring_audit.rb`, its view section and nine locale files)
-# names the base plugin NOWHERE: it matches the permission NAME `manage_report_templates`,
-# which carries no plugin id, and its prose says "the base plugin". A diagnostic that
-# named it would have added ten entries to the list it is supposed to shrink — and worse,
-# would have implied the audit depends on that plugin being installed. It does not: the
-# grant it looks for outlives the plugin, which is the case it exists for.
-lib/redmine_reporter_dashboards/reporter_presence.rb   owns the detection; PLUGIN_ID names the plugin being looked for
-lib/redmine_reporter_dashboards.rb                     routes the one remaining reporter-only require behind reporter_present?
-init.rb                                                logs which mode the plugin booted in; documents that reporter is optional
+#   Decision #1 withdraws renders BY that plugin, so speeding that path up became incoherent
+#   (`DECISIONS-PENDING.md` §1 says so in as many words). The patch went, the detection
+#   became a memo with no reader and went too, and `ZERO_REPORTER_MODE=strict` reaches its
+#   1.0 target: **0 non-`[permanent]` entries.**
+#
+# THE LESSON, SINCE IT COST TWO PREDICTIONS: enumerate a thing's callers from the SOURCE
+# (`git grep -n reporter_present?`) before quoting a destination count. Both wrong numbers
+# were written by sessions that had read the code and reasoned about it instead.
+#
+# What deliberately did NOT join this list on the way past: T-27's upgrade diagnostic
+# (`permissions/authoring_audit.rb`, its view section and nine locale files) names the base
+# plugin NOWHERE — it matches the permission NAME `manage_report_templates`, which carries no
+# plugin id, and its prose says "the base plugin". Naming it would have added ten entries to
+# the list it is supposed to shrink, and worse, implied the audit depends on that plugin being
+# installed. It does not: the grant it looks for outlives the plugin, which is the case it
+# exists for.
 
 # --- THE WIDGET SURFACE IS GONE (T-26a, 2026-08-12). This section used to list both report
 # --- widgets on two surfaces, their PDF export, the optional-widget machinery, the reporter

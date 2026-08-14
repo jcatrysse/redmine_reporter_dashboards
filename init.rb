@@ -3,18 +3,23 @@
 require 'redmine'
 
 # ---------------------------------------------------------------------------
-# redmine_reporter is OPTIONAL
+# THE BASE PLUGIN IS NOT INVOLVED AT ALL — and there is no longer a detection.
 #
 # It used to be a hard dependency enforced here with a `raise`, which made this
-# plugin uninstallable without a paid third-party plugin. Project dashboards, the
-# SQL aggregation tags and the statistics endpoint need none of it.
+# plugin uninstallable without a paid third-party plugin. Then it was OPTIONAL,
+# detected once at after_plugins_loaded, with one thing hanging off the answer.
 #
-# Detection is therefore deferred rather than done here: it belongs at
-# after_plugins_loaded, below, where every plugin's init.rb has run and the
-# registry is actually complete. Asking at this point would answer for whatever
-# subset of plugins happened to load first.
+# Curator decision #1 (2026-08-13, `docs/plan/DECISIONS-PENDING.md`) withdrew the
+# last of it: renders performed BY that plugin are no longer supported, so the
+# performance patch on its controller is gone, and with its only consumer gone so
+# is `ReporterPresence`. Nothing in this plugin now asks whether that plugin is
+# installed, patches it, or behaves differently when it is present.
 #
-# See RedmineReporterDashboards.reporter_present?.
+# What survives, deliberately, is the IMPORTER — `rake
+# reporter_dashboards:migrate_from_reporter:*` reads that plugin's TABLES by name,
+# which is the one place naming it is the point rather than a coupling. It works on
+# a database from which the plugin has already been removed, so it needs no
+# detection either.
 # ---------------------------------------------------------------------------
 
 if Rails.configuration.respond_to?(:autoloader) && Rails.configuration.autoloader == :zeitwerk
@@ -163,11 +168,15 @@ end
 # ---------------------------------------------------------------------------
 # Patch + Liquid tag loading
 #
-# Everything that prepends/includes into core or reporter classes is deferred
-# to after_plugins_loaded so that:
-#   * Project / ProjectsHelper / Report are fully defined, and
-#   * reporter classes (IssueListReportTemplate, ReportTemplatesController) have
-#     been registered by redmine_reporter's own init.rb.
+# Everything that prepends/includes into core classes is deferred to
+# after_plugins_loaded so that Project / ProjectsHelper are fully defined.
+#
+# IT USED TO BE DEFERRED FOR A SECOND REASON THAT IS GONE: the reporter classes
+# (IssueListReportTemplate, ReportTemplatesController) had to have been registered
+# by the base plugin's own init.rb before this plugin could prepend into them.
+# Nothing prepends into that plugin any more — the last such patch went with
+# curator decision #1 — but the core reason stands on its own, and the permission
+# collision check below genuinely needs the complete registry.
 #
 # after_plugins_loaded fires at the end of the same to_prepare cycle, after
 # every plugin's init.rb has run. (Nesting a to_prepare here would defer to the
@@ -175,20 +184,24 @@ end
 # ---------------------------------------------------------------------------
 class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
   def after_plugins_loaded(_context = {})
-    # Asked exactly once, here, and memoised from now on. This is the first moment
-    # the answer is trustworthy and the last moment it can still change.
-    reporter = RedmineReporterDashboards.reporter_present?
-
-    # Logged either way, at info. "Running standalone" is a normal state, not a
-    # degradation — but an operator who expected the report widgets to be there
-    # needs one line telling them why they are not, rather than an empty picker.
+    # ONE LINE, UNCONDITIONALLY, AND THE SCOPE NOTE FOR DECISION #1 ASKED FOR THIS
+    # EXPLICITLY: "keep the 'running standalone' log line or replace it deliberately —
+    # an operator who expected the widgets reads it, and deleting it silently is the kind
+    # of thing this project writes handover entries about."
+    #
+    # It used to branch on whether the base plugin was installed. There is no detection
+    # left to branch on, and inventing one just to keep two log lines would be a memo with
+    # no reader — the thing `ReporterPresence` was deleted for being. So the line says what
+    # is now unconditionally true instead of which of two modes booted.
+    #
+    # Note what it deliberately does NOT say: nothing about the base plugin being absent.
+    # On an install that HAS both plugins the old line said "detected", which now reads as a
+    # promise this plugin no longer keeps. Saying only what this plugin does is accurate in
+    # both installs, and the README's own section is where the operator learns that
+    # host-rendered templates are withdrawn.
     Rails.logger.info(
-      if reporter
-        '[reporter_dashboards] redmine_reporter detected — report widgets and drop patches enabled'
-      else
-        '[reporter_dashboards] redmine_reporter not installed — running standalone; ' \
-        'dashboards, SQL aggregation and statistics are unaffected'
-      end
+      '[reporter_dashboards] ready — dashboards, SQL aggregation, report templates and ' \
+      'statistics; no other plugin and no vendor gem required'
     )
 
     # T-40. Every plugin's init.rb has run, so the permission registry is complete and the
@@ -205,13 +218,16 @@ class RedmineReporterDashboardsLoader < Redmine::Hook::Listener
     RedmineReporterDashboards.register_geo_version_map_tag
     RedmineReporterDashboards.register_chart_tag
     RedmineReporterDashboards.register_mermaid_tag
+
+    # THE LAST STEP, AND NOTHING FOLLOWS IT ANY MORE. There used to be a
+    # `return unless reporter` here and an `apply_reporter_patches` after it, prepending
+    # `ReporterReportContentPatch` into the host plugin's `ReportTemplatesController`.
+    # Curator decision #1 withdrew renders by that plugin, which made speeding that path up
+    # incoherent — `DECISIONS-PENDING.md` says so in as many words — so the patch, the
+    # `apply_patch` helper and the detection that gated them are all deleted.
+    #
+    # `load_patches` stays and is unconditional: both files it requires (`project_patch`,
+    # `role_patch`) are this plugin's own patches into Redmine core.
     RedmineReporterDashboards.load_patches
-
-    return unless reporter
-
-    # T-20 removed a fourth step here — the prepend that added `issue.target_version`
-    # and `issue.custom_field_value[…]` to the HOST plugin's issue drop. Both accessors
-    # are now on this plugin's own drops. See RedmineReporterDashboards for the note.
-    RedmineReporterDashboards.apply_reporter_patches
   end
 end

@@ -46,7 +46,14 @@ module RedmineReporterDashboards
     # authoring. Listing those here would cry wolf on every role that may read a report,
     # which is the fastest way to make a diagnostic ignored.
     #
-    # --- AND WHY IT IS NOT ASKED OF `ReporterPresence` ---
+    # --- AND WHY IT IS NOT ASKED OF THE PLUGIN REGISTRY ---
+    #
+    # WRITTEN AGAINST `ReporterPresence`, WHICH NO LONGER EXISTS — curator decision #1
+    # deleted the detection on 2026-08-14, because the patch that was its last consumer went
+    # with the host-render path. The reasoning below is kept verbatim rather than trimmed,
+    # because it is the argument against REINTRODUCING a detection to gate this page, and
+    # that is a thing a later session would otherwise propose as a tidy-up. Read
+    # `ReporterPresence` below as "any question put to `Redmine::Plugin.installed?`".
     #
     # This is the decision T-27 owed, and the answer inverts the brief's guess that the boot
     # log line is "the diagnostic in embryo". A permission grant is a STRING in
@@ -81,8 +88,9 @@ module RedmineReporterDashboards
     # removed, which is when no other surface in Redmine will show it to them.
     #
     # Therefore: the audit reads Redmine's own permission tables and asks the plugin registry
-    # NOTHING. `ReporterPresence` keeps its one real consumer — deciding whether
-    # `REPORTER_GLUE_FILES` is required — and is not this diagnostic's input.
+    # NOTHING. When this was written the detection still had one real consumer of its own;
+    # since decision #1 it has none and is deleted, so there is not even a module left to be
+    # tempted to wire in here.
     #
     # --- PURE, LIKE `Permissions.collisions` AND FOR THE SAME REASON ---
     #

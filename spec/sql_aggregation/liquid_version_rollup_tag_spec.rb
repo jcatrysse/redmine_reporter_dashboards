@@ -27,15 +27,30 @@ unless defined?(Setting)
   end
 end
 
-# `User.current` — needed since T-20, and its absence is the whole reason this comment
-# exists. `Drops::VersionDrop` refuses a nil RenderContext (INV-1), so the tag now asks
-# `Liquid::TagContext` for one, and on the legacy path that reads `User.current`. Redmine
-# always defines it; a DB-less spec process does not, and the tag's rescue turned the
-# resulting NameError into an EMPTY row list — a degradation that looks exactly like an
-# aggregation returning nothing. Worth knowing before diagnosing an empty rollup.
+# `User.current` — NOW AN EXPLODING STUB, WHICH IS THE OPPOSITE OF WHAT IT USED TO BE.
+#
+# It answered a memoised `Object.new` from T-20, and it had to: `Drops::VersionDrop` refuses a
+# nil RenderContext (INV-1), so the tag asked `Liquid::TagContext` for one, and on a render
+# this plugin did not produce that fallback read `User.current`. A DB-less spec process does
+# not define it, and the tag's rescue turned the resulting NameError into an EMPTY row list —
+# a degradation indistinguishable from an aggregation that found nothing.
+#
+# Curator decision #1 deleted `TagContext` and the fallback. The first version of this comment
+# claimed the stub was still load-bearing "because the frozen aggregation kernel reads
+# `User.current` too", and MUTATION REFUTED THAT IN ONE RUN: replacing the body with a `raise`
+# left all 15 examples green, because the kernel is doubled in this DB-less file and nothing
+# else on the tag's path touches it. That is `HANDOVER.md`'s "believe a survivor" — the claim
+# was written from reading the code, and reading was wrong.
+#
+# So rather than delete the stub or keep a false reason for it, it is inverted into a control:
+# if any part of this tag's path ever reaches for the ambient actor again, these examples fail
+# loudly instead of quietly resolving somebody. Same shape as
+# `spec/liquid/scope_binding_spec.rb`'s `never reads User.current`, and it costs nothing.
 class RollupTagUser
   def self.current
-    @current ||= Object.new
+    raise 'User.current was read: the version_rollup tag takes its actor from the ' \
+          'RenderContext, and a render without one never reaches decoration ' \
+          '(INV-1, curator decision #1)'
   end
 end
 
@@ -200,10 +215,19 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     # What it was really protecting is INV-1 — that the drop carries an EXPLICIT actor
     # rather than reading an ambient one — and that is kept, pointed at the owned path,
     # by the example below.
+    #
+    # CURATOR DECISION #1 then deleted `TagContext` itself, and this example's precondition
+    # with it — it used to read `expect(TagContext).to be_owned(ctx)`, a predicate that
+    # existed so a spec could tell the owned branch from the fallback branch WITHOUT
+    # inferring it. With one branch left there is nothing to tell apart, so the precondition
+    # is now the direct question: is there a `RenderContext` in these registers at all? Kept
+    # rather than dropped, because an example whose subject is "the actor came from the
+    # context" is vacuous if no context was there — which is precisely what the deleted
+    # predicate was guarding against.
     it 'carries the owning context\'s actor into every decorated version drop' do
       ctx = build_context({}, owned_registers(scope: scope))
 
-      expect(RedmineReporterDashboards::Liquid::TagContext).to be_owned(ctx)
+      expect(RedmineReporterDashboards::Liquid::RenderContext.from(ctx)).not_to be_nil
 
       build_tag('from: issues').render(ctx)
       drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']

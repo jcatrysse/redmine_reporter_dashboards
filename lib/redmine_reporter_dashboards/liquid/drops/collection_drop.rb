@@ -12,10 +12,11 @@ module RedmineReporterDashboards
       # --- WHAT `all` IS, AND WHY IT IS NOT HERE ---
       #
       # The gem's `IssuesDrop#all` maps every record in the scope into a drop object.
-      # That is the O(n) materialisation `reporter_report_content_patch.rb` exists to
-      # work around: at 10 000 issues it is 10 000 `Issue` objects and 10 000 drops,
-      # built so a template can ask for `.size`. §3.2 says plainly: **`all` is not
-      # implemented**.
+      # That is the O(n) materialisation this plugin used to work around ON THE HOST
+      # PLUGIN'S OWN PATH, with a prepend called `reporter_report_content_patch.rb` —
+      # deleted by curator decision #1 with the rest of the host-render support. At 10 000
+      # issues it is 10 000 `Issue` objects and 10 000 drops, built so a template can ask for
+      # `.size`. §3.2 says plainly: **`all` is not implemented**.
       #
       # It is still REACHABLE, and that is deliberate. A template that calls it must get
       # a visible answer rather than a blank — so `all` records

@@ -18,7 +18,7 @@ Widgets are laid out as ordered rows. **Up** / **down** move a widget to the adj
 
 ### `{% sql_aggregate %}` Liquid tag
 
-The standard Liquid approach in Reporter templates iterates over all issues as objects:
+The standard Liquid approach in a report template iterates over all issues as objects:
 
 ```liquid
 {% for issue in issues %}...{% endfor %}
@@ -52,7 +52,31 @@ A per-**target-version** rollup, computed entirely in SQL. A "one card per versi
 It used to be required, and the plugin refused to load without it. It no longer is:
 project dashboards, the tab bar, the `{% sql_aggregate %}` / `{% version_rollup %}` /
 `{% geo_version_map %}` Liquid tags and the statistics endpoint all work on a plain
-Redmine. Installed or not, one line in the log says which mode you are in.
+Redmine. One line in the log at boot says the plugin is ready and needs nothing else.
+
+> **This plugin no longer detects whether `redmine_reporter` is installed, and behaves the
+> same either way.** Until 1.0 it asked once at boot, logged which of two modes it was in, and
+> installed one performance patch on that plugin's own report controller. All of that is gone.
+
+#### Templates rendered *by* `redmine_reporter` are not supported
+
+**If you have both plugins installed, read this.** Liquid tag names are registered
+process-wide, so `{% sql_aggregate %}`, `{% version_rollup %}` and `{% geo_version_map %}`
+are *parseable* inside a template that `redmine_reporter` renders itself — but they no longer
+resolve anything there. Such a template renders structurally intact with **zeros and empty
+lists**, and each tag writes a warning to the log saying so.
+
+That is deliberate, not a regression to report. These tags need to know *who* the report is
+for before they may count anything (issue counts, spent hours and custom-field values are all
+visibility-scoped, and getting the viewer wrong is a data leak, not a cosmetic bug). This
+plugin's own renderer names that viewer explicitly on every render; another plugin's renderer
+does not, and the alternative — falling back to "whoever's web request happens to be running"
+— is exactly the ambient guesswork that produced the leaks 0.5.0 was written to close.
+
+**What to do instead:** move the template into this plugin (**Reports → Templates** in a
+project, or `rake reporter_dashboards:migrate_from_reporter:plan` to see what a migration would
+copy). Everything else about `redmine_reporter` keeps working, including its own reports —
+they simply do not get this plugin's aggregation tags.
 
 **Nothing does any more.** The report widgets — both on a project dashboard and both on
 **My page** — render this plugin's own report templates through its own render path, and the
@@ -1240,7 +1264,12 @@ only the bytes go.
 
 ## Using the `{% sql_aggregate %}` tag
 
-Place the tag at the top of your Reporter template. It writes the result into a Liquid variable (`stats` by default) that you can then use freely.
+Place the tag at the top of your report template (**Reports → Templates** in a project). It
+writes the result into a Liquid variable (`stats` by default) that you can then use freely.
+
+It must be *this plugin's* template: the tag parses inside a template rendered by
+`redmine_reporter` but resolves nothing there — see
+[Templates rendered *by* `redmine_reporter` are not supported](#templates-rendered-by-redmine_reporter-are-not-supported).
 
 ### Time series — created and closed per period
 
@@ -1510,12 +1539,25 @@ Week {{ weekly.labels[i] }}: {{ weekly.created[i] }} created, {{ weekly.closed[i
 
 **Via a saved query (query_id):**
 
-When the Reporter plugin exposes `query_id` in the template context:
+`query_id:` aggregates a saved `IssueQuery` instead of the report's own scope. The query is
+looked up as **you**, through `IssueQuery.visible`, so naming a query you may not see gives
+an empty result rather than someone else's numbers.
 
 ```liquid
-{% sql_aggregate query_id: query_id, period: month, periods: 3,
+{% sql_aggregate query_id: 42, period: month, periods: 3,
    closed_statuses: "Closed;Rejected", assign_to: stats %}
 ```
+
+A bare name is read as a Liquid variable, so `query_id: my_query_id` works where the report
+assigns one. Note that a *quoted* value is literal text — `query_id: "42"` is the number 42,
+but `query_id: "my_query_id"` is the string `my_query_id`, which is not a number and resolves
+to nothing. See [Quoted or unquoted — they mean different things](#quoted-or-unquoted--they-mean-different-things).
+
+> **This paragraph used to read differently.** It said *"When the Reporter plugin exposes
+> `query_id` in the template context"*, and it documented the one way an aggregation tag could
+> still resolve data inside a template rendered by the **`redmine_reporter`** plugin. That is
+> withdrawn — see [`redmine_reporter` is optional](#redmine_reporter-is-optional). `query_id:`
+> is unchanged in this plugin's own templates, which is where the example above belongs.
 
 **Issues per department (custom field 92), top 10 plus "Other":**
 
@@ -2211,7 +2253,11 @@ The tag was previously called `{% geo_aggregate %}`. That name still works as an
 > at the end of this section. Run `rake reporter_dashboards:migrate_from_reporter:plan` to list the
 > templates that still use it.
 
-Place the tag near the top of your Reporter template. It writes a lookup table into a Liquid variable (`geo_versions` by default), keyed by version name.
+Place the tag near the top of your report template — *this plugin's*, not one rendered by
+`redmine_reporter`, where it resolves nothing (see
+[Templates rendered *by* `redmine_reporter` are not supported](#templates-rendered-by-redmine_reporter-are-not-supported)).
+It writes a lookup table into a Liquid variable (`geo_versions` by default), keyed by version
+name.
 
 ```liquid
 {% geo_version_map assign_to: geo_versions %}

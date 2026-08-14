@@ -7,11 +7,22 @@ set -euo pipefail
 # redmine_reporter, Redmineup or up_acts_as_list, and compares that set against the
 # committed allowlist.
 #
-# WARN mode by default, because the integration still exists: reporter is optional,
-# not gone, so a handful of files legitimately name it and each says why in
-# zero_reporter.allowlist. What the gate enforces is the RATCHET — a file that is not
+# WARN mode by default. What the gate enforces is the RATCHET — a file that is not
 # on the list is a failure, AND a file on the list that no longer needs to be there is a
 # failure too, so the list can only shrink.
+#
+# STRICT PASSES AS OF 2026-08-14 (curator decision #1: the last coupling — a performance
+# patch on the base plugin's own controller, and the detection that gated it — is deleted).
+# The seven remaining entries are all `[permanent]`: five importer files, which read that
+# plugin's TABLES because that is what an importer is for, and two comment-only historical
+# records.
+#
+# THE DEFAULT IS STILL `warn`, DELIBERATELY, AND CHANGING IT IS A CURATOR CALL. Warn already
+# prevents silent regression, which is the property that matters: a NEW file naming the base
+# plugin fails warn unless somebody adds an allowlist entry for it, and adding one is a
+# reviewed decision with a written reason. Flipping the default to strict would additionally
+# refuse that decision — a policy change about what CI permits, not a tidy-up — so it is left
+# to whoever cuts 1.0.
 #
 # Mode:
 #   ZERO_REPORTER_MODE=warn    (default) an unlisted file fails; a STALE entry fails
@@ -137,12 +148,19 @@ if [ "$MODE" = 'strict' ]; then
     echo "Strict is the 1.0 target: no coupling except the importer, which reads the base" >&2
     echo "plugin's data by name because that is what it is for." >&2
     echo >&2
-    echo "This message used to say the list goes 'when T-30..T-32 own the reporting" >&2
-    echo "surface'. Those landed and the list did not move, so the sentence was training" >&2
-    echo "readers to wait for something that had already happened. What is actually left:" >&2
-    echo "  * the my-page report widget (T-26a increment 3) and the PDF patch it needs;" >&2
-    echo "  * the detection and glue that cannot go while the integration exists at all" >&2
-    echo "    - something has to name the plugin it is looking for." >&2
+    echo "STRICT PASSED FOR THE FIRST TIME AT 2026-08-14 (curator decision #1), so this is" >&2
+    echo "no longer a list of work remaining — it is a REGRESSION. Something new named the" >&2
+    echo "base plugin or the vendor gem. Two honest ways out and one dishonest one:" >&2
+    echo "  * remove the reference — the usual answer, and say it by MECHANISM instead" >&2
+    echo "    ('another plugin's renderer', 'the base plugin') the way the tag refusals do;" >&2
+    echo "  * if the reference genuinely has to stay, that is an allowlist entry WITHOUT" >&2
+    echo "    [permanent], which keeps warn green and leaves strict red on purpose;" >&2
+    echo "  * NOT by writing [permanent] on it. That marker is the curator's to hand out" >&2
+    echo "    (see the allowlist header, and decision #5 for the precedent)." >&2
+    echo >&2
+    echo "This message twice predicted when the list would empty and was twice wrong about" >&2
+    echo "the arithmetic - 6->3 that was really 6->5, then 5->2 that was really 3->0. It" >&2
+    echo "does not predict any more." >&2
     status=1
   fi
 fi

@@ -107,9 +107,10 @@ module SqlAggregation
   class LiquidAggregateTag < Liquid::Tag
     # T-07: two resolution sources, both starting from Issue.visible. The six-source
     # archaeology this replaced lived in Glue::Legacy::ScopeResolution and was DELETED by
-    # S-30 (2026-08-13). A render arriving with no RenderContext now resolves nothing
-    # unless the tag named a `query_id:`, which needs only an actor and gets one from
-    # TagContext.
+    # S-30 (2026-08-13). Since curator decision #1 (2026-08-14) a render arriving with no
+    # RenderContext resolves NOTHING AT ALL — `query_id:` included, because resolving it
+    # needed an ambient actor and that read is gone with the host-render path it served. The
+    # tag assigns the empty result and logs, as it already did for an unresolvable scope.
     include RedmineReporterDashboards::Liquid::ScopeBinding
 
     # Markup parsing and the quoted-means-literal rule live in one place for all four

@@ -1,9 +1,6 @@
 # frozen_string_literal: true
 
 require_relative 'render_context'
-# S-30: `query_id:` resolves on a context-less render too, and TagContext is where the one
-# ambient-actor read lives. Required here so that path cannot depend on load order.
-require_relative 'tag_context'
 require_relative 'tag_params'
 
 module RedmineReporterDashboards
@@ -89,9 +86,10 @@ module RedmineReporterDashboards
         # author. `ScopeBinding` is what both tags already include, so it is where the one
         # copy goes.
         #
-        # `RenderContext.from` and NOT `TagContext.for`: the latter never answers nil and
-        # building its fallback reads `User.current`, and an ambient actor read on a path
-        # that needs no actor is what INV-1 is about. Nil is the answer this wants.
+        # `RenderContext.from` and nothing else: nil is the answer this wants. There used to
+        # be a `TagContext.for` here whose fallback read `User.current`, and an ambient actor
+        # read on a path that needs no actor is what INV-1 is about. Decision #1 deleted that
+        # module outright, so there is now only one way to ask.
         #
         # S-30 CHANGED WHAT NIL MEANS HERE. It used to mean "the legacy path produced this
         # render, and that path resolves issue scopes and nothing else", so defaulting to
@@ -140,46 +138,59 @@ module RedmineReporterDashboards
           # render with neither an owned context nor a `query_id:` has nothing nameable
           # in it, and answering NONE is the INV-1 position — a scope taken from whatever
           # happened to be lying in the Liquid context has no named viewer behind it.
-          # `query_id:` IS RESOLVED FIRST, AND BEFORE THE NIL-CONTEXT CHECK.
           #
           # An explicit query_id: names ONE query. If it cannot be resolved there is
           # deliberately no fallback: a template that asked for query 7 and silently got
           # the ambient scope would report the wrong numbers under the right heading,
           # which is worse than reporting none.
           #
-          # THE ORDER MATTERS AND THE FIRST VERSION OF S-30 GOT IT WRONG. `query_id:` was
-          # never one of the legacy module's ambient sources in the sense the deletion is
-          # about — it names a query explicitly and resolves it through
-          # `IssueQuery.visible(actor)`, so the only thing it needs from a render context
-          # is the ACTOR. Putting the nil-context return above it withdrew a documented,
-          # working feature (README: "When the Reporter plugin exposes `query_id` in the
-          # template context") from every render this plugin does not produce, silently,
-          # as collateral of a deletion that never claimed it. Found by an independent
-          # review.
+          # --- THE NIL-CONTEXT CHECK IS BACK ABOVE `query_id:`, BY CURATOR DECISION ---
           #
-          # `TagContext.actor` and not `render_context.actor`: it answers the owned
-          # context's actor when there is one and `User.current` when there is not — the
-          # single, named, logged place this plugin reads an ambient actor, which is what
-          # INV-1 asks for. The visibility scoping is identical either way, because
-          # `visible_query` applies `IssueQuery.visible(actor)` to whichever it gets.
-          if raw_params.key?('query_id')
-            return from_query_id(raw_params['query_id'], liquid_context,
-                                 TagContext.actor(liquid_context))
+          # THIS ORDER WAS DELIBERATELY THE OTHER WAY ROUND AND THE REASON HAS EXPIRED, so
+          # read this before "restoring" it. S-30's first draft returned NONE here before
+          # looking at `query_id:`, and an independent review rejected that: `query_id:`
+          # names a query explicitly and needs only an ACTOR from the render context, so
+          # hoisting the check withdrew a DOCUMENTED, WORKING feature (the README's "When
+          # the Reporter plugin exposes `query_id` in the template context") from every
+          # render this plugin does not produce — silently, as collateral of a deletion that
+          # never claimed it. The review was right, and the fix was to resolve `query_id:`
+          # first from `TagContext`'s ambient actor.
+          #
+          # Curator decision #1, 2026-08-13 (`docs/plan/DECISIONS-PENDING.md`), withdraws
+          # that feature ON PURPOSE — *"niemand gebruikt dat nog"*. So the collateral the
+          # review objected to is now the intent, the ambient actor read has no remaining
+          # caller, and `TagContext` is deleted. The README paragraph that documented the
+          # feature is corrected in the same change, which is the other half of not doing
+          # this silently.
+          #
+          # AND PASSING A NIL ACTOR INSTEAD WOULD BE WORSE THAN EITHER, WHICH IS THE PART
+          # THAT IS A MEASUREMENT RATHER THAN AN ARGUMENT. `Query.visible` opens with
+          # `user = args.shift || User.current` (`app/models/query.rb:385` on 7.0-stable;
+          # the same line is present on 5.1, 6.0 and 6.1 — checked on all four branches),
+          # so `IssueQuery.visible(nil)` does not fail closed, it reads the ambient actor
+          # INSIDE REDMINE CORE where no gate or grep in this plugin can see it. Refusing
+          # is the only spelling that actually removes the ambient read.
+          if render_context.nil?
+            # NAMED BY MECHANISM, NOT BY PLUGIN — and that is a gate, not a style choice.
+            # `script/gates/zero_reporter.sh` matches the base plugin's id anywhere under
+            # `lib/`, comments and strings included, and decision #1's own deliverable is
+            # taking `ZERO_REPORTER_MODE=strict` to zero. Naming it here would have put this
+            # file back on the allowlist the change exists to empty. The mechanism is also
+            # the more useful half for whoever is reading the log: what they can act on is
+            # "this render did not come from this plugin's renderer", and the README carries
+            # the rest.
+            log('no render context — this render was not produced by this plugin\'s own ' \
+                'TemplateRenderer, and rendering these tags through another plugin\'s ' \
+                'renderer is no longer supported (curator decision #1). Nothing is ' \
+                'resolved: there is no named viewer, and query_id: is refused for the same ' \
+                'reason, because IssueQuery.visible falls back to User.current when handed ' \
+                'no actor rather than failing closed (INV-1). Author the report in this ' \
+                'plugin\'s own template editor.')
+            return NONE
           end
 
-
-          # No render context and no `query_id:` — nothing nameable to resolve.
-          #
-          # LOGGED, NOT SILENT (INV-4). Every other refusal in this file announces itself,
-          # and this is the branch that turns a previously-resolving render into an empty
-          # one, so it is the last place that should be quiet. A degradation cannot be
-          # recorded — there is no context to record it on — which is precisely why the
-          # log line is mandatory rather than optional.
-          if render_context.nil?
-            log('no render context and no query_id: — this render was not produced by ' \
-                "TemplateRenderer, so there is no named viewer to resolve a scope for (INV-1). " \
-                'A host-plugin template can name one explicitly with query_id:.')
-            return NONE
+          if raw_params.key?('query_id')
+            return from_query_id(raw_params['query_id'], liquid_context, render_context.actor)
           end
 
           Binding.new(scope: render_context.scope, query: render_context.query,
@@ -230,9 +241,13 @@ module RedmineReporterDashboards
           query
         end
 
-        # Best-effort by construction: a render with no `RenderContext` has nowhere to record
-        # a degradation, which is why `visible_query` also logs. The log line is for whoever
-        # is on call; this is for whoever is authoring (INV-4).
+        # `&.` ON A PATH THAT CAN NO LONGER BE NIL, kept deliberately and said so rather than
+        # tightened. Since decision #1 `bind` refuses a context-less render before it looks at
+        # `query_id:`, so every caller of this reaches it through a real `RenderContext` and
+        # the safe navigation is belt-and-braces. Removing it would be an equivalent mutant
+        # today and a nil crash the moment somebody calls `from_query_id` directly — which
+        # `spec/liquid/scope_binding_spec.rb` does. `visible_query` still logs as well: the
+        # log line is for whoever is on call, this is for whoever is authoring (INV-4).
         def degrade_unresolved(param, liquid_context)
           RenderContext.from(liquid_context)
                        &.diagnostics

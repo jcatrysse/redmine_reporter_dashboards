@@ -7,13 +7,13 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
 # permission set failed to load would boot with an authorize call that permits nobody,
 # which looks exactly like a misconfigured role.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions'
-# T-27's upgrade diagnostic. Required next to the permission model it reads, and NOT
-# behind `reporter_present?`: a `manage_report_templates` grant outlives the plugin that
-# registered it, so the case this exists for is the one where that plugin is gone.
+# T-27's upgrade diagnostic. Required next to the permission model it reads. It never was
+# behind a detection and now there is none to be behind: a `manage_report_templates` grant
+# outlives the plugin that registered it, so the case this exists for is the one where that
+# plugin is gone.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions/authoring_audit'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/report_frame'
-require File.dirname(__FILE__) + '/redmine_reporter_dashboards/reporter_presence'
 # Called from a my-page partial, which core renders through its OWN helper set
 # (`include_all_helpers = false`), so neither of these can live in one of this plugin's
 # helpers — `TemplatesHelper` delegates to both instead. `reporter_report_templates` used to
@@ -168,6 +168,18 @@ module RedmineReporterDashboards
   # `ScopeBinding#bind` now answers `NONE` where it used to fall back. Nothing in
   # production reaches that branch — every render has constructed a context from an
   # explicit actor since T-26a — and answering NONE is the INV-1 position anyway.
+  #
+  # AND `REPORTER_PATCH_FILES`' LAST DESCENDANT IS GONE TOO (curator decision #1,
+  # 2026-08-14): `apply_reporter_patches`, the `apply_patch` helper it was the only caller
+  # of, `lib/reporter_report_content_patch.rb`, and the `reporter_present?` /
+  # `ReporterPresence` detection that gated the three. THIS MODULE NOW PATCHES NOTHING
+  # OUTSIDE REDMINE CORE AND ASKS NOTHING ABOUT ANY OTHER PLUGIN. `PATCH_FILES` is the whole
+  # of it, and it is unconditional.
+  #
+  # The patch that went was a performance fix on the HOST plugin's `report_content` action
+  # (a lazy `base_scope` instead of a materialised Array of Issues). Keeping it would have
+  # meant optimising the one render path this plugin had just stopped supporting, which
+  # `DECISIONS-PENDING.md` names as the clearest signal that #1 needed an answer.
 
   # The plugin id, spelled once. `Setting.plugin_<id>` and the settings partial both need
   # it, and two spellings of one identifier is how a settings read silently answers `{}`.
@@ -295,8 +307,8 @@ module RedmineReporterDashboards
     defined?(::Rails) && ::Rails.respond_to?(:logger) ? ::Rails.logger : nil
   end
 
-  # T-40. Asked at after_plugins_loaded, which is the first moment the answer is complete,
-  # and for the same reason `reporter_present?` is asked there.
+  # T-40. Asked at after_plugins_loaded, which is the first moment the answer is complete —
+  # the same reason the (now deleted) reporter detection was asked there.
   #
   # `technical-spec.md` §7 makes simultaneous installation of both plugins a DESIGN GOAL —
   # it is the whole A/B argument — and `Redmine::AccessControl` keeps permissions in a flat
@@ -336,27 +348,23 @@ module RedmineReporterDashboards
     logger ? logger.public_send(level, message) : warn(message)
   end
 
-  # Whether the optional redmine_reporter plugin is installed. One memo, owned by
-  # ReporterPresence; see that file for why detection is a positive question asked
-  # once at after_plugins_loaded rather than a rescued NameError.
-  def reporter_present?
-    ReporterPresence.present?
-  end
-
-  # ONE memoised answer about the optional dependency now.
+  # THERE IS NO `reporter_present?` ANY MORE, and this paragraph is here so the next reader
+  # does not go looking for it. It answered "is the optional base plugin
+  # installed", memoised once at `after_plugins_loaded`, and by 2026-08-14 it had exactly one
+  # consumer left: `apply_reporter_patches`. Curator decision #1 deleted that patch, so the
+  # detection became a memo with no reader and went with it — along with
+  # `reset_reporter_presence!` and `ReporterPresence` itself.
   #
-  # This used to clear two, because `ReporterReportTemplates` cached whether the base
-  # plugin's report-template classes RESOLVE — the question the my-page widget had to ask
-  # before naming one. T-26a increment 3 made that widget this plugin's own, so nothing
-  # asks it, and the module went rather than being left memoising an answer with no reader.
-  def reset_reporter_presence!
-    ReporterPresence.reset!
-  end
+  # DO NOT REINTRODUCE IT "FOR A DIAGNOSTIC". T-27 measured that question and the answer is
+  # in `Permissions::AuthoringAudit`'s own header: a permission grant outlives the plugin
+  # that registered it, so a diagnostic gated on the registry prints an empty list in exactly
+  # the case it exists for. The audit reads Redmine's permission tables and asks the plugin
+  # registry nothing, on purpose.
 
-  # S-30: `PATCH_FILES` and nothing else. This used to append `REPORTER_GLUE_FILES` on a
-  # true `reporter_present?`, which was the ONE thing loaded on the detection's answer.
-  # Both patches here are this plugin's own (`project_patch`, `role_patch`), so what gets
-  # required no longer depends on whether the host plugin is installed.
+  # `PATCH_FILES` and nothing else, unconditionally. Both patches here are this plugin's own
+  # (`project_patch`, `role_patch`), so what gets required depends on nothing external. It
+  # used to append `REPORTER_GLUE_FILES` on a true `reporter_present?` (deleted by S-30) and
+  # the detection itself is gone now too.
   def load_patches
     PATCH_FILES.each { |file| require File.join(lib_root, file) }
   rescue LoadError, StandardError => e
@@ -467,43 +475,30 @@ module RedmineReporterDashboards
   # drop, which has neither accessor. `spec/liquid/retired_surface_spec.rb` pins the
   # deletion; `implementation-plan.md` §Findings F-11 records the window.
 
-  # Apply the performance patch to the host plugin's class. Only called when
-  # reporter_present? is true, so absence is not a case handled here.
+  # RETIRED BY CURATOR DECISION #1, 2026-08-14: `apply_reporter_patches` and `apply_patch`.
   #
-  # S-30 REMOVED THE FIRST OF THE TWO. `IssueListReportTemplate` was patched by
-  # `Glue::Legacy::ReporterListPatch`, whose job was to park that plugin's `IssueQuery`
-  # in a thread-local so a Liquid tag could reach it — its `liquidize()` takes no
-  # registers argument to extend, so there was no other channel. The reader of that
-  # thread-local was `Glue::Legacy::ScopeResolution`, deleted in the same change, so the
-  # patch had nothing left to talk to.
+  # `apply_reporter_patches` prepended ONE module into another plugin's class —
+  # `ReporterReportContentPatch` into `ReportTemplatesController#report_content` — handing
+  # the host plugin's own `generate_reports` a lazy `IssueQuery#base_scope` instead of a
+  # materialised Array of Issues. `apply_patch` was the const_defined?-then-const_get helper
+  # it was the only caller of, written so absence was ASKED about rather than inferred from a
+  # rescued NameError.
   #
-  # `reporter_report_content_patch` STAYS. It is a different thing: it hands the host
-  # plugin's own report generation a `base_scope` instead of a materialised Array, which
-  # is a straight performance fix on that plugin's path and does not depend on anything
-  # this plugin resolves. It is also the last consumer of `reporter_present?`.
-  def apply_reporter_patches
-    apply_patch('ReportTemplatesController', 'reporter_report_content_patch', 'ReporterReportContentPatch')
-  end
-
-  def apply_patch(class_name, require_path, module_name)
-    # Asked, not inferred from a rescued NameError. const_defined? sees a constant
-    # Zeitwerk has registered for autoload without forcing it; the const_get below
-    # then triggers the load, in development as before.
-    unless Object.const_defined?(class_name)
-      Rails.logger.info("[reporter_dashboards] #{class_name} is not defined — #{module_name} not applied")
-      return false
-    end
-
-    klass = Object.const_get(class_name)
-    require File.join(lib_root, require_path)
-    patch = Object.const_get(module_name)
-    klass.prepend(patch) unless klass.ancestors.include?(patch)
-    Rails.logger.info("[reporter_dashboards] #{module_name} applied to #{class_name}")
-    true
-  rescue LoadError, StandardError => e
-    # Warn, never swallow. Past this point the constant existed, so a failure is a
-    # defect in loading it — not the absence of an optional plugin.
-    Rails.logger.warn("[reporter_dashboards] #{class_name} patch failed: #{e.class}: #{e.message}")
-    false
-  end
+  # Both went with the render path they served. `DECISIONS-PENDING.md` §1 makes the argument
+  # in one sentence: with host renders withdrawn, "we speed up a path we just stopped
+  # supporting", which is incoherent whichever way the decision goes. It went by withdrawal.
+  #
+  # WHAT THAT COSTS AN INSTALL RUNNING BOTH PLUGINS, said plainly rather than left for
+  # somebody to discover: that plugin's own reports still work, and its `report_content`
+  # action goes back to materialising its Issue objects — its behaviour before this plugin
+  # was ever installed. What does NOT work any more is one of ITS templates using
+  # `{% sql_aggregate %}` / `{% version_rollup %}` / `{% geo_version_map %}`: those tags are
+  # registered process-wide by Liquid and cannot be un-registered per renderer, so they still
+  # PARSE there, and they now resolve nothing and log a warn line naming this decision. The
+  # README says so in its section on the base plugin being optional. Fails closed, never a
+  # leak.
+  #
+  # S-30 had already removed the OTHER patch (`Glue::Legacy::ReporterListPatch`, a
+  # thread-local parking `IssueQuery` for a tag to find), so this leaves zero prepends into
+  # any plugin but Redmine core.
 end

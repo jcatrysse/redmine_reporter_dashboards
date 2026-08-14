@@ -18,6 +18,33 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**A GREEN CI CELL ON THE ONE ENGINE A DEFECT LIVES ON CAN BE SILENT ABOUT IT, AND THIS ONE
+WAS FOR A RELEASE BLOCKER.** Decision #2's, found 2026-08-14 while reading CI for #1.
+
+`adapter (MariaDB 11)` was green at `b87b08c` — 254 examples, 0 failures, MariaDB 11.8.8 —
+and the brief pointed at that cell as *"the only thing that can answer"* whether decision #2
+fixed D-1's grouped `sum`/`avg`/`distinct`. It could not have answered. **Decision #2 added no
+adapter examples at all**: its four touched files are the kernel, two G7 artefacts and
+`spec/sql_aggregation/` — which is DB-LESS, where a stub cannot exhibit a column-label
+truncation because there is no server to truncate one. And nothing already in the adapter suite
+or the golden corpus reached the shape: **every** `measure:` case in both groups by `status`,
+`tracker` or `priority` (a few dozen characters), and **every** `age` case is a plain COUNT. So
+the cell ran a grouped aggregate over a >256-character expression exactly zero times.
+
+The cell did prove the MECHANISM is still live, which is worth knowing: T-31's
+`time_entry_aggregator_spec` probe asserts the label-keyed read still DIVERGES on MariaDB, and
+it passed. The engine still truncates; nothing had exercised our fix against it.
+
+Three rules, and the second is the one that generalises past databases.
+**A fix whose subject is an ENGINE needs an example that runs on that engine** — a DB-less
+example of the same code proves the Ruby and nothing about the wire. **Before citing a cell as
+evidence, check that the cell RUNS the shape**: `git show <fix> --stat` naming only DB-less
+spec files is the tell, and it takes one command. And when the discriminating engine is one you
+cannot run locally, say which of your examples are locally proven and which are not — the six
+added here are labelled in place, because on PostgreSQL the values are right either way (it
+truncates the alias consistently at 63 on both ends) and only the statement-shape assertion
+bites. Restoring the pre-#2 code and re-running was **1 failure of 69**, measured, not assumed.
+
 **AN EXAMPLE THAT EXERCISES THE CHANGED LINE IS NOT THE SAME AS ONE THAT DISCRIMINATES,
 AND THAT IS HOW A BLOCKER SHIPPED PAST TWELVE MUTATIONS.** Decision #3's own, 2026-08-14.
 The quoting rule was covered at `query_id:` by an example reading `query_id: "42"` — which
@@ -36,6 +63,25 @@ your input — if it is the same, the example is documentation, not a test. And 
 mutation testing cannot find this class at all: it measures whether a line is observed, not
 whether the observation is the interesting one.
 
+**"DELETE THE AMBIENT FALLBACK" IS NOT THE SAME INSTRUCTION AS "PASS NIL INSTEAD", AND ON THIS
+CODEBASE THE SECOND ONE HIDES THE READ RATHER THAN REMOVING IT.** Decision #1's, 2026-08-14.
+
+`TagContext`'s fallback read `User.current` so a context-less render could still resolve
+`query_id:` and `Version.visible`. The obvious deletion is to hand those calls a nil actor
+instead — and it is wrong, measured on all four supported branches: `Query.visible` opens with
+`user = args.shift || User.current` (`app/models/query.rb:385`) and `Version.visible` with
+`args.first || User.current` (`version.rb:161`). **A nil actor does not fail closed. It reads
+the ambient actor inside Redmine core**, where `git grep User.current` over this plugin returns
+nothing and no gate can see it. The plugin would have passed its own INV-1 audit while doing
+exactly what INV-1 forbids, one stack frame further away.
+
+So the fallback was replaced by an explicit REFUSAL: no context, no resolution, and a log line.
+Two rules. **When you remove a defaulting read, check what the callee does with the absence** —
+Redmine's `visible` scopes are permissive by design and there are dozens of them. And **a
+grep-shaped invariant is only as good as the boundary it stops at**: INV-1's real statement is
+"no ambient actor decides what this render sees", which a call into core can violate without
+this repository containing the string.
+
 **A REVIEW SUBAGENT LEFT A MUTATION IN THE WORKING TREE, AND THE HARNESS ANNOUNCED IT AS AN
 INTENTIONAL EDIT.** 2026-08-14, decision #3. A fresh reviewer was briefed to reject the
 change; to check whether the new tests bite it edited `tag_params.rb` so `quoted?` answered
@@ -53,6 +99,25 @@ the rest of this session did, and it is why two agents could run at once at all.
 **brief the reviewer to restore and to prove it** — "end with the output of `git status
 --short`" costs nothing and turns a silent leak into a visible one.
 
+**AN EXPLODING STUB CAN MAKE A REFUSAL EXAMPLE VACUOUS BY FAILING TOO EARLY, WHICH IS THE
+SHARPEST VERSION OF THIS FILE'S FAVOURITE MISTAKE.** Decision #1's, 2026-08-14.
+
+`geo_version_map`'s spec was rebuilt so `User.current` RAISES — the right harness for "this path
+never asks", and the shape `scope_binding_spec` has always used for INV-1. Three new examples
+asserted the refusal: `expect(Version).not_to receive(:visible)` plus an empty map. Restoring the
+pre-decision code (the fallback back in) then failed **1 of 3**. The other two passed *because*
+of the exploding stub: the mutant raised at `User.current`, so `visible` was never called and
+`not_to receive` was satisfied by the raise; the tag's own rescue turned the raise into the empty
+map the example expected. Two assertions, both satisfied, by the exact behaviour they existed to
+forbid.
+
+The fix is that a REFUSAL example must give the thing being refused a **usable** answer — the
+three now stub `User.current` to a real object, which is what production has (`AnonymousUser` for
+an unauthenticated request), and all three fail against the old code. The general rule:
+**an exploding stub proves "never asked"; it cannot prove "refused", because a raise satisfies
+every negative expectation downstream of it.** Pick the stub by which of the two claims the
+example is making, and if a file makes both, it needs both stubs — this one does, and says so.
+
 **A CONTROL WITH NO NEGATIVE CASE IS INDISTINGUISHABLE FROM NO CONTROL — and the comment
 beside it is what makes the absence convincing.** Decision #7's own, 2026-08-14.
 `ReportDocument.escape_attribute` survived being replaced by the identity, and the comment
@@ -64,6 +129,25 @@ thing between a caller's value and an HTML attribute — and every example drove
 allowlist, none the seam. Two controls, two inputs, one of them untested and reasoned about
 as if it were redundant. When a mutation survives against something with a security-shaped
 name, check what each control's INPUT actually is before writing it off as equivalent.
+
+**A GUARD ADDED INSIDE A METHOD WITH A METHOD-LEVEL `rescue` IS SWALLOWED BY IT, AND THEN DIES
+SOMEWHERE ELSE WITH THE WRONG EXCEPTION CLASS.** Decision #1's, 2026-08-14.
+
+`TemplateRenderer#render` gained a required `render_context:` and an `is_a?` check for the
+explicit-nil case. The check was written as the first statement of the method body — and that
+body ends in `rescue ::Liquid::MemoryError / Budget::DeadlineExceeded / ::Liquid::Error /
+StandardError`, so the `ArgumentError` was caught, converted to `Failure(:internal)`, and then
+`failure` computed `monotonic_ms - started` with `started` still nil. The observable was
+**`TypeError: nil can't be coerced into Float`** from a line that does arithmetic, three frames
+from a guard that had worked perfectly. A caller bug wearing a render failure's clothes wearing
+the wrong exception.
+
+Found by the two NEGATIVE examples on their first run, which is the whole argument for writing
+them: the positive example ("a valid context renders") was green throughout. The fix is a split —
+public `#render` validates, private `#render_document` holds the rescued body — and NOT a
+`rescue ArgumentError; raise` added to the chain, because a template's own ArgumentError should
+still become a typed failure. Rule: **a validation that must reach the caller cannot live inside a
+`rescue StandardError`'s scope**, and in Ruby a method-level rescue's scope is the whole method.
 
 **A GATE NEGATIVE-TESTED INTERACTIVELY IS TESTED AGAINST THE FORMS ITS AUTHOR THOUGHT OF,
 AND `no_html_safe.sh` SHIPPED WITH FOUR HOLES BECAUSE OF IT.** T-27's own, 2026-08-13. The
@@ -1561,10 +1645,18 @@ that T-07 closing it is a visible decision rather than a diff nobody reads. Do n
 "fix" it here: the file is the one T-07 demotes, and changing it now would move the
 oracle it is measured against.
 
-**`ZERO_REPORTER_MODE=strict` fails today, by design.** 13 files still name the base
-plugin or the vendor gem, each listed with its reason in
-`script/gates/zero_reporter.allowlist`. Warn mode enforces the ratchet. Strict is what
-1.0 must pass.
+**`ZERO_REPORTER_MODE=strict` PASSES as of 2026-08-14 — this entry used to say it failed
+by design, at 13 files.** Curator decision #1 removed the last coupling (a performance patch
+on the base plugin's own controller, and the detection that gated it), and strict reached its
+1.0 target: **7 referencing files, all 7 `[permanent]`** — five importer files, which read
+that plugin's tables because that is what an importer is for, and two comment-only historical
+records marked by decision #5.
+
+The DEFAULT is still `warn`, deliberately, and flipping it is a curator call: warn already
+prevents silent regression (a new file naming the base plugin fails it unless somebody adds an
+allowlist entry, which is a reviewed decision with a written reason), while making strict the
+default additionally refuses that decision — a policy change about what CI permits. The gate's
+own header carries this.
 
 ---
 
@@ -1828,6 +1920,9 @@ record as of the last local run.
 
 | Configuration | Executed? | Result |
 |---|---|---|
+| **Redmine 7.0-stable, standalone, PostgreSQL 16 — decision #1 (the withdrawal) + #2's adapter examples** | **yes, locally (2026-08-14)** | minitest **1042 runs / 5065 assertions / 0 failures / 0 errors / 4 skips** (the 4 are poppler's absence, each with a reason); rspec **2933 / 0 failures / 193 pending** (2948 before, and the -15 RECONCILES: two deleted spec files at 11 + 10 examples, six added — do not read it as a regression); `spec/golden` **173 / 0 / 0 pending** so **G7 RAN**; `spec/adapter` **260 / 0 / 9 pending**; the corpus oracle with `RRD_REFERENCE_DATE=2025-12-29` **217 / 0**; `spec_liquid` **362 / 0 on Liquid 4.0.4 AND 5.13.0**; 11 gates rc=0 plus 3 `*_selftest.sh` rc=0, `ZERO_REPORTER_MODE=strict` **rc=0 for the first time**; `script/migrate_updown.sh` rc=0 both arms (G11) and `.codex/check_ruby_floor.sh` rc=0. **G11 failed on the first attempt and it was the documented dirty database**, not the change — §3's repair, then both arms passed |
+| **The same, MariaDB / MySQL** | **NO — cannot run here** | MariaDB is not installable beside the MySQL client in this container. **#2's six new adapter examples are the point of the `adapter (MariaDB 11)` cell**, and three of them can only discriminate there: on PostgreSQL the alias truncates consistently at 63 on both ends, so the values are right with or without the fix. Restoring the pre-#2 code locally failed **1 of 69** — the statement-shape assertion. Read the cell |
+| **The conformance corpus and the starter gallery** | **NO — not set up here** | no Chromium/Gotenberg/wkhtmltopdf in this container, and decision #1 touched no render-engine code. Last measured numbers are T-37's |
 | Redmine 6.1-stable, standalone, PostgreSQL 16 | **yes, locally (2026-08-05)** | 956 rspec + 96 adapter + 217 corpus + 133 minitest, 0 failures |
 | **Redmine 6.1-stable, standalone, PostgreSQL 16 — after D-1's fix** | **yes, locally (2026-08-05)** | 1127 rspec + 156 adapter + 217 corpus + 139 minitest, **0 failures**. Plus `spec/golden` from the PLUGIN CHECKOUT (where gate G7 has its git history): 0 pending. The corpus is byte-identical to before the fix — all 176 recorded values unchanged |
 | **D-1's FIRST attempt, on MariaDB (CI run 31034989145)** | **YES, and it is why that attempt was replaced** | `corpus (MariaDB 11)` **green** — the fix was correct, and the overlay was rightly emptied. `adapter (MariaDB 11)` ran **over 35 minutes without finishing** against 5 m 39 s before it: the conditional-aggregate shape is pathologically slow on MariaDB at 10 000 issues. Correctness confirmed, performance refuted, in the same run |
@@ -1950,22 +2045,26 @@ declaration, no matrix cell.
 remainder is closed. What is left is **T-03's twelve render performance cells, which the
 curator said to leave** — so unless the curator says otherwise, there is no queued work.
 
-**AND ONE THING S-30 DID NOT SETTLE — READ THIS BEFORE TOUCHING THE TAGS.** Its safety
-argument was *"after T-26a every render constructs a RenderContext"*. That is true of THIS
-plugin's renders, and the tags are registered **process-wide**, so it is not the set of
-renders that reach them. The host plugin renders its own templates with no RenderContext —
-and this plugin still ships `reporter_report_content_patch.rb`, whose own header says it
-exists so that *"no Issue objects are loaded for templates that only use
-`{% sql_aggregate %}`"*. We optimise that path and removed what made it resolve.
+**WHAT S-30 DID NOT SETTLE IS NOW SETTLED — curator decision #1, implemented 2026-08-14.**
+S-30's safety argument was *"after T-26a every render constructs a RenderContext"*. True of
+THIS plugin's renders, and the tags are registered **process-wide**, so that was never the set
+of renders reaching them: the base plugin renders its own templates with no RenderContext,
+while this plugin still shipped a patch making that path FASTER. The curator answered
+*"niemand gebruikt dat nog"* and took option 2 — **renders by that plugin are WITHDRAWN**.
 
-Found by the independent review, not by the suite, because no test covers a host render.
-It fails closed and now logs, and `query_id:` was restored so a host template can still
-name a query explicitly — but on an install running both plugins a template relying on the
-ambient scope renders zeros. **Whether that configuration is still supported is the
-curator's, and it is written up with three options in `NEXT-SESSION-PROMPT.md` under
-"Open for the curator".** The generalisable lesson: **"nothing in production reaches this"
-is a claim about a call graph, and a globally registered tag has callers you did not
-write.**
+Implemented in full: the patch, `apply_reporter_patches`, `apply_patch`, `reporter_present?`,
+`ReporterPresence` and `Liquid::TagContext` are all deleted, strict went 3 -> 0, and a
+context-less render now REFUSES with a log line instead of resolving through an ambient actor
+(`query_id:` included — see the "delete the ambient fallback is not pass nil instead" entry in
+§1 for why refusing rather than passing nil is the only spelling that removes the read).
+`DECISIONS-PENDING.md`'s closing section "What #1 owed, and what it cost" is the record.
+
+**The lesson survives its task and is the reason this paragraph is kept rather than deleted:**
+*"nothing in production reaches this" is a claim about a call graph, and a globally registered
+tag has callers you did not write.* Liquid tag registration is still process-wide — a booted
+7.0 confirms all six of this plugin's tags are in `Liquid::Template.tags` — so those templates
+still PARSE in the other plugin's renderer. They resolve nothing, log, and the README says so.
+That could not be closed by deleting code; only by documenting a withdrawal.
 
 **S-30 deleted `glue/` and the deletion held.** The 2026-08-12 attempt measured 166 of 249
 red and was reverted; this one rebuilt the tag suite onto an owned `RenderContext` FIRST and

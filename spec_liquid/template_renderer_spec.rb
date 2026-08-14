@@ -15,9 +15,27 @@ module RedmineReporterDashboards
 
       subject(:renderer) { described_class.new(policy: ExecutionPolicy.widget) }
 
+      # `render_context:` IS A REQUIRED KEYWORD SINCE CURATOR DECISION #1, so every example
+      # names an actor. It used to default to nil, and that default existed only for this file
+      # — nothing in `app/` or `lib/` ever rendered without a context.
+      #
+      # A `let` rather than one shared constant: `RenderContext` is frozen and the renderer
+      # derives a budget-carrying copy per render, so sharing one is harmless — but a `let`
+      # keeps each example's actor its own, which is what the multi-actor examples elsewhere in
+      # the suite depend on and is one less thing to think about here.
+      let(:actor) { Object.new }
+      let(:render_context) { RenderContext.new(actor: actor) }
+
+      # Every call in this file goes through here, so the required keyword is spelled once. A
+      # literal `render_context: render_context` on twelve lines would have made the diff for
+      # decision #1 look like twelve decisions.
+      def render(source, **options)
+        renderer.render(source, render_context: render_context, **options)
+      end
+
       describe 'an ordinary render' do
         it 'returns a document carrying the body and how long it took' do
-          result = renderer.render('Hello {{ name }}', assigns: { 'name' => 'world' })
+          result = render('Hello {{ name }}', assigns: { 'name' => 'world' })
 
           expect(result).to be_success
           expect(result.body).to eq('Hello world')
@@ -29,13 +47,13 @@ module RedmineReporterDashboards
         # everywhere and raises nothing, which is the quietest way for a report to come
         # out empty — so the renderer converts rather than letting the caller find out.
         it 'accepts symbol-keyed assigns rather than rendering them as blank' do
-          result = renderer.render('Hello {{ name }}', assigns: { name: 'world' })
+          result = render('Hello {{ name }}', assigns: { name: 'world' })
 
           expect(result.body).to eq('Hello world')
         end
 
         it 'does not mark its output html_safe' do
-          result = renderer.render('{{ x }}', assigns: { 'x' => '<b>' })
+          result = render('{{ x }}', assigns: { 'x' => '<b>' })
 
           expect(result.body).to respond_to(:html_safe?).or satisfy { |b| !b.respond_to?(:html_safe?) }
           expect(result.body.respond_to?(:html_safe?) ? result.body.html_safe? : false).to be(false)
@@ -61,7 +79,7 @@ module RedmineReporterDashboards
         end
 
         it 'turns that same template into a typed failure with no body at all' do
-          result = renderer.render('{{ 1 | divided_by: 0 }}')
+          result = render('{{ 1 | divided_by: 0 }}')
 
           expect(result).to be_failure
           expect(result.code).to eq(:runtime_error)
@@ -76,7 +94,7 @@ module RedmineReporterDashboards
         end
 
         it 'says nothing about the exception in the message a user sees' do
-          result = renderer.render('{{ 1 | divided_by: 0 }}')
+          result = render('{{ 1 | divided_by: 0 }}')
 
           expect(result.message).not_to include('divided_by')
           expect(result.message).not_to include('ZeroDivision')
@@ -89,14 +107,14 @@ module RedmineReporterDashboards
         # Its own code, because it is fixed by a different person than a runtime error:
         # the author editing the template, not the operator reading the log.
         it 'is reported as a syntax error rather than a render failure' do
-          result = renderer.render('{% if %}never closed')
+          result = render('{% if %}never closed')
 
           expect(result).to be_failure
           expect(result.code).to eq(:syntax_error)
         end
 
         it 'carries the detail an author needs without leaking it to the reader' do
-          result = renderer.render('{% if %}never closed')
+          result = render('{% if %}never closed')
 
           expect(result.message).to match(/syntax error/i)
           expect(result.detail).not_to be_nil
@@ -108,7 +126,7 @@ module RedmineReporterDashboards
           renderer = described_class.new(policy: ExecutionPolicy.widget)
           # 2 000 000 characters of output from a template that is three lines long,
           # which is exactly the shape of the accident the limits exist for.
-          result = renderer.render('{% for i in (1..40000) %}{{ pad }}{% endfor %}',
+          result = render('{% for i in (1..40000) %}{{ pad }}{% endfor %}',
                                    assigns: { 'pad' => 'x' * 200 })
 
           expect(result).to be_failure
@@ -119,6 +137,7 @@ module RedmineReporterDashboards
         it 'renders the same template happily under the report class' do
           result = described_class.new(policy: ExecutionPolicy.report)
                                   .render('{% for i in (1..40000) %}{{ pad }}{% endfor %}',
+                                          render_context: render_context,
                                           assigns: { 'pad' => 'x' * 200 })
 
           expect(result).to be_success
@@ -140,7 +159,8 @@ module RedmineReporterDashboards
           ::Liquid::Template.register_tag('rrd_spec_slow', slow_tag)
 
           policy = ExecutionPolicy.widget(deadline_ms: 0)
-          result = described_class.new(policy: policy).render('{% rrd_spec_slow %}')
+          result = described_class.new(policy: policy)
+                                  .render('{% rrd_spec_slow %}', render_context: render_context)
 
           expect(result).to be_failure
           expect(result.code).to eq(:deadline_exceeded)
@@ -157,10 +177,62 @@ module RedmineReporterDashboards
           end
           ::Liquid::Template.register_tag('rrd_spec_probe', probe_tag)
 
-          described_class.new(policy: ExecutionPolicy.report).render('{% rrd_spec_probe %}')
+          described_class.new(policy: ExecutionPolicy.report)
+                        .render('{% rrd_spec_probe %}', render_context: render_context)
 
           expect(seen).to be_a(Budget)
           expect(seen.deadline_ms).to eq(30_000)
+        end
+      end
+
+      # --- CURATOR DECISION #1 — A RENDER WITHOUT A CONTEXT IS NOT REPRESENTABLE ---------
+      #
+      # These are the mechanical half of decision #1's proof obligation. The obligation was to
+      # ESTABLISH BY MEASUREMENT that no context-less render remains before deleting the
+      # ambient-actor fallback that served one; three greps established it for today
+      # (one `Liquid::Context.new`, one `Template.parse` — already gated by
+      # `script/gates/single_parse.sh` — and one caller of `#render`). A required keyword is
+      # what keeps it true tomorrow, and unlike a source-level spec it cannot be defeated by
+      # a path glob (`HANDOVER.md` §1 has the `/redmine/` story).
+      #
+      # RUN AGAINST THE REAL GEM, deliberately. `spec/spec_helper.rb` installs a Liquid STUB
+      # whose `Context` is not the gem's, so a keyword contract asserted there would be
+      # asserting the stub's. This file is where the real `Liquid::Context` is built.
+      describe 'the required render context' do
+        it 'refuses a render with no context at all' do
+          expect { renderer.render('static markup') }
+            .to raise_error(ArgumentError, /missing keyword: :?render_context/)
+        end
+
+        # BOTH SPELLINGS, because Ruby only closes one of them. `render_context:` being
+        # required stops a caller OMITTING it; an explicit `nil` satisfies the keyword and
+        # would have sailed straight through to `build_context`, putting no register in the
+        # context and reproducing exactly the state the fallback used to paper over.
+        it 'refuses an explicit nil, which the keyword alone would have allowed' do
+          expect { renderer.render('static markup', render_context: nil) }
+            .to raise_error(ArgumentError, /must be a RenderContext/)
+        end
+
+        # And it refuses something merely context-SHAPED. `RenderContext.from` type-checks its
+        # register with `is_a?`, so a double reaching the registers reads as no context at all
+        # — a silent zero-reading render rather than a loud refusal.
+        it 'refuses an object that only looks like one' do
+          lookalike = Struct.new(:actor, :scope, :query).new(Object.new, nil, nil)
+
+          expect { renderer.render('static markup', render_context: lookalike) }
+            .to raise_error(ArgumentError, /must be a RenderContext/)
+        end
+
+        # THE POSITIVE HALF, so the three refusals above cannot be satisfied by a renderer
+        # that refuses everything. An actor-only context — no scope, no query — is the case the
+        # old `nil` default was justified by ("a covering page, a preview of static markup"),
+        # and it still renders.
+        it 'renders a scope-less, query-less context, which is what the nil default was for' do
+          result = renderer.render('static markup',
+                                   render_context: RenderContext.new(actor: Object.new))
+
+          expect(result).to be_success
+          expect(result.body).to eq('static markup')
         end
       end
 
@@ -224,13 +296,14 @@ module RedmineReporterDashboards
             end
           end
 
-          result = renderer.render('{{ "hi" | rrd_spec_shout }}', filters: [filters])
+          result = render('{{ "hi" | rrd_spec_shout }}', filters: [filters])
           expect(result.body).to eq('hi!')
 
           # A SECOND renderer without the filter must not see it. `Template.register_filter`
           # would have made it global and this would pass by accident.
           plain = described_class.new(policy: ExecutionPolicy.widget)
-                                 .render('{{ "hi" | rrd_spec_shout }}')
+                                 .render('{{ "hi" | rrd_spec_shout }}',
+                                         render_context: render_context)
           expect(plain).to be_failure, 'the filter leaked out of the render that declared it'
         end
       end
@@ -238,13 +311,13 @@ module RedmineReporterDashboards
       describe 'strictness' do
         # An unknown FILTER is an authoring mistake and must be loud.
         it 'refuses an unknown filter instead of rendering nothing' do
-          expect(renderer.render('{{ x | no_such_filter }}', assigns: { 'x' => 1 })).to be_failure
+          expect(render('{{ x | no_such_filter }}', assigns: { 'x' => 1 })).to be_failure
         end
 
         # An unknown VARIABLE is not: `{{ issue.due_date }}` on an issue without one is
         # ordinary, and a template that guards every optional field is unmaintainable.
         it 'renders an unknown variable as blank rather than failing' do
-          result = renderer.render('[{{ nothing_here }}]')
+          result = render('[{{ nothing_here }}]')
 
           expect(result).to be_success
           expect(result.body).to eq('[]')

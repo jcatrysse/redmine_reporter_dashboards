@@ -13,7 +13,9 @@ recommendation everywhere except where I say otherwise", overrode #3 to land in 
 than 1.1, and resolved #1's conditional with *"niemand gebruikt dat nog"* — so #1 is
 option 2, the full withdrawal.
 
-**STATUS 2026-08-14: SEVEN OF THE EIGHT ARE IMPLEMENTED. ONLY #1 REMAINS.**
+**STATUS 2026-08-14 (later the same day): ALL EIGHT ARE IMPLEMENTED. THE LIST IS CLOSED.**
+#1 landed as the withdrawal (option 2). `ZERO_REPORTER_MODE=strict` now passes with **0**
+non-`[permanent]` entries, which was #1's stated destination.
 
 | | landed | where |
 |---|---|---|
@@ -24,7 +26,7 @@ option 2, the full withdrawal.
 | #6 the README's spent-time table | 2026-08-14 | `f77dde4` |
 | #7 `<html lang>` from the installation default | 2026-08-14 | `f77dde4`, `ea9c4fb`, `27865db` |
 | #8 FR-50 renumbered | 2026-08-14 | `f77dde4` (nine locale headers), `27865db` (the seventeen CODE files it had missed) |
-| **#1 withdraw host-plugin renders** | **NOT STARTED** | — |
+| **#1 withdraw host-plugin renders** | 2026-08-14 | this commit — see *"What #1 owed, and what it cost"* below |
 
 **An independent review of #3-#8 found 1 blocker, 5 majors and 8 minors; all are closed
 in `27865db`.** The blocker was #3's own acceptance condition failing on `query_id:` — a
@@ -33,8 +35,9 @@ message before assuming the decisions landed cleanly.
 
 **#1 was left deliberately, not forgotten.** It is the item this file's own closing
 section puts last, it is the only one with an irreversible deletion in it, and S-30's
-lesson is that a deletion half-done is worse than one not started. What it needs is
-below under "What #1 still owes".
+lesson is that a deletion half-done is worse than one not started. What it needed is
+below under "What #1 still owes", and what it turned out to cost is under
+"What #1 owed, and what it cost" after it.
 
 Ordered by what it costs you to get it wrong, not by effort.
 
@@ -315,4 +318,87 @@ narrow this case. `rg -n 'Reporter template|redmine_reporter' README.md` finds t
 absorbed into it: eighteen README examples still write `from:` on an aggregation tag, and
 `from:` has been decorative on every render since T-26a — the owned path returns
 `render_context.scope` and never reads it. Keeping it as documentation-of-intent or
-stripping it is a separate curator call.
+stripping it is a separate curator call. **Still open — not absorbed.**
+
+---
+
+## What #1 owed, and what it cost — DONE 2026-08-14
+
+The record, not a task. Read this before "restoring" any of it.
+
+**THE PROOF OBLIGATION WAS DISCHARGED FIRST, AND THEN MADE MECHANICAL.** The measurement, run
+before a file was deleted:
+
+| question | answer | how |
+|---|---|---|
+| how many places construct a `Liquid::Context`? | **1** — `liquid/template_renderer.rb` | `git grep -n 'Liquid::Context' -- lib app` |
+| how many call `Liquid::Template.parse`? | **1**, same file — and already **gated** | `script/gates/single_parse.sh`, which fails on a parse outside `liquid/` |
+| how many callers does `TemplateRenderer#render` have in `app/` + `lib/`? | **1** — `Reporting::ReportRun#render_section` | `git grep -n 'TemplateRenderer\|render_context:' -- lib app` |
+| does that caller always pass a context? | **yes**, unconditionally, built at `report_run.rb:408` from an explicit actor | read `render_section` |
+
+Three greps are a measurement of today, so the third is now Ruby's job:
+**`TemplateRenderer#render`'s `render_context:` is a REQUIRED keyword**, type-checked against
+`RenderContext` (an explicit `nil` satisfies Ruby and would have sailed through). That is the
+same trade #3 took with `TagParams::Value` — guard it mechanically, not by tracing.
+
+**WHAT WAS DELETED** — the five things, all five: `lib/reporter_report_content_patch.rb`;
+`apply_reporter_patches` **and** the `apply_patch` helper it was the only caller of;
+`reporter_present?` / `reset_reporter_presence!` / `ReporterPresence` (+ its spec);
+`Liquid::TagContext` **entirely** (+ its spec) rather than only its fallback; and the three
+non-`[permanent]` allowlist rows. Strict went **3 → 0**.
+
+**`TagContext` WENT WHOLE, AND THAT IS A DEVIATION FROM THE SCOPE NOTE ABOVE**, which said to
+delete "the ambient-actor fallback". With the fallback gone the module was three one-line
+delegations to `RenderContext.from`, and its own header argued for its existence entirely from
+the host-render case — a second way to ask a question that now has one answer, which
+`CLAUDE.md` §6 rule 6 forbids. The three call sites ask `RenderContext.from` directly.
+
+**THE ONE THING THE SCOPE NOTE DID NOT ANTICIPATE, AND IT IS THE WHOLE DESIGN.** "Delete the
+fallback" cannot mean "pass a nil actor instead", and this is measured rather than argued:
+`Query.visible` opens with `user = args.shift || User.current` (`app/models/query.rb:385`) and
+`Version.visible` with `args.first || User.current` — **checked on all four supported branches,
+5.1 / 6.0 / 6.1 / 7.0.** A nil actor does not fail closed; it reads the ambient actor *inside
+Redmine core*, where no gate or grep in this plugin can see it. So the fallback is replaced by
+an **explicit refusal**, not by a nil:
+
+- `ScopeBinding.bind` returns `NONE` for a context-less render **before** looking at
+  `query_id:`. This restores the ordering S-30's independent review had rejected — and the
+  review was right at the time: hoisting the check then withdrew a documented working feature
+  as collateral. Decision #1 withdraws that feature *on purpose*, so the collateral is now the
+  intent. **The README paragraph that documented it is corrected in the same commit.**
+- `{% geo_version_map %}` needed its own refusal and is the only tag that did: it resolves no
+  scope, so it never met the `scope.nil?` branch the two aggregation tags already had.
+- Both refusals log, naming the MECHANISM ("this render was not produced by this plugin's own
+  TemplateRenderer") rather than the base plugin — because `zero_reporter.sh` matches that
+  plugin's id inside a string as readily as inside a `require`, and getting to 0 was the point.
+
+**WHAT AN INSTALL WITH BOTH PLUGINS LOSES, stated rather than left to be discovered:** that
+plugin's own reports keep working; its `report_content` action goes back to materialising Issue
+objects (its behaviour before this plugin existed). One of ITS templates using
+`{% sql_aggregate %}` / `{% version_rollup %}` / `{% geo_version_map %}` still PARSES — Liquid
+tag registration is process-wide and cannot be scoped per renderer — and now resolves nothing,
+renders structurally intact with zeros, and logs a warn line per tag. Fails closed, never a
+leak. The README says so under a new heading.
+
+**THREE THINGS MEASUREMENT CONTRADICTED, all of them things this session had written down as
+true:**
+
+1. A comment claiming the `User.current` stub in `liquid_version_rollup_tag_spec.rb` was still
+   load-bearing "because the frozen kernel reads it too". **Mutation refuted it in one run** —
+   replacing the body with a `raise` left all 15 examples green. The stub is now an exploding
+   control instead, which is what it should have been.
+2. Two of the three new `geo_version_map` refusal examples **passed vacuously.** Restoring the
+   pre-decision code showed why: with the file's exploding `User.current`, the mutant raised
+   *before* `Version.visible`, so `not_to receive(:visible)` was satisfied by the raise and the
+   tag's own rescue turned it into the empty map the example expected. 1 of 3 discriminated.
+   They now give the ambient read a **usable** answer — what production has — and all 3 fail
+   against the old code.
+3. The required-keyword type check, written inside `#render`'s body, was **swallowed by that
+   method's own `rescue StandardError`** and then died in `failure` on `monotonic_ms - started`
+   with `started` still nil — reporting `TypeError: nil can't be coerced into Float` from a line
+   that does arithmetic. Found by the two new negative examples on their first run. The guard now
+   sits outside the rescued body, in a `#render` that delegates to a private `#render_document`.
+
+**Verified here** (Redmine 7.0-stable, PostgreSQL 16, standalone): see the commit message for
+the numbers. **NOT verified here:** MariaDB, the conformance corpus and the starter gallery —
+no engines and no MariaDB in this container.

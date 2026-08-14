@@ -459,6 +459,66 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
 
       build_tag('query_id: 42, assign_to: stats').render(build_context({}, owned_registers))
     end
+
+    # ------------------------------------------------------------------
+    # CURATOR DECISION #1 — `query_id:` NEEDS A RENDER CONTEXT TOO, AT THE TAG
+    # ------------------------------------------------------------------
+    #
+    # THIS IS THE ONE EXAMPLE IN THIS FILE THAT DISCRIMINATES THE WITHDRAWAL, so read
+    # `HANDOVER.md` §1's opening entry before touching it. Every example above hands the tag
+    # `owned_registers` and would pass identically before and after decision #1 — they run the
+    # changed line, they do not separate the two behaviours.
+    #
+    # What separates them is a context with NO `RenderContext` and a `query_id:` that RESOLVES:
+    # before the decision that produced real numbers off `LiquidTagIssueQueryStub` through
+    # `TagContext`'s ambient actor, and now it produces the empty result. `query_id: 42`, not
+    # `query_id: "qid"`: an unresolvable spelling answers the empty result under BOTH rules and
+    # would be documentation rather than a test — the precise trap that let decision #3's
+    # blocker past fourteen mutations.
+    #
+    # Written at the TAG and not only at `ScopeBinding` because the two claims differ. The unit
+    # examples say `bind` answers NONE; this says the READER of that answer assigns the
+    # empty-safe hash and keeps rendering, rather than raising into the tag's rescue or
+    # assigning nil for a template to walk into.
+    describe 'with no render context (a render this plugin did not produce)' do
+      it 'assigns the empty result for a query_id that would have resolved' do
+        ctx = build_context({}, {})
+        expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
+
+        build_tag('query_id: 42, assign_to: stats').render(ctx)
+
+        expect(ctx.scopes.last['stats']['total']).to eq(0)
+      end
+
+      it 'never looks the query up, so no ambient actor is consulted' do
+        LiquidTagIssueQueryStub.visible_args.clear
+
+        build_tag('query_id: 42, assign_to: stats').render(build_context({}, {}))
+
+        # THE ASSERTION IS ON THE CALL, NOT ON THE RESULT. An implementation that resolved the
+        # query as `User.current` and then discarded it would satisfy the example above; only
+        # this one says the lookup does not happen, which is what "the ambient read is gone"
+        # actually means.
+        expect(LiquidTagIssueQueryStub.visible_args).to eq([])
+      end
+
+      it 'says why, so a zero-reading report is not silent (INV-4)' do
+        warnings = []
+        allow(Rails.logger).to receive(:warn) { |line| warnings << line }
+
+        build_tag('query_id: 42, assign_to: stats').render(build_context({}, {}))
+
+        expect(warnings.grep(/no render context/)).not_to be_empty
+        expect(warnings.grep(/decision #1/)).not_to be_empty
+      end
+
+      # The tag renders to '' either way — a side-effect tag whose refusal turned into a
+      # visible fragment of text in the middle of somebody's report would be a worse outcome
+      # than the zeros.
+      it 'still renders to the empty string' do
+        expect(build_tag('query_id: 42, assign_to: stats').render(build_context({}, {}))).to eq('')
+      end
+    end
   end
 
   # ------------------------------------------------------------------

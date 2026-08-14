@@ -2,7 +2,7 @@
 
 require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
 require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
-require_relative '../redmine_reporter_dashboards/liquid/tag_context'
+require_relative '../redmine_reporter_dashboards/liquid/render_context'
 require_relative '../redmine_reporter_dashboards/liquid/tag_params'
 require_relative '../redmine_reporter_dashboards/liquid/drops'
 
@@ -40,9 +40,10 @@ module SqlAggregation
   class LiquidVersionRollupTag < Liquid::Tag
     # T-07: two resolution sources, both starting from Issue.visible. The six-source
     # archaeology this replaced lived in Glue::Legacy::ScopeResolution and was DELETED by
-    # S-30 (2026-08-13). A render arriving with no RenderContext now resolves nothing
-    # unless the tag named a `query_id:`, which needs only an actor and gets one from
-    # TagContext.
+    # S-30 (2026-08-13). Since curator decision #1 (2026-08-14) a render arriving with no
+    # RenderContext resolves NOTHING AT ALL — `query_id:` included — because renders by the
+    # base plugin are withdrawn and there is no ambient actor left to resolve
+    # one for. The tag assigns the empty list and logs.
     include RedmineReporterDashboards::Liquid::ScopeBinding
 
     # Markup parsing and the quoted-means-literal rule live in one place for all five
@@ -123,8 +124,14 @@ module SqlAggregation
     # substitutes for a String on top. Nothing in a template has to change.
     #
     # ONE context for the whole decoration, resolved once. Building it per row would
-    # mean one `User.current` read per version and one `Batch` per version, and the
-    # rows all belong to the same render.
+    # mean one `Batch` per version, and the rows all belong to the same render.
+    #
+    # `RenderContext.from` DIRECTLY, since decision #1 deleted `TagContext` — and this call
+    # site cannot see a nil: `resolve_scope` above returns nil for a context-less render and
+    # `render` has already assigned `[]` and returned by then. It is not defended with a
+    # `&.` for that reason; if the invariant ever breaks, `Drops::VersionDrop`'s constructor
+    # refuses a nil context by name (INV-1) and the tag's own rescue turns it into an empty
+    # list and an error line, rather than a version drop with no viewer behind it.
     #
     # A drop and not a Hash, deliberately: a drop is LAZY. `completed_percent` runs a
     # query, and a Hash would run it for every version whether or not the template ever
@@ -133,7 +140,7 @@ module SqlAggregation
     def decorate_with_versions(rows, context)
       ids      = rows.map { |r| r['version_id'] }.compact.uniq
       versions = ids.any? ? Version.where(id: ids).includes(:project).index_by(&:id) : {}
-      drop_context = RedmineReporterDashboards::Liquid::TagContext.for(context)
+      drop_context = RedmineReporterDashboards::Liquid::RenderContext.from(context)
 
       rows.each do |row|
         version        = versions[row['version_id']]

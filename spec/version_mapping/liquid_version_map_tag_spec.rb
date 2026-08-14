@@ -74,9 +74,26 @@ class VersionMapProjectClass
   def self.visible(*); end
 end
 
-# User.current, needed by the visibility scopes.
+# `User.current` EXPLODES IN THIS FILE, and that is the harness rather than a hazard.
+#
+# It used to answer a memoised `Object.new`, because the tag's actor came from
+# `TagContext`, whose fallback read `User.current` on any render this plugin did not
+# produce. Curator decision #1 deleted that fallback: the actor now comes from the
+# `RenderContext` in the registers and from nowhere else, and a context-less render is
+# REFUSED rather than served with the ambient actor.
+#
+# So the ambient read is made to raise, the way `spec/liquid/scope_binding_spec.rb` has
+# always done it for the same invariant. A stub that quietly returned an object would let
+# every example in this file pass against a tag that had reintroduced the fallback — the
+# read would happen, the value would be usable, and nothing would say so. Redmine's real
+# `Version.visible` reaches for `User.current` when handed nil (`args.first || User.current`,
+# `app/models/version.rb:161`), so "the tag passes nil" and "the tag reads the ambient actor"
+# are the SAME outcome in production and only an exploding stub tells them apart here.
 class VersionMapUserClass
-  def self.current; @current ||= Object.new; end
+  def self.current
+    raise 'User.current was read: the geo_version_map tag must take its actor from the ' \
+          'RenderContext, and refuse when there is none (INV-1, curator decision #1)'
+  end
 end
 
 RSpec.describe VersionMapping::LiquidVersionMapTag do
@@ -86,6 +103,10 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
   let(:v1) { VersionMapVersion.new(10, '1.0', Date.new(2026, 6, 1), 'open',   proj_a) }
   let(:v2) { VersionMapVersion.new(20, '2.0', nil,                  'closed', proj_a) }
   let(:v3) { VersionMapVersion.new(30, 'Shared', Date.new(2027, 1, 1), 'locked', proj_b) }
+
+  # The actor the default context carries. See `build_context` for why it must not be
+  # whatever `User.current` would have answered.
+  let(:render_actor) { Object.new }
 
   before do
     stub_const('Version', VersionMapVersionClass)
@@ -103,8 +124,34 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
     described_class.new('geo_version_map', markup, [])
   end
 
-  def build_context(assigns = {}, registers = {})
+  # THE DEFAULT CONTEXT NOW CARRIES A `RenderContext`, and that is the harness change
+  # decision #1 required. Every example below except the refusal ones is about what the tag
+  # BUILDS, and used to get its scope resolved through the ambient-actor fallback; with that
+  # gone, a registerless context makes the tag refuse and 12 examples fail for a reason that
+  # has nothing to do with their subjects. `HANDOVER.md` records this exact shape from S-30 —
+  # of 150 failures there, 121 were the harness and only 38 had the deleted behaviour as
+  # their subject. Rebuild the harness first, then read what is left.
+  #
+  # `render_actor` IS DELIBERATELY NOT `User.current`. Handing the context the same object the
+  # ambient read would have produced would make every visibility assertion below pass under
+  # either implementation — the trap `HANDOVER.md` §1 opens with. It is a distinct object, so
+  # `expect(Version).to receive(:visible).with(render_actor)` discriminates: it fails if the
+  # tag ever goes back to asking the ambient user (which in this file also raises).
+  #
+  # A REAL `RenderContext` and not a double: `RenderContext.from` type-checks the register
+  # with `is_a?(self)`, so a double in the registers reads as no context at all — which would
+  # silently turn every example here into the refusal case.
+  def build_context(assigns = {}, registers = nil)
+    registers ||= { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY =>
+                      RedmineReporterDashboards::Liquid::RenderContext.new(actor: render_actor) }
     Liquid::Context.new({}, assigns, registers)
+  end
+
+  # A context with NO RenderContext — a render this plugin did not produce. Named rather
+  # than spelled inline, because it is the subject of its own describe block and reusing
+  # `build_context({}, {})` there would read as an accident.
+  def build_context_without_render_context(assigns = {})
+    Liquid::Context.new({}, assigns, {})
   end
 
   # An AR-relation-ish stub: responds to includes(:project) (chainable) and each.
@@ -216,7 +263,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
 
   describe 'visibility' do
     it 'builds the full map from the visible versions only' do
-      expect(Version).to receive(:visible).with(User.current).and_return(scope_stub([v1]))
+      expect(Version).to receive(:visible).with(render_actor).and_return(scope_stub([v1]))
 
       build_tag('assign_to: geo_versions').render(build_context)
     end
@@ -250,7 +297,7 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
       project = double('project', shared_versions: shared)
       allow(Project).to receive(:find_by).with(identifier: 'proj-a').and_return(project)
 
-      expect(shared).to receive(:visible).with(User.current).and_return(shared)
+      expect(shared).to receive(:visible).with(render_actor).and_return(shared)
 
       build_tag('project: proj-a, assign_to: geo_versions').render(build_context)
     end
@@ -408,11 +455,10 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
     let(:render_context_actor) { Object.new }
 
     # Driven through a stubbed `RenderContext.from` rather than by putting a real context
-    # in the registers, and deliberately so: the tag asks `TagContext`, `TagContext` asks
-    # `RenderContext.from`, and stubbing the far end proves the whole delegation rather
-    # than the near end of it. `RenderContext.from` type-checks with `is_a?(self)`, so a
-    # double could not be planted in the registers anyway.
-    it 'prefers the render context actor over User.current' do
+    # in the registers, and deliberately so: stubbing the far end proves the whole
+    # delegation rather than the near end of it. `RenderContext.from` type-checks with
+    # `is_a?(self)`, so a double could not be planted in the registers anyway.
+    it 'takes its actor from the render context' do
       allow(RedmineReporterDashboards::Liquid::RenderContext)
         .to receive(:from).and_return(double('render_context', actor: render_context_actor))
 
@@ -421,12 +467,78 @@ RSpec.describe VersionMapping::LiquidVersionMapTag do
       build_tag('assign_to: geo_versions').render(build_context)
     end
 
-    it 'falls back to User.current when no owned renderer produced this render' do
-      allow(RedmineReporterDashboards::Liquid::RenderContext).to receive(:from).and_return(nil)
+    # --- THE INVERTED EXAMPLE. IT USED TO ASSERT THE FALLBACK; NOW IT ASSERTS ITS ABSENCE.
+    #
+    # It read *"falls back to User.current when no owned renderer produced this render"* and
+    # pinned exactly the behaviour curator decision #1 withdraws. Inverted rather than
+    # deleted: this is the one place in the file where the change is a BEHAVIOUR change, and
+    # an example that fails if the fallback comes back is the only thing that keeps it gone.
+    #
+    # THREE ASSERTIONS, BECAUSE "NO NUMBERS" AND "NO AMBIENT READ" AND "SAID SO" ARE THREE
+    # CLAIMS. A single `eq({})` would pass against a tag that read `User.current`, got an
+    # empty scope from the stub and assigned an empty map for the wrong reason — and against
+    # one that refused in silence, which INV-4 forbids.
+    # `User.current` IS DELIBERATELY MADE TO **WORK** IN THE THREE REFUSAL EXAMPLES, which is
+    # the opposite of the file-level stub and the reason this comment is long.
+    #
+    # MEASURED, NOT REASONED: with the file's exploding `User.current` in place, two of these
+    # three examples passed VACUOUSLY. Restoring the pre-decision code (delete the refusal,
+    # put `|| ::User.current` back) made the mutant raise *before* `Version.visible`, so
+    # `expect(Version).not_to receive(:visible)` was satisfied by the raise, the tag's own
+    # rescue turned it into an empty map, and `eq({})` was satisfied too. Only the log
+    # example failed — 1 of 3. A control with no negative case is indistinguishable from no
+    # control (`HANDOVER.md` §1), and these were two of them.
+    #
+    # So the refusal examples give the ambient read a USABLE answer, which is what production
+    # has: `User.current` is never nil in Redmine (an unauthenticated request gets
+    # `AnonymousUser`). Now the mutant reaches `Version.visible(ambient_actor)` and
+    # `not_to receive(:visible)` fires. The exploding default stays for the other examples,
+    # where the claim is "this path never asks" rather than "this path refuses".
+    let(:ambient_actor) { Object.new }
 
-      expect(Version).to receive(:visible).with(User.current).and_return(scope_stub([v1]))
+    def allow_ambient_actor!
+      usable = ambient_actor
+      stub_const('User', Class.new { define_singleton_method(:current) { usable } })
+    end
+
+    it 'refuses instead, reading no ambient actor and assigning an empty map' do
+      allow_ambient_actor!
+      allow(RedmineReporterDashboards::Liquid::RenderContext).to receive(:from).and_return(nil)
+      expect(Version).not_to receive(:visible)
+      ctx = build_context
+
+      expect { build_tag('assign_to: geo_versions').render(ctx) }.not_to raise_error
+      expect(ctx.scopes.last['geo_versions']).to eq({})
+    end
+
+    it 'says why, naming the mechanism rather than the plugin' do
+      allow_ambient_actor!
+      allow(RedmineReporterDashboards::Liquid::RenderContext).to receive(:from).and_return(nil)
+      warnings = []
+      allow(Rails.logger).to receive(:warn) { |line| warnings << line }
 
       build_tag('assign_to: geo_versions').render(build_context)
+
+      # INV-4: the branch that turns a resolving render into an empty one must announce
+      # itself. The message is asserted for the MECHANISM and for the decision it cites —
+      # not for the base plugin's id, which `script/gates/zero_reporter.sh` matches inside a
+      # string as readily as inside a require, and which decision #1's own deliverable is
+      # getting to zero.
+      expect(warnings.grep(/no render context/)).not_to be_empty
+      expect(warnings.grep(/decision #1/)).not_to be_empty
+    end
+
+    # THE REFUSAL THROUGH THE REAL SEAM, not through a stubbed `RenderContext.from`. The two
+    # examples above stub the far end, which proves the delegation; this one hands the tag a
+    # Liquid context with EMPTY REGISTERS — what a render by another plugin's renderer
+    # actually looks like — so the refusal is exercised end to end rather than at a double.
+    it 'refuses a genuinely registerless context, which is what a foreign render looks like' do
+      allow_ambient_actor!
+      expect(Version).not_to receive(:visible)
+      ctx = build_context_without_render_context
+
+      expect { build_tag('assign_to: geo_versions').render(ctx) }.not_to raise_error
+      expect(ctx.scopes.last['geo_versions']).to eq({})
     end
 
     it 'resolves project: through the same actor, not a second one' do

@@ -308,20 +308,35 @@ RSpec.describe RedmineReporterDashboards::Liquid::ScopeBinding do
                                       def self.logger=(l); @logger = l; end })
       Rails.logger = logger
 
-      expect(logger).to receive(:warn).with(/no render context and no query_id/)
+      expect(logger).to receive(:warn).with(/no render context/)
 
       described_class.bind({}, FakeLiquidContext.new)
     end
 
-    # --- AND THE ONE SOURCE THAT STILL WORKS WITHOUT AN OWNED CONTEXT ----------------
+    # --- AND `query_id:` IS REFUSED HERE TOO, WHICH IS THE BEHAVIOUR CHANGE -----------
     #
-    # `query_id:` NAMES its query and resolves it through `IssueQuery.visible(actor)`, so
-    # the only thing it ever needed from a render context is the ACTOR. The first version
-    # of S-30 put the nil-context return ABOVE this branch and silently withdrew a
-    # documented feature — the README's "When the Reporter plugin exposes `query_id` in
-    # the template context" — from every render this plugin does not produce. Found by an
-    # independent review; these two examples are the regression test.
-    it 'still resolves query_id: with no render context' do
+    # READ THE HISTORY BEFORE CHANGING THESE, because this pair has now been written both
+    # ways round and both times for a good reason.
+    #
+    # S-30's first draft returned NONE before looking at `query_id:`. An independent review
+    # rejected that: `query_id:` NAMES its query and resolves it through
+    # `IssueQuery.visible(actor)`, so the only thing it ever needed from a render context is
+    # the ACTOR — and hoisting the check silently withdrew a DOCUMENTED feature (the README's
+    # "When the Reporter plugin exposes `query_id` in the template context") from every render
+    # this plugin does not produce. Two examples were added as the regression test, asserting
+    # that `query_id:` still resolved and still scoped its lookup to the ambient actor.
+    #
+    # CURATOR DECISION #1 (2026-08-13) WITHDRAWS THAT FEATURE ON PURPOSE — *"niemand gebruikt
+    # dat nog"*. So the two examples are INVERTED rather than deleted: the behaviour they
+    # pinned is exactly the behaviour being withdrawn, and an inverted example is the only
+    # kind that fails if somebody restores the old ordering by accident. Deleting them would
+    # have left the change unpinned in the one place it is a behaviour change.
+    #
+    # `stub_issue_query` STILL RECORDS, AND THAT IS THE POINT OF THE SECOND EXAMPLE. Asserting
+    # only "the binding is NONE" would pass against an implementation that looked the query up
+    # and then threw the answer away — the interesting claim is that NO LOOKUP HAPPENS AT ALL,
+    # because a lookup implies an actor and the only actor available would be the ambient one.
+    it 'refuses query_id: with no render context, where it used to resolve it' do
       base = double('base_scope')
       found = double('IssueQuery', id: 7, base_scope: base)
       stub_issue_query(found: { 7 => found })
@@ -329,24 +344,45 @@ RSpec.describe RedmineReporterDashboards::Liquid::ScopeBinding do
 
       binding = described_class.bind({ 'query_id' => '7' }, FakeLiquidContext.new)
 
-      expect(binding.scope).to be(base)
-      expect(binding.query).to be(found)
-      expect(binding.source).to eq(:query_id)
+      # `query_id: '7'` and not `'qid'`: a NUMERIC literal is what the OLD code resolved
+      # successfully, so it is the input whose old and new answers differ. HANDOVER §1's
+      # first entry is about picking the discriminating input rather than the one that
+      # merely runs the changed line — here the discriminator is the case that used to WORK.
+      expect(binding.scope).to be_nil
+      expect(binding.query).to be_nil
+      expect(binding.source).to eq(:none)
     end
 
-    it 'scopes that lookup to the ambient actor rather than skipping visibility' do
+    it 'does not look the query up at all, so no ambient actor is read' do
       found = double('IssueQuery', id: 7, base_scope: double)
       klass = stub_issue_query(found: { 7 => found })
-      stub_const('User', Class.new { def self.current; :ambient_actor; end })
+      ambient = Class.new do
+        def self.current
+          raise 'User.current was read on a context-less render (INV-1)'
+        end
+      end
+      stub_const('User', ambient)
 
-      described_class.bind({ 'query_id' => '7' }, FakeLiquidContext.new)
+      # A RAISING `User.current` RATHER THAN A RECORDING ONE. A stub that merely returned
+      # `:ambient_actor` would let the example pass while the read still happened, as long as
+      # the value went unused; the whole subject here is that the read is GONE. This is the
+      # same shape as `Assets::Fetcher.expects(:new).never` in `HANDOVER.md` §1 — when the
+      # claim is about a call not happening, assert on the call.
+      expect { described_class.bind({ 'query_id' => '7' }, FakeLiquidContext.new) }
+        .not_to raise_error
 
-      # The ONE ambient read, and it is still visibility-scoped. Reading User.current
-      # here is not an INV-1 breach: it happens in TagContext, which is the single named
-      # place this plugin is allowed to do it, and the result is passed EXPLICITLY into
-      # IssueQuery.visible rather than consulted again downstream.
-      expect(klass.seen_actors).to eq([:ambient_actor])
+      expect(klass.seen_actors).to eq([])
     end
+
+    # WHY REFUSING RATHER THAN PASSING `nil`, recorded here as a comment and NOT as an
+    # example, because there is no honest example to write: the claim is about REDMINE's code,
+    # not this module's. `Query.visible` opens with `user = args.shift || User.current`
+    # (`app/models/query.rb:385` on 7.0-stable; the same line on 5.1, 6.0 and 6.1 — checked on
+    # all four), and `Version.visible` does `args.first || User.current`. So handing either a
+    # nil actor does not narrow anything, it reads the ambient actor INSIDE CORE where no gate
+    # or grep in this plugin can see it. An example built on the double above could only have
+    # asserted that this file passes nil — which is the opposite of reassuring — so the
+    # assertion that carries the weight is the one above: no lookup happens at all.
   end
 
   # ------------------------------------------------------------------

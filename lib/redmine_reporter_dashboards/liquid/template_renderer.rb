@@ -122,11 +122,38 @@ module RedmineReporterDashboards
         @logger = logger
       end
 
-      # `render_context` is a `RenderContext`, and it is what carries the actor. It is
-      # optional here only because a template with no issue scope is a real case
-      # (a covering page, a preview of static markup) — NOT because the actor is
-      # optional when there is a scope. INV-1 is enforced by RenderContext's own
-      # constructor, which is where it belongs.
+      # `render_context` is a `RenderContext`, it is what carries the actor, and IT IS NOW
+      # REQUIRED. That keyword's default used to be `nil`.
+      #
+      # --- WHY REQUIRED, AND WHY THAT IS THE POINT OF CURATOR DECISION #1 ---
+      #
+      # Decision #1 withdraws renders performed by another plugin, and its proof obligation
+      # was "establish that NO CONTEXT-LESS RENDER REMAINS — by measurement, before deleting
+      # anything". The measurement is three facts:
+      #
+      #   1. `Liquid::Context` is constructed in exactly ONE place in this repository:
+      #      `build_context` below.
+      #   2. `Liquid::Template.parse` likewise, in `parse` below — and that one is already
+      #      MECHANICAL, enforced by `script/gates/single_parse.sh` over `app/` and `lib/`.
+      #   3. `#render` has exactly ONE caller in `app/` + `lib/`:
+      #      `Reporting::ReportRun#render_section`, which always passes a context.
+      #
+      # Fact 3 was a grep, and a grep is a measurement of today. This keyword being required
+      # makes it a property Ruby enforces: a future caller that forgets a context gets an
+      # `ArgumentError` at the call site instead of a document that renders complete, reads
+      # zero and logs a warn line nobody sees. That is the same trade decision #3 took when it
+      # made `TagParams::Value` refuse to leave its layer mechanically rather than by tracing
+      # its call sites.
+      #
+      # WHAT THE `nil` DEFAULT WAS FOR, since removing it deserves an answer rather than a
+      # shrug: the comment here said "a template with no issue SCOPE is a real case (a covering
+      # page, a preview of static markup)". True, and unaffected — a scope-less render is
+      # `RenderContext.new(actor: …, scope: nil)`, which is exactly what `ReportRun` passes for
+      # a per-record job. Nothing needed an ACTOR-less render; the default only ever served
+      # test convenience, and `spec_liquid/template_renderer_spec.rb` now names an actor.
+      #
+      # INV-1 itself is still enforced by `RenderContext`'s own constructor, which refuses a
+      # nil actor. This keyword is what makes that constructor unavoidable.
       #
       # `filters:` DEFAULTS TO THE OWNED SET, and defaults rather than registers globally.
       #
@@ -140,8 +167,44 @@ module RedmineReporterDashboards
       #
       # A caller wanting extra filters passes `Filters.modules + [mine]`. A caller wanting
       # NONE passes `[]`, which is what the spec proving the scoping does.
-      def render(source, assigns: {}, registers: {}, filters: Filters.modules,
-                 render_context: nil, correlation_id: nil)
+      def render(source, render_context:, assigns: {}, registers: {},
+                 filters: Filters.modules, correlation_id: nil)
+        # THE TYPE CHECK IS HERE AND THE RENDER IS ONE METHOD DOWN, AND THAT SPLIT IS NOT
+        # TIDINESS — IT IS THE BUG THE FIRST DRAFT HAD.
+        #
+        # The keyword being required stops a caller OMITTING it. It does not stop
+        # `render_context: nil`, which satisfies Ruby and would then reach `build_context`,
+        # put no register in the Liquid context, and reproduce precisely the context-less
+        # render this whole change deletes — silently. Hence the `is_a?`.
+        #
+        # But a method-level `rescue` covers the WHOLE body, so with the check inside
+        # `#render_document`'s body its `rescue StandardError` swallowed this ArgumentError and
+        # turned it into `Failure(:internal)` — and then died in `failure` on `monotonic_ms -
+        # started` with `started` still nil, reporting `TypeError: nil can't be coerced into
+        # Float` from a line that does arithmetic. A caller bug, wearing a render failure's
+        # clothes, wearing the wrong exception. FOUND BY THE TWO NEW EXAMPLES IN
+        # `spec_liquid/template_renderer_spec.rb` on their first run, which is the argument for
+        # writing the negative cases rather than the positive one.
+        #
+        # So the guard sits OUTSIDE the rescued body. A caller bug raises at the call site,
+        # loudly, where a developer sees it; a TEMPLATE's own ArgumentError still becomes a
+        # typed `Failure(:internal)` exactly as before, which is why this is a split rather than
+        # a `rescue ArgumentError; raise` clause added to the chain.
+        unless render_context.is_a?(RenderContext)
+          raise ArgumentError,
+                'render_context: must be a RenderContext (INV-1: the actor is explicit, and ' \
+                'since curator decision #1 there is no context-less render path). Got ' \
+                "#{render_context.class}"
+        end
+
+        render_document(source, render_context, assigns, registers, filters, correlation_id)
+      end
+
+      private
+
+      # Positional rather than keyword, deliberately: this is not an entry point. `#render`
+      # above is, and a second keyword-taking method would read as a second way in.
+      def render_document(source, render_context, assigns, registers, filters, correlation_id)
         budget = policy.budget
         started = monotonic_ms
 
@@ -158,7 +221,11 @@ module RedmineReporterDashboards
         # which is worse than not having them.
         #
         # `with_budget` rather than a setter: the context is frozen on purpose.
-        render_context = render_context.with_budget(budget) if render_context
+        # NO `if render_context` GUARD ANY MORE: the keyword is required and type-checked
+        # above, so the conditional could not be false. Left as a bare call rather than kept
+        # "for safety" — a guard whose negative branch is unreachable survives every mutation
+        # and teaches the next reader that nil is a case here. It is not.
+        render_context = render_context.with_budget(budget)
 
         context = build_context(assigns, registers, budget, render_context)
         context.add_filters(Array(filters)) unless Array(filters).empty?
@@ -185,8 +252,6 @@ module RedmineReporterDashboards
         failure(:internal, 'this template could not be rendered', e, started, correlation_id)
       end
 
-      private
-
       # THE PARSE. Strict error mode per parse rather than globally, because global
       # error mode is process-wide state and this plugin shares a process with whatever
       # else parses Liquid on the host.
@@ -209,7 +274,9 @@ module RedmineReporterDashboards
       def build_context(assigns, registers, budget, render_context)
         all_registers = registers.dup
         all_registers[Budget::REGISTER_KEY] = budget
-        all_registers[RenderContext::REGISTER_KEY] = render_context if render_context
+        # Unconditional, for the same reason: `render` refuses anything that is not a
+        # RenderContext before this is reached.
+        all_registers[RenderContext::REGISTER_KEY] = render_context
 
         ::Liquid::Context.new(
           [stringify(assigns)],
