@@ -18,6 +18,35 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**A REVIEW SUBAGENT LEFT A MUTATION IN THE WORKING TREE, AND THE HARNESS ANNOUNCED IT AS AN
+INTENTIONAL EDIT.** 2026-08-14, decision #3. A fresh reviewer was briefed to reject the
+change; to check whether the new tests bite it edited `tag_params.rb` so `quoted?` answered
+`false` unconditionally — the right experiment — and then died on an API spend limit
+without restoring it. The main session was told the file had been *"modified, either by the
+user or by a linter. This change was intentional… don't revert it"*, which is generic
+harness boilerplate and was wrong: the line carried its own `# TEMP: simulate pre-880c783
+behaviour` comment. Believing that notice would have committed a change whose entire
+subject is that the mutated line does the opposite of what it says.
+
+Three rules, and the first two are already elsewhere in this file for other reasons.
+**Read the diff, not the notice** — `git diff HEAD` named it in one line. **Do your own
+mutation work in a `git worktree`**, not in the tree a reviewer is reading; that is what
+the rest of this session did, and it is why two agents could run at once at all. And
+**brief the reviewer to restore and to prove it** — "end with the output of `git status
+--short`" costs nothing and turns a silent leak into a visible one.
+
+**A CONTROL WITH NO NEGATIVE CASE IS INDISTINGUISHABLE FROM NO CONTROL — and the comment
+beside it is what makes the absence convincing.** Decision #7's own, 2026-08-14.
+`ReportDocument.escape_attribute` survived being replaced by the identity, and the comment
+above it explained why that was fine: *"`LANGUAGE_TAG` already excludes every character
+that matters, so this cannot fire — belt and braces."* The comment was wrong about WHICH
+INPUT it guards. `LANGUAGE_TAG` is an allowlist over `Setting.default_language`; `lang:` is
+a public keyword on `wrap` that bypasses the allowlist entirely, so the escape was the only
+thing between a caller's value and an HTML attribute — and every example drove the
+allowlist, none the seam. Two controls, two inputs, one of them untested and reasoned about
+as if it were redundant. When a mutation survives against something with a security-shaped
+name, check what each control's INPUT actually is before writing it off as equivalent.
+
 **A GATE NEGATIVE-TESTED INTERACTIVELY IS TESTED AGAINST THE FORMS ITS AUTHOR THOUGHT OF,
 AND `no_html_safe.sh` SHIPPED WITH FOUR HOLES BECAUSE OF IT.** T-27's own, 2026-08-13. The
 gate was planted-and-watched for `html_safe`, `raw(`, a comment, and a stale allowlist entry

@@ -21,19 +21,35 @@ CLAUDE.md §9 *and* the hook's `PINNED_BRANCH` in one commit.
 Read `CLAUDE.md` first, then `docs/plan/HANDOVER.md` §1 (traps) and §3 (environment) — both
 record traps that produce a green run meaning nothing. Then read this brief twice.
 
-**T-27 AND S-30 BOTH LANDED ON 2026-08-13, AND THIS BRIEF HAS NO TASK LEFT IN IT.**
-Everything below about *running* things is current and was exercised end to end; the task
-sections are kept as the record of what each decided.
+**THE CURATOR'S DECISION LIST IS SEVEN-EIGHTHS DONE, AND THERE IS EXACTLY ONE TASK LEFT.**
+2026-08-14. `docs/plan/DECISIONS-PENDING.md` carries the table; #2 through #8 are
+implemented and #1 — **withdraw host-plugin renders** — is not started.
 
-**There is no queued work, and the next step is a DECISION, not a task.**
-`docs/plan/DECISIONS-PENDING.md` states the eleven open items in plain language, each with
-options, costs and a recommendation, and each with a `Decision:` line for the curator to
-fill in. **If those lines are still blank, your job is to walk the curator through them —
-not to pick answers.** If they are filled in, implement them in the order that file's last
-section gives.
+**#1 IS YOUR TASK, AND IT IS SCOPED FOR YOU** at the foot of `DECISIONS-PENDING.md` under
+*"What #1 still owes"*: the five things that go together, the README corrections, and the
+one PROOF OBLIGATION that is the actual work. Read that section before anything else in
+this brief.
 
-The technical detail behind each item is in "Open for the curator" below; the decisions
-file is the readable version of the same list.
+**The proof obligation, said once here because it is the part a session skips.**
+`ScopeBinding.bind` resolves `query_id:` BEFORE its nil-context check and takes its actor
+from `TagContext`'s ambient fallback. S-30's independent review put that ordering there on
+purpose — moving it withdrew a documented working feature as collateral of a deletion that
+never claimed it. So deleting the fallback is safe only if NO CONTEXT-LESS RENDER REMAINS,
+which is precisely what withdrawing host renders is supposed to establish. **Establish it
+by measurement before deleting anything.** S-30 is this project's own evidence: the
+2026-08-12 attempt deleted first and measured 166 of 249 red; the one that worked rebuilt
+the harness first and proved indifference before a file was removed.
+
+**Do not absorb the `from:` question into #1.** Eighteen README examples still write `from:`
+on an aggregation tag and it has been decorative since T-26a. Keeping it as
+documentation-of-intent or stripping it is a separate curator call, and #1 is already the
+largest item on the list.
+
+**What decision #3 changed that you will meet everywhere.** A QUOTED tag parameter is now
+LITERAL TEXT; a bare one is a Liquid variable falling back to the literal. One module says
+it — `liquid/tag_params.rb` — and five tags share it. If you touch tag markup, that is the
+rule, and `TagParams::Value` is a String subclass that must never leave the layer (`resolve`
+returns a plain String, and two examples assert it).
 
 ## Where the work stands
 
@@ -67,23 +83,40 @@ README already says so for a spent-time template and it is in fact true everywhe
 README examples still write it. Whether to keep it as harmless documentation-of-intent or to
 strip it is a curator call; nothing depends on it either way.
 
-Verified at HEAD, on Redmine **7.0-stable** with **PostgreSQL 16**, standalone (no
-`redmine_reporter`, no `redmineup` gem):
+Verified at HEAD (`ea9c4fb`, 2026-08-14), on Redmine **7.0-stable** with **PostgreSQL 16**,
+standalone (no `redmine_reporter`, no `redmineup` gem):
 
-    minitest             1040 runs, 5078 assertions, 0 failures, 0 errors, 0 skips
-                         (1056 before S-30; the deleted golden_scope_fixture_test.rb
-                         defined exactly 16 test methods — counted, not trusted)
-    rspec                2869 examples, 0 failures, 136 pending — and 2869 / 0 / 146 in the
-                         CI SHAPE (from redmine/, plugin mirrored under plugins/), which is
-                         the invocation that found T-38's four red RSpec jobs
-    thirteen gates rc=0  including the new no_html_safe + its 16-arm selftest; three need
-                         arguments or tools (cve x2, drop_reference_parity, which needs the
-                         Liquid gem and is OK under bundle exec). Sweep the status on its
-                         OWN line — `out=$(cmd); echo "$(basename $f): rc=$?"` reports
-                         basename's status and is always 0
+    minitest             1042 runs, 5084 assertions, 0 failures, 0 errors, 0 SKIPS
+                         (1040 before; the count moved by the two new functional tests,
+                         counted with `grep -c '^  def test_'` rather than trusted.
+                         0 skips only because poppler-utils is installed here — a run
+                         without it reports 4, each with a reason)
+    rspec                2934 examples, 0 failures, 136 pending
+                         (2880 before; +54. **193 pending on the first run of this
+                         session, and that was poppler's absence, not a regression** —
+                         diff the pending LISTS before attributing a move)
+    spec/golden          173 examples, 0 failures, 0 pending          <- G7 RAN
     spec_liquid          346 examples, 0 failures on Liquid 4.0.4 AND 5.13.0
-    spec/golden          167 examples, 0 failures, 0 pending          <- G7 RAN
-    script/migrate_updown.sh rc=0 (G11), .codex/check_ruby_floor.sh rc=0
+    eleven gates rc=0    plus three *_selftest.sh; `drop_reference_parity.sh` needs
+                         `BUNDLE_GEMFILE=$PWD/redmine/Gemfile` or it exits 2 with
+                         "the Liquid gem is not loadable" — which is the gate being
+                         honest, not a failure. Sweep each status on its OWN line
+    script/migrate_updown.sh rc=0 both arms (G11), .codex/check_ruby_floor.sh rc=0
+    locale parity        395 keys x 9 files, verified by PARSING each file
+
+**NOT VERIFIED HERE, and #2 is the one that matters:** MariaDB. The engine defect #2 fixes
+is not reproducible in this container — MariaDB is not installable beside the MySQL client
+— so the `adapter (MariaDB 11)` CI cell is the only thing that can answer it. **Read that
+cell.** Also unrun: the conformance corpus and the starter gallery (no Chromium/Gotenberg/
+wkhtmltopdf set up here), and CI has not run on any of `880c783`..`ea9c4fb`.
+
+**AND THE INDEPENDENT REVIEW OF THIS WORK DID NOT COMPLETE.** Two subagents were briefed to
+reject it; the first died on an API spend limit mid-run (leaving a mutation in the tree —
+HANDOVER §1's new first entry), the second was still running when the session ended. What
+stands in for it is twelve MUTATIONS against the new code, six of which survived and five
+of which were real holes now closed. That is weaker evidence than a review and is recorded
+as weaker rather than implied. **Re-running the review over `880c783..ea9c4fb` is a
+reasonable first act.**
 
 **A CLOUD SESSION STARTS SHALLOW AND THAT FAILS G7 LIKE A REAL BREACH.** `git fetch
 --unshallow origin` first, before concluding anything from `spec/golden`. And **`rspec spec`

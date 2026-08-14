@@ -13,6 +13,24 @@ recommendation everywhere except where I say otherwise", overrode #3 to land in 
 than 1.1, and resolved #1's conditional with *"niemand gebruikt dat nog"* — so #1 is
 option 2, the full withdrawal.
 
+**STATUS 2026-08-14: SEVEN OF THE EIGHT ARE IMPLEMENTED. ONLY #1 REMAINS.**
+
+| | landed | where |
+|---|---|---|
+| #2 MariaDB grouped sum/avg/distinct | 2026-08-13 | `2c22c74` |
+| #3 quoted parameters are literal | 2026-08-14 | `880c783`, `160dc67` |
+| #4 narrow the diagnostic | 2026-08-14 | `f77dde4` |
+| #5 `[permanent]` on the two comment-only files | 2026-08-14 | `f77dde4` |
+| #6 the README's spent-time table | 2026-08-14 | `f77dde4` |
+| #7 `<html lang>` from the installation default | 2026-08-14 | `f77dde4`, `ea9c4fb` |
+| #8 FR-50 renumbered in nine locale headers | 2026-08-14 | `f77dde4` |
+| **#1 withdraw host-plugin renders** | **NOT STARTED** | — |
+
+**#1 was left deliberately, not forgotten.** It is the item this file's own closing
+section puts last, it is the only one with an irreversible deletion in it, and S-30's
+lesson is that a deletion half-done is worse than one not started. What it needs is
+below under "What #1 still owes".
+
 Ordered by what it costs you to get it wrong, not by effort.
 
 ---
@@ -248,3 +266,48 @@ some answers touch the same files:
    coupling list 5 → 2.
 
 Then: run the full test suite, read CI, bump the version from 0.5.0 to 1.0.
+
+---
+
+## What #1 still owes — scoped 2026-08-14, not started
+
+Written down so the next session does not re-derive it. Every path below was READ, not
+guessed; the line numbers are at `ea9c4fb`.
+
+**The five things to delete, and they go together or not at all.**
+
+1. `lib/reporter_report_content_patch.rb` (35 lines) and the `apply_patch(...)` call in
+   `RedmineReporterDashboards.apply_reporter_patches` — `lib/redmine_reporter_dashboards.rb:484`.
+2. `apply_reporter_patches` itself, and its caller `init.rb:215` plus the `return unless
+   reporter` above it.
+3. `reporter_present?` / `reset_reporter_presence!`
+   (`lib/redmine_reporter_dashboards.rb:342,352`), `ReporterPresence`, and the boot log
+   line at `init.rb:180-193`. **Keep the "running standalone" log line or replace it
+   deliberately** — an operator who expected the widgets reads it, and deleting it silently
+   is the kind of thing this project writes handover entries about.
+4. `TagContext`'s ambient-actor fallback (`liquid/tag_context.rb:69-75`, the one
+   `User.current` read in the plugin), **and only after proving it is unreachable**.
+5. The three non-`[permanent]` rows in `script/gates/zero_reporter.allowlist` — all three
+   are the detection. `ZERO_REPORTER_MODE=strict` then goes **3 → 0** (the decision text
+   says "5 → 2"; that was written before #5 marked the two comment-only files permanent,
+   so the arithmetic moved and the destination did not).
+
+**THE PROOF OBLIGATION, AND IT IS THE WHOLE TASK.** `ScopeBinding.bind` resolves
+`query_id:` **before** its nil-context check (`liquid/scope_binding.rb:164-167`) and takes
+its actor from `TagContext.actor`. S-30's independent review put that ordering there on
+purpose, because moving it withdrew a documented working feature as collateral. So the
+deletion is safe **only if no context-less render remains** — which is exactly what
+withdrawing host renders is supposed to establish. Establish it by MEASUREMENT before
+deleting anything, the way S-30 rebuilt the harness before removing a file: enumerate
+every producer of a `Liquid::Context` in the tree and show each one carries a
+`RenderContext`. `git grep -n 'Liquid::Template' -- lib app` is the starting point.
+
+**The README corrections.** Sections that tell an author to put `{% sql_aggregate %}` or
+`{% version_rollup %}` in a *Reporter* template, and the `query_id:` note that exists to
+narrow this case. `rg -n 'Reporter template|redmine_reporter' README.md` finds them.
+
+**And the open question this deletion inherits**, which is NOT part of #1 and should not be
+absorbed into it: eighteen README examples still write `from:` on an aggregation tag, and
+`from:` has been decorative on every render since T-26a — the owned path returns
+`render_context.scope` and never reads it. Keeping it as documentation-of-intent or
+stripping it is a separate curator call.
