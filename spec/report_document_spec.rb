@@ -94,6 +94,25 @@ RSpec.describe RedmineReporterDashboards::ReportDocument do
 
         expect(described_class.wrap(body)).to include('<html lang="en">')
       end
+
+      # AND THE `lang:` SEAM IS ESCAPED SEPARATELY, which is not belt-and-braces: the
+      # `LANGUAGE_TAG` allowlist guards the SETTING, and `lang:` is a public keyword that
+      # bypasses it entirely. Found by mutation — replacing `escape_attribute` with the
+      # identity left 984 examples green, because every example above went through the
+      # allowlist and none through the seam. The two controls guard two different inputs.
+      it 'escapes a caller-supplied lang, which the allowlist never sees' do
+        document = described_class.wrap(body, lang: '" onload="alert(1)')
+
+        expect(document).not_to include('" onload="alert(1)"')
+        expect(document).to include('&quot; onload=&quot;alert(1)')
+      end
+
+      it 'escapes the other three attribute-breaking characters too' do
+        document = described_class.wrap(body, lang: '<&>')
+
+        expect(document).to include('&lt;&amp;&gt;')
+        expect(document).not_to include('<html lang="<&>">')
+      end
     end
 
     it 'carries the report stylesheet' do

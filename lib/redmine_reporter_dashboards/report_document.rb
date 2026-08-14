@@ -95,10 +95,17 @@ module RedmineReporterDashboards
     # this module that does not come from the caller.
     LANGUAGE_TAG = /\A[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*\z/.freeze
 
-    # `LANGUAGE_TAG` already excludes every character that matters here, so this cannot
-    # fire — it is belt and braces on the ONE attribute value this module interpolates,
-    # and it is three characters rather than a dependency on ERB::Util, which the DB-less
-    # spec run does not load. NOT `html_safe` anywhere (INV-9).
+    # TWO CONTROLS ON TWO DIFFERENT INPUTS, and the first draft of this comment got that
+    # wrong. It said `LANGUAGE_TAG` already excludes every character that matters "so this
+    # cannot fire — belt and braces". `LANGUAGE_TAG` guards the SETTING; `lang:` is a
+    # public keyword that bypasses the allowlist entirely, so this is the only thing
+    # standing between a caller's value and an attribute. Mutation found it: replacing
+    # this method with the identity left 984 examples green, because every example went
+    # through the allowlist and none through the seam.
+    #
+    # Hand-rolled rather than `ERB::Util`, which the DB-less spec run does not load, and
+    # `&` FIRST so the other three substitutions cannot be double-escaped. NOT `html_safe`
+    # anywhere (INV-9).
     def self.escape_attribute(value)
       value.to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;').gsub('>', '&gt;')
     end
