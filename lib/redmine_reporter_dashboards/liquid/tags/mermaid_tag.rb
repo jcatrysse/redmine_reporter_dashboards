@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../execution_policy'
+require_relative '../tag_params'
 
 module RedmineReporterDashboards
   module Liquid
@@ -85,7 +86,6 @@ module RedmineReporterDashboards
         # rather than escaped, so there is nothing to get wrong later when it lands in an
         # attribute.
         ID_PATTERN = /\A[A-Za-z][A-Za-z0-9_-]*\z/
-        PARAM_RE = /(\w+)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/
         # A single `{{ … }}` lookup. Deliberately not a Liquid subset: no filters, no `{% %}`.
         LOOKUP_RE = /\{\{\s*([a-zA-Z_][\w.\[\]'"-]*)\s*\}\}/
 
@@ -117,10 +117,11 @@ module RedmineReporterDashboards
 
         def initialize(tag_name, markup, tokens)
           super
-          @params = markup.to_s.scan(PARAM_RE)
-                          .each_with_object({}) { |(k, dq, sq, bare), out|
-                            out[k.strip] = dq || sq || bare || ''
-                          }
+          # Every parameter here is a LITERAL — this tag has never looked one up in the
+          # context — so `TagParams` changes nothing for it. Shared anyway, because a
+          # sixth copy of the same regexp is how the four copies drifted apart in the
+          # first place (CLAUDE.md §5).
+          @params = TagParams.parse(markup)
         end
 
         # Liquid 4's entry point.
@@ -302,7 +303,7 @@ module RedmineReporterDashboards
 
         # THE BODY ESCAPER IS NOT ENOUGH FOR AN ATTRIBUTE. `escape` handles `&`, `<` and
         # `>`, which is what a `<pre>`'s content needs; an attribute value also has to
-        # survive its own quoting. `PARAM_RE` accepts a single-quoted value, so
+        # survive its own quoting. `TagParams::PARAM_RE` accepts a single-quoted value, so
         # `title: 'say "hi"'` really can carry a double quote, and both quote forms are
         # escaped rather than one — a rule with an exception is a rule somebody applies
         # inconsistently.

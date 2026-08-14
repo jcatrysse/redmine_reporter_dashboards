@@ -713,6 +713,149 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
   # ------------------------------------------------------------------
 
   # ------------------------------------------------------------------
+  # Curator decision #3 — a quoted parameter is LITERAL TEXT
+  # ------------------------------------------------------------------
+  #
+  # A bare parameter is a Liquid variable, falling back to the literal; a QUOTED one is
+  # never looked up. Before this, `parse_markup` threw the quoting away and `str_param`
+  # looked everything up — so `group_by: "user"` asked for `group_by: "Redmine Admin"`,
+  # because `user` is assigned in every report this plugin renders.
+  #
+  # This is a BREAKING CHANGE, taken in 1.0 by decision. The two halves below are what the
+  # curator asked for: the dimensions that could not be written at all now can be, and a
+  # template that RELIED on the old behaviour fails VISIBLY rather than reporting a
+  # different number under the right heading.
+  #
+  # `spec/liquid/tag_params_spec.rb` covers the rule itself. These cover the TAG — the
+  # thing an author actually types — and the two ends of the blast radius.
+  describe 'quoted parameters are literal text' do
+    let(:the_actor) { Object.new }
+
+    def owned_context(source, assigns = {})
+      render_context = RedmineReporterDashboards::Liquid::RenderContext.new(
+        actor: the_actor, scope: scope, source: source
+      )
+      build_context(assigns, { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY =>
+                               render_context })
+    end
+
+    def codes(ctx)
+      ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
+         .diagnostics.to_a.map { |d| (d['code'] || d[:code]).to_s }
+    end
+
+    # THE REPORTED DEFECT, CLOSED. Found by T-37's own gallery harness: two of the
+    # spent-time source's four dimensions — `user` and `project` — were unreachable in
+    # EVERY spelling, because both names are always assigned in a report.
+    %w[user project].each do |dimension|
+      it "can finally ask for group_by: \"#{dimension}\", which no spelling could reach" do
+        ctx = owned_context(:time_entries, dimension => 'Redmine Admin')
+        expect(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+          .to receive(:breakdown).with(scope, hash_including(group_by: dimension))
+          .and_return(dimension_result)
+
+        build_tag(%(group_by: "#{dimension}", assign_to: stats)).render(ctx)
+      end
+    end
+
+    it 'accepts single quotes for the same thing' do
+      ctx = owned_context(:time_entries, 'user' => 'Redmine Admin')
+      expect(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown).with(scope, hash_including(group_by: 'user'))
+        .and_return(dimension_result)
+
+      build_tag("group_by: 'user', assign_to: stats").render(ctx)
+    end
+
+    # THE OTHER HALF OF THE CURATOR'S CONDITION. A template written against the old
+    # behaviour said `group_by: "dim"` to get the dimension name out of a variable. It now
+    # gets the literal `dim`, which is not a dimension — and the aggregator's own refusal
+    # reaches the page (INV-4). It does NOT quietly group by something else.
+    #
+    # The aggregator here is the REAL one: only the issue kernel is stubbed in this file,
+    # so `aggregation_dimension_unknown` is raised by the module under test rather than by
+    # the harness.
+    it 'fails VISIBLY for a template that relied on the old lookup' do
+      ctx = owned_context(:time_entries, 'dim' => 'activity')
+
+      build_tag('group_by: "dim", assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).to include('aggregation_dimension_unknown')
+      expect(ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
+               .diagnostics.to_a.to_s).to include('dim')
+      expect(ctx.scopes.last['stats']).to eq(described_class.new('sql_aggregate', '', nil)
+                                                            .send(:empty_result))
+    end
+
+    # ...and the same markup WITHOUT the quotes still resolves the variable, so the
+    # author's way out is one keystroke and the old behaviour is still spellable.
+    it 'still resolves the same variable when the quotes are removed' do
+      ctx = owned_context(:time_entries, 'dim' => 'activity')
+      expect(RedmineReporterDashboards::Aggregation::TimeEntryAggregator)
+        .to receive(:breakdown).with(scope, hash_including(group_by: 'activity'))
+        .and_return(dimension_result)
+
+      build_tag('group_by: dim, assign_to: stats').render(ctx)
+    end
+
+    # THE BARE PATH IS UNTOUCHED, and this is the assertion that bounds the blast radius:
+    # every README example and every shipped starter writes its dimensions bare.
+    it 'leaves a bare dimension that resolves to nothing as the literal field name' do
+      ctx = build_context({}, owned_registers(scope: scope))
+      expect(SqlAggregation::QueryAggregator).to receive(:breakdown)
+        .with(scope, hash_including(group_by: 'status')).and_return(breakdown_result)
+
+      build_tag('group_by: status, assign_to: stats').render(ctx)
+    end
+
+    # A LABEL IS THE COMMON QUOTED PARAMETER, and it was only ever right by accident —
+    # `Other` happens not to be an assigned variable. Now it is right by rule.
+    it 'passes a quoted label through untouched even when it collides with a variable' do
+      ctx = build_context({ 'Other' => 'SHOULD NOT WIN' }, owned_registers(scope: scope))
+      # `other_label:` is one of DIMENSION_PARAMS, so this is the dimension path.
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(other_label: 'Other')).and_return(dimension_result)
+
+      build_tag('group_by: status, other_label: "Other", assign_to: stats').render(ctx)
+    end
+
+    # `int_param` HAS THE SAME RULE, and it needed saying separately: it does its own
+    # context lookup for anything that is not a plain integer literal, so `limit: "n"`
+    # would otherwise still have resolved a variable.
+    it 'reads a quoted integer as the number, not as a variable of that name' do
+      ctx = build_context({ 'n' => 999 }, owned_registers(scope: scope))
+      # `limit:` is one of DIMENSION_PARAMS, so this is the dimension path.
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(limit: 5)).and_return(dimension_result)
+
+      build_tag('group_by: status, limit: "5", assign_to: stats').render(ctx)
+    end
+
+    # `list_param` and `bool_param` route through `str_param`, so they inherit the rule —
+    # asserted rather than assumed, because "it routes through" is exactly the kind of
+    # claim that stops being true in a later refactor.
+    it 'reads a quoted list as its own text' do
+      ctx = build_context({ '30;60' => 'SHOULD NOT WIN' }, owned_registers(scope: scope))
+      expect(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown)
+        .with(scope, hash_including(age_buckets: %w[30 60])).and_return(dimension_result)
+
+      build_tag('group_by: age, age_buckets: "30;60", assign_to: stats').render(ctx)
+    end
+
+    # `query_id:` IS THE FIFTH READER, and it lives in `ScopeBinding` rather than in the
+    # tag — a separate copy of the same lookup, which is why it gets its own example.
+    it 'reads a quoted query_id as the number' do
+      LiquidTagIssueQueryStub.register(42, scope)
+      ctx = build_context({ '42' => 999 }, owned_registers)
+
+      expect(SqlAggregation::QueryAggregator).to receive(:aggregate)
+        .with(scope, anything).and_return(agg_result)
+
+      build_tag('query_id: "42", assign_to: stats').render(ctx)
+    end
+  end
+
+  # ------------------------------------------------------------------
   # Parameter parsing
   # ------------------------------------------------------------------
 

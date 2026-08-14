@@ -1839,6 +1839,51 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body
   end
 
+  # CURATOR DECISION #3, END TO END — A QUOTED PARAMETER IS LITERAL TEXT.
+  #
+  # `user` and `project` are assigned in every report this plugin renders, so before this
+  # change the spent-time source's `user` dimension could not be asked for in ANY spelling:
+  # bare resolved the variable, and quoting resolved it too because `parse_markup` threw
+  # the quotes away. This is the whole defect, on a real page.
+  def test_a_quoted_dimension_is_the_dimension_and_not_a_variable
+    template = create_template(
+      source: 'time_entries',
+      content: '{% sql_aggregate group_by: "user", assign_to: stats %}' \
+               'ROWS=[{{ stats.buckets | size }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+    another_users_hours
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    # It grouped. The count is deliberately not pinned to a number — the point is that the
+    # dimension RESOLVED, and `aggregation_dimension_unknown` would have made it zero.
+    assert_not_include ERB::Util.html_escape('ROWS=[0]'), response.body
+    assert_select 'div.reporter-degradations', count: 0
+  end
+
+  # AND THE OTHER HALF THE CURATOR ASKED FOR: a template written against the OLD behaviour
+  # fails where the reader can see it, rather than quietly reporting a different number
+  # under the right heading. `dim` holds a real dimension name; quoted, it is now the
+  # literal `dim`, which is not one.
+  def test_a_template_that_relied_on_the_old_lookup_fails_visibly
+    template = create_template(
+      source: 'time_entries',
+      content: '{% assign dim = "activity" %}' \
+               '{% sql_aggregate group_by: "dim", assign_to: stats %}TOTAL=[{{ stats.total }}]'
+    )
+    grant_time(:view_reporter_dashboards_reports)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_include ERB::Util.html_escape(
+      l(:text_reporter_degradation_aggregation_dimension_unknown, group_by: 'dim')
+    ), response.body
+    assert_include ERB::Util.html_escape('TOTAL=[0]'), response.body
+  end
+
   # AND A CLEAN ISSUE RENDER SAYS NOTHING, so the block is not simply always drawn.
   def test_a_clean_render_reports_no_degradations
     template = create_template(content: 'x')

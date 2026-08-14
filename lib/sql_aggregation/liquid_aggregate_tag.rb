@@ -2,6 +2,7 @@
 
 require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
 require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
+require_relative '../redmine_reporter_dashboards/liquid/tag_params'
 require_relative '../redmine_reporter_dashboards/aggregation/drill_through'
 
 module SqlAggregation
@@ -111,8 +112,10 @@ module SqlAggregation
     # TagContext.
     include RedmineReporterDashboards::Liquid::ScopeBinding
 
-    # Matches: key: "quoted" | key: 'quoted' | key: bare_value
-    PARAM_RE = /(\w+)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/
+    # Markup parsing and the quoted-means-literal rule live in one place for all four
+    # tags — see `RedmineReporterDashboards::Liquid::TagParams`, which carries the
+    # decision and the upgrade note.
+    TagParams = RedmineReporterDashboards::Liquid::TagParams
 
     # Parameters that only exist in dimension mode. When none of them is used and
     # group_by names one of the seven core fields, the legacy .breakdown path runs
@@ -130,7 +133,7 @@ module SqlAggregation
 
     def initialize(tag_name, markup, tokens)
       super
-      @raw_params = parse_markup(markup)
+      @raw_params = TagParams.parse(markup)
     end
 
     def render(context)
@@ -560,27 +563,25 @@ module SqlAggregation
     # Parameter helpers
     # ------------------------------------------------------------------
 
-    def parse_markup(markup)
-      params = {}
-      markup.to_s.scan(PARAM_RE) do |key, dq, sq, bare|
-        params[key.strip] = dq || sq || bare || ''
-      end
-      params
-    end
-
+    # QUOTED MEANS LITERAL, BARE MEANS A VARIABLE — decided once, in `TagParams`,
+    # which carries the reasoning and the upgrade note.
     def str_param(value, context, default: '')
-      return default if value.nil? || value.empty?
-
-      resolved = context[value]
-      resolved.nil? ? value : resolved.to_s
+      TagParams.resolve(value, context, default: default)
     end
 
     def int_param(value, context, default: 0)
       return default if value.nil? || value.empty?
 
       # Skip context lookup for plain numeric literals — avoids accidentally
-      # resolving a context key named e.g. "6" to an unrelated variable.
-      resolved = value.match?(/\A\d+\z/) ? value : (context[value] || value)
+      # resolving a context key named e.g. "6" to an unrelated variable. A QUOTED
+      # value is a literal for the same reason every other quoted value is: `limit: "6"`
+      # asks for six, never for whatever a variable named `6` holds.
+      resolved =
+        if TagParams.quoted?(value) || value.match?(/\A\d+\z/)
+          value.to_s
+        else
+          context[value.to_s] || value.to_s
+        end
       n = resolved.to_i
       n.zero? ? default : n
     end

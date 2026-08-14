@@ -3,6 +3,7 @@
 require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
 require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
 require_relative '../redmine_reporter_dashboards/liquid/tag_context'
+require_relative '../redmine_reporter_dashboards/liquid/tag_params'
 require_relative '../redmine_reporter_dashboards/liquid/drops'
 
 module SqlAggregation
@@ -44,12 +45,13 @@ module SqlAggregation
     # TagContext.
     include RedmineReporterDashboards::Liquid::ScopeBinding
 
-    # Matches: key: "quoted" | key: 'quoted' | key: bare_value
-    PARAM_RE = /(\w+)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/
+    # Markup parsing and the quoted-means-literal rule live in one place for all five
+    # tags — see `RedmineReporterDashboards::Liquid::TagParams`.
+    TagParams = RedmineReporterDashboards::Liquid::TagParams
 
     def initialize(tag_name, markup, tokens)
       super
-      @raw_params = parse_markup(markup)
+      @raw_params = TagParams.parse(markup)
     end
 
     def render(context)
@@ -148,19 +150,9 @@ module SqlAggregation
     # Parameter helpers (mirrors SqlAggregation::LiquidAggregateTag)
     # ------------------------------------------------------------------
 
-    def parse_markup(markup)
-      params = {}
-      markup.to_s.scan(PARAM_RE) do |key, dq, sq, bare|
-        params[key.strip] = dq || sq || bare || ''
-      end
-      params
-    end
-
+    # QUOTED MEANS LITERAL, BARE MEANS A VARIABLE — decided once, in `TagParams`.
     def str_param(value, context, default: '')
-      return default if value.nil? || value.empty?
-
-      resolved = context[value]
-      resolved.nil? ? value : resolved.to_s
+      TagParams.resolve(value, context, default: default)
     end
 
     def elapsed_ms(t0)

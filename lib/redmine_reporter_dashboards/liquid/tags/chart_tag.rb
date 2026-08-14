@@ -2,6 +2,7 @@
 
 require_relative '../execution_policy'
 require_relative '../render_context'
+require_relative '../tag_params'
 require_relative '../../charts'
 
 module RedmineReporterDashboards
@@ -44,7 +45,6 @@ module RedmineReporterDashboards
       # in a report cannot tell a refused chart from a chart the author never wrote, and
       # the degradation list is downstream of a reader who has already been confused.
       class ChartTag < ::Liquid::Tag
-        PARAM_RE = /(\w+)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/
 
         # `from:` reads a variable the aggregation tags assigned. Those results are
         # String-keyed Hashes (`buckets`, `labels`, `rows`, `matrix`, …), which is what
@@ -53,7 +53,7 @@ module RedmineReporterDashboards
 
         def initialize(tag_name, markup, tokens)
           super
-          @raw_params = parse_markup(markup)
+          @raw_params = TagParams.parse(markup)
         end
 
         def render(context)
@@ -170,18 +170,11 @@ module RedmineReporterDashboards
         # Parameters
         # ------------------------------------------------------------------
 
-        def parse_markup(markup)
-          params = {}
-          markup.to_s.scan(PARAM_RE) { |key, dq, sq, bare| params[key.strip] = dq || sq || bare || '' }
-          params
-        end
-
+        # QUOTED MEANS LITERAL, BARE MEANS A VARIABLE — decided once, in `TagParams`.
+        # `nil` rather than `''` for an absent parameter, because `ChartSpec` treats "no
+        # title" and "an empty title" differently.
         def str_param(name, context)
-          raw = @raw_params[name]
-          return nil if raw.nil? || raw.empty?
-
-          resolved = context[raw]
-          (resolved.nil? ? raw : resolved).to_s
+          TagParams.resolve(@raw_params[name], context, default: nil)
         end
 
         def int_param(name, fallback)

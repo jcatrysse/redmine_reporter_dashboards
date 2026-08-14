@@ -129,6 +129,37 @@ All notable changes to this plugin are documented in this file.
 
 ### Changed
 
+- **BREAKING — a quoted value in a report tag now means that text, and nothing else.**
+
+  `{% sql_aggregate group_by: "user" %}` used to mean *"whatever the variable `user` holds"*.
+  The quotes were thrown away before the value was looked up, so a quoted parameter behaved
+  exactly like an unquoted one. Every report assigns `user` and `project`, so two of the four
+  spent-time groupings — **`user` and `project` — could not be written at all**, in any
+  spelling. They can now.
+
+  The rule, for all five tags (`sql_aggregate`, `version_rollup`, `chart`, `mermaid`,
+  `geo_version_map`):
+
+  | you write | what it means |
+  |---|---|
+  | `group_by: "user"` or `group_by: 'user'` | the text `user` |
+  | `group_by: user` | the Liquid variable `user`, falling back to the text `user` if there is no such variable |
+
+  **What to check before upgrading.** Almost nothing changes: quoted values in this plugin's
+  README examples and in every shipped starter are labels and lists (`other_label: "Other"`,
+  `age_buckets: "30;60;90;180"`), which always meant their own text and still do. The one
+  template that changes behaviour is one that **quoted a value in order to read a variable** —
+  `group_by: "my_dimension"` where `my_dimension` is assigned earlier in the template.
+
+  **If you have one, it will tell you.** The parameter is now the literal `my_dimension`,
+  which is not a dimension, so the report shows the *"is not a dimension"* message in its
+  diagnostics panel and reports zero — it does not quietly group by something else and print a
+  different number under the same heading. **The fix is to remove the quotes**, which is what
+  the documentation has always shown.
+
+  This also applies to `query_id:`, `limit:` and the other numeric parameters, and to the
+  `on`/`off` flags: `limit: "5"` is five, never a variable named `5`.
+
 - **`rake reporter_dashboards:render:preflight` no longer exits 0 after checking nothing.**
 
   If every render engine on the installation needs a separate service and none of them is the

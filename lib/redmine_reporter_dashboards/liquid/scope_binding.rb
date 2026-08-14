@@ -4,6 +4,7 @@ require_relative 'render_context'
 # S-30: `query_id:` resolves on a context-less render too, and TagContext is where the one
 # ambient-actor read lives. Required here so that path cannot depend on load order.
 require_relative 'tag_context'
+require_relative 'tag_params'
 
 module RedmineReporterDashboards
   module Liquid
@@ -210,9 +211,13 @@ module RedmineReporterDashboards
         # A template may write either `query_id: 7` or `query_id: some_variable`, so the
         # literal is tried as a context lookup first — the same two-step the legacy
         # module does, kept because it is template-facing behaviour and templates exist.
+        # THE SAME QUOTING RULE AS EVERY OTHER TAG PARAMETER (curator decision #3).
+        # `query_id: 7` and `query_id: some_var` are unchanged; `query_id: "7"` is the
+        # literal seven rather than a lookup of a variable named `7`. Routed through
+        # `TagParams` rather than repeated, because a second copy of the rule is how the
+        # four copies of `str_param` drifted apart.
         def query_id_of(param, liquid_context)
-          resolved = liquid_context.respond_to?(:[]) ? liquid_context[param] : nil
-          (resolved || param).to_i
+          TagParams.resolve(param, liquid_context).to_i
         end
 
         def log(message)

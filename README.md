@@ -1433,6 +1433,30 @@ a permission difference as a bug.
 An invalid enum-ish value (`sort: banana`, `age_field: banana`) falls back to the
 default and logs a warning — it never raises.
 
+#### Quoted or unquoted — they mean different things
+
+This applies to every tag in this plugin, not just `{% sql_aggregate %}`.
+
+| you write | what it means |
+|-----------|---------------|
+| `group_by: "user"` or `group_by: 'user'` | **the text `user`** — never looked up |
+| `group_by: user` | **the Liquid variable `user`**, falling back to the text `user` when no such variable exists |
+
+Write dimensions, measures and field names **unquoted** — that is what every example
+here does, and the fallback makes it read as the plain word. Quote a value when it
+contains a space, a semicolon or a comma (`other_label: "Everything else"`,
+`age_buckets: "30;60;90;180"`), or when you want the plain word and a variable of that
+name happens to exist.
+
+That last case is not hypothetical: **`user` and `project` are assigned in every
+report**, so `group_by: user` on a spent-time report asks for a grouping named after
+the current user. Write `group_by: "user"` there.
+
+> **Changed in 1.0.** Quotes used to be stripped *before* the lookup, so a quoted value
+> behaved exactly like an unquoted one. A template that quoted a value **in order to**
+> read a variable now gets the literal text instead — and says so in its diagnostics
+> panel rather than reporting a different number. Remove the quotes. See the changelog.
+
 **Ordering.** Sorted rows first, then the `Other` row, then the no-value row.
 Both special rows always sit at the end, whatever `sort` says. `sort: position`
 uses the custom field's own value order (`CustomFieldEnumeration#position`, or
