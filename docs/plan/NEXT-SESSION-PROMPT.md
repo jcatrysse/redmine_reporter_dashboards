@@ -21,29 +21,28 @@ CLAUDE.md §9 *and* the hook's `PINNED_BRANCH` in one commit.
 Read `CLAUDE.md` first, then `docs/plan/HANDOVER.md` §1 (traps) and §3 (environment) — both
 record traps that produce a green run meaning nothing. Then read this brief twice.
 
-**THE CURATOR'S DECISION LIST IS SEVEN-EIGHTHS DONE, AND THERE IS EXACTLY ONE TASK LEFT.**
-2026-08-14. `docs/plan/DECISIONS-PENDING.md` carries the table; #2 through #8 are
-implemented and #1 — **withdraw host-plugin renders** — is not started.
+**THE CURATOR'S DECISION LIST IS DONE. ALL EIGHT. THERE IS NO QUEUED WORK.**
+2026-08-14. `docs/plan/DECISIONS-PENDING.md` carries the table; #2 through #8 landed
+earlier that day and **#1 — withdraw host-plugin renders — landed in `5d8d2c8`**, with the
+proof obligation discharged before anything was deleted. `ZERO_REPORTER_MODE=strict` passes
+for the first time, at **0** non-`[permanent]` entries, which was #1's stated destination.
 
-**#1 IS YOUR TASK, AND IT IS SCOPED FOR YOU** at the foot of `DECISIONS-PENDING.md` under
-*"What #1 still owes"*: the five things that go together, the README corrections, and the
-one PROOF OBLIGATION that is the actual work. Read that section before anything else in
-this brief.
+**SO YOUR FIRST JOB IS TO READ CI, NOT TO WRITE CODE.** Three commits went up unread by any
+CI run: `5d8d2c8` (#1), `ca92231` (#2's adapter examples) and `2c7ef77` (a gate hole found
+under #1's own proof). The cell that matters is **`adapter (MariaDB 11)`** — see the next
+section, because it is the one thing this container cannot answer and it now, for the first
+time, has something to say.
 
-**The proof obligation, said once here because it is the part a session skips.**
-`ScopeBinding.bind` resolves `query_id:` BEFORE its nil-context check and takes its actor
-from `TagContext`'s ambient fallback. S-30's independent review put that ordering there on
-purpose — moving it withdrew a documented working feature as collateral of a deletion that
-never claimed it. So deleting the fallback is safe only if NO CONTEXT-LESS RENDER REMAINS,
-which is precisely what withdrawing host renders is supposed to establish. **Establish it
-by measurement before deleting anything.** S-30 is this project's own evidence: the
-2026-08-12 attempt deleted first and measured 166 of 249 red; the one that worked rebuilt
-the harness first and proved indifference before a file was removed.
+**What #1 turned out to cost is written up** at the foot of `DECISIONS-PENDING.md` under
+*"What #1 owed, and what it cost"* — the measurement table, the one deviation from the scope
+note (`TagContext` went whole, not just its fallback), and the three things measurement
+contradicted after they had been written down as true. Read it before undoing any of it; two
+of the deletions restore a behaviour a previous independent review had deliberately
+protected, and the reason that protection expired is recorded in the code.
 
-**Do not absorb the `from:` question into #1.** Eighteen README examples still write `from:`
-on an aggregation tag and it has been decorative since T-26a. Keeping it as
-documentation-of-intent or stripping it is a separate curator call, and #1 is already the
-largest item on the list.
+**The `from:` question was NOT absorbed into #1 and is still open.** Eighteen README examples
+write `from:` on an aggregation tag and it has been decorative since T-26a. Keeping it as
+documentation-of-intent or stripping it is a curator call.
 
 **What decision #3 changed that you will meet everywhere.** A QUOTED tag parameter is now
 LITERAL TEXT; a bare one is a Liquid variable falling back to the literal. One module says
@@ -107,11 +106,24 @@ standalone (no `redmine_reporter`, no `redmineup` gem):
     locale parity        396 keys x 9 files, verified by PARSING each file, with the
                          placeholders of the changed keys compared across all nine
 
-**NOT VERIFIED HERE, and #2 is the one that matters:** MariaDB. The engine defect #2 fixes
-is not reproducible in this container — MariaDB is not installable beside the MySQL client
-— so the `adapter (MariaDB 11)` CI cell is the only thing that can answer it. **Read that
-cell.** Also unrun: the conformance corpus and the starter gallery (no Chromium/Gotenberg/
-wkhtmltopdf set up here), and CI has not run on any of `880c783`..`27865db`.
+**NOT VERIFIED HERE, AND MARIADB IS STILL THE ONE THAT MATTERS — BUT THE REASON HAS CHANGED,
+SO READ THIS RATHER THAN THE OLD VERSION OF IT.** The 2026-08-14 session read the
+`adapter (MariaDB 11)` cell at `b87b08c` and found it **green and incapable of confirming #2**:
+decision #2 added examples only under `spec/sql_aggregation/`, which is DB-LESS (a stub cannot
+truncate a column label — there is no server), and every pre-existing `measure:` case in both
+the adapter suite and the golden corpus groups by `status`/`tracker`/`priority`, a few dozen
+characters. Every `age` case is a plain COUNT. So the cell had never once run a grouped
+aggregate over an expression past MariaDB's 256-character limit.
+
+`ca92231` adds six adapter examples that do (the default age axis measures **333 characters**
+with `SUM(issues.estimated_hours)` beside it). **Three of them can only discriminate on
+MariaDB** — on PostgreSQL the alias truncates consistently at 63 on both ends, so the values
+are right with or without the fix, and restoring the pre-#2 code locally failed only 1 of 69
+(the statement-shape assertion). **So read the `adapter (MariaDB 11)` cell for the head you
+inherit.** It is now the measurement rather than a formality.
+
+Also unrun here: the conformance corpus and the starter gallery (no Chromium/Gotenberg/
+wkhtmltopdf set up), and CI has not run on `5d8d2c8`, `ca92231` or `2c7ef77`.
 
 **THE INDEPENDENT REVIEW RAN AND IT FOUND A BLOCKER**, which is the reason to keep briefing
 one. Two subagents were used: the first died on an API spend limit mid-run and left a
@@ -246,37 +258,25 @@ job as the README's record of the old idiom). And the chart form has no "drill o
 
 ## Open for the curator
 
-- **DECIDE FIRST: are renders by the `redmine_reporter` plugin still supported?** S-30's
-  independent review found this and it is the one open item with a behaviour change behind
-  it. The deletion's safety argument was *"after T-26a every render constructs a
-  RenderContext"* — true of **this plugin's** renders, and the tags are registered
-  **process-wide** (`::Liquid::Template.register_tag`). The host plugin renders its own
-  templates through `generate_reports`, with no RenderContext, and **this plugin still
-  ships `lib/reporter_report_content_patch.rb`, whose own header says it exists so "no
-  Issue objects are loaded for templates that only use `{% sql_aggregate %}`"** — i.e. we
-  optimise that path while having removed what made it resolve.
+- **~~DECIDE FIRST: are renders by the base plugin still supported?~~ ANSWERED AND
+  IMPLEMENTED.** The curator took **option 2 — withdrawn** (*"niemand gebruikt dat nog"*), and
+  it landed in `5d8d2c8` on 2026-08-14. Kept here, struck through rather than deleted, because
+  the three options and the reasoning behind them are what a later session would otherwise
+  re-derive from scratch — and because option 2's own text under-described the work in two
+  places that are worth knowing:
 
-  **Effect today:** on an install with both plugins, a host-rendered template using
-  `{% sql_aggregate %}` or `{% version_rollup %}` resolves nothing unless it names a
-  `query_id:` — it renders structurally intact with zero figures. It fails CLOSED (no
-  leak) and it now logs a warn line, and `query_id:` was restored precisely to narrow
-  this. But `technical-spec.md` §7 makes simultaneous installation a design goal, so this
-  is a supported configuration changing behaviour.
+  It said *"delete `TagContext`'s ambient-actor fallback"*. Deleting the fallback cannot mean
+  passing a nil actor instead: `Query.visible` opens with `user = args.shift || User.current`
+  and `Version.visible` with `args.first || User.current`, on all four supported branches, so a
+  nil actor reads the ambient one INSIDE REDMINE CORE where no gate here can see it. The
+  fallback is replaced by an explicit REFUSAL, and `{% geo_version_map %}` needed its own
+  because it resolves no scope and so never met the `scope.nil?` branch the aggregation tags had.
 
-  Three ways out, and the choice is yours:
-  1. **Host renders stay supported** — give them a scope. The honest shape is a narrow,
-     named source (not the six ambient ones), e.g. requiring `query_id:` and saying so in
-     the README, which is close to where the code already is.
-  2. **Host renders are withdrawn** — then finish it in one change: delete
-     `reporter_report_content_patch.rb` and its `apply_reporter_patches` call, delete
-     `TagContext`'s ambient-actor fallback, retire `ReporterPresence` (strict 5 → 2), and
-     correct the README sections that tell authors to put these tags in a Reporter
-     template.
-  3. **Leave as is** — accept zeros-with-a-log-line for that configuration, and say so in
-     the README so an operator is not debugging it.
+  It also said *"strict 5 → 2"*. The real arithmetic was **3 → 0**, because decision #5 marked
+  two comment-only files `[permanent]` in between. That is the third time a session predicted
+  this count and missed; the gate's own failure message now refuses to predict it.
 
-  Option 2 is the only one that also closes the strict list; option 1 is the only one that
-  keeps the A/B argument in §7 true. **Do not let a future session pick one by inference.**
+  `DECISIONS-PENDING.md`'s closing section is the full record.
 
 - **`group_by: user` CANNOT BE EXPRESSED on the spent-time source, and quoting does not help.**
   Found by T-37's own gallery harness. A bare tag parameter is resolved as a Liquid variable
@@ -295,12 +295,13 @@ job as the README's record of the old idiom). And the chart form has no "drill o
   three grouped calculations. **A release blocker by decision.**
 - **`<html lang>` is absent from both bindings.** Setting it needs a decision about whose locale
   a SCHEDULED report speaks.
-- **`ZERO_REPORTER_MODE=strict` is at 5 files** (T-27 left it at 6; S-30 took it to 5). Three are the detection,
-  which stays until S-30 deletes the glue it gates. Two are comment-only historical records
-  (`positioned.rb`, migration 001) still wanting a `[permanent]` marker or a reword — the
-  allowlist header makes the marker a CURATOR decision, so neither session took it. Going
-  below 5 means retiring the detection, which means deciding the fate of
-  `reporter_report_content_patch` — see the S-30 review note in "Open for the curator".
+- **~~`ZERO_REPORTER_MODE=strict` is at 5 files~~ STRICT PASSES, at 0 non-`[permanent]`
+  entries** (2026-08-14, decision #1). Seven files still name the base plugin and all seven
+  carry the marker: five importer files, which read that plugin's tables because that is what
+  an importer is for, and two comment-only historical records marked by decision #5. **The
+  gate's DEFAULT is still `warn` and flipping it is a curator call** — warn already blocks
+  silent regression, while defaulting to strict additionally refuses the reviewed decision to
+  allowlist something, which is a policy change about what CI permits.
 - **`manage_public_reporter_dashboards_templates` is flagged as code execution and cannot
   author.** T-40 marks it `authoring: true`, and its own comment says a role holding only it is
   refused at `#create` by a second guard. T-27's diagnostic reads the flag faithfully, so such a
