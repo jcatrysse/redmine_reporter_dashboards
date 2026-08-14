@@ -162,7 +162,7 @@ module ReportRunSpecSupport
   # A stand-in that STAMPS ITS OWN NAME into the Success it returns, so an example can
   # tell WHICH adapter ran. `FakeAdapter.behaviour` deliberately cannot: it is one shared
   # lambda, which is exactly what makes it a convenient lever and a useless witness.
-  # A LOGGER THAT RECORDS. FR-50's "an unregistered selection is ignored" is a behaviour whose
+  # A LOGGER THAT RECORDS. FR-27's "an unregistered selection is ignored" is a behaviour whose
   # only observable half is the log line, so the line is part of the assertion rather than a
   # side effect somebody hopes happened.
   class Recorder
@@ -253,7 +253,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
   end
 
   # `engine_preference: nil` — "this installation has selected no engine" — UNLESS an example
-  # says otherwise, and the axis is stated here rather than inherited. FR-50's resolution goes
+  # says otherwise, and the axis is stated here rather than inherited. FR-27's resolution goes
   # through `RedmineReporterDashboards.render_engine_id`, which lives in the boot file and
   # cannot be loaded in this suite (the same reason `asset_resolver` is injected), so the
   # default sentinel would make five examples about something else fail with a
@@ -621,7 +621,7 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       end
 
       # ------------------------------------------------------------------
-      # FR-50 — THIS INSTALLATION'S OWN CHOICE, and the four things about it that can break.
+      # FR-27 — THIS INSTALLATION'S OWN CHOICE, and the four things about it that can break.
       #
       # Every example here is written against a DISCRIMINATOR, because the whole hazard in a
       # precedence chain is that a step which does nothing looks exactly like a step that

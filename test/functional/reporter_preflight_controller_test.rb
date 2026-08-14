@@ -304,7 +304,7 @@ class ReporterPreflightControllerTest < ActionController::TestCase
     end
   end
 
-  # FR-50 — THE INSTALLATION'S SELECTED ENGINE REACHES THE SUITE FROM HERE.
+  # FR-27 — THE INSTALLATION'S SELECTED ENGINE REACHES THE SUITE FROM HERE.
   #
   # `PreflightSuite` may not read a `Setting` (mechanism E5; `render/**` is gated), so the
   # selection arrives as a port that THIS controller fills. A port a caller forgets is the

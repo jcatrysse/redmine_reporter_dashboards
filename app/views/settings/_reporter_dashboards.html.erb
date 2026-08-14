@@ -36,7 +36,7 @@
   raw_allowlist = raw['asset_allowlist'] || raw[:asset_allowlist] || policy.allowlist.join("\n")
 
   # T-32 — the ad-hoc mail policy, built from the same posted Hash and for the same reason.
-  # FR-50 — built from the POSTED hash for the same reason `policy` is: after a save that
+  # FR-27 — built from the POSTED hash for the same reason `policy` is: after a save that
   # dropped a value, an administrator has to see what they sent rather than what was stored.
   engine_pref = RedmineReporterDashboards::Render::EnginePreference.from_settings(raw)
 

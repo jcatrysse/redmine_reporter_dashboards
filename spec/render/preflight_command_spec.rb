@@ -155,7 +155,7 @@ module RedmineReporterDashboards
         # AND SELECTING THAT ENGINE IS THE DECISION THE DEFERRAL WAS WAITING FOR, so the run
         # checks it and the exit code goes back to being about the checks. Without this the
         # fix above would make every Gotenberg-only install permanently red, which is the
-        # opposite of what FR-50 bought.
+        # opposite of what FR-27 bought.
         it 'is not 2 when the installation has selected the engine that needs a service' do
           Registry.register(:gotenberg, good)
           stub_preflight(:pass)
@@ -164,7 +164,7 @@ module RedmineReporterDashboards
           expect(out.string).not_to include('NOTHING WAS VERIFIED')
         end
 
-        # Naming one deliberately does the same, and it is the pre-FR-50 way to ask.
+        # Naming one deliberately does the same, and it is the pre-FR-27 way to ask.
         it 'is not 2 when the operator named the engine with RRD_ENGINE' do
           Registry.register(:gotenberg, good)
           stub_preflight(:pass)

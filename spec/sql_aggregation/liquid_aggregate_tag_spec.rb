@@ -879,6 +879,63 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
 
       build_tag('query_id: "42", assign_to: stats').render(ctx)
     end
+
+    # THE BLOCKER AN INDEPENDENT REVIEW FOUND, AND THE EXAMPLE ABOVE IS WHY IT SURVIVED:
+    # `query_id: "42"` is a NUMERIC literal, whose outcome is identical under both rules.
+    # The case that changes is a quoted VARIABLE NAME — the one spelling a template would
+    # have used to read a query id out of a variable.
+    #
+    # Under the old rule this resolved `qid` and aggregated a real query. Under the new one
+    # it is the literal `qid`, `to_i` is 0, and `visible_query` returned nil BEFORE its own
+    # log line — so the report rendered complete, showed no diagnostics panel and read zero.
+    # That is exactly what the curator's second condition on #3 forbids.
+    it 'degrades VISIBLY when a quoted query_id resolves to no query' do
+      LiquidTagIssueQueryStub.register(7, scope)
+      ctx = build_context({ 'qid' => 7 }, owned_registers)
+      expect(SqlAggregation::QueryAggregator).not_to receive(:aggregate)
+
+      build_tag('query_id: "qid", assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).to include('aggregation_query_id_unresolved')
+      expect(ctx.scopes.last['stats']['total']).to eq(0)
+    end
+
+    # THE DEGRADATION NAMES WHAT THE AUTHOR WROTE, which is the actionable half. It does
+    # NOT say whether a query of that id exists — that distinction is the disclosure
+    # `IssueQuery.visible` is there to prevent, so one code covers both causes and the
+    # difference lives in the log.
+    it 'names the parameter the author wrote, and nothing about what exists' do
+      ctx = build_context({ 'qid' => 7 }, owned_registers)
+
+      build_tag('query_id: "qid", assign_to: stats').render(ctx)
+
+      expect(ctx.registers[RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY]
+               .diagnostics.to_a.to_s).to include('qid')
+    end
+
+    # AND THE PRE-EXISTING SILENT CASE IS CLOSED BY THE SAME CHANGE. A `query_id:` naming a
+    # query that is gone, or that this actor may not see, used to log and assign zeros with
+    # nothing on the page either — the review found the quoted case, and this is the same
+    # hole reached by a different route.
+    it 'degrades for a query that does not resolve at all, quoted or not' do
+      ctx = build_context({}, owned_registers)
+
+      build_tag('query_id: 9999, assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).to include('aggregation_query_id_unresolved')
+    end
+
+    # ...and a query that DOES resolve records nothing, so the panel is not simply always
+    # drawn — the failure mode a cry-wolf degradation would introduce.
+    it 'records no degradation when the query resolves' do
+      LiquidTagIssueQueryStub.register(42, scope)
+      ctx = build_context({}, owned_registers)
+      allow(SqlAggregation::QueryAggregator).to receive(:aggregate).and_return(agg_result)
+
+      build_tag('query_id: 42, assign_to: stats').render(ctx)
+
+      expect(codes(ctx)).not_to include('aggregation_query_id_unresolved')
+    end
   end
 
   # ------------------------------------------------------------------

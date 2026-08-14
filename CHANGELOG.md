@@ -137,13 +137,22 @@ All notable changes to this plugin are documented in this file.
   spent-time groupings — **`user` and `project` — could not be written at all**, in any
   spelling. They can now.
 
-  The rule, for all five tags (`sql_aggregate`, `version_rollup`, `chart`, `mermaid`,
-  `geo_version_map`):
+  The rule, for the four tags that read a parameter through the template's variables
+  (`sql_aggregate`, `version_rollup`, `chart`, `geo_version_map`):
 
   | you write | what it means |
   |---|---|
   | `group_by: "user"` or `group_by: 'user'` | the text `user` |
   | `group_by: user` | the Liquid variable `user`, falling back to the text `user` if there is no such variable |
+
+  **`{% mermaid %}` is not in that list and never was**: its parameters have always been
+  literal text in both spellings, so nothing about it changes. Writing `title: heading` there
+  gives you the word *heading*, not the value of a variable — it always did.
+
+  **Two parameters of `{% chart %}` are also unaffected, because they name a KEY rather than
+  carry a value**: `from:` names the variable to chart, and `x:` / `y:` / `series_label:` name
+  columns inside it. `from: "stats"` and `from: stats` both mean *the variable `stats`*, which
+  is the same thing quoting a literal has always meant here.
 
   **What to check before upgrading.** Almost nothing changes: quoted values in this plugin's
   README examples and in every shipped starter are labels and lists (`other_label: "Other"`,
@@ -151,14 +160,27 @@ All notable changes to this plugin are documented in this file.
   template that changes behaviour is one that **quoted a value in order to read a variable** —
   `group_by: "my_dimension"` where `my_dimension` is assigned earlier in the template.
 
-  **If you have one, it will tell you.** The parameter is now the literal `my_dimension`,
-  which is not a dimension, so the report shows the *"is not a dimension"* message in its
-  diagnostics panel and reports zero — it does not quietly group by something else and print a
-  different number under the same heading. **The fix is to remove the quotes**, which is what
-  the documentation has always shown.
+  **Where it tells you, and where it does not.** This matters, so it is spelled out rather
+  than summarised:
 
-  This also applies to `query_id:`, `limit:` and the other numeric parameters, and to the
-  `on`/`off` flags: `limit: "5"` is five, never a variable named `5`.
+  - **It tells you** for anything that names a *dimension, measure, sort or query* —
+    `group_by:`, `split_by:`, `measure:`, `sort:`, `query_id:`. The value is no longer one the
+    aggregation recognises, so the report names it in its diagnostics panel and reports zero.
+    It does **not** quietly group by something else and print a different number under the
+    same heading.
+  - **It does not tell you** for anything that is just *text*: `other_label:`, `empty_label:`,
+    `user_label:`, `assign_to:`, `title:`, `x_title:`, `y_title:`, `closed_statuses:`,
+    `cost_fields:`, `age_buckets:`, `fields:`, `project:`. Any string is a valid label, so
+    there is nothing for the plugin to object to — a quoted one now shows the quoted text
+    itself. `assign_to:` is the one worth a look: `assign_to: "dest"` now assigns to `dest`
+    rather than to whatever a variable named `dest` held, so a later `{{ my_stats.total }}`
+    would render empty.
+
+  **The fix in both cases is to remove the quotes**, which is what the documentation has
+  always shown.
+
+  This also applies to `limit:` and the other numeric parameters: `limit: "5"` is five, never
+  a variable named `5`.
 
 - **`rake reporter_dashboards:render:preflight` no longer exits 0 after checking nothing.**
 

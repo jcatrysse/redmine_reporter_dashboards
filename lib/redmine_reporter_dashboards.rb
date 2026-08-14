@@ -43,7 +43,7 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/minimal_pd
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/pdf_inspector'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/preflight_suite'
-# FR-50 — the install-wide engine choice. Required at boot with the rest of render/ for
+# FR-27 — the install-wide engine choice. Required at boot with the rest of render/ for
 # the same reason: a LoadError has to surface on the branch that broke it rather than on
 # the first settings page an administrator opens.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/engine_preference'
@@ -194,7 +194,7 @@ module RedmineReporterDashboards
     Assets::Policy.from_settings(plugin_settings, logger: logger || safe_logger)
   end
 
-  # --- FR-50: which engine this installation renders with -----------------------------
+  # --- FR-27: which engine this installation renders with -----------------------------
   #
   # The ONE Redmine read for the engine choice, here rather than in `render/` for exactly the
   # reason `asset_policy` is here: `EnginePreference` takes a Hash and must not know that a

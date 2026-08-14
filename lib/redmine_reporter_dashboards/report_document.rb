@@ -56,9 +56,21 @@ module RedmineReporterDashboards
   # INSTALLATION, so every document this plugin produces declares the same language.
   #
   # A screen reader announces the document in this language and a PDF engine hyphenates
-  # with it, so it is a real accessibility improvement rather than a formality. `dir` is
-  # NOT set: all nine locales this plugin ships are left-to-right, and emitting a direction
-  # nobody has measured would be a claim rather than a fact.
+  # with it, so it is a real accessibility improvement rather than a formality.
+  #
+  # `dir` IS NOT SET, AND THE FIRST VERSION OF THIS NOTE SCOPED THAT TO THE WRONG SET. It
+  # said "all nine locales this plugin ships are left-to-right" — true, and irrelevant: the
+  # value emitted is `Setting.default_language`, drawn from REDMINE'S ~50 locales, which
+  # include `ar`, `fa` and `he`. An independent review measured that on the 7.0-stable
+  # clone. So on an Arabic installation this now declares `lang="ar"` and no direction.
+  #
+  # That is deliberate and it is the smaller of two wrongs. Emitting `dir` would mean
+  # deciding it from a locale list this plugin does not own, on engines whose RTL behaviour
+  # nobody here has measured — a claim rather than a fact, which is what §7 forbids. A
+  # missing `dir` leaves the reader with the default `ltr` they already had before this
+  # attribute existed; a wrong `dir` would newly mis-render the page. Bounding `lang` to
+  # the plugin's own nine was the other option and is worse: it would announce an Arabic
+  # installation's reports as English.
   module ReportDocument
     # What `lang` says when Redmine is not loaded, or when the setting is blank — which it
     # can be: `Setting.default_language` is a String and an administrator may empty it.
@@ -72,6 +84,10 @@ module RedmineReporterDashboards
     # `lang:` is a seam, not a feature: it defaults to the installation's language and
     # exists so a spec can assert the markup without stubbing a global. No caller passes it.
     def self.wrap(body, head: '', lang: default_language)
+      # A BLANK `lang` IS WORSE THAN NO ATTRIBUTE — it tells a screen reader "no language"
+      # explicitly. `LANGUAGE_TAG` guards the SETTING; this guards the SEAM, which an
+      # independent review found still admitted `lang: nil` and `lang: ''`.
+      lang = FALLBACK_LANGUAGE if lang.to_s.empty?
       "<!DOCTYPE html>\n" \
         "<html lang=\"#{escape_attribute(lang)}\"><head><meta charset=\"utf-8\">\n" \
         "#{head}" \
@@ -104,10 +120,16 @@ module RedmineReporterDashboards
     # through the allowlist and none through the seam.
     #
     # Hand-rolled rather than `ERB::Util`, which the DB-less spec run does not load, and
-    # `&` FIRST so the other three substitutions cannot be double-escaped. NOT `html_safe`
-    # anywhere (INV-9).
+    # `&` FIRST so the four substitutions after it cannot be double-escaped. NOT
+    # `html_safe` anywhere (INV-9).
+    #
+    # BOTH QUOTE FORMS, matching `MermaidTag#attribute` — which says in its own comment
+    # that "a rule with an exception is a rule somebody applies inconsistently". This
+    # attribute is double-quoted today, so `'` cannot break out of it; two escapers in one
+    # plugin disagreeing about which characters count is the finding, not the exploit.
     def self.escape_attribute(value)
-      value.to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub('<', '&lt;').gsub('>', '&gt;')
+      value.to_s.gsub('&', '&amp;').gsub('"', '&quot;').gsub("'", '&#39;')
+           .gsub('<', '&lt;').gsub('>', '&gt;')
     end
     private_class_method :escape_attribute
   end

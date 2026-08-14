@@ -2,7 +2,7 @@
 
 require File.expand_path('../test_helper', __dir__)
 
-# FR-50 — the install-wide engine selection, where it is a Redmine settings page.
+# FR-27 — the install-wide engine selection, where it is a Redmine settings page.
 #
 # --- WHAT ONLY A FUNCTIONAL TEST CAN REACH ---
 #

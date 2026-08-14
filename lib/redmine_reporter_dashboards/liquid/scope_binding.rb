@@ -167,6 +167,7 @@ module RedmineReporterDashboards
                                  TagContext.actor(liquid_context))
           end
 
+
           # No render context and no `query_id:` — nothing nameable to resolve.
           #
           # LOGGED, NOT SILENT (INV-4). Every other refusal in this file announces itself,
@@ -190,14 +191,35 @@ module RedmineReporterDashboards
         # would still let a template learn that somebody else's private query exists,
         # and confirm its filters through the shape of the result. Redmine's own query
         # lookups are visibility-scoped; so is this one.
+        # A `query_id:` THAT RESOLVES TO NOTHING NOW REACHES THE AUTHOR (INV-4), and this is
+        # decision #3's blocker rather than a flourish.
+        #
+        # An independent review measured the hole: `{% assign qid = 7 %}{% sql_aggregate
+        # query_id: "qid" %}` used to resolve the variable; under the quoting rule it is the
+        # literal `qid`, whose `to_i` is **0**, so `visible_query` returned nil before ever
+        # reaching its own log line and the tag assigned the empty result with nothing but a
+        # `Rails.logger.warn`. A report that renders complete and reads zero is what
+        # `DECISIONS-PENDING.md` calls "the worst kind of wrong", and the curator's second
+        # condition on #3 was that a template relying on the old behaviour must fail VISIBLY.
+        #
+        # ONE CODE FOR BOTH CAUSES, and that is deliberate. `query_id: "qid"` (unresolvable)
+        # and `query_id: 9999` (gone, or not this actor's) are told apart in the LOG and not
+        # on the page: distinguishing "does not exist" from "not yours" is precisely the
+        # disclosure `IssueQuery.visible` exists to prevent. The degradation names what the
+        # author WROTE, which is the actionable half and discloses nothing.
         def from_query_id(param, liquid_context, actor)
           query = visible_query(param, liquid_context, actor)
+          degrade_unresolved(param, liquid_context) if query.nil?
           Binding.new(scope: query&.base_scope, query: query, source: :query_id)
         end
 
         def visible_query(param, liquid_context, actor)
           id = query_id_of(param, liquid_context)
-          return nil if id.zero?
+          if id.zero?
+            log("query_id: #{param.to_s.inspect} did not resolve to a query id — skipping. " \
+                'A quoted parameter is literal text; write it unquoted to read a variable.')
+            return nil
+          end
 
           query = ::IssueQuery.visible(actor).find_by(id: id)
           if query.nil?
@@ -206,6 +228,15 @@ module RedmineReporterDashboards
             log("query ##{id} does not exist or is not visible to this actor — skipping")
           end
           query
+        end
+
+        # Best-effort by construction: a render with no `RenderContext` has nowhere to record
+        # a degradation, which is why `visible_query` also logs. The log line is for whoever
+        # is on call; this is for whoever is authoring (INV-4).
+        def degrade_unresolved(param, liquid_context)
+          RenderContext.from(liquid_context)
+                       &.diagnostics
+                       &.degrade(:aggregation_query_id_unresolved, query_id: param.to_s)
         end
 
         # A template may write either `query_id: 7` or `query_id: some_variable`, so the

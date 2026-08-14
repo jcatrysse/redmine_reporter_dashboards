@@ -102,7 +102,7 @@ class RenderPreflightRakeTest < ActiveSupport::TestCase
     assert_equal Render::PreflightCommand::OK, status
   end
 
-  # FR-50 — THE INSTALLATION'S SELECTED ENGINE REACHES THE COMMAND FROM THIS FILE, and an
+  # FR-27 — THE INSTALLATION'S SELECTED ENGINE REACHES THE COMMAND FROM THIS FILE, and an
   # independent review found the line carrying it asserted by nothing.
   #
   # This file's own header says why that matters: what no spec can reach is the glue here,

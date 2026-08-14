@@ -1985,7 +1985,7 @@ module RedmineReporterDashboards
           end
 
           # ------------------------------------------------------------------
-          # FR-50 — AND THE INSTALL'S OWN CHOICE STOPS THE DEFERRAL, which is the third place
+          # FR-27 — AND THE INSTALL'S OWN CHOICE STOPS THE DEFERRAL, which is the third place
           # this rule has had to be written (§Findings E-27's "a rule about 'an install has not
           # chosen this' belongs everywhere an engine is chosen FOR the operator"). Without it
           # the skip's own sentence — then "this install has not chosen it", now "…and it is not

@@ -204,9 +204,10 @@ module RedmineReporterDashboards
         #
         # "Every output carries one" means a diagram with no `title:` needs a default, and
         # the obvious English default is the one thing this cannot be: CLAUDE.md §10 forbids
-        # a hardcoded user-facing string, the report body has no locale (`ReportDocument`
-        # says why it carries no `lang`), and a `<title>` reading "flowchart diagram" in a
-        # Russian report is the bug §10 is about. So the default is Mermaid's OWN first
+        # a hardcoded user-facing string, the report's own CONTENT is not in the
+        # installation's language (a report about Russian issues reads Russian whatever
+        # `<html lang>` says), and a `<title>` reading "flowchart diagram" in such a report
+        # is the bug §10 is about. So the default is Mermaid's OWN first
         # keyword — `flowchart`, `sequenceDiagram`, `gantt` — which is a language-neutral
         # fact about the source rather than a sentence in one language.
         #
@@ -253,9 +254,15 @@ module RedmineReporterDashboards
         #   Mermaid's own keyword      the fallback. `flowchart`, `sequenceDiagram`, `gantt`.
         #
         # AND THE FALLBACK IS DELIBERATELY NOT AN ENGLISH SENTENCE. "flowchart diagram" would be
-        # a hardcoded user-facing string (CLAUDE.md §10) in a document that has no locale —
-        # `ReportDocument` says why it carries no `lang` — so a Russian report would get an
-        # English name. Mermaid's keyword is a language-neutral fact about the source.
+        # a hardcoded user-facing string (CLAUDE.md §10) in a document whose CONTENT is in
+        # whatever language the data is, so a Russian report would get an English name.
+        # Mermaid's keyword is a language-neutral fact about the source.
+        #
+        # CORRECTED 2026-08-14: both of these used to justify themselves with "the report
+        # body has no locale — `ReportDocument` says why it carries no `lang`". Decision #7
+        # gave it one, from the installation default. The design still holds for the reason
+        # restated above — a document's declared language is not its data's language — but
+        # the sentence supporting it had become false.
         def diagram_title(raw_source)
           authored = @params['title'].to_s.strip
           return authored[0, MAX_LABEL_CHARS] unless authored.empty?

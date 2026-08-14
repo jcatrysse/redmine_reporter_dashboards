@@ -67,7 +67,7 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
              'mail_external_domains' => '',
              'mail_rate_limit' => RedmineReporterDashboards::Reporting::MailPolicy::DEFAULT_RATE_LIMIT.to_s,
              'mail_rate_window_minutes' => RedmineReporterDashboards::Reporting::MailPolicy::DEFAULT_RATE_WINDOW_MINUTES.to_s,
-             # --- FR-50 / technical-spec.md §5.2 clause 4: the engine this install uses ---
+             # --- FR-27 / technical-spec.md §5.2 clause 4: the engine this install uses ---
              #
              # EMPTY IS THE DEFAULT, and it means "the engine `config/capabilities.yml`
              # declares as the default" rather than "no engine". A fresh install and an

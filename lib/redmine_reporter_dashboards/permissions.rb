@@ -294,6 +294,16 @@ module RedmineReporterDashboards
       ),
       # --- authoring: every one of these is a code-execution privilege (INV-9) ----------
       #
+      # AND ONE OF THEM IS EXCLUDED FROM THE UPGRADE DIAGNOSTIC — read
+      # `Permissions::AuthoringAudit::NOT_AUTHORING_IN_PRACTICE` before adding a fifth.
+      # `manage_public_reporter_dashboards_templates` carries this flag and cannot write a
+      # template body on its own (its own entry below says why), so the diagnostic that
+      # lists "who can run server-side code" would have warned about people who cannot —
+      # curator decision #4, 2026-08-13. The flag itself is unchanged and still derives
+      # `require: :member`; only the AUDIT is narrower. A permission added here is included
+      # by default, because that exclusion is a subtraction from this list rather than a
+      # second list — which is the property to preserve if you change either.
+      #
       # `#preview` is mapped by all three of the authoring template permissions and by
       # nothing else, because a preview RUNS the template — it is the editor's own
       # execution of code the author is writing, and giving it to a consumer would hand

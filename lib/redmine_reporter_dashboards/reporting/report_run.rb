@@ -137,7 +137,7 @@ module RedmineReporterDashboards
       # so without implicating the engine.
       MAX_RUN_ASSET_BYTES = 128 * 1024 * 1024
 
-      # FR-50 — "resolve the install-wide engine choice from the plugin settings", as a value
+      # FR-27 — "resolve the install-wide engine choice from the plugin settings", as a value
       # that is DISTINCT from "there is no choice".
       #
       # THE SENTINEL EXISTS BECAUSE `nil` ALREADY MEANS SOMETHING, and §Findings E-27 records
@@ -215,7 +215,7 @@ module RedmineReporterDashboards
       #         third-party URL refused under `:bundled`, a same-origin one inlined off
       #         disk — are properties of the RESOLVER's answer rather than of a render.
       # engine_preference
-      #         the engine id this INSTALLATION selected (FR-50), `nil` for "it selected
+      #         the engine id this INSTALLATION selected (FR-27), `nil` for "it selected
       #         nothing", or `FROM_SETTINGS` — the default — for "read the plugin settings".
       #         A port for the same reason `asset_resolver` is one: resolving it reads
       #         `Setting.plugin_redmine_reporter_dashboards`, which does not exist in the
@@ -694,7 +694,7 @@ module RedmineReporterDashboards
       # refusing to render it here would make a portable template unportable. The
       # configured default draws it instead, and the degradation is visible in the run.
       #
-      # FR-50 ADDS A SECOND STEP, AND THE HINT STILL WINS. The order is: the template's hint,
+      # FR-27 ADDS A SECOND STEP, AND THE HINT STILL WINS. The order is: the template's hint,
       # then this INSTALLATION's selection, then the declared default, then any engine that
       # needs no service. A hint outranks the setting because a hint is a claim about a
       # DOCUMENT — "this report needs a modern JavaScript engine" — and the setting is a claim
@@ -718,7 +718,7 @@ module RedmineReporterDashboards
         id && registry.fetch(id)
       end
 
-      # FR-50 — the id an administrator chose in *Administration → Plugins*.
+      # FR-27 — the id an administrator chose in *Administration → Plugins*.
       #
       # AN ENGINE THAT `needs_service` IS DELIBERATELY ALLOWED HERE, and that is not a hole in
       # T-34's rule: that rule is "auto-detection never picks a service-backed engine FOR an

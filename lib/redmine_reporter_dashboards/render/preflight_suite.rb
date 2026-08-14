@@ -101,10 +101,10 @@ module RedmineReporterDashboards
       # NAMING AN ENGINE OVERRIDES THIS ENTIRELY. `RRD_ENGINE=gotenberg` is how you ask,
       # and asking is a decision — so it runs the real checks, including the credential one.
       #
-      # FR-50 — AND THE INSTALL'S OWN CHOICE IS NOT A DEFERRAL CASE. This is the THIRD place
+      # FR-27 — AND THE INSTALL'S OWN CHOICE IS NOT A DEFERRAL CASE. This is the THIRD place
       # the same rule has had to be written, and E-27 said so in as many words: "a rule about
       # 'an install has not chosen this' belongs everywhere an engine is chosen FOR the
-      # operator, and there were two such places". FR-50 gives an install a way to choose, so
+      # operator, and there were two such places". FR-27 gives an install a way to choose, so
       # without this the skip's own sentence — then "the render engine needs a service, and this
       # install has not chosen it", since corrected twice: it is now "…and it is not this
       # installation's selected engine", true whatever was chosen — would be FALSE on exactly
@@ -160,7 +160,7 @@ module RedmineReporterDashboards
             # that "proved" the remediation asserted on the Check object and never on
             # rendered output, which is the same shape as the blocker this commit fixes.
             # `RRD_ENGINE=…` STILL COMES FIRST (the text surface cuts a detail at 90
-            # characters), and the last clause had to change when FR-50 landed: "used only
+            # characters), and the last clause had to change when FR-27 landed: "used only
             # by a template that names it" stopped being true the moment an installation
             # could choose one.
             # `Administration > Plugins` WITH `>` AND NOT `→`, matching the one sentence in

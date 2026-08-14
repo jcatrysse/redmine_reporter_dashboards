@@ -137,8 +137,22 @@ module RedmineReporterDashboards
           raise ChartSpecError, e.message
         end
 
+        # `from:` NAMES A KEY, SO QUOTING DOES NOT CHANGE IT — and that is an exception to
+        # decision #3's rule worth writing down, because an independent review read it as an
+        # oversight and it is not.
+        #
+        # The rule is "a quoted value is literal text, never looked up". Here the literal
+        # text IS the lookup: `from:` says WHICH VARIABLE to chart, so `from: "stats"` and
+        # `from: stats` both mean *the variable `stats`*. There is no second reading of
+        # `from: "stats"` that quoting could select — "the value of the variable named by the
+        # value of the variable `stats`" is not a thing anyone writes.
+        #
+        # The same holds for `x:`, `y:` and `series_label:` in `SeriesReader`, which name
+        # columns inside that result, and for `id:`, which is the chart's own identifier.
+        # None of them goes through `TagParams.resolve`, deliberately. The README's
+        # "Quoted or unquoted" section says so; if that changes, change both.
         def resolve_from(context)
-          name = @raw_params.fetch('from', DEFAULT_FROM)
+          name = @raw_params.fetch('from', DEFAULT_FROM).to_s
           value = context[name]
           raise ChartSpecError, "chart from: #{name} resolved to nothing" if value.nil?
 

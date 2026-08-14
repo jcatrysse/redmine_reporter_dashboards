@@ -1435,12 +1435,21 @@ default and logs a warning — it never raises.
 
 #### Quoted or unquoted — they mean different things
 
-This applies to every tag in this plugin, not just `{% sql_aggregate %}`.
-
 | you write | what it means |
 |-----------|---------------|
 | `group_by: "user"` or `group_by: 'user'` | **the text `user`** — never looked up |
 | `group_by: user` | **the Liquid variable `user`**, falling back to the text `user` when no such variable exists |
+
+This is the rule for `{% sql_aggregate %}`, `{% version_rollup %}`, `{% chart %}` and
+`{% geo_version_map %}`. **Two things are outside it, and both are outside it because
+they name something rather than carry a value:**
+
+- **`{% mermaid %}`'s parameters are always literal**, in both spellings. It has never
+  read a variable, so `title: heading` there is the word *heading*.
+- **A parameter that names a KEY is unaffected by quoting**: `{% chart %}`'s `from:` says
+  which variable to chart, `x:` / `y:` / `series_label:` name columns inside it, and `id:`
+  is the chart's own name. `from: "stats"` and `from: stats` both mean *the variable
+  `stats`* — the quoted text is still the name being looked up.
 
 Write dimensions, measures and field names **unquoted** — that is what every example
 here does, and the fallback makes it read as the plain word. Quote a value when it

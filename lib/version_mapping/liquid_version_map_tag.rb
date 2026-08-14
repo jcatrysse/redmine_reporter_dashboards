@@ -156,8 +156,13 @@ module VersionMapping
     # then a numeric id. Both go through `Project.visible`, so an unknown project and an
     # invisible one are indistinguishable from the template's point of view.
     def resolve_project(viewer)
-      identifier = @raw_params['project']
-      return nil if identifier.nil? || identifier.empty?
+      # `.to_s` FOR THE SAME REASON `ChartTag#chart_id` HAS ONE: `@raw_params` holds
+      # `TagParams::Value`, a String subclass, and this is the last path that handed one
+      # to something outside the tag layer (an ActiveRecord `find_by`). Harmless today —
+      # Rails casts through `to_s` — but the containment claim is that a `Value` never
+      # leaves, and "harmless today" is not that claim. Found by an independent review.
+      identifier = @raw_params['project'].to_s
+      return nil if identifier.empty?
 
       visible = Project.visible(viewer)
       visible.find_by(identifier: identifier) || visible.find_by(id: identifier)

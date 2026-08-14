@@ -6,7 +6,7 @@ require_relative 'registry'
 
 module RedmineReporterDashboards
   module Render
-    # FR-50 / technical-spec.md §5.2 clause 4 — WHICH ENGINE THIS INSTALLATION RENDERS
+    # FR-27 / technical-spec.md §5.2 clause 4 — WHICH ENGINE THIS INSTALLATION RENDERS
     # WITH, and the one line per engine an operator needs in order to choose.
     #
     # --- WHY A SETTING EXISTS AT ALL (§Findings E-27 row 2) ---

@@ -3,7 +3,7 @@
 require_relative '../spec_helper'
 require_relative '../../lib/redmine_reporter_dashboards/render/engine_preference'
 
-# FR-50 — the install-wide engine choice, as a value object.
+# FR-27 — the install-wide engine choice, as a value object.
 #
 # Everything here is about the COERCION and the OFFERED SET, because those are the two
 # things a settings form can get wrong in a way nothing else notices: Redmine performs no
@@ -178,7 +178,7 @@ RSpec.describe RedmineReporterDashboards::Render::EnginePreference do
       end
     end
 
-    # A `needs_service` ENGINE IS SELECTABLE, and this is the whole point of FR-50. T-34's
+    # A `needs_service` ENGINE IS SELECTABLE, and this is the whole point of FR-27. T-34's
     # rule is that nobody may have one chosen FOR them by auto-detection; choosing it
     # deliberately is what this setting IS.
     it 'accepts an engine that needs a service, because choosing it is the decision' do

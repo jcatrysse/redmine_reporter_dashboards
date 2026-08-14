@@ -76,7 +76,7 @@ class ReporterPreflightController < ApplicationController
     @reports = Render::PreflightSuite.new(
       engine_ids: engine.empty? ? nil : engine,
       redmine_base_url: redmine_base_url,
-      # FR-50 — the same port the rake task fills, and the reason it is a port rather than a
+      # FR-27 — the same port the rake task fills, and the reason it is a port rather than a
       # read inside the suite: this controller is application code and may know that a
       # `Setting` table exists; `render/**` may not (mechanism E5).
       selected_engine_id: RedmineReporterDashboards.render_engine_id(logger: Rails.logger),

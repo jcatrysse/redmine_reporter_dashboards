@@ -483,15 +483,15 @@ namespace :reporter_dashboards do
       RedmineReporterDashboards::Render::PreflightCommand.load_engines!
 
       # The two ports `render/**` may not reach for itself: these are the ONLY lines in this
-      # task that know Redmine has a Setting table — the base URL below, and FR-50's selected
+      # task that know Redmine has a Setting table — the base URL below, and FR-27's selected
       # engine after it. See PreflightCommand's note on mechanism E5. (This comment said "the
-      # one line" until FR-50 added the second; an independent review caught it.)
+      # one line" until FR-27 added the second; an independent review caught it.)
       base_url = Setting.host_name.present? ? "#{Setting.protocol}://#{Setting.host_name}" : nil
 
       exit RedmineReporterDashboards::Render::PreflightCommand.new(
         engine_ids: ENV['RRD_ENGINE'],
         redmine_base_url: base_url,
-        # FR-50. The engine this installation SELECTED is checked by the default run even
+        # FR-27. The engine this installation SELECTED is checked by the default run even
         # when it needs a service — choosing it is the decision the deferral was waiting for.
         selected_engine_id: RedmineReporterDashboards.render_engine_id(logger: Rails.logger),
         format: (ENV['RRD_FORMAT'] || 'text').to_sym,

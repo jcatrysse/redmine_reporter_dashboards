@@ -57,7 +57,7 @@ module RedmineReporterDashboards
 
       def initialize(engine_ids: nil, redmine_base_url: nil, format: :text,
                      out: $stdout, logger: nil, selected_engine_id: nil)
-        # FR-50 — forwarded, not resolved here: this class has no more business reading a
+        # FR-27 — forwarded, not resolved here: this class has no more business reading a
         # Setting than the suite does, and the rake task is what knows one exists.
         @suite = PreflightSuite.new(engine_ids: engine_ids,
                                     redmine_base_url: redmine_base_url, logger: logger,

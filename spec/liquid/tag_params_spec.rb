@@ -158,6 +158,80 @@ RSpec.describe RedmineReporterDashboards::Liquid::TagParams do
     end
   end
 
+  # THE DOCUMENTED SURFACE'S EDGES, none of which had an example — an independent review
+  # listed them. Each is behaviour an author can reach by typing, so each is pinned even
+  # where the answer is "unchanged".
+  describe 'the edges of the markup grammar' do
+    # A BARE VALUE STOPS AT THE FIRST SPACE, which is what `[^\s,]+` says and is why a
+    # label with a space has to be quoted. Worth pinning because the failure is silent
+    # truncation, not an error.
+    it 'ends a bare value at the first space, dropping the remainder' do
+      params = described_class.parse('other_label: Everything else')
+
+      expect(params.fetch('other_label')).to eq('Everything')
+      expect(params).not_to have_key('else')
+    end
+
+    it 'is why a label with a space must be quoted, and then it survives whole' do
+      expect(described_class.parse('other_label: "Everything else"').fetch('other_label'))
+        .to eq('Everything else')
+    end
+
+    # LAST ONE WINS, because `scan` walks left to right into the same Hash. Unchanged from
+    # every previous `parse_markup`, and pinned so a rewrite cannot flip it silently.
+    it 'takes the last value when a key is given twice' do
+      params = described_class.parse('group_by: status, group_by: tracker')
+
+      expect(params.fetch('group_by')).to eq('tracker')
+    end
+
+    it 'keeps the LAST value\'s quoting, not the first\'s' do
+      expect(described_class.parse(%(group_by: status, group_by: "tracker"))
+                            .fetch('group_by')).to be_quoted
+      expect(described_class.parse(%(group_by: "status", group_by: tracker))
+                            .fetch('group_by')).not_to be_quoted
+    end
+
+    # THE ONE SPELLING THAT CAN CARRY A DOUBLE QUOTE. `mermaid_tag.rb`'s attribute escaper
+    # names this case in a comment and nothing asserted it.
+    it 'lets a single-quoted value carry a double quote, and the reverse' do
+      expect(described_class.parse(%(title: 'say "hi"')).fetch('title')).to eq('say "hi"')
+      expect(described_class.parse(%(title: "it's")).fetch('title')).to eq("it's")
+    end
+
+    # A CONTEXT VALUE OF `false` OR `0` IS NOT "nothing". `resolve` branches on `.nil?`,
+    # exactly as the four `str_param`s it replaced did — pinned because switching to a
+    # truthiness test would silently turn `drill: flag` with `flag = false` into the
+    # literal `flag`, which `bool_param` reads as false by luck rather than by rule.
+    it 'treats a resolved false as a value, not as nothing' do
+      params = described_class.parse('drill: flag')
+
+      expect(described_class.resolve(params['drill'], context('flag' => false))).to eq('false')
+    end
+
+    it 'treats a resolved zero as a value, not as nothing' do
+      params = described_class.parse('limit: n')
+
+      expect(described_class.resolve(params['limit'], context('n' => 0))).to eq('0')
+    end
+
+    # ...and an EMPTY resolved value still falls back to the literal, because `resolve`
+    # asks `.nil?` of the resolution and not `.empty?`.
+    it 'falls back to the literal when a bare value resolves to an empty string' do
+      params = described_class.parse('group_by: status')
+
+      expect(described_class.resolve(params['group_by'], context('status' => ''))).to eq('')
+    end
+
+    # A NON-STRING FROM A CALLER, which `ScopeBinding.bind` can receive: it is a public
+    # module method taking a raw-params Hash, and the `str_param`s this replaced tolerated
+    # an Integer through `(resolved || param).to_i`. Raising here would be a narrowing.
+    it 'accepts a non-String value rather than raising' do
+      expect(described_class.resolve(7, context)).to eq('7')
+      expect(described_class.resolve(7, context('7' => 'looked up'))).to eq('looked up')
+    end
+  end
+
   describe '.quoted?' do
     # A String a caller built — in a test, or by concatenation — is BARE, which is the
     # pre-decision behaviour. The change is confined to what the author actually typed.

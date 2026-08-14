@@ -10,7 +10,7 @@
 # `rake reporter_dashboards:render:preflight` documents an exit-code contract —
 # 0 verified, 1 failed, 2 nothing verified — and for two releases NO CI RUN EVER READ
 # WHAT THIS DRIVER CANNOT COVER, and it is worth saying rather than leaving a reader to
-# discover it: there is no Redmine here, so there is no `Setting`, so FR-50's install-wide
+# discover it: there is no Redmine here, so there is no `Setting`, so FR-27's install-wide
 # SELECTED engine cannot reach `PreflightCommand` through this path at all. The selection
 # arm of the exit-code contract — a chosen engine that is down turning a green deploy step
 # red — is therefore covered IN-PROCESS ONLY (`test/unit/render_preflight_rake_test.rb`

@@ -46,9 +46,21 @@ module RedmineReporterDashboards
     # Carrying the bit on the value means every existing call site keeps working and
     # keeps its quoting — including that one.
     #
-    # `Value` never leaves this layer: `resolve` returns a plain String (`String#to_s`
-    # converts a subclass), so nothing downstream — a bucket label, a JSON payload, a
-    # rendered document — can ever hold one.
+    # --- Keeping `Value` out of the data, and the RETRACTED reason for it ------------
+    #
+    # This paragraph used to say: "`Value` never leaves this layer: `resolve` returns a
+    # plain String, so nothing downstream can ever hold one." The first half is true and
+    # the *therefore* is not — `resolve` is not the only exit. `{% chart %}` reads `type:`,
+    # `orientation:`, `id:`, `x:`, `y:` and `series_label:` straight off `@raw_params`, and
+    # `{% geo_version_map %}` reads `project:`. An independent review pointed at the gap.
+    #
+    # What actually holds it, in two parts. `resolve` returns a plain String
+    # (`String#to_s` converts a subclass) for everything that goes through it; and every
+    # direct reader normalises on its own way in — `Series#initialize` does `label.to_s`,
+    # `chart_id` does `.to_s`. That second half is a property of five call sites rather
+    # than of this module, so it is asserted MECHANICALLY rather than argued: a chart drawn
+    # from all-quoted markup is walked in `spec/liquid/chart_tag_spec.rb` and nothing
+    # anywhere in `ChartSpec#to_h` may be a `Value`. Negative-tested with two plants.
     module TagParams
       # Matches: key: "quoted" | key: 'quoted' | key: bare_value
       #
@@ -71,7 +83,10 @@ module RedmineReporterDashboards
         end
 
         # Deliberately not `def quoted? = @quoted`: the declared Ruby floor is 2.7
-        # (Redmine 5.1), and `.codex/check_ruby_floor.sh` fails an endless method.
+        # (Redmine 5.1's Gemfile says `ruby '>= 2.7.0'`) and an endless method is 3.0
+        # syntax, so this file would not PARSE there. The reason is the floor itself, not
+        # the gate that currently checks it — `.codex/check_ruby_floor.sh` is deleted by
+        # the floor decision (CLAUDE.md §8), and this comment must outlive it.
         def quoted?
           @quoted
         end
@@ -94,8 +109,13 @@ module RedmineReporterDashboards
         # still does.
         #
         # Returns a plain String (or `default`, which a caller may declare as nil).
+        # `to_s.empty?` AND NOT `empty?`: `ScopeBinding.bind` is a public module method
+        # taking a raw-params Hash, so a caller — an importer, a spec — can hand it an
+        # Integer, and the four `str_param`s this replaced tolerated one
+        # (`(resolved || param).to_i`). Raising `NoMethodError` on a non-String would be a
+        # narrowing nobody asked for.
         def resolve(value, context, default: '')
-          return default if value.nil? || value.empty?
+          return default if value.nil? || value.to_s.empty?
           # A context that cannot be indexed is treated as no context — the literal.
           # `ScopeBinding#query_id_of` has always guarded this and its callers include
           # tests that pass nil.
