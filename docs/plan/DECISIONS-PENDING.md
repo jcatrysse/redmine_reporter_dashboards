@@ -8,10 +8,10 @@ thing `CLAUDE.md` §11 forbids.
 Answer them by editing the **Decision:** line under each item — `Decision: 2` or
 `Decision: leave it` is enough. A session can then implement the lot without asking again.
 
-**STATUS 2026-08-13: the curator answered "follow the recommendation everywhere except
-where I say otherwise", and said #3 is to be fixed NOW rather than in 1.1.** Nine items are
-settled below. **#1 is NOT**, because the recommendation for it was conditional on a fact
-only the curator has — see its Decision line.
+**STATUS 2026-08-13: ALL ELEVEN ARE SETTLED.** The curator answered "follow the
+recommendation everywhere except where I say otherwise", overrode #3 to land in 1.0 rather
+than 1.1, and resolved #1's conditional with *"niemand gebruikt dat nog"* — so #1 is
+option 2, the full withdrawal.
 
 Ordered by what it costs you to get it wrong, not by effort.
 
@@ -56,10 +56,16 @@ confusion. If you cannot confirm that, take option 1 — it is cheap and honest.
 take option 3**: it is option 2 without the tidying, and the next person will rediscover
 it as a bug.
 
-**Decision:** *pending one fact from the curator* — "follow the recommendation" was given,
-but the recommendation is CONDITIONAL: option 2 only if no customer runs both plugins with
-shared templates, otherwise option 1. That is not something a session can look up. **Do not
-implement either until this line names a number.**
+**Decision: 2** (curator, 2026-08-13). The conditional was resolved by the curator directly:
+*"niemand gebruikt dat nog"* — nobody is still running templates on that path. So host-plugin
+renders are WITHDRAWN, and the tidy-up is part of the change rather than a follow-up.
+
+**One interaction to handle rather than trip over.** S-30's review fix made `query_id:`
+resolve on a context-less render, taking its actor from `TagContext`'s ambient fallback.
+With host renders withdrawn there is no context-less render left — `ReportRun` builds a
+context for every one — so that path and the ambient fallback become unreachable together.
+Remove them in the same change or the deletion is half-done again, which is the exact state
+S-30 was created to clean up.
 
 ---
 
@@ -236,7 +242,9 @@ some answers touch the same files:
 2. **#3 (quoted parameters)** — now in scope for 1.0 by curator decision, and the only
    breaking change in the set. Do it early, while there is room to react to what it breaks.
 3. **#4, #5, #6, #7, #8** — small and independent.
-4. **#1 (old-plugin renders)** — largest blast radius, and still awaiting the curator's
-   answer. Do not infer it.
+4. **#1 (old-plugin renders, option 2)** — largest blast radius, so last. Deletes the
+   speed-up patch, the ambient-actor fallback, the context-less `query_id:` path that
+   depends on it, and the last of the old-plugin detection; corrects the README. Strict
+   coupling list 5 → 2.
 
 Then: run the full test suite, read CI, bump the version from 0.5.0 to 1.0.
