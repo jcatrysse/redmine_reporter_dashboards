@@ -617,8 +617,30 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
   # about, one level in. This builds the case where it IS: a second source row is inserted
   # with an explicit id equal to the copy's. Without the marker the widget is rewritten a
   # second time, to a template nobody named.
+  # THE PRECONDITION IS NOW BUILT RATHER THAN HOPED FOR, AND CI IS WHY.
+  #
+  # This read `seed_source(name: 'The real one')`, which takes the next autoincrement id in
+  # the stand-in `report_templates` — 1 on a fresh table. `copy_id` is an autoincrement in
+  # `reporter_dashboards_templates`, which is ALSO 1 whenever the tests that ran earlier in
+  # the process happened to create no template. When both are 1 the precondition
+  # `assert_not_equal first_source, copy_id` is FALSE and the test fails with
+  # "Expected 1 to not be equal to 1" — a red build with nothing wrong in the code.
+  #
+  # MEASURED: `Minitest standalone (Redmine 5.1-stable)` at `f2344a7`, seed 11028, 1 failure
+  # of 1042. Six earlier runs the same day were green on other seeds, and it passes in
+  # isolation, so it is a latent order dependency the seed exposed rather than a regression —
+  # the change that surfaced it touches no file under `test/` at all.
+  #
+  # The irony is that this test's own header is about not relying on that coincidence: "a
+  # second run is a no-op simply because that id is usually not also a source id — which is
+  # the probabilistic reasoning S-29 is about". The COLLISION was built; the precondition
+  # asserting the ids differ was left probabilistic, one line above it.
+  #
+  # An explicit id far above any autoincrement `reporter_dashboards_templates` reaches makes
+  # them differ BY CONSTRUCTION. The collision the test is actually about is built below, as
+  # it always was, with `seed_source_with_id(copy_id)`.
   def test_the_marker_stops_a_second_rewrite_when_the_new_id_collides_with_a_source_id
-    first_source = seed_source(name: 'The real one')
+    first_source = seed_source_with_id(9_001, name: 'The real one')
     tab = tab_with_widget(stored_template_id: first_source)
     run_import
     copy_id = stored_template_id(tab.reload)

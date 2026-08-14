@@ -18,6 +18,32 @@ messages, which carry the reasoning for every non-obvious decision.
 Each of these produced a green run that meant nothing. They are ordered by how easily
 they fool you.
 
+**A PRECONDITION LEFT PROBABILISTIC IS A RED BUILD WAITING FOR A SEED, AND IT SAT ONE LINE
+ABOVE A COMMENT ABOUT NOT RELYING ON THAT COINCIDENCE.** 2026-08-14, found by reading CI.
+
+`Minitest standalone (Redmine 5.1-stable)` went red at `f2344a7`: **1 failure of 1042**, seed
+11028, `test_the_marker_stops_a_second_rewrite_when_the_new_id_collides_with_a_source_id`,
+failing on `precondition: the rewrite must have happened. Expected 1 to not be equal to 1`.
+Six earlier runs the same day were green, and it passes in isolation.
+
+The mechanism: `seed_source` takes the next autoincrement id in the stand-in `report_templates`
+— **1** on a fresh table — and `copy_id` is an autoincrement in
+`reporter_dashboards_templates`, which is **also 1** whenever the tests that happened to run
+earlier in the process created no template. The test BUILDS its collision (that is its whole
+subject, S-29) and then asserted the two ids DIFFER by luck, one line above its own comment
+about "the probabilistic reasoning S-29 is about". Fixed by seeding the source at an explicit
+`9_001`, so the precondition holds by construction.
+
+**AND THE DIAGNOSIS WAS A MEASUREMENT, WHICH IS THE PART WORTH COPYING.** The tempting move is
+to argue it is not yours (the change touched no file under `test/`; the test set is byte
+identical, 1029 `def test_` both sides; minitest's order is a function of seed and test set, so
+the same seed on the old tree must produce the same order). All true, and still an argument. So
+the old commit was checked out into a `git worktree`, mirrored, and run at the SAME SEED on
+Redmine 5.1: **1042 runs, 4789 assertions, 1 failures, 5 skips — the CI cell's numbers exactly.**
+Pre-existing, proven, in one run. Then the fix, same seed: 4791 assertions, 0 failures, and
+green on four seeds. A worktree at the base commit plus the seed from the failing cell settles
+"is this mine" faster than any amount of reading.
+
 **A GREEN CI CELL ON THE ONE ENGINE A DEFECT LIVES ON CAN BE SILENT ABOUT IT, AND THIS ONE
 WAS FOR A RELEASE BLOCKER.** Decision #2's, found 2026-08-14 while reading CI for #1.
 
@@ -1685,6 +1711,24 @@ own header carries this.
 
 ## 3. Environment quirks (cloud sessions)
 
+- **REDMINE 5.1 *CAN* BE RUN HERE, AND `test_setup.sh` MAKES IT LOOK AS THOUGH IT CANNOT.**
+  Measured 2026-08-14 while reproducing a 5.1-only CI failure. The script ends with *"mise is
+  required to install Ruby 2.7. Please install mise or set PATH to a compatible ruby"* and
+  leaves no migrated database; `bundle exec` then dies with `Bundler::RubyVersionMismatch:
+  Your Ruby version is 3.3.6, but your Gemfile specified >= 2.7.0, < 3.3.0`, which reads as
+  "this branch is not runnable in this container". It is — **rbenv already carries 3.1.6,
+  3.2.6 and 3.3.6**, and 5.1 needs one of the first two:
+
+      export PATH=/opt/rbenv/versions/3.2.6/bin:$PATH
+      cd redmine && bundle install --jobs 4
+      RAILS_ENV=test bundle exec rake db:migrate redmine:plugins:migrate
+      RAILS_ENV=test bundle exec rake redmine:plugins:test NAME=redmine_reporter_dashboards
+
+  Worth the four lines because 5.1 is the ONLY Rails 6.1 branch in the matrix, so it is where
+  a version-specific failure is most likely to be real — and the branch a session is most
+  likely to write off as CI-only. `ls /opt/rbenv/versions` before believing a Ruby-version
+  wall. Note the clone script replaces `redmine/` wholesale, so switching branches costs a
+  full `bundle install`; do the 7.0 measurements before you need 5.1.
 - **DOCKER WORKS HERE, BUT `service docker start` DOES NOT.** The init script dies on
   `ulimit: error setting limit (Operation not permitted)` and leaves no daemon, which
   reads as "Docker is unavailable in this container" and is not. Start it directly:
