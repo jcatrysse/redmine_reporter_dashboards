@@ -150,77 +150,46 @@ module ReporterDashboards
       ::RedmineReporterDashboards::DegradationText.count_of(degradation)
     end
 
-    # THE OPAQUE-ORIGIN SANDBOX — `technical-spec.md` §4, and INV-9's third mechanism.
+    # THE OPAQUE-ORIGIN SANDBOX — INV-9's third mechanism.
     #
-    # --- WHY A REPORT BODY MAY NOT BE INLINED INTO THE PAGE ---
+    # A template is written by somebody holding an authoring permission, which is a
+    # code-execution privilege held by an ordinary project member. The permission label is
+    # NOT the boundary, because the alternative is: a member writes
+    # `<script>fetch('/users/1/memberships', …)</script>`, makes the template public, and
+    # every viewer who opens it — an administrator included, whose flag bypasses every
+    # permission check — runs it same-origin with their own session.
     #
-    # A template is written by somebody holding an `authoring: true` permission, which
-    # §4.1 labels a code-execution privilege — and `require: :member` means that is an
-    # ordinary project member. §4 is explicit that the permission label is NOT the
-    # boundary and lists the sandbox as a separate mechanism, because the alternative is
-    # this: a member writes `<script>fetch('/users/1/memberships', …)</script>`, makes the
-    # template public, and every viewer who opens it — an administrator included, whose
-    # flag bypasses every permission check — runs it same-origin with their own session.
-    # Privilege escalation by report.
-    #
-    # So the body never becomes markup in the viewer's document. It goes into an
-    # `srcdoc` ATTRIBUTE, which Rails escapes on the way in, and the browser parses it as
-    # a separate document inside a frame carrying `sandbox="allow-scripts"` **without**
-    # `allow-same-origin` — which is what §4 means by an opaque origin: the frame has no
-    # access to cookies, to `localStorage`, or to the parent DOM, and its own `fetch`
+    # So the body never becomes markup in the viewer's document. It goes into a `srcdoc`
+    # ATTRIBUTE, which Rails escapes on the way in, and the browser parses it as a separate
+    # document inside a frame carrying `sandbox="allow-scripts"` WITHOUT
+    # `allow-same-origin`: no cookies, no `localStorage`, no parent DOM, and its own `fetch`
     # carries no credentials for this site.
     #
-    # --- WHY THERE IS NO `html_safe` HERE ANY MORE, AND THAT IS THE POINT ---
+    # Escaping the body into an attribute is not a workaround for "no `html_safe` anywhere"
+    # — it is the invariant: the parent document never contains author-controlled markup.
     #
-    # §4: *"No `html_safe` anywhere."* The first version of this helper marked the body
-    # safe and dropped it into a `<div>`; the independent review of T-23 refused it
-    # against exactly this section. Escaping the body into an attribute is not a
-    # workaround for the invariant — it is the invariant: the parent document never
-    # contains author-controlled markup at all.
+    # THE POLICY IS SPLIT BETWEEN TWO CARRIERS, and it has to be:
     #
-    # --- THE POLICY IS SPLIT BETWEEN TWO CARRIERS, DELIBERATELY ---
+    #   the `sandbox` ATTRIBUTE  the sandbox itself. CSP's `sandbox` DIRECTIVE is
+    #                            header-only and is ignored in a `<meta>`, so putting it
+    #                            there would be a policy that does not exist.
+    #   the `<meta>` CSP         every other directive, which `<meta http-equiv>` does
+    #                            honour: no network, images only from `data:`, inline styles
+    #                            and inline scripts.
     #
-    # §4 asks for `Content-Security-Policy: sandbox allow-scripts; default-src 'none';
-    # img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'` on "the
-    # content endpoint". There is no content endpoint here — a PREVIEW renders content
-    # that exists only in the request body and has no URL — so the same policy is
-    # delivered by the two carriers that work for a `srcdoc` document:
-    #
-    #   the `sandbox` ATTRIBUTE   the sandbox itself. CSP's `sandbox` DIRECTIVE is
-    #                             header-only and is ignored in a `<meta>`, so putting it
-    #                             there and calling it done would be a policy that does
-    #                             not exist — the failure mode this repository keeps
-    #                             deleting.
-    #   the `<meta>` CSP          every other directive, which `<meta http-equiv>` does
-    #                             honour: no network of any kind, images only from
-    #                             `data:`, inline styles and inline scripts.
-    #
-    # **`img-src data:` IS ONLY SURVIVABLE BECAUSE SOMETHING INLINES THE IMAGES, and for a
-    # long time nothing did.** This comment used to say "(T-33 has already inlined them)".
-    # T-33 built the resolver and no producer called it (§Findings ~~F-16~~), so every
-    # URL-referenced image in this iframe was blocked by this very directive and drew
-    # blank — a cited control with no call site, which is the defect class this project has
-    # shipped four times. F-16's first version then wired the PDF path and left this one,
-    # so the claim stayed false on the surface an author looks at first. It is true now:
+    # `img-src data:` IS ONLY SURVIVABLE BECAUSE SOMETHING INLINES THE IMAGES.
     # `ReportRun#html_only` resolves every section through `Assets::Resolver` with
     # `HTML_CAPABILITIES` — `[:asset_inline]`, chosen to match this line — before the body
-    # reaches the view. If you narrow this directive, that is the code to change with it.
+    # reaches the view. Narrow this directive and that is the code to change with it.
     #
-    # **This is a deviation from §4's wording and is reported rather than absorbed**
-    # (CLAUDE.md §11.3): the security property is the one §4 asks for, the delivery
-    # differs because one mechanism has to serve both a saved report and an unsaved
-    # preview, and a second mechanism for the second case is the "two ways of doing one
-    # thing" §6 forbids. If the curator wants the header, it needs a content endpoint and
-    # a way to address unsaved content, which is a task.
-    # THE TOKENS AND THE DOCUMENT NOW LIVE IN `RedmineReporterDashboards::ReportFrame`,
-    # and these two constants are delegations rather than copies.
+    # There is no content ENDPOINT to carry the policy as a header: a preview renders
+    # content that exists only in the request body and has no URL. One mechanism has to
+    # serve both a saved report and an unsaved preview.
     #
-    # They moved because `include_all_helpers = false` makes this helper unreachable from a
-    # my-page widget, and T-26a needs the same frame on that surface. The comment that used
-    # to sit here said the policy and the body must not be separable by an edit to one of
-    # two files — which is exactly why the move was a MOVE and not a second copy: that
-    # module is now the only place either is assembled, and everything else delegates.
-    # One copy used twice cannot drift; two copies can.
+    # The tokens and the document live in `ReportFrame`; these two constants are
+    # delegations rather than copies, because that module is also reachable from a my-page
+    # widget where `include_all_helpers = false` makes this helper invisible. One copy used
+    # twice cannot drift.
     CONTENT_SECURITY_POLICY = ::RedmineReporterDashboards::ReportFrame::CONTENT_SECURITY_POLICY
     SANDBOX = ::RedmineReporterDashboards::ReportFrame::SANDBOX
 

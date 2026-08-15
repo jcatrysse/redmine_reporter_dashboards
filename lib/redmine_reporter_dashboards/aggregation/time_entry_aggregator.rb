@@ -2,69 +2,42 @@
 
 module RedmineReporterDashboards
   module Aggregation
-    # T-31 — the OWNED aggregator for time entries. A sibling of
-    # `aggregation/query_aggregator.rb`, never an edit to it.
+    # The aggregator for time entries. A sibling of `aggregation/query_aggregator.rb`,
+    # never an edit to it.
     #
-    # --- WHY A SECOND MODULE RATHER THAN A SECOND G7 HUNK ---
+    # WHY A SECOND MODULE. The issue kernel counts `DISTINCT issues.id` by construction, and
+    # G7 holds that file to its v0.5.0 code. Generalising the counted unit there would move
+    # the oracle 176 corpus values are measured against. What the two would have shared was
+    # never the query builder — a time-entry report wants `SUM(hours)` grouped by activity,
+    # user or an issue attribute — it is the RESULT VOCABULARY: the bucket shape, the
+    # `filter` payload a drill-through is built from, `(none)` and `(other)`, the cap and its
+    # `truncated` flag. Every rule below that says "as the kernel does" cites the kernel line
+    # it copies, and the specs compare against `TimeEntryQuery#available_filters` and against
+    # a real `dimension_breakdown` call.
     #
-    # Curator decision, 2026-08-08, closing §Findings **S-13**. The issue kernel counts
-    # `DISTINCT issues.id` by construction — that is the constant `DISTINCT_ISSUES` — and
-    # gate **G7** holds that file byte-identical to its `v0.5.0` blob plus exactly ONE
-    # declared hunk. Generalising the counted unit there would be a second exception in the
-    # file this plan freezes hardest, and it would move the oracle 176 corpus values are
-    # measured against.
+    # THE DIMENSION SET IS CORE'S. `redmine/lib/redmine/helpers/time_report.rb`'s
+    # `load_available_criteria` is the authority, and these are its eight. `priority`,
+    # `author` and `assignee` are excluded because none has a `TimeEntryQuery` filter to
+    # drill into — and `author` is the dangerous one, since `author_id` IS a time-entry
+    # filter and means WHO RECORDED THE ENTRY, not the issue's author, so its payload would
+    # resolve to a plausible, wrong row set. Adding a dimension means answering "which filter
+    # does its drill-through use" first.
     #
-    # The objection to two implementations is answered by what they actually share. A
-    # time-entry report wants DIFFERENT SQL — `SUM(hours)` grouped by activity, user or an
-    # issue attribute — so the reusable part was never the query builder. What is shared is
-    # the RESULT VOCABULARY: the bucket shape, the `filter` payload a drill-through link is
-    # built from, the `(none)` and `(other)` buckets, the cap and its `truncated` flag.
+    # EVERY GROUPED AGGREGATE IS READ POSITIONALLY, AND THAT IS A CORRECTNESS RULE. MariaDB
+    # truncates a returned column label at 256 characters, and ActiveRecord keys a grouped
+    # `.sum`/`.average`/`.count` by the group expression's own text — past the limit every
+    # key comes back NULL, the buckets collapse into one, and the total is taken from
+    # whichever group the server returned last. `SUM(hours)` grouped by a dimension is this
+    # module's entire purpose, so there is no `.sum`, `.average` or `.count` on a grouped
+    # relation anywhere below: `measure_rows` is the only read, it plucks, and a spec asserts
+    # this file's source contains none of the three.
     #
-    # **AND "SHARED VOCABULARY" IS A CLAIM THAT HAS TO BE CHECKED RATHER THAN ASSERTED.** An
-    # independent review of the first version found six ways it was false while the key sets
-    # still matched: the axis had no ceiling, ties were ordered by whatever row order the
-    # engine returned, `sort: label` sorted by raw id, the cap swallowed the `(none)` bucket
-    # into `(other)`, `(other)` carried no `values`, and six of eleven `filter` payloads
-    # named a filter `TimeEntryQuery` does not have. Every rule below that says "as the
-    # kernel does" now cites the kernel line it copies, and the specs compare against
-    # `TimeEntryQuery#available_filters` and against a real `dimension_breakdown` call.
-    #
-    # --- THE DIMENSION SET IS CORE'S, NOT AN INVENTION ---
-    #
-    # `redmine/lib/redmine/helpers/time_report.rb:106-131` — `load_available_criteria` — is
-    # the authority, and these are its eight. The first version had eleven: it added
-    # `priority`, `author` and `assignee`, and those three were exactly the three with no
-    # `TimeEntryQuery` filter to drill into. `author` was the dangerous one, because
-    # `author_id` IS a time-entry filter and it means **who recorded the entry**, not the
-    # issue's author — so that payload resolved to a plausible, wrong row set. Adding a
-    # dimension here means answering "which filter does its drill-through use" first.
-    #
-    # --- EVERY GROUPED AGGREGATE IS READ POSITIONALLY, AND THAT IS A CORRECTNESS RULE ---
-    #
-    # This is `Accept:` clause 5 and the single most important thing in the file. Defect
-    # **D-1** — MariaDB truncating a returned column label at 256 characters — was fixed for
-    # the COUNT path only: `QueryAggregator.grouped_counts` does
-    # `relation.pluck(*group_values, Arel.sql("COUNT(…)"))` and reads the row BY POSITION,
-    # while `raw_measure` still calls `relation.sum(Arel.sql(expression))` on a grouped
-    # relation — and ActiveRecord keys that Hash by the group expression's own TEXT. Past 256
-    # characters every key comes back NULL, the buckets collapse into one and the total is
-    # taken from whichever group the server returned last.
-    #
-    # `SUM(hours)` grouped by a dimension is this module's entire purpose, so it walks
-    # straight into the one defect class this project has documented as open and ungated —
-    # the handover says of it, in as many words, *"no gate in this project can catch it"*. So
-    # there is no `.sum`, `.average` or `.count` on a grouped relation anywhere below;
-    # `measure_rows` is the only read, it plucks, and a spec asserts this file's own source
-    # contains none of the three.
-    #
-    # --- HOW CORRECTNESS IS ESTABLISHED: A SECOND COMPUTATION, NOT A SNAPSHOT ---
-    #
-    # `Accept:` clause 6. `spec/adapter/time_entry_aggregator_spec.rb` computes every figure
-    # twice — once through this module's SQL and once by loading the rows and adding them up
-    # in Ruby — and runs the comparison on PostgreSQL, MySQL 8 and MariaDB 11. Two
-    # independent computations agreeing is a correctness claim; a recorded file would only be
-    # a did-it-change claim, and for brand-new code it would freeze whatever this happened to
-    # answer on its first day. No golden corpus is added, deliberately.
+    # CORRECTNESS IS A SECOND COMPUTATION, NOT A SNAPSHOT.
+    # `spec/adapter/time_entry_aggregator_spec.rb` computes every figure twice — once through
+    # this SQL and once by loading the rows and adding them up in Ruby — on PostgreSQL,
+    # MySQL 8 and MariaDB 11. Two independent computations agreeing is a correctness claim; a
+    # recorded file would only be a did-it-change claim, and for new code it would freeze
+    # whatever this answered on its first day. No golden corpus here, deliberately.
     module TimeEntryAggregator
       # `DISTINCT issues.id` is the issue kernel's unit. This module's is a time entry, and
       # naming it as a constant is what makes the difference greppable rather than implied.

@@ -3,38 +3,22 @@
 require_relative 'report_stylesheet'
 
 module RedmineReporterDashboards
-  # T-38 — the ONE place a rendered report body becomes a standalone HTML document.
+  # The ONE place a rendered report body becomes a standalone HTML document.
   #
-  # --- WHY A SECOND MODULE RATHER THAN A SECOND METHOD ON `ReportFrame` -------------
+  # `ReportFrame` still owns the sandbox policy and is still the only caller that names it.
+  # What lives here is the part that is NOT about a sandbox — doctype, charset, stylesheet —
+  # because the PDF binding needs exactly that part and has no sandbox at all. Two assemblers
+  # would mean the HTML view and the PDF share a stylesheet only until somebody edits one.
   #
-  # `ReportFrame` says of itself that it is "the ONLY place that assembles the document
-  # or names the sandbox", and that property is what stopped the CSP and the body
-  # becoming separable. It is kept: `ReportFrame.document` still owns the sandbox
-  # policy and still is the only caller that names it. What moved here is the part that
-  # is NOT about a sandbox — the doctype, the charset and the stylesheet — because the
-  # PDF binding needs exactly that part and has no sandbox at all.
+  #   ReportFrame.document(body)        -> adds the CSP meta, for the srcdoc iframe
+  #   Reporting::ReportRun#bind_assets  -> adds nothing, for DocumentRequest#body
   #
-  # The alternative was to let the PDF path assemble its own document, and that is the
-  # arrangement T-38 exists to end: two assemblers means the HTML view and the PDF get
-  # the same stylesheet only until somebody edits one of them. `technical-spec.md`
-  # §9b.4 wants "the same document at two sizes rather than two designs", which is a
-  # claim about construction rather than about intent.
-  #
-  # So there is one assembler with two callers:
-  #
-  #   ReportFrame.document(body)          -> adds the CSP meta, for the srcdoc iframe
-  #   Reporting::ReportRun#bind_assets    -> adds nothing, for DocumentRequest#body
-  #
-  # --- NO `html_safe`, AND THE BODY IS NOT ESCAPED EITHER ---------------------------
-  #
-  # `body` is already-rendered markup from the Liquid layer, which is where escaping
-  # happens (FR-19, `ScriptSafeJson`, the drop layer). This module concatenates; it
-  # does not decide anything about the body's safety and does not mark it safe. On the
-  # HTML binding the result becomes the value of a `srcdoc` ATTRIBUTE, which Rails
-  # escapes as attribute data (INV-9 — held by construction, by `report_document_spec.rb`'s
-  # own source check, and since T-27 by `script/gates/no_html_safe.sh`, which runs in CI's
-  # `gates` job); on the PDF binding
-  # it becomes `DocumentRequest#body`, which no browser of the viewer's ever parses.
+  # NO `html_safe`, AND THE BODY IS NOT ESCAPED EITHER. `body` is already-rendered markup
+  # from the Liquid layer, which is where escaping happens. This module concatenates; it
+  # decides nothing about the body's safety and does not mark it safe. On the HTML binding
+  # the result becomes a `srcdoc` ATTRIBUTE value, which Rails escapes as attribute data
+  # (INV-9); on the PDF binding it becomes `DocumentRequest#body`, which no viewer's browser
+  # ever parses.
   #
   # --- `<html lang>` — THE INSTALLATION DEFAULT, BY DECISION ------------------------
   #

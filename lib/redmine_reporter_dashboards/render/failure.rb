@@ -34,20 +34,11 @@ module RedmineReporterDashboards
       #                            message, and no retry will ever produce a different
       #                            answer.
       #
-      # THE FIRST DRAFT OF THIS COMMENT FAILED ITS OWN TEST, and an independent UX review
-      # caught it: it said `:engine_unavailable` is where "nothing an operator TYPES changes
-      # the diagnosis" and listed "not installed" as an example — but installing the binary
-      # is exactly what fixes that one. The discriminator is not "can an operator act on it";
-      # it is "do we KNOW what to tell them".
-      #
-      # E-27 row 3 recorded the old behaviour as *defensible*: the adapter refuses to use
-      # an unauthenticated Gotenberg, so it IS unavailable to it. What that collapses is
-      # the only thing a reader of a failed report can act on. "The render service could
-      # not be reached" sends an operator to `docker ps`; "the service answered the
-      # conversion route without the configured credential" sends them to
-      # `--api-enable-basic-auth`. Both were the same code, and the second sentence was
-      # already being written — the code was throwing the distinction away after the
-      # message had made it.
+      # The discriminator is NOT "can an operator act on it" — installing a missing binary
+      # is an action, and that one is `:engine_unavailable`. It is "do we KNOW what to tell
+      # them". "The render service could not be reached" sends an operator to `docker ps`;
+      # "the service answered the conversion route without the configured credential" sends
+      # them to `--api-enable-basic-auth`.
       #
       # WHAT DOES NOT GET THIS CODE, deliberately, because the same row is what made the
       # old collapse defensible in the first place:

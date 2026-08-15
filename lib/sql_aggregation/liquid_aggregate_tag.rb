@@ -8,98 +8,50 @@ require_relative '../redmine_reporter_dashboards/aggregation/drill_through'
 module SqlAggregation
   # Liquid tag: {% sql_aggregate ... %}   (legacy alias: {% geo_aggregate ... %})
   #
-  # Runs server-side SQL aggregation and assigns results to a Liquid variable.
-  # Replaces expensive {% for issue in issues %} loops in report templates.
+  # Runs server-side SQL aggregation and assigns the result to a Liquid variable, instead of
+  # a {% for issue in issues %} loop. The parameter surface is documented for the people who
+  # write templates in `docs/template-authoring.md`; what follows is the behaviour a
+  # maintainer needs and the doc does not carry.
   #
-  # Usage (primary — uses the issues drop already in context):
-  #   {% sql_aggregate from: issues, period: month, periods: 6,
-  #      closed_statuses: "Closed;Rejected", assign_to: stats %}
+  # --- MODE SWITCHING ---
   #
-  # Usage (after reporter plugin fix exposes query_id):
-  #   {% sql_aggregate query_id: query_id, period: week, periods: 13,
-  #      closed_statuses: "Closed;Rejected", assign_to: stats %}
+  #   no group_by                 time series
+  #   group_by                    breakdown
+  #   group_by + split_by         crosstab
+  #   group_by: flags             scalar counters; never valid as split_by
+  #   group_by: completeness      filled/empty per field; never valid as split_by
   #
-  # Usage (custom field breakdown, crosstab, age histogram, KPI tiles):
-  #   {% sql_aggregate from: issues, group_by: cf_92, sort: count, limit: 10,
-  #      assign_to: by_department %}
-  #   {% sql_aggregate from: issues, group_by: cf_92, split_by: cf_86, assign_to: matrix %}
-  #   {% sql_aggregate from: issues, group_by: period, split_by: cf_86,
-  #      period: month, periods: 12, assign_to: per_month %}
-  #   {% sql_aggregate from: issues, group_by: age, age_buckets: "30;60;90;180", assign_to: ages %}
-  #   {% sql_aggregate from: issues, group_by: flags, closed_statuses: "Closed;Rejected", assign_to: kpi %}
+  # A `group_by` over one of the seven core fields with none of the newer parameters runs
+  # the original `.breakdown` path unchanged, so templates written before the dimension API
+  # keep their exact keys, ordering and labels.
   #
-  # --- Dimensions (group_by / split_by) ---
+  # `sort` / `limit` / `other_label` are IGNORED for `period` and `age`: those axes are
+  # always chronological or ascending and include their empty buckets.
   #
-  #   status | priority | tracker | assignee | author | category | version
-  #   cf_<id>   issue custom field by numeric id (cf_92)
-  #   period    date bucket    — period / periods / date_field
-  #   age       age bucket     — age_buckets / age_field
-  #   flags        scalar counters  — group_by only, never split_by
-  #   completeness filled/empty per field (fields:) — group_by only, never split_by
+  # --- RESULT KEYS ---
   #
-  # --- Parameters ---
+  #   time series  labels, created, closed, open_now, total, period, periods
+  #   breakdown    buckets [{label, count, value, filter}], total, group_by, dimension,
+  #                field_name, multi_value, truncated
+  #   crosstab     + series, series_entries, rows [{label, total, counts, cells, value,
+  #                filter}], matrix, columns, split_by, series_field_name
+  #   flags        flags {...}, the same counters at top level, and
+  #                stages [{key, label, count, filter}]
+  #   completeness buckets [{label, count, empty, total, pct, value, filter, empty_filter}]
+  #                in the order `fields:` names them, plus fields and total
   #
-  #   assign_to       — result variable name                     (default: stats)
-  #   from            — Liquid var holding the issues drop       (default: issues)
-  #   query_id        — IssueQuery id to aggregate instead
-  #   group_by        — dimension; switches to breakdown mode
-  #   split_by        — second dimension; requires group_by, produces a crosstab
-  #   period          — day | week | month | year                (default: month)
-  #   periods         — number of periods back  (default 30/13/6/3, capped 90/52/24/10)
-  #   months          — backward-compatible alias for periods when period is month
-  #   date_field      — created | closed: which timestamp `period` buckets on (default: created)
-  #   closed_statuses — semicolon/comma-separated status names (else the is_closed flag)
-  #   sort            — count (desc) | label (asc, natural) | position  (default: count)
-  #   limit           — keep the top N rows, remainder collapses into `other_label` (default: 0 = all)
-  #   other_label     — label of the collapsed row                (default: Other)
-  #   empty_label     — label of the no-value row (default: (none); Unassigned for assignee)
-  #   age_buckets     — ascending day boundaries                 (default: 30;60;90;180)
-  #   age_field       — created | updated | due                  (default: created)
-  #   fields          — semicolon/comma-separated field list for group_by: completeness
-  #   user_label      — name | login for the assignee/author dimensions (default: name)
-  #   measure         — count (default) | distinct | sum | avg
-  #   of              — field the measure applies to (author, cf_94, estimated_hours, …)
-  #   drill           — true adds drill-through URLs                (default: false)
-  #   drill_max_url   — maximum URL length before an element gets no URL (default: 2000)
-  #   drill_inherit   — all (default) | filters: what a drill-down URL inherits
+  # --- DRILL-THROUGH ---
   #
-  # sort / limit / other_label are IGNORED for `period` and `age`: those axes are
-  # always in chronological / ascending order and include their empty buckets.
+  # `drill: true` adds drill_available, drill_degraded, base_url, a `url` on every bucket,
+  # row, series entry and stage, and `cell_urls` (+ cell_urls_truncated) for a crosstab.
   #
-  # --- Result keys ---
+  # It IMPLIES the dimension path, because only that path knows the raw stored value behind
+  # a label — so for a core field the labels become the dimension ones (display name for
+  # users) rather than the legacy ones; `user_label: login` keeps the old text.
   #
-  #   Time series (no group_by): labels, created, closed, open_now, total, period, periods
-  #   Breakdown:                 buckets [{label, count, value, filter}], total,
-  #                              group_by, dimension, field_name, multi_value, truncated
-  #   Crosstab (split_by):       + series, series_entries, rows [{label, total,
-  #                              counts, cells, value, filter}], matrix, columns,
-  #                              split_by, series_field_name
-  #   flags:                     flags {...} plus the same counters at top level,
-  #                              and stages [{key, label, count, filter}]
-  #   completeness:              buckets [{label, count, empty, total, pct, value,
-  #                              filter, empty_filter}] in the order fields: names
-  #                              them, plus fields and total (the issue count)
-  #
-  # --- Drill-through (drill: true) ---
-  #
-  #   Adds drill_available, drill_degraded, base_url, a `url` on every bucket /
-  #   row / series_entries entry / stage, and `cell_urls` (+ cell_urls_truncated)
-  #   for a crosstab (rows x series, aligned with `matrix`). Each URL is the Redmine issue list showing the
-  #   report's own issues — filters, columns, grouping, totals and sort inherited
-  #   — narrowed to that one element.
-  #
-  #   drill: true implies the dimension path, because only it knows the raw stored
-  #   value behind a label. For one of the seven core fields that means the
-  #   dimension labels (display name for users) instead of the legacy ones; pass
-  #   user_label: login to keep the old text.
-  #
-  #   Nothing is emitted when no IssueQuery can be resolved: drill_available is
-  #   then false and there are no URLs at all, because a dimension-only URL would
-  #   silently show issues from outside the report scope.
-  #
-  # A `group_by` over the seven core fields with none of the new parameters runs
-  # the original .breakdown code path unchanged, so templates written before the
-  # dimension API keep their exact keys, ordering and labels.
+  # Nothing is emitted when no IssueQuery can be resolved: `drill_available` is false and
+  # there are no URLs at all, because a dimension-only URL would silently show issues from
+  # outside the report scope.
   #
   # On any error the tag assigns an empty-safe hash and logs to Rails.logger
   # so the rest of the template renders without crashing.
