@@ -185,39 +185,61 @@ RSpec.describe 'the shipped templates and the README (FR-19)' do
     end
   end
 
-  describe "the README's own snippets" do
-    # PER FENCED BLOCK, not over the whole file. A README is prose, and its prose talks
-    # ABOUT tags: the sentence describing this very rule contains a backticked
-    # `<script>`, which the HTML scanner correctly reads as an element — opening a region
-    # that swallowed 350 lines of Markdown and produced 23 findings in text that is not a
-    # template. The unit T-19 means by "the README's own snippets" is the snippet.
-    let(:snippets) { read('README.md').scan(/^```liquid\n(.*?)^```/m).flatten }
+  # EVERY PAGE THAT TEACHES LIQUID, not just the README. The snippets moved when the
+  # 2 623-line README was split into `docs/`, and a gate that keeps scanning the file the
+  # examples LEFT is a gate that reports zero findings over a repository that has some —
+  # the same failure `vendor_integrity.sh` had. The list is explicit so adding a fourth
+  # guide is a visible decision.
+  PROSE = %w[
+    README.md
+    docs/user-guide.md
+    docs/template-authoring.md
+    docs/admin-guide.md
+  ].freeze
+
+  describe 'the snippets in the documentation' do
+    # PER FENCED BLOCK, not over the whole file. Prose talks ABOUT tags: a sentence
+    # describing this very rule contains a backticked `<script>`, which the HTML scanner
+    # correctly reads as an element — opening a region that swallowed 350 lines of Markdown
+    # and produced 23 findings in text that is not a template. The unit is the snippet.
+    def snippets_in(path)
+      read(path).scan(/^```liquid\n(.*?)^```/m).flatten
+    end
+
+    let(:snippets) { PROSE.flat_map { |path| snippets_in(path).map { |s| [path, s] } } }
 
     it 'has snippets to check, so this file cannot pass by finding nothing' do
       expect(snippets.length).to be >= 20
     end
 
+    it 'teaches Liquid on the authoring page, which is where the examples now live' do
+      expect(snippets_in('docs/template-authoring.md').length).to be >= 15
+    end
+
     it 'has none with an unescaped interpolation inside <script>' do
-      offenders = snippets.each_with_index.filter_map do |snippet, index|
+      offenders = snippets.filter_map do |path, snippet|
         found = findings(snippet).select { |f| f.rule == FR19 }
         next if found.empty?
 
         lines = snippet.lines
-        "  snippet #{index + 1}, line #{found.first.line}: #{lines[found.first.line - 1].to_s.strip}"
+        "  #{path}, line #{found.first.line}: #{lines[found.first.line - 1].to_s.strip}"
       end
 
       expect(offenders).to be_empty,
-                           (['the README teaches the defective idiom again:'] + offenders).join("\n")
+                           (['the documentation teaches the defective idiom again:'] + offenders)
+                             .join("\n")
     end
 
-    # The idiom the README used to document, asserted GONE by name. A README that stopped
+    # The idiom the documentation used to teach, asserted GONE by name. A page that stopped
     # showing charts would also have no findings.
     it 'no longer documents `| escape` as the way into a JS string' do
-      expect(read('README.md')).not_to match(/"\{\{[^}]*\|\s*escape\s*\}\}"/)
+      PROSE.each do |path|
+        expect(read(path)).not_to match(/"\{\{[^}]*\|\s*escape\s*\}\}"/), path
+      end
     end
 
     it 'documents `| json` instead' do
-      expect(read('README.md')).to include('| json }}')
+      expect(PROSE.map { |path| read(path) }.join).to include('| json }}')
     end
   end
 
