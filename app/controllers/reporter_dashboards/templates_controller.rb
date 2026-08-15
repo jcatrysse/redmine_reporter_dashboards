@@ -1,43 +1,28 @@
 # frozen_string_literal: true
 
 module ReporterDashboards
-  # T-23 — the plugin's FIRST OWNED HTTP ENTRY POINT.
+  # AUTHORIZATION IS PER ACTION, AND `authorize` IS ONLY THE FIRST HALF.
   #
-  # Everything before this task built a layer that nothing called. `RenderContext` had no
-  # producer, the drops had no constructor, `render/` had no caller and `BatchGuard` had
-  # no batch. This controller is where all four acquire one, which is why finding E-6
-  # said T-15's two owed assertions had to wait for it: *"a cap with no caller is a cap
-  # nobody has seen refuse anything"*.
+  # `before_action :authorize` is unscoped on purpose — no `only:`, no `except:`, no
+  # `skip_before_action`. `spec/permissions/permission_map_spec.rb` reads that out of the AST.
   #
-  # --- AUTHORIZATION IS PER ACTION, AND THE `authorize` LINE IS ONLY THE FIRST HALF ---
-  #
-  # `before_action :authorize` is UNSCOPED here on purpose — no `only:`, no `except:`, no
-  # `skip_before_action` — because the review of T-40 defeated a per-controller check with
-  # exactly those two lines, and `spec/permissions/permission_map_spec.rb` now reads them
-  # out of the AST.
-  #
-  # But `authorize` alone is not the guard this surface needs, and that is the second
-  # half. Redmine's `authorize` passes when the actor holds **any** permission mapping the
-  # action, so with `manage_public_…` mapped to `#create` — which it must be, because that
-  # is where the visibility decision is made and it is core's own shape for
-  # `manage_public_queries` — a role holding only that one permission would otherwise
-  # reach a code-execution endpoint. And *"import requires `add_…` **and** `edit_…`"* is a
+  # But Redmine's `authorize` passes when the actor holds ANY permission mapping the action.
+  # With `manage_public_…` mapped to `#create` — which it must be, because that is where the
+  # visibility decision is made — a role holding only that one permission would otherwise
+  # reach a code-execution endpoint. And "import requires `add_…` AND `edit_…`" is a
   # conjunction Redmine's permission model cannot express at all.
   #
-  # So each group of actions carries an explicit second guard naming the permission it
-  # really needs, and the functional suite holds each permission ALONE and asserts 403 on
-  # everything it must not reach:
+  # So each group of actions carries an explicit second guard, and the functional suite holds
+  # each permission ALONE and asserts 403 on everything it must not reach:
   #
   #   authorize                  the action is mapped and this role holds one of them
   #   require_create_permission  new/create really need the create permission
-  #   require_edit_permission    edit/update/destroy/export need an edit permission FOR
-  #                              THIS TEMPLATE — which is where edit_own_ differs
+  #   require_edit_permission    edit/update/destroy/export need an edit permission FOR THIS
+  #                              TEMPLATE — which is where edit_own_ differs
   #   require_import_permissions import needs BOTH authoring permissions
   #   require_preview_permission preview RUNS the template, so it needs an authoring one
   class TemplatesController < ApplicationController
-    # The plugin's `lib/` is not on Redmine's autoload paths; these are shorter names for
-    # constants `lib/redmine_reporter_dashboards.rb` has already required at boot. The
-    # same pattern as `ReporterPreflightController`.
+    # Shorter names for constants `lib/redmine_reporter_dashboards.rb` required at boot.
     Reporting = RedmineReporterDashboards::Reporting
     Render = RedmineReporterDashboards::Render
     Archive = RedmineReporterDashboards::Archive

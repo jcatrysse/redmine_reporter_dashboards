@@ -17,81 +17,47 @@ require_relative '../registry'
 module RedmineReporterDashboards
   module Render
     module Engines
-      # `:gotenberg` — the same Chromium, in somebody else's container. NOT the default,
-      # and a test asserts auto-detection never selects it (technical-spec.md §5.2,
-      # OQ-3 closed 2026-08-04: "as ONE of the options, documented and safe").
+      # `:gotenberg` — the same Chromium, in somebody else's container. Never the default,
+      # and never chosen by auto-detection: an operator has to deploy it and select it.
       #
-      # --- THIS FILE HOLDS A SOCKET, AND THAT IS THE ONE EXEMPTION IN `render/**` ---
+      # THIS FILE IS THE ONE EXEMPTION TO THE `Net::HTTP` BAN UNDER `render/**`.
+      # `script/gates/layer_purity.sh` enforces the ban as a proxy for INV-8 — the renderer
+      # never holds the network, because a renderer that fetches a document's references on
+      # the viewer's behalf is SSRF with a report attached. An engine that IS a service
+      # cannot be reached without a socket, so the exemption is named, scoped to this file
+      # and bounded by its own gate arm: no other file under `render/**` may name
+      # `Net::HTTP`, and this file may not name `Rails.`, `ActiveRecord`, `Liquid`, `Issue`,
+      # a cookie or a session.
       #
-      # `script/gates/layer_purity.sh` forbids `Net::HTTP` under `render/**`. That rule is
-      # a MECHANICAL PROXY for INV-8 — "the renderer is never the thing holding the
-      # network" — and INV-8's subject, spelled out in technical-spec.md §11, is the ASSET
-      # path: the renderer must never fetch a document's references on the viewer's
-      # behalf, because that is SSRF with a report attached.
+      # What keeps the exemption narrow:
       #
-      # An engine that IS a service cannot be reached without a socket. There is no
-      # version of this adapter that does not open one, so the choice was never "socket or
-      # no socket" — it was "a socket this gate can see, or a socket laundered through a
-      # neutral directory that the gate cannot". This file's own gate says why the second
-      # is worse: the `charts`/`assets` arms exist precisely because "the boundary would
-      # hold TRANSITIVELY only by luck" otherwise. A transport one hop away is the two-hop
-      # evasion those arms were written to stop, wearing a port's clothes.
-      #
-      # So the exemption is NAMED, scoped to this one file, bounded by its own gate arm
-      # (`layer_purity.sh`'s `render-http` arm: no OTHER file under `render/**` may name
-      # `Net::HTTP`, and THIS file may not name `Rails.`, `ActiveRecord`, `Liquid`,
-      # `Issue`, a cookie or a session either), and negative-tested. What the exemption
-      # buys is bounded by construction, not by promise:
-      #
-      #   * the endpoint is OPERATOR CONFIGURATION. It is never derived from a document,
-      #     a template, a request parameter or an asset URL — `ENDPOINT_SCHEMES` and
-      #     `#validate_endpoint!` are what make that a check rather than a habit.
-      #   * `/forms/chromium/convert/url` is a FORBIDDEN CODE PATH (§5.2 clause 1). It is
-      #     SSRF by design — you hand Gotenberg a URL and it fetches it — and a boundary
-      #     grep asserts the string is absent from the whole tree, not merely from here.
+      #   * the endpoint is OPERATOR CONFIGURATION, never derived from a document, a
+      #     template, a request parameter or an asset URL (`ENDPOINT_SCHEMES`,
+      #     `#validate_endpoint!`);
+      #   * `/forms/chromium/convert/url` is forbidden — it is SSRF by design, and a
+      #     boundary grep asserts the string is absent from the whole tree;
       #   * the document arriving here is already asset-resolved. This adapter fetches
-      #     nothing; it POSTS bytes it was given.
-      #   * `DocumentRequest` still has no field a credential could travel in. The
-      #     credential is the OPERATOR's, comes from configuration, and is attached to the
-      #     transport rather than to the request.
+      #     nothing; it POSTs bytes it was given.
       #
-      # --- WHY UPLOAD, AND WHY THAT MATTERS BEYOND THIS ENGINE ---
+      # ASSET MODEL: UPLOAD, because that is Gotenberg's only one — a multipart form whose
+      # `index.html` is the document and whose sibling parts are the files it refers to by
+      # relative name.
       #
-      # Gotenberg's only asset model IS upload: a multipart form whose `index.html` is the
-      # document and whose sibling parts are files the document refers to by relative
-      # name. That makes this adapter the first consumer of `DocumentRequest#assets` —
-      # finding F-16's remaining half. Until now `:asset_upload` was declared by no
-      # shipped engine, so the resolver always chose `:inline` and the upload branch was
-      # proven at the resolver and nowhere else.
-      #
-      # Declaring the capability and delivering it therefore had to land together: G12's
-      # three-state rule turns a DECLARED capability that fails into a hard failure, and a
-      # capability this project declares and does not deliver is INV-7's exact sin.
-      #
-      # --- MEASURED AGAINST THE REAL CONTAINER, 2026-08-10 ---
-      #
-      # gotenberg/gotenberg:8 @ sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
-      # (Gotenberg 8.35.0). Every constant below that encodes a fact about the wire format
-      # was read off that container rather than off its documentation; the two probes that
-      # mattered most are written up on `#preflight`, because both of them are checks that
-      # would otherwise have been unable to fail.
+      # The wire-format constants below were read off `gotenberg/gotenberg:8` @
+      # sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+      # (Gotenberg 8.35.0) rather than off its documentation.
       class Gotenberg
         ID = :gotenberg
 
-        # Matches `config/capabilities.yml` exactly, and the conformance suite asserts the
-        # two are equal rather than trusting that they look it.
+        # Matches `config/capabilities.yml` exactly; the conformance suite asserts the two
+        # are equal rather than trusting that they look it.
         #
-        # `:asset_inline` IS DELIBERATELY ABSENT even though this engine's Chromium
-        # decodes a `data:` URI perfectly well. The declaration is what the RESOLVER reads
-        # to choose a model (`Assets::Resolver#embed`), and an engine declaring both would
-        # take the inline branch for everything under `inline_max_bytes` — which would
-        # leave the upload path exactly as unexercised as it was before this adapter
-        # existed. One asset model per engine is also what `capabilities.yml` says
-        # (`asset_models: [upload]`), and that file is the declaration of record.
+        # `:asset_inline` is absent even though this engine's Chromium decodes a `data:` URI
+        # fine. The resolver reads this list to pick an asset model, and an engine declaring
+        # both would take the inline branch for everything under `inline_max_bytes`, leaving
+        # the upload path unexercised. One asset model per engine.
         #
-        # `:outline` and `:tagged_pdf` are absent because this route does not offer them
-        # in a form this adapter has measured; `:asset_http` is absent by policy as well
-        # as by capability (INV-8).
+        # `:asset_http` is absent by policy as well as by capability (INV-8).
         CAPABILITIES = %i[
           javascript modern_javascript readiness_expression print_backgrounds header footer
           page_furniture_tokens custom_page_size landscape margins scale
@@ -115,24 +81,17 @@ module RedmineReporterDashboards
 
         ENDPOINT_SCHEMES = %w[http https].freeze
 
-        # THERE IS NO DEFAULT ENDPOINT, and the one that used to be here was the worst
-        # possible value: `http://localhost:3000` is RAILS' AND REDMINE'S OWN PORT. On a
-        # Rails-default deployment an unconfigured Gotenberg adapter POSTed a probe
-        # document — and, with the env vars set, a credential — to Redmine itself, got a
-        # 404, and reported `:internal, "the report could not be produced"`, whose own
-        # comment says that code means "a bug here, not an engine fault". Every step
-        # reasonable, the composite a false accusation.
+        # THERE IS NO DEFAULT ENDPOINT. The obvious one is the worst possible value:
+        # `http://localhost:3000` is Rails' and Redmine's own port, so an unconfigured
+        # adapter would POST a probe document — and a credential — to Redmine itself.
         #
-        # Construction stays TOTAL — raising here would escape `adapter.new` in
-        # `ReportRun#with_pdf` and in the conformance harness, neither of which expects it
-        # — so an unconfigured adapter builds and answers a typed `Failure` naming the
-        # variable to set. That is INV-5's whole shape: the error travels in the value.
+        # Construction stays total: raising here would escape `adapter.new` in
+        # `ReportRun#with_pdf` and in the conformance harness. An unconfigured adapter builds
+        # and answers a typed `Failure` naming the variable to set (INV-5).
         UNCONFIGURED = nil
 
-        # Gotenberg 8 is the floor `config/capabilities.yml` declares. The check is on the
-        # MAJOR only: a project that pins by digest gets its patch level from the pin, and
-        # refusing 8.36 because this file was written against 8.35 would be a support
-        # claim nobody measured, in the opposite direction.
+        # The floor `config/capabilities.yml` declares. Checked on the MAJOR only: a project
+        # pinning by digest gets its patch level from the pin.
         SUPPORTED_MAJOR = 8
 
         # How long to wait for the credential and version probes. These are not renders;

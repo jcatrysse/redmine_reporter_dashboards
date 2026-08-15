@@ -1,103 +1,39 @@
 # frozen_string_literal: true
 
 module RedmineReporterDashboards
-  # T-40 — the permission model, as DATA rather than as a list of calls in `init.rb`.
+  # The permission model, as DATA rather than as a list of calls in `init.rb`.
   #
-  # --- WHY THIS FILE EXISTS, AND WHAT IT REPLACES ---
+  # WHY DATA. `spec/permissions/permission_map_spec.rb` reads this table and asserts that
+  # every registered action exists on the named controller, that the controller calls
+  # `authorize`, that every permission is labelled in all nine locales, and that every
+  # public controller action is either permission-mapped or listed in NON_PERMISSION_GUARDS
+  # with the guard it really uses. A list of calls inside `Redmine::Plugin.register` cannot
+  # be read without booting Redmine.
   #
-  # `technical-spec.md` §4 used to answer INV-9 — *template authoring IS code execution* —
-  # with a plugin setting, `template_authoring: :admins_only | :project_managers`, and
-  # `[OQ-F]` asked which of the two should be the default. **The curator rejected the whole
-  # shape on 2026-08-06**: a plugin states who may do what the way Redmine already does,
-  # as role permissions an administrator grants per project and per role, not as one global
-  # switch with two positions.
+  # It also makes the authoring rule enforcement instead of prose: `Entry#requires` DERIVES
+  # `:member` from `authoring: true`, so a code-execution privilege cannot be offered to the
+  # Anonymous or Non-member role by an edit that forgets — or un-offered by one.
   #
-  # The rejection was right, and for a reason worth writing down rather than merely
-  # obeying. `:project_managers` — the value the spec recommended for upgraded installs —
-  # would have **widened a code-execution privilege on upgrade, silently, install-wide**,
-  # to whatever every role the operator thinks of as a manager happens to be. That is the
-  # failure this project keeps naming, pointed the other way. And `:admins_only` would have
-  # made the feature unreachable for the very person it is for. A setting cannot say
-  # *"this role, in this project"*; a permission is exactly the vocabulary that can.
+  # THIS PLUGIN GRANTS NOTHING. A plugin can declare a permission; it has no way to tick
+  # one. But Redmine's own default-data loader gives the Manager role every setable
+  # permission, ours included, on a brand-new install
+  # (`lib/redmine/default_data/loader.rb`, identical on 5.1 through 7.0). That is why the
+  # preflight page reports which of OUR roles hold an authoring permission, not only the
+  # base plugin's: on a fresh install nobody necessarily chose it.
   #
-  # --- WHY DATA AND NOT THREE `permission` LINES ---
+  # WHAT IS DELIBERATELY NOT A PERMISSION, because an unused checkbox on the roles screen
+  # costs an administrator attention every time they read it:
   #
-  # Three reasons, all of them mechanical:
-  #
-  # 1. `spec/permissions/permission_map_spec.rb` can read it. It asserts every registered
-  #    action **exists** on the named controller, that the controller actually calls
-  #    `authorize`, that every registered permission is labelled in all nine locales, and
-  #    that every public controller action is either permission-mapped or listed in
-  #    NON_PERMISSION_GUARDS with the guard it really uses. A list of calls inside
-  #    `Redmine::Plugin.register` cannot be read without booting Redmine, so those
-  #    assertions would live in a suite that only runs in CI.
-  # 2. The authoring rule becomes enforcement instead of prose: `Entry#requires` **derives**
-  #    `:member` from `authoring: true` — it is not written on the entry at all — so a
-  #    code-execution privilege cannot be offered to the Anonymous or Non-member role by an
-  #    edit that forgets, and cannot be *un*-offered by one either.
-  # 3. PLANNED entries make the *design* reviewable now while keeping the roles screen
-  #    honest: a permission an administrator can tick and that guards nothing is a lie in
-  #    the interface, so nothing here is registered until the task named in `lands_in`
-  #    ships the controller it guards.
-  #
-  # --- HOW `[OQ-F]`'s REAL WORRY IS ANSWERED WITHOUT A SETTING ---
-  #
-  # `[OQ-F]` worried about two things and a default could only serve one of them:
-  #
-  # * *A fresh install must not hand out code execution.* **This plugin grants nothing** — a
-  #   plugin can declare a permission, it has no way to tick one — so for every install that
-  #   already has roles, authoring starts nowhere and only administrators (whose flag
-  #   bypasses the check) can author.
-  #
-  #   **But "no role holds one until an administrator grants it" is NOT true in general, and
-  #   the review of T-40 was right to refuse that sentence.** Redmine's own default-data
-  #   loader does this, identically on 5.1, 6.0, 6.1 and 7.0
-  #   (`lib/redmine/default_data/loader.rb:51`):
-  #
-  #       manager.permissions = manager.setable_permissions.collect {|p| p.name}
-  #
-  #   and `Role#setable_permissions` subtracts only `public_permissions` for a givable role.
-  #   So on a **brand-new** install — where `Role.where(builtin: 0)` is empty, which is the
-  #   loader's own precondition (`:31`) — loading the default configuration with this plugin
-  #   already present grants the **Manager** role every setable permission of ours,
-  #   `require: :member` included. Once T-23 registers the authoring four, that is literally
-  #   `:project_managers`, arriving from core rather than from a setting.
-  #
-  #   That is not a reason to bring the setting back: the setting would have produced the
-  #   same grant on **every** install rather than only on one ordering, and silently. It is a
-  #   reason the diagnostic below must report **our** roles, not only the base plugin's — see
-  #   T-27 — and a reason this file does not claim more than it can hold.
-  # * *An upgraded install must not break silently.* It does not break silently, and not
-  #   because of a default: the preflight page and `import:plan` **name every role that
-  #   holds the base plugin's authoring permission and every role that holds ours**, so the
-  #   administrator reads the situation instead of discovering it. Naming the roles is
-  #   strictly better than defaulting to `:project_managers`, because the default would have
-  #   closed the gap by *granting* code execution to roles nobody re-examined — and, per the
-  #   paragraph above, it is also the only thing that can surface a Manager role seeded by
-  #   core.
-  #
-  # --- WHAT IS DELIBERATELY *NOT* A PERMISSION ---
-  #
-  # Each of these was considered and rejected, because an unused checkbox on the roles
-  # screen costs an administrator attention every time they read it:
-  #
-  # * **Exporting a document** as distinct from viewing one. Redmine does not separate
-  #   "see the issue list" from "export it as CSV", and the cost of a render is bounded by
-  #   FR-32's caps and the engine's own limits, not by a role grant.
-  # * **Importing a bundle.** Import *is* authoring — it creates templates whose content is
-  #   code — so it requires `add_…` **and** `edit_…` rather than a weaker permission of its
-  #   own. Exporting a bundle requires whichever permission lets you read the content in
-  #   the editor, because the bundle *is* the content.
-  # * **Reading a template's version history**, or rolling back to a version: the same
-  #   permission that lets you edit that template (FR-21's audit trail is for the same
-  #   person who can change it).
-  # * **Revoking a share link.** FR-53 puts that with the link's creator, the template's
-  #   owner and admins — ownership, which a permission cannot express.
-  # * **Sending to an external e-mail address.** FR-61 makes that an installation-wide
-  #   admin setting plus a domain allowlist. It is a policy about the installation, not a
-  #   capability of a role in a project.
-  # * **A template with no project** (`project_id IS NULL`). Redmine has no role grant
-  #   outside a project, so a global template is admin-only, by construction.
+  #   * exporting a document, as distinct from viewing one — Redmine does not separate
+  #     "see the issue list" from "export it as CSV";
+  #   * importing a bundle — import IS authoring, so it requires `add_…` AND `edit_…`;
+  #   * reading or rolling back a template's version history — same permission as editing it;
+  #   * revoking a share link — that belongs to the creator, the template's owner and admins,
+  #     which is ownership, and a permission cannot express it;
+  #   * sending to an external address — an installation-wide setting plus a domain
+  #     allowlist, because it is a policy about the installation rather than a role;
+  #   * a template with no project — Redmine has no role grant outside a project, so a
+  #     global template is admin-only by construction.
   module Permissions
     # `requires` and not `require`: a Struct member called `require` would define a
     # `#require` reader on every entry, shadowing `Kernel#require` for that object.

@@ -105,7 +105,6 @@ db/migrate/001_create_reporter_dashboards_tables.rb    [permanent] migration com
 lib/redmine_reporter_dashboards/import/survey.rb         [permanent] reads reporter's tables by name; that is the task
 lib/redmine_reporter_dashboards/import/plan_report.rb    [permanent] tells the operator which plugin's data was surveyed
 lib/redmine_reporter_dashboards/import/runner.rb         [permanent] T-24 copies reporter's templates; naming its tables IS the migration path
-lib/redmine_reporter_dashboards/template_linter.rb       [permanent] usage groups name the gem the accessors come from
 lib/tasks/reporter_dashboards.rake                       [permanent] `rake -T` must say what import:plan surveys
 
 # --- The legacy glue (T-07) IS GONE (S-30, 2026-08-13). `glue/` is deleted entirely and

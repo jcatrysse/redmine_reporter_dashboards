@@ -2,29 +2,24 @@
 
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/compat'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/block_settings'
-# T-40. Required BEFORE anything else that could fail, because `init.rb`'s
-# `Redmine::Plugin.register` block reads it to declare the permissions: a plugin whose
-# permission set failed to load would boot with an authorize call that permits nobody,
-# which looks exactly like a misconfigured role.
+# Required BEFORE anything that could fail: `init.rb` reads it to declare the permissions,
+# and a plugin whose permission set failed to load would boot with an authorize call that
+# permits nobody — which looks exactly like a misconfigured role.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions'
-# T-27's upgrade diagnostic. Required next to the permission model it reads. It never was
-# behind a detection and now there is none to be behind: a `manage_report_templates` grant
-# outlives the plugin that registered it, so the case this exists for is the one where that
-# plugin is gone.
+# The upgrade diagnostic, next to the permission model it reads. A `manage_report_templates`
+# grant outlives the plugin that registered it, so this has to work with that plugin gone.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions/authoring_audit'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/report_frame'
 # Called from a my-page partial, which core renders through its OWN helper set
-# (`include_all_helpers = false`), so neither of these can live in one of this plugin's
-# helpers — `TemplatesHelper` delegates to both instead. `reporter_report_templates` used to
-# be required here for the same reason and is gone with the base-plugin widget it guarded.
+# (`include_all_helpers = false`), so neither can live in one of this plugin's helpers.
+# `TemplatesHelper` delegates to both instead.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/degradation_text'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/row_layout'
 
-# The render layer (T-10). Loaded here rather than autoloaded because a plugin's lib/
-# is not on Redmine's autoload paths, and required at boot rather than lazily so a
-# syntax or load error surfaces on the branch that broke it instead of on the first
-# render. Nothing calls it yet — T-11 onward do.
+# The render layer. Loaded here rather than autoloaded because a plugin's lib/ is not on
+# Redmine's autoload paths, and at boot rather than lazily so a load error surfaces on the
+# branch that broke it instead of on the first render.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/capabilities'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/page_furniture'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/render/failure'

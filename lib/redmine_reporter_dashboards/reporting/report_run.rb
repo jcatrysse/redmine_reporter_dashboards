@@ -18,25 +18,15 @@ require_relative '../render/renderer'
 
 module RedmineReporterDashboards
   module Reporting
-    # T-23 — the thing that turns a stored template into documents.
+    # Turns a stored template into documents.
     #
-    # This is the **producer** every earlier task deliberately did not write. T-07's
-    # `RenderContext` says "Nobody yet, and that is correct rather than an omission";
-    # T-18's drop layer says "nothing constructs a drop yet"; T-10's `render/` says
-    # "Nothing renders yet". All three named T-23. This file is where they meet, and it
-    # is the first place in the plugin where an owned `RenderContext` is built from a
-    # real actor and handed real drops.
+    #   phase A  Liquid  template + scope      -> HTML bodies
+    #   phase B  render  HTML + page geometry  -> PDF bytes
     #
-    # --- TWO PHASES, AND THE CAP HAS TO SIT IN FRONT OF BOTH ---
-    #
-    #   phase A  Liquid  template + scope           -> HTML bodies
-    #   phase B  render  HTML + page geometry       -> PDF bytes
-    #
-    # `Render::BatchGuard` owns phase B by construction. It cannot own phase A, because
-    # phase A is what PRODUCES the `DocumentRequest`s it would be handed — so a
-    # per-record report over 4 000 issues would render 4 000 Liquid templates and only
-    # then be refused. That is the same defect as drawing 200 PDFs before refusing, so
-    # the guard is asked up front (`#cap_refusal`) and phase A does not start.
+    # THE CAP SITS IN FRONT OF BOTH. `Render::BatchGuard` owns phase B by construction, and
+    # cannot own phase A because phase A is what produces the `DocumentRequest`s it would be
+    # handed — so a per-record report over 4 000 issues would render 4 000 Liquid templates
+    # and only then be refused. The guard is asked up front (`#cap_refusal`) instead.
     #
     # --- WHY A TEMPLATE FAILURE ABORTS THE WHOLE PER-RECORD RUN ---
     #

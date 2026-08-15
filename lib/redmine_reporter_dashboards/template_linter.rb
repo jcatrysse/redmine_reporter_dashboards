@@ -6,19 +6,13 @@ require_relative 'liquid/filters'
 module RedmineReporterDashboards
   # Reads a stored template body and says two different things about it.
   #
-  #   findings  what will BREAK when the render path changes — each with a line
-  #             number, because FR-71 puts this same linter behind the editor's lint
-  #             panel and a finding without a line number is not actionable there.
-  #   usage     what the template DEPENDS ON — the counts that decide which of the
-  #             vendor gem's accessors the owned drop layer has to reproduce. Not
-  #             defects. `reference/redmineup-gem-drop-surface.md` ends with "[GAP]
-  #             still open: what GEOxyz's production templates use — a SELECT content
-  #             FROM report_templates grep settles it, and nothing in these
-  #             repositories can." This is that grep, made repeatable.
+  #   findings  what will BREAK — each with a line number, because the editor's lint panel
+  #             shows these and a finding without a line number is not actionable there.
+  #   usage     what the template DEPENDS ON. Not defects.
   #
   # Keeping them apart is the whole design. A tool that reported "your template uses
-  # issue.story_points" as a *finding* would be telling an operator to fix something
-  # that is not broken, and the one thing a linter cannot survive is crying wolf.
+  # issue.story_points" as a finding would be telling an operator to fix something that is
+  # not broken, and the one thing a linter cannot survive is crying wolf.
   #
   # --- Where the rules come from ---
   #
