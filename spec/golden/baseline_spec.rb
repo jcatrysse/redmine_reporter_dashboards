@@ -3,6 +3,7 @@
 require_relative '../spec_helper'
 require_relative 'baseline'
 require_relative 'kernel_exception'
+require_relative 'code_only'
 
 # The corpus and gate G7 both compare against one commit. If that commit stops
 # resolving, or stops being the thing it claims to be, every comparison built on it
@@ -53,7 +54,7 @@ RSpec.describe RrdGolden::Baseline do
                               'stop working once the branch is gone. Tag it before that happens.'
   end
 
-  describe 'the byte-identity reference for gate G7' do
+  describe 'the code-identity reference for gate G7' do
     it 'can read every kernel file at the baseline' do
       described_class::KERNEL_FILES.each_value do |baseline_path|
         content = described_class.file_at_baseline(baseline_path)
@@ -72,34 +73,53 @@ RSpec.describe RrdGolden::Baseline do
       )
     end
 
-    # THE G7 ASSERTION. Before T-08 moved the files this compared a path with itself and
-    # passed trivially; now it compares the ported file with the v0.5.0 blob, which is
-    # what "byte-identical" was always supposed to mean.
-    #
-    # "Byte-identical" now reads "byte-identical to the blob with every DECLARED hunk
-    # applied" — see kernel_exception.rb. With no declared hunks the two are the same
-    # sentence. With one, the licensed change is the only difference that can pass, and
-    # it had to be written down with a reason before it could.
-    it 'is byte-identical to the baseline blob at the ported location' do
+    # THE G7 ASSERTION: the ported kernel is the v0.5.0 kernel, with every DECLARED hunk
+    # applied, comparing CODE. `CodeOnly` says why comments stopped counting; every byte of
+    # code is still compared, and a declared hunk is still the only way a code change passes.
+    it 'is code-identical to the baseline blob at the ported location' do
       described_class::KERNEL_FILES.each_key do |current_path|
         working = File.join(described_class.repo_root, current_path)
 
         expect(File.exist?(working)).to be(true),
                                        "#{current_path} is missing. KERNEL_FILES names where the ported " \
                                        'kernel lives; if it moved again, this map moves with it.'
-        expect(File.binread(working)).to eq(RrdGolden::KernelException.expected_for(current_path)),
-                                        "#{current_path} differs from its v0.5.0 blob " \
-                                        "(#{described_class::KERNEL_FILES[current_path]}) by something no " \
-                                        'declared hunk accounts for. Gate G7 is byte-identity: the only change ' \
-                                        'the kernel may carry is the one T-08 argues for, and it has to be ' \
-                                        'declared in kernel_exception.rb rather than discovered here.'
+        expect(RrdGolden::CodeOnly.call(File.binread(working)))
+          .to eq(RrdGolden::CodeOnly.call(RrdGolden::KernelException.expected_for(current_path))),
+              "#{current_path} differs IN CODE from its v0.5.0 blob " \
+              "(#{described_class::KERNEL_FILES[current_path]}) by something no declared hunk " \
+              'accounts for. Gate G7 holds the kernel code identical: the only change it may ' \
+              'carry is the one T-08 argues for, and it has to be declared in ' \
+              'kernel_exception.rb rather than discovered here. Comments are free to move.'
       end
+    end
+
+    # THE CANONICALISER MUST NOT BE ABLE TO HIDE A CODE CHANGE, and this is where that is
+    # proved rather than assumed. A gate that compares a transformation of two files is only
+    # as good as the transformation: one that returned '' would pass everything.
+    it 'still fails on a one-character code change' do
+      path = described_class::KERNEL_FILES.keys.first
+      original = File.binread(File.join(described_class.repo_root, path))
+      mutated = original.sub(/^(\s*)MAX_/) { "#{Regexp.last_match(1)}XAM_" }
+
+      expect(mutated).not_to eq(original), 'the mutation did not apply; this example proves nothing'
+      expect(RrdGolden::CodeOnly.call(mutated))
+        .not_to eq(RrdGolden::CodeOnly.call(original))
+    end
+
+    it 'ignores a comment-only change, which is the point of lifting byte-identity' do
+      path = described_class::KERNEL_FILES.keys.first
+      original = File.binread(File.join(described_class.repo_root, path))
+      recommented = original.sub(/^(\s*)# .*$/) { "#{Regexp.last_match(1)}# rewritten by the docs pass" }
+
+      expect(recommented).not_to eq(original), 'the mutation did not apply; this example proves nothing'
+      expect(RrdGolden::CodeOnly.call(recommented))
+        .to eq(RrdGolden::CodeOnly.call(original))
     end
 
     # The exception mechanism is only worth anything if it is actually load-bearing:
     # a file with no declared hunk must still be held to plain byte-identity, and
     # drill_through.rb is the one that has none.
-    it 'holds the kernel file with no declared hunk to plain byte-identity' do
+    it 'holds the kernel file with no declared hunk to the baseline itself' do
       path = 'lib/redmine_reporter_dashboards/aggregation/drill_through.rb'
 
       expect(RrdGolden::KernelException.entries_for(path)).to be_empty

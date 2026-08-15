@@ -1,92 +1,55 @@
 # frozen_string_literal: true
 
 module SqlAggregation
-  # Runs pure-SQL COUNT(DISTINCT issues.id) GROUP BY aggregations on an
-  # ActiveRecord scope. No Issue objects are instantiated — the scope is used
-  # only for SQL generation. Requires PostgreSQL or MySQL/MariaDB.
+  # Pure-SQL aggregations over an ActiveRecord scope. No Issue objects are instantiated —
+  # the scope is used only for SQL generation. PostgreSQL or MySQL/MariaDB.
   #
-  # --- Time-series mode (.aggregate / .monthly_flow) ---
+  # The parameter surface is documented for template authors in
+  # `docs/template-authoring.md`; what follows is the shape each entry point returns.
   #
-  #   period  — 'day' | 'week' | 'month' | 'year'  (default: 'month')
-  #   periods — number of buckets back               (default: 30/13/6/3)
+  #   .aggregate / .monthly_flow   time series
+  #     period 'day'|'week'|'month'|'year' (default month); periods back, capped
+  #     90/52/24/10 with defaults 30/13/6/3. Labels are "2026-05-30", "2026-W22"
+  #     (ISO 8601, zero-padded), "2026-05", "2026".
+  #     -> labels, created, closed, open_at_end, open_now, total, period, periods
   #
-  #   day   → "2026-05-30"   (max 90,  default 30)
-  #   week  → "2026-W22"     (max 52,  default 13, ISO 8601 zero-padded)
-  #   month → "2026-05"      (max 24,  default 6)
-  #   year  → "2026"         (max 10,  default 3)
+  #     `open_at_end` is the backlog height. `closed_on` records only the LAST closing and
+  #     survives a reopen, so a reopened issue counts as open for everything before that
+  #     closing. Those points carry no drill-through URL.
   #
-  #   Returns: labels, created, closed, open_at_end, open_now, total, period, periods
+  #   .breakdown                   LEGACY, one of the seven core fields, users by login.
+  #     Keys, ordering and label text are frozen for templates written before the
+  #     dimension API. New code uses .dimension_breakdown.
+  #     -> buckets [{label, count}] desc, total, group_by
   #
-  #   open_at_end is the backlog height: issues that existed and were not yet closed
-  #   at the end of each period. One conditional aggregate per period, chunked.
-  #   closed_on records only the last closing and survives a reopen, so a reopened
-  #   issue counts as open for everything before that last closing; and the points
-  #   carry no drill-through URL.
+  #   .dimension_breakdown         group_by / split_by over any dimension: the seven core
+  #     fields, cf_<id>, period, age. measure/of makes a bucket value something other than
+  #     a row count; a non-additive measure makes `total` its own aggregate rather than the
+  #     sum of the buckets.
+  #     -> buckets, total, group_by, dimension, field_name, measure, measure_field,
+  #        multi_value, truncated
+  #     -> two dimensions add series, rows, matrix, columns, split_by, series_field_name,
+  #        series_entries (a dense rows x series crosstab)
   #
-  # --- Breakdown mode (.breakdown) — LEGACY ---
+  #     Every bucket, row and series entry carries the raw stored value and the issue-list
+  #     filter isolating it, so a chart element can become a drill-through URL:
   #
-  #   group_by — 'status' | 'priority' | 'tracker' | 'assignee' |
-  #              'author' | 'category' | 'version'
+  #       'value'  => '415'                # nil for the empty bucket
+  #       'values' => ['580', '581']       # only on a collapsed Other row
+  #       'filter' => { 'field' => 'cf_92', 'operator' => '=', 'values' => ['415'] }
   #
-  #   Returns: buckets [{label, count}] sorted desc, total, group_by
+  #     'filter' is nil when the bucket cannot be expressed as a filter; labels and counts
+  #     are unaffected. An unresolvable dimension returns nil after logging, so the caller
+  #     assigns its empty-safe result instead of raising.
   #
-  #   Labels users by login. Keys, ordering and label text are kept identical for
-  #   templates written before the dimension API below; new code should use
-  #   .dimension_breakdown instead.
+  #   .completeness                up to 12 core fields and/or cf_<id>. One bucket per
+  #     field: label, count (FILLED), empty, total, pct, value, and the is-set/is-not-set
+  #     filters. Order follows `fields:`; sort and limit do not apply. The numbers are what
+  #     the VIEWER may see — a role-restricted field counts as empty for a user who cannot
+  #     see it.
   #
-  # --- Dimension mode (.dimension_breakdown) ---
-  #
-  #   group_by / split_by — any DIMENSION:
-  #
-  #     status | priority | tracker | assignee | author | category | version
-  #                     — the seven core fields (same labels, display name for users)
-  #     cf_<id>         — issue custom field by numeric id, e.g. cf_92
-  #     period          — date bucket (period / periods / date_field)
-  #     age             — age bucket  (age_buckets / age_field)
-  #
-  #   measure / of    — what a bucket VALUE is, when it is not a row count:
-  #                     count (default) | distinct | sum | avg over an `of:` field.
-  #                     A non-additive measure makes `total` its own aggregate
-  #                     rather than the sum of the buckets.
-  #
-  #   One dimension  → buckets, total, group_by, dimension, field_name,
-  #                    measure, measure_field, multi_value, truncated
-  #   Two dimensions → additionally series, rows, matrix, columns, split_by,
-  #                    series_field_name, series_entries
-  #                    (a dense rows x series crosstab)
-  #
-  #   Every bucket, row and series entry additionally carries the raw stored
-  #   value and the issue-list filter that isolates it, so {% sql_aggregate %}
-  #   can turn a chart element into a drill-through URL:
-  #
-  #     'value'  => '415'                 # raw value, nil for the empty bucket
-  #     'values' => ['580', '581']        # only on a collapsed Other row
-  #     'filter' => { 'field' => 'cf_92', 'operator' => '=', 'values' => ['415'] }
-  #
-  #   'filter' is nil whenever the bucket cannot be expressed as an issue-list
-  #   filter; labels and counts are unaffected.
-  #
-  #
-  #   Returns nil (after logging a warning) when a dimension cannot be resolved,
-  #   so the caller can assign its empty-safe result instead of raising.
-  #
-  # --- Completeness (.completeness) ---
-  #
-  #   fields — up to 12 core fields and/or cf_<id> names
-  #
-  #   One bucket per field: label, count (FILLED), empty, total, pct, value, and the
-  #   is-set / is-not-set filters. One statement, and one custom_values join for all
-  #   the custom fields. Bucket order follows `fields:`; sort and limit do not apply.
-  #   The numbers are what the VIEWER may see: a role-restricted field counts as
-  #   empty for a user who cannot see it.
-  #
-  # --- Governance flags (.flags) ---
-  #
-  #   One row of scalar counters for KPI tiles: total, open, closed, assigned,
-  #   unassigned, with_due_date, without_due_date, overdue, no_estimate,
-  #   oldest_open_days, newest_open_days, median_open_days, p90_open_days — plus
-  #   `stages`, the funnel projection of four of them with the issue-list filter
-  #   that isolates each stage.
+  #   .flags                       scalar counters for KPI tiles, plus `stages`, the funnel
+  #     projection of four of them with the filter isolating each stage.
   class QueryAggregator
     # Raised when the connected database is neither PostgreSQL nor MySQL. The
     # tags rescue it, so a dashboard degrades to an empty result with one clear
@@ -956,22 +919,13 @@ module SqlAggregation
     end
     private_class_method :measure_groups
 
-    # DEFECT D-1, SECOND HALF. `grouped_counts` below fixed the COUNTED axis by reading
-    # the GROUP BY positionally; this does the same for `sum`, `avg` and `distinct`,
-    # which went on calling `.sum`/`.average`/`.count` on a grouped relation and so went
-    # on keying their result Hash by the group expression's own TEXT — the alias MariaDB
-    # truncates at 256 characters. The `grouped_counts` comment argues the whole
-    # mechanism and every word of it applies here; the only reason the two are separate
-    # methods is that the aggregate differs.
+    # `sum`, `avg` and `distinct` read positionally, for the reason `grouped_counts` below
+    # spells out: a grouped `.sum`/`.average`/`.count` keys its result by the group
+    # expression's own text, which is the alias MariaDB truncates at 256 characters. A
+    # `SUM(hours)` over an age axis is exactly the shape that crosses it.
     #
-    # It was left exposed deliberately in T-08 and written down as such, in the README's
-    # database section and in this file's own G7 exception entry. A `SUM(hours)` over an
-    # age axis is exactly the shape that crosses the limit, so "documented" was never
-    # going to be the end state.
-    #
-    # `measure_number` is applied per row rather than to a Hash afterwards because the
-    # rows arrive as [key..., value] tuples, which is the same shape `grouped_counts`
-    # folds — one reading pattern in this file, not two.
+    # `measure_number` is applied per row rather than to a Hash afterwards because the rows
+    # arrive as [key..., value] tuples — the same shape `grouped_counts` folds.
     def self.grouped_measure(relation, measure)
       expressions = relation.group_values
       return {} if expressions.empty?
@@ -998,31 +952,27 @@ module SqlAggregation
     end
     private_class_method :grouped_aggregate_sql
 
-    # The counted axis, read back BY POSITION — defect D-1's fix.
+    # THE COUNTED AXIS IS READ BACK BY POSITION, AND IT HAS TO BE.
     #
     # ActiveRecord's grouped `.count` derives a result-column ALIAS from the group
-    # expression's own text (execute_grouped_calculation -> ColumnAliasTracker#
-    # column_alias_for -> table_alias_for, which slices at table_alias_length) and then
-    # looks each key up by that alias. MariaDB truncates a returned column label at 256
-    # characters — measured with the age CASE, 261 works and 262 does not — so the two
-    # ends asked and answered with different names, EVERY key came back nil, the whole
-    # axis collapsed into the empty bucket, and the total was taken from whichever group
-    # the server returned last. Four age boundaries cross it and DEFAULT_AGE_BUCKETS is
-    # four, so that was the default on MariaDB, in production.
+    # expression's own text and then looks each key up by that alias. MariaDB truncates a
+    # returned column label at 256 characters — measured: 261 works, 262 does not — so the
+    # two ends ask and answer with different names, every key comes back nil, the axis
+    # collapses into the empty bucket, and the total is taken from whichever group the
+    # server returned last. Four age boundaries cross it and DEFAULT_AGE_BUCKETS is four.
     #
-    # Shortening the expression is not the fix and was measured not to be: on PostgreSQL
-    # the alias is ALREADY truncated (limit 63) and the answer is correct, because AR
-    # asks for the same truncated name it sent. The defect is the two ends DISAGREEING,
-    # so a shorter CASE only moves the cliff. `SELECT <expr>, COUNT(...) GROUP BY <expr>`
-    # read positionally carries no alias for anything to disagree about.
+    # Shortening the expression is not the fix: on PostgreSQL the alias is already
+    # truncated (limit 63) and the answer is correct, because AR asks for the same
+    # truncated name it sent. The defect is the two ends DISAGREEING, so a shorter CASE
+    # only moves the cliff. `SELECT <expr>, COUNT(...) GROUP BY <expr>` read positionally
+    # carries no alias for anything to disagree about.
     #
-    # It is the same statement and the same GROUP BY — this changes how the result is
-    # READ, not how much work the server does. Query count is unchanged. Reading it any
-    # other way (one conditional aggregate per bucket) was tried and is dramatically
-    # slower on MariaDB, which is the engine the defect is on.
+    # Same statement, same GROUP BY, same work for the server — only the reading changes.
+    # One conditional aggregate per bucket was tried instead and is dramatically slower on
+    # MariaDB, which is the engine the defect is on.
     #
-    # `group_values` is what was passed to `.group`, so the key shape matches `.count`'s
-    # exactly: one group expression gives a bare key, several give an Array key.
+    # `group_values` is what was passed to `.group`, so the key shape matches `.count`'s:
+    # one group expression gives a bare key, several give an Array key.
     def self.grouped_counts(relation)
       expressions = relation.group_values
       return {} if expressions.empty?

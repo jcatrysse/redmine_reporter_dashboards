@@ -900,7 +900,7 @@ jobs:
       - name: Install rspec
         run: gem install rspec --no-document
 
-      - name: Verify the baseline commit and the byte-identity reference
+      - name: Verify the baseline commit and the code-identity reference
         run: rspec -I spec spec/golden --format documentation
 
       # If these skip, the job is green and has checked nothing. Say so out loud.

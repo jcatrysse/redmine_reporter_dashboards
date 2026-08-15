@@ -6,13 +6,14 @@ module RrdGolden
   # Gate G7's declared exceptions: the argued, counted, byte-exact hunks the ported
   # aggregation kernel is allowed to carry against its v0.5.0 blob.
   #
-  # G7 is byte-identity, and `baseline_spec.rb` could express exactly two states:
-  # identical, or different. "Identical except one argued hunk" had no spelling at
-  # all — so the moment the kernel legitimately had to change, the only ways to a
-  # green gate were to delete the assertion or to move the reference. Both destroy
-  # the oracle. This is the third way, and it is deliberately modelled on
-  # `AdapterOverlay`: named entries, a written reason each, and a RATCHET that caps
-  # how many may exist.
+  # G7 could express exactly two states: identical, or different. "Identical except one
+  # argued hunk" had no spelling at all — so the moment the kernel legitimately had to
+  # change, the only ways to a green gate were to delete the assertion or to move the
+  # reference. Both destroy the oracle. This is the third way: named entries, a written
+  # reason each, and a RATCHET that caps how many may exist.
+  #
+  # Comments are outside this mechanism entirely — G7 compares code (`code_only.rb`), so
+  # rewriting a comment needs no entry here. Every entry is therefore a CODE change.
   #
   # --- What an entry is ---
   #
@@ -33,7 +34,7 @@ module RrdGolden
   # It is not a licence to keep editing. There is no writer for these files, and that
   # is the point: `RRD_CORPUS_OVERLAY_WRITE=1` exists because an overlay records a
   # MEASUREMENT, while this records an ARGUMENT. Regenerating an argument on demand
-  # is how a byte-identity gate becomes a formality. A new hunk is recorded by hand,
+  # is how this gate becomes a formality. A new hunk is recorded by hand,
   # with its reason, and RATCHET goes up in the same commit that a reviewer reads.
   #
   # --- The only admissible reason ---

@@ -217,7 +217,7 @@ tells you nothing about them.
 | **G4** | UX: flows work, copy consistent, empty and error states handled, I18n used | §9b's checklist plus the locale diff |
 | **G5** | Security: authorization per action, no secret logged, no injection, visibility fail-closed | the permission test per entry point; the multi-actor case |
 | **G6** | Performance: no N+1, no query count scaling with issue count, no unbounded output | query-count assertion, not an eyeball |
-| **G7** | **Byte-identity** of the ported aggregation kernel — `git diff --no-index` against the `v0.5.0` blob is **empty**, not "whitespace-only" | the `corpus` job output |
+| **G7** | **Code-identity** of the ported aggregation kernel against the `v0.5.0` blob — every byte of code, comments excluded (curator decision 2026-08-15; `spec/golden/code_only.rb` says why). A code change passes only as a hunk declared in `kernel_exception.rb` | the `corpus` job output |
 | **G8** | **Zero-reporter / layer purity** — no reference to the base plugin or the vendor gem outside a shrinking allowlist, each entry carrying a reason | the `gates` job output |
 | **G9** | **Support matrix is generated from the run**, and the committed file matches | the lint that diffs them |
 | **G10** | **No bare `skip`, and the skip total is ≤ the committed inventory** | the run-level check, not the grep alone |

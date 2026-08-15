@@ -2,6 +2,7 @@
 
 require_relative '../spec_helper'
 require_relative 'kernel_exception'
+require_relative 'code_only'
 require_relative 'baseline'
 
 # The ratchet on gate G7's declared exceptions, mechanically — the same shape as
@@ -102,15 +103,19 @@ RSpec.describe RrdGolden::KernelException do
       end
     end
 
-    # The whole mechanism in one line: the working kernel is the blob plus exactly
-    # the declared hunks, and nothing else. baseline_spec.rb makes this gate G7; here
-    # it is stated as a property of the mechanism itself, so a broken reconstruction
-    # is distinguishable from an undeclared edit.
+    # The whole mechanism in one line: the working kernel is the blob plus exactly the
+    # declared hunks, and nothing else — IN CODE. Comments are outside G7 since the curator
+    # lifted byte-identity on 2026-08-15 (`code_only.rb`), and they are outside this
+    # statement for the same reason: a rewritten comment is not an undeclared edit.
+    #
+    # baseline_spec.rb makes this gate G7; here it is stated as a property of the mechanism
+    # itself, so a broken reconstruction is distinguishable from an undeclared edit.
     it 'reconstructs the working kernel from the blob and the declared hunks alone' do
       described_class::ENTRIES.map { |entry| entry[:file] }.uniq.each do |current_path|
         working = File.binread(File.join(RrdGolden::Baseline.repo_root, current_path))
 
-        expect(described_class.expected_for(current_path)).to eq(working)
+        expect(RrdGolden::CodeOnly.call(described_class.expected_for(current_path)))
+          .to eq(RrdGolden::CodeOnly.call(working))
       end
     end
 

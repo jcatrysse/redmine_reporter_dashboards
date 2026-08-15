@@ -34,7 +34,7 @@ module RrdGolden
     # rather than asserted.
     VERSION = '0.5.0'
 
-    # The two files ported byte-identically (technical-spec.md §1.3, gate G7).
+    # The two files ported without changing their code (technical-spec.md §1.3, gate G7).
     #
     # A MAP, not a list, because T-08 moved them: the key is where the file lives in the
     # working tree now, the value is where its blob lives at COMMIT. Before the move the
@@ -66,10 +66,10 @@ module RrdGolden
         !resolved_commit.nil?
       end
 
-      # Raw BYTES, deliberately. Gate G7 is byte-identity, and comparing a
-      # git-captured string against a file read as UTF-8 compares two different
-      # encodings of the same content: an em-dash shows up as a three-byte
-      # difference that is not a difference. Pair this with File.binread.
+      # Raw BYTES, deliberately. Comparing a git-captured string against a file read as
+      # UTF-8 compares two different encodings of the same content: an em-dash shows up as
+      # a three-byte difference that is not a difference. Pair this with File.binread, and
+      # hand both sides to `CodeOnly` before comparing.
       def file_at_baseline(path)
         git('show', "#{COMMIT}:#{path}")
       end
