@@ -48,6 +48,7 @@ so only one of the two can be installed at a time.
 | **RSpec** | `spec/` | None | SQL aggregation code (standalone) |
 | **adapter execution** | `spec/adapter/` | A PostgreSQL or MySQL/MariaDB server | The aggregator's SQL actually run against a real engine |
 | **minitest** | `test/unit`, `test/functional`, `test/integration` | Redmine (reporter optional) | Dashboard controllers, models, helpers, the HTTP verb of every route, and the golden scope fixture |
+| **system (browser)** | `test/system/` | Redmine, a database, **Chrome and a matching chromedriver** | The primary journeys in a real browser: the Preview button's form submission, the scripts that reveal the chart form and the settings box, and the `data-method` / `data-confirm` controls. Opt-in locally (`RRD_SYSTEM_TESTS=1`); CI runs it on 5.1 and 7.0 |
 | **golden corpus** | `spec/golden/`, verified by `spec/adapter/aggregation_corpus_spec.rb` | A database **and** `RRD_REFERENCE_DATE` | That the aggregation numbers have not moved — gate G7's differential |
 | **R7 invariants** | `spec/adapter/performance_invariants_spec.rb` | A database | Query count independent of issue count, zero issue instantiation, bounded output — asserted hard, every run |
 | **the importer survey** | `spec/template_linter_spec.rb`, `spec/import/`, `spec/adapter/import_survey_spec.rb` | The last one needs a database | The template linter's rules, the report's copy and bounds, and that `import:plan` issues nothing but `SELECT` |
@@ -57,6 +58,29 @@ The RSpec specs run without `redmine_reporter` and without a database. The minit
 suite boots the full Redmine app; since reporter became optional it runs **standalone**,
 which is the configuration CI proves, and four report-widget tests skip with a reason
 when reporter is absent.
+
+### The browser suite
+
+`test/system/` is opt-in locally, because it needs a browser and a matching driver that
+`test_setup.sh` does not install. `test_plugin.sh` prints one line saying it did not run
+them rather than quietly running a smaller suite.
+
+```bash
+RRD_SYSTEM_TESTS=1 ./.codex/test_plugin.sh
+```
+
+Two environment variables shape it, and both exist because a browser is the runner's
+business rather than the test's:
+
+- **`GOOGLE_CHROME_OPTS_ARGS`** — Redmine's own variable, comma-delimited. `test_plugin.sh`
+  defaults it to `--headless=new,--no-sandbox,--disable-dev-shm-usage,--disable-gpu`, which
+  is what a container running as root needs. Set it yourself to keep the sandbox.
+- **`RRD_CHROME_PATH`** — where the browser is, when it is not where chromedriver looks.
+  Without it a container holding Chrome for Testing in a cache fails every example with
+  `unknown error: cannot find Chrome binary`, which reads like a broken suite and is not one.
+
+If Selenium warns that the chromedriver in `PATH` does not match the browser, take that
+driver off `PATH` and let Selenium Manager fetch the matching one.
 
 `spec/adapter/` is the exception to "no database". It loads the real ActiveRecord,
 recreates a small schema and runs the aggregator for real, so it always runs as its

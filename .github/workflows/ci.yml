@@ -385,9 +385,152 @@ jobs:
           fi
           echo 'No redmine_reporter plugin: standalone, as intended.'
 
-      - name: Run plugin functional tests
-        run: bundle exec rake redmine:plugins:test NAME=redmine_reporter_dashboards
+      # THE THREE BROWSERLESS SUITES BY NAME, NOT `redmine:plugins:test`.
+      #
+      # That task globs FOUR directories, and the fourth is `test/system/**` — so the moment
+      # T-41's browser suite landed, this job started launching Chrome on four runners that
+      # have none. Redmine provides the narrower tasks for exactly this reason. The system
+      # suite has its own job below, on the oldest and newest branch, with a browser.
+      #
+      # Named individually rather than excluded by pattern, so a fifth suite directory is a
+      # visible decision here rather than something that silently starts or stops running.
+      - name: Run plugin unit tests
+        run: bundle exec rake redmine:plugins:test:units NAME=redmine_reporter_dashboards
         working-directory: redmine
+
+      - name: Run plugin functional tests
+        run: bundle exec rake redmine:plugins:test:functionals NAME=redmine_reporter_dashboards
+        working-directory: redmine
+
+      - name: Run plugin integration tests
+        run: bundle exec rake redmine:plugins:test:integration NAME=redmine_reporter_dashboards
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # System tests — the primary journeys IN A REAL BROWSER. R-02 / C-07.
+  #
+  # An independent review's second major finding: every other suite in this repository
+  # stops at the controller, and the repository's own history has a defect that only a
+  # browser could see (T-23's Preview button 404'd on every press, because `formaction`
+  # plus `formmethod: 'post'` plus Rails' hidden `_method=patch` is a combination a
+  # controller test constructs correctly by definition and a browser can get wrong).
+  #
+  # OLDEST AND NEWEST ONLY, which is the review's own recommendation and a deliberate
+  # narrowing of the four-cell matrix its neighbours run. What these tests are about is
+  # the host application's UJS layer and its form handling, and those differ across
+  # Rails generations rather than across Redmine point releases — 5.1 (Rails 6.1) and
+  # 7.0 (Rails 8.1) are the two ends of the span. A browser cell costs minutes, and
+  # four of them buys two more samples of the same two answers.
+  #
+  # `fail-fast: false` (CLAUDE.md §6): with two cells and a version-sensitive subject,
+  # "which end broke" is the whole information content of a red run.
+  # ------------------------------------------------------------------
+  system:
+    name: System tests in a browser (Redmine ${{ matrix.redmine }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { redmine: '5.1-stable', ruby: '3.2' }
+          - { redmine: '7.0-stable', ruby: '3.4' }
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+    env:
+      RAILS_ENV: test
+      # Redmine's own `ApplicationSystemTestCase` reads this. `--no-sandbox` is the
+      # RUNNER's decision and belongs here rather than in a test file: a GitHub runner
+      # needs it, a developer's workstation must not be silently told to drop the
+      # browser sandbox by a file they did not open.
+      GOOGLE_CHROME_OPTS_ARGS: '--headless=new,--no-sandbox,--disable-dev-shm-usage,--disable-gpu'
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Redmine ${{ matrix.redmine }}
+        run: |
+          git clone --depth 1 --branch ${{ matrix.redmine }} \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      # HARD, not a skip. G12's three-state rule is about DECLARED capabilities, and a
+      # browser is declared here by the existence of this job: a runner without one has
+      # not "skipped an undeclared capability", it has failed to provide the single
+      # thing the job is for. `render-smoke` fails the same way for the same reason.
+      - name: Locate a browser
+        run: |
+          for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+              echo "browser: $("$candidate" --version)"
+              exit 0
+            fi
+          done
+          echo "::error::no browser on this runner — the system suite cannot run" >&2
+          exit 1
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: postgresql
+            database: redmine_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+            encoding: unicode
+          EOF
+        working-directory: redmine
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: false
+          working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      - name: Populate the test database
+        run: |
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+          bundle exec rake redmine:plugins:migrate
+        working-directory: redmine
+
+      - name: Run plugin system tests
+        run: bundle exec rake redmine:plugins:test:system NAME=redmine_reporter_dashboards
+        working-directory: redmine
+
+      # The screenshots Rails writes on a failing example. Worth more than the log line
+      # on a browser failure, and only uploaded when there is one to look at.
+      - name: Keep the failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-screenshots-${{ matrix.redmine }}
+          path: redmine/tmp/screenshots/
+          if-no-files-found: ignore
 
   # ------------------------------------------------------------------
   # T-37 / FR-73 — EVERY STARTER, ON EVERY ENGINE IN THE MATRIX.

@@ -115,8 +115,34 @@ if [ -d "$TEST_DIR" ]; then
     echo "Running the full-app tests STANDALONE — no $REPORTER_PLUGIN_NAME, no redmineup gem." >&2
   fi
 
-  run_command bundle exec rake redmine:plugins:test NAME="$PLUGIN_NAME"
+  # THE THREE BROWSERLESS SUITES, NAMED. `redmine:plugins:test` also globs `test/system/**`,
+  # which needs Chrome and a driver — so running it here would make "the plugin's suite" fail
+  # on a workstation that has neither, for a reason that has nothing to do with the change
+  # being tested. The system suite is opt-in below, and CI gives it a job of its own.
+  run_command bundle exec rake redmine:plugins:test:units NAME="$PLUGIN_NAME"
+  run_command bundle exec rake redmine:plugins:test:functionals NAME="$PLUGIN_NAME"
+  run_command bundle exec rake redmine:plugins:test:integration NAME="$PLUGIN_NAME"
   ran_tests=true
+
+  # OPT-IN, AND IT SAYS SO WHEN IT DOES NOT RUN. A suite that quietly does not run is the
+  # thing this repository keeps a skip inventory to prevent (G10), so the else branch prints
+  # what would have been run and what to set — rather than the run simply being smaller.
+  #
+  # `RRD_CHROME_PATH` is read by `test/system_test_case.rb` and exists because chromedriver
+  # searches a few fixed locations: a container holding Chrome for Testing in a cache fails
+  # every example with `unknown error: cannot find Chrome binary`, which reads like a broken
+  # suite rather than an unconfigured one.
+  if [ "${RRD_SYSTEM_TESTS:-0}" = "1" ]; then
+    : "${GOOGLE_CHROME_OPTS_ARGS:=--headless=new,--no-sandbox,--disable-dev-shm-usage,--disable-gpu}"
+    export GOOGLE_CHROME_OPTS_ARGS
+    echo "Running the system tests with GOOGLE_CHROME_OPTS_ARGS=$GOOGLE_CHROME_OPTS_ARGS" >&2
+    run_command bundle exec rake redmine:plugins:test:system NAME="$PLUGIN_NAME"
+  else
+    echo "SKIPPED: the browser suite (test/system). It needs Chrome and a matching" >&2
+    echo "         chromedriver. Set RRD_SYSTEM_TESTS=1 to run it, and RRD_CHROME_PATH" >&2
+    echo "         if the browser is not where chromedriver looks. CI runs it on" >&2
+    echo "         5.1-stable and 7.0-stable in the 'system' job either way." >&2
+  fi
 fi
 
 if [ "$ran_tests" = false ]; then
