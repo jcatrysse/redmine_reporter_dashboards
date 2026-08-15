@@ -148,26 +148,21 @@ module RedmineReporterDashboards
 
         PROBE_DOCUMENT = '<!DOCTYPE html><html><body><h1>rrd preflight</h1></body></html>'
 
-        # THE READINESS EXPRESSION, COERCED TO A BOOLEAN — and the `!!` is not tidiness.
+        # THE READINESS EXPRESSION, COERCED TO A BOOLEAN, and the `!!` is load-bearing.
         #
-        # MEASURED against 8.35.0, and it cost every chart-bearing report on this engine
-        # before the probe caught it. `Readiness::EXPRESSION` is
-        # `window.__rd && window.__rd.ready === true`, and BEFORE THE CHART SHELL HAS RUN
-        # `window.__rd` is undefined, so the whole expression evaluates to `undefined`
-        # rather than to `false`. Gotenberg does not treat that as "not ready yet" — it
-        # refuses the conversion outright:
+        # `Readiness::EXPRESSION` is `window.__rd && window.__rd.ready === true`. Before the
+        # chart shell has run, `window.__rd` is undefined, so the whole expression evaluates
+        # to `undefined` rather than `false`. Gotenberg does not treat that as "not ready
+        # yet" — measured against 8.35.0, it refuses the conversion outright:
         #
         #     400 The expression '…' (waitForExpression) returned an exception or undefined
         #
-        # in 0.2 s, so the readiness contract's "wait, then render anyway" never even
-        # started. `!!(…)` makes it a real `false`, which Gotenberg waits on correctly.
+        # in 0.2 s, so "wait, then render anyway" never starts. `!!(…)` makes it a real
+        # `false`, which Gotenberg waits on correctly.
         #
-        # The reference adapter has always done this — `page.evaluate("!!(#{EXPRESSION})")`
-        # — so the coercion is the interface's, not this engine's quirk. It is spelled out
-        # here rather than pushed into `Readiness::EXPRESSION` because wkhtmltopdf's
-        # `--window-status` arm does not evaluate an expression at all, and changing the
-        # shared constant would put a JavaScript operator into a string that engine reads
-        # as a status name.
+        # Spelled out here rather than pushed into `Readiness::EXPRESSION` because
+        # wkhtmltopdf's `--window-status` arm does not evaluate an expression at all, and a
+        # JavaScript operator inside that constant would become part of a status name.
         READINESS_EXPRESSION = "!!(#{Readiness::EXPRESSION})"
 
         attr_reader :endpoint
@@ -252,70 +247,42 @@ module RedmineReporterDashboards
           @version = "unavailable (#{e.class})"
         end
 
-        # PREFLIGHT IS A ROUND TRIP, and for this engine it is also the only place the
-        # UNSAFE CONFIGURATIONS can be caught — technical-spec.md §5.2 clause 2. Four
-        # checks, in this order, because each is cheaper than the one after it and because
-        # refusing an unauthenticated service should not require rendering anything on it.
+        # PREFLIGHT IS A ROUND TRIP, and the only place an UNSAFE CONFIGURATION is caught.
+        # Four checks, cheapest first, because refusing an unauthenticated service should
+        # not require rendering anything on it: credential, version floor, JavaScript
+        # liveness, render round trip.
         #
-        #   1. the credential check
-        #   2. the version floor
-        #   3. JavaScript liveness
-        #   4. the render round trip
+        # TWO OF THEM HAD TO BE REWRITTEN BECAUSE THE OBVIOUS PROBE COULD NOT FAIL.
         #
-        # --- 1. THE CREDENTIAL CHECK, AND THE PROBE THAT WOULD HAVE BEEN VACUOUS ---
+        # 1. The credential check is an UNAUTHENTICATED POST to the convert route with no
+        #    parts, not a GET of `/health`. Measured against 8.35.0 with
+        #    `--api-enable-basic-auth`:
         #
-        # MEASURED, and this is the entry worth reading before changing anything here.
-        # Against 8.35.0 with `--api-enable-basic-auth` and both env vars set:
+        #      GET  /health                       unauthenticated -> 200   <-- EXEMPT
+        #      GET  /version                      unauthenticated -> 401
+        #      POST /forms/chromium/convert/html  unauthenticated -> 401
         #
-        #     GET  /health                        unauthenticated -> 200   <-- EXEMPT
-        #     GET  /version                       unauthenticated -> 401
-        #     POST /forms/chromium/convert/html   unauthenticated -> 401
-        #     POST /forms/chromium/convert/html   authenticated   -> 415 (no parts)
+        #    `/health` is exempt from basic auth, so a check written against it answers 200
+        #    on a locked-down service AND on a wide-open one.
         #
-        # `/health` is exempt from basic auth. A credential check written against the
-        # obvious health endpoint therefore answers 200 on a correctly locked-down service
-        # AND on a wide-open one — a security check that cannot fail, which is the exact
-        # shape this repository keeps rediscovering. So the probe is an UNAUTHENTICATED
-        # POST to the convert route with no parts: it is the route that actually matters,
-        # it costs no render, and 401/403 versus anything else is decisive.
+        #    A MISSING CREDENTIAL IS ALSO A FAILURE: with none configured this plugin cannot
+        #    authenticate, so the endpoint is reachable unauthenticated by it — which is the
+        #    configuration the 2026 unauthenticated-critical CVE cluster is about. Both arms
+        #    name their own remediation, because they need different ones.
         #
-        # AND A MISSING CREDENTIAL IS ALSO A FAILURE. §5.2 reads "the endpoint is not
-        # reachable without the configured credential (if a credential is configured)" and
-        # then, one sentence later, "A Gotenberg reachable UNAUTHENTICATED produces a
-        # preflight failure with a named remediation, not a warning". The second sentence
-        # is unconditional and is the safer of the two readings, so it is the one
-        # implemented: with no credential configured this plugin cannot authenticate, so
-        # the endpoint IS reachable unauthenticated by it, which is the configuration the
-        # 2026 unauthenticated-critical CVE cluster is about. Both arms name their own
-        # remediation, because they need different ones.
+        # 3. JavaScript liveness is a document whose script THROWS, sent with
+        #    `failOnConsoleExceptions`, not a `waitForExpression`. Measured:
         #
-        # --- 3. JAVASCRIPT LIVENESS, AND THE SECOND CHECK THAT COULD NOT FAIL ---
+        #      waitForExpression, JS live     -> 503 after the 30 s api timeout
+        #      waitForExpression, JS disabled -> 200 in 0.17 s     <-- silently ignored
+        #      throwing script,   JS live     -> 409, naming the exception
+        #      throwing script,   JS disabled -> 200, the script never ran
         #
-        # §5.2 also requires the preflight to assert that `chromium.disableJavaScript`
-        # matches what this adapter assumes — it declares `:javascript`,
-        # `:modern_javascript` and `:readiness_expression`, all three of which are void on
-        # a container started with `--chromium-disable-javascript`.
-        #
-        # The obvious probe is `waitForExpression`, and MEASURED it is worthless for this:
-        #
-        #     JS live,     expression never true  -> 503 after the 30 s api timeout
-        #     JS disabled, expression never true  -> 200 in 0.17 s
-        #
-        # Gotenberg SILENTLY IGNORES `waitForExpression` when JavaScript is off. So a
-        # readiness signal that is the whole basis of the chart contract quietly stops
-        # being waited for, every report renders chart-free, and nothing anywhere fails —
-        # which is precisely the "healthy container, silently wrong documents" failure the
-        # preflight exists to catch.
-        #
-        # The probe that DOES discriminate, in half a second either way, is a document
-        # whose script THROWS, sent with `failOnConsoleExceptions`:
-        #
-        #     JS live     -> 409, naming the exception
-        #     JS disabled -> 200, because the script never ran
-        #
-        # A 409 is therefore the PASS here, which is worth the double-take: the check
-        # succeeds by provoking an error, and an engine that cannot be made to error has
-        # no JavaScript.
+        #    Gotenberg silently ignores `waitForExpression` when JavaScript is off, so the
+        #    readiness signal the whole chart contract rests on stops being waited for and
+        #    nothing fails. A 409 is therefore the PASS here: the check succeeds by
+        #    provoking an error, and an engine that cannot be made to error has no
+        #    JavaScript.
         def preflight
           return unconfigured_failure('preflight') unless @endpoint
 
@@ -326,32 +293,25 @@ module RedmineReporterDashboards
                                      page_size: 'A4', timeout_ms: 30_000))
         end
 
-        # --- THE PRODUCT'S PREFLIGHT READS THIS, AND THAT IS THE WHOLE POINT ----
+        # THE CHECKS ARE PUBLISHED AS DATA, AND THAT IS THE WHOLE POINT.
         #
-        # `#preflight` returns a `Result`, which is what the conformance harness wants and
-        # what the other two adapters answer. It is NOT what an operator sees: the admin
-        # page and `rake reporter_dashboards:render:preflight` both go through
-        # `Render::Preflight#run`, which renders a probe document and reads it back — and
-        # for two releases nothing in the shipped product called `engine.preflight` at all.
+        # `#preflight` returns a `Result`, which is what the conformance harness wants. It is
+        # NOT what an operator sees: the admin page and the rake task both go through
+        # `Render::Preflight#run`. For two releases nothing in the shipped product called
+        # `engine.preflight` at all — so the credential, version and JavaScript checks, each
+        # rewritten after measuring that it could not fail, hung on a method with no caller,
+        # while the README and `capabilities.yml` told operators the plugin refuses an
+        # unauthenticated Gotenberg. The command the README prints returned exit 0 and eight
+        # passes against a Gotenberg with no authentication at all.
         #
-        # Two independent reviews found that on the same afternoon, and it is the worst
-        # kind of defect this project has a name for: the credential check, the version
-        # floor and the JavaScript probe were each rewritten after MEASURING that they
-        # could not fail — and then hung on a method with no caller, while the README, the
-        # compose file and `capabilities.yml` all told an operator the plugin refuses an
-        # unauthenticated Gotenberg. Running the exact command the README prints, against a
-        # Gotenberg with no authentication whatsoever, returned EXIT 0 AND EIGHT PASSES.
+        # So these are plain hashes — id, title, state, detail — that `Render::Preflight`
+        # turns into its own `Check`s. The `id` is the CONTRACT rather than prose: it is what
+        # `ReporterPreflightHelper::CHECK_LABELS` keys a locale entry off, which is how these
+        # sentences become translatable.
         #
-        # So the checks are published as DATA — id, title, state, detail — and
-        # `Render::Preflight` turns them into its own `Check`s. Plain hashes, because this
-        # is the same shape `Assets` uses to avoid naming a render type across a boundary,
-        # and because the `id` is the part that is a CONTRACT rather than prose: it is what
-        # `ReporterPreflightHelper::CHECK_LABELS` keys a locale entry off, which is how
-        # these sentences become translatable (§Findings E-26 #6's own recommendation).
-        #
-        # An adapter that does not answer to this simply has no configuration checks, which
-        # is true of both binary-backed engines: there is nothing to misconfigure about a
-        # Chromium you launched yourself.
+        # An adapter that does not answer to this has no configuration checks, which is true
+        # of both binary-backed engines: there is nothing to misconfigure about a Chromium
+        # you launched yourself.
         def configuration_checks
           unless @endpoint
             return [check_hash(:gotenberg_endpoint, unconfigured_failure('preflight'),
@@ -759,41 +719,27 @@ module RedmineReporterDashboards
             'credential.',
             detail: "GET #{VERSION_PATH} answered #{response.code}: #{body_excerpt(response)}"
           )
-        # ITS OWN SENTENCE, AND DELIBERATELY NOT ITS OWN CODE — which is E-29 row 2's
-        # recommendation as written ("a diagnostic-message change rather than a code change")
-        # and not the wider thing the first draft of this arm did.
+        # ITS OWN SENTENCE, NOT ITS OWN CODE. A name that does not resolve and a socket that
+        # refuses used to arrive under one message — "nothing answered at …, confirm the
+        # container is running" — which sends an operator to `docker ps` for a fault no
+        # restart can fix. Splitting the ARM fixes that; moving the CODE to
+        # `:engine_misconfigured` would not, for two reasons:
         #
-        # What the UX pass measured is real: a name that does not resolve and a socket that
-        # refuses were arriving under ONE sentence — *"nothing answered at …, Confirm the
-        # container is running"* — which sends an operator to `docker ps` for a fault no
-        # restart can fix, with the discriminator sitting unused in `detail`. Splitting the
-        # ARM fixes that. The first draft also moved the CODE to `:engine_misconfigured`, and
-        # an independent review refuted that by measurement, twice over:
-        #
-        #   * `technical-spec.md` §5 states this rule ONCE, on purpose — "two normative
-        #     statements of one rule is how a vocabulary acquires two meanings" — and what it
-        #     states is that reachability and transport are THEREFORE `:engine_unavailable`.
-        #     A code change here contradicts the contract; a message change does not.
-        #   * `SocketError` is not "the name is wrong". It is every `getaddrinfo` failure,
-        #     EAI_AGAIN included — a resolver that is temporarily unreachable, measured
-        #     against a bind-mounted unreachable `nameserver` with the address spelled
-        #     correctly. `:engine_misconfigured` promises "no retry will ever produce a
-        #     different answer", and a retry is exactly what fixes that one. So the code that
-        #     has NOT chosen between remedies is the correct code, and the sentence names both
-        #     of them.
+        #   * §5 states once, on purpose, that reachability and transport are
+        #     `:engine_unavailable`. A code change here contradicts the contract.
+        #   * `SocketError` is not "the name is wrong". It covers every `getaddrinfo`
+        #     failure, EAI_AGAIN included — a resolver that is temporarily unreachable.
+        #     `:engine_misconfigured` promises "no retry will ever produce a different
+        #     answer", and a retry is exactly what fixes that one.
         #
         # `Socket::ResolutionError#error_code` would discriminate EAI_AGAIN from EAI_NONAME,
-        # but only on Ruby 3.3+ — below it there is nothing but the message — so the split
-        # would hold on three of the four supported cells (3.2, 3.3, 3.4, 3.4 — a review counted
-        # this where an earlier comment said two) and guess on the fourth. One sentence naming
-        # both remedies is honest on all four.
+        # but only on Ruby 3.3+, so the split would guess on Redmine 5.1's cell. One sentence
+        # naming both remedies is honest on all four.
         #
-        # `SocketError` AND NOT `Socket::ResolutionError` as the arm's class: the latter is
-        # Ruby 3.3+ and this plugin's floor is 2.7 (§8 raises it to 3.1, still below 3.3), so
-        # naming it directly would break Redmine 5.1's Ruby 3.2 cell. It is a subclass, so one
-        # rescue covers both — measured on 3.3.6, where a real unresolvable host raises it —
-        # and `Errno::ECONNREFUSED` is NOT a `SocketError`, which is what keeps the refused
-        # socket on the generic arm below.
+        # `SocketError` and NOT `Socket::ResolutionError` as the arm's class: the latter is
+        # Ruby 3.3+ and this plugin's floor is below that. It is a subclass, so one rescue
+        # covers both, and `Errno::ECONNREFUSED` is NOT a `SocketError` — which is what keeps
+        # the refused socket on the generic arm below.
         rescue SocketError => e
           preflight_failure(
             started, "the name in #{@endpoint} did not resolve from Redmine",
@@ -1126,26 +1072,17 @@ module RedmineReporterDashboards
         # `nil` IS THE THIRD POSITIONAL ARGUMENT AND IT IS LOAD-BEARING. `Net::HTTP.start`'s
         # signature is `start(address, port = nil, p_addr = :ENV, …)`, so passing only
         # keywords leaves `p_addr` at `:ENV` and the socket goes wherever `http_proxy` /
-        # `HTTP_PROXY` points — NOT to the endpoint the operator configured.
+        # `HTTP_PROXY` points — NOT to the endpoint the operator configured. Measured against
+        # a listening fake proxy, an ambient proxy variable — which a Redmine host very often
+        # has, for unrelated reasons — sent the operator's `Authorization: Basic …` header and
+        # the whole rendered report to it. Invisible in every test and in CI for one reason:
+        # `URI::Generic#find_proxy` returns nil for `127.*` and `::1`, and every spec and both
+        # CI containers are on loopback.
         #
-        # MEASURED by an independent review, against a listening fake proxy:
-        #
-        #     POST http://gotenberg.internal:3000/forms/chromium/convert/html
-        #     Authorization: Basic cnJkOnMzY3JldA==     <-- the operator's credential
-        #     Content-Type: multipart/form-data; …      <-- the whole rendered report
-        #
-        # So an ambient proxy variable — which a Redmine host very often has, for entirely
-        # unrelated reasons — silently exfiltrated both the credential and issue data that
-        # had already been through the visibility filter. It is invisible in every test and
-        # in CI for one reason: `URI::Generic#find_proxy` returns nil for `127.*` and `::1`,
-        # and every spec and both CI containers are on loopback. CLAUDE.md §3's
-        # "passes locally, fails in production", with a security consequence.
-        #
-        # `nil` disables proxying outright. That is the right default for this adapter and
-        # not a limitation: the endpoint is operator configuration, the document is already
-        # complete, and INV-8 is that the renderer is never the thing holding the network —
-        # a proxy is one more thing holding it. An operator who genuinely needs one should
-        # have to say so, and no parameter for it exists yet.
+        # `nil` disables proxying outright, and that is the right default rather than a
+        # limitation: the endpoint is operator configuration, the document is already
+        # complete, and INV-8 is that the renderer is never the thing holding the network — a
+        # proxy is one more thing holding it. An operator who needs one should have to say so.
         DEFAULT_HTTP = lambda do |base, request, seconds|
           Net::HTTP.start(base.host, base.port, nil,
                           use_ssl: base.scheme == 'https',

@@ -100,44 +100,34 @@ module RedmineReporterDashboards
       # remove and which the first version of F-16 left in place on this path.
       HTML_CAPABILITIES = %i[asset_inline].freeze
 
-      # THE RUN-LEVEL BYTE BUDGET, and G6 had no evidence for this path without it.
+      # THE RUN-LEVEL BYTE BUDGET. `Assets::Resolver::MAX_TOTAL_BYTES` is 32 MiB and it is
+      # PER DOCUMENT. `bind_assets` builds every `DocumentRequest`, each holding its fully
+      # inlined body, BEFORE the first one is drawn, so the resident total is documents ×
+      # per-document budget: at `BatchGuard`'s default of 50 documents, 1.6 GiB, on a request
+      # any member can make.
       #
-      # `Assets::Resolver::MAX_TOTAL_BYTES` is 32 MiB and it is PER DOCUMENT — `State` is a
-      # local of one `#call`. `bind_assets` builds every `DocumentRequest`, each holding its
-      # fully inlined body, BEFORE the first one is drawn (`render_all` takes the list), so
-      # the resident total is documents × per-document budget: at `BatchGuard`'s default of
-      # 50 documents that is **1.6 GiB**, on a request any member can make. Measured by an
-      # independent QA pass, which also confirmed all requests are built up front.
+      # What is counted is the document the ENGINE receives — the wrapped body, with doctype,
+      # head and report stylesheet — because the budget exists to bound what is held in memory
+      # and posted to an engine.
       #
-      # WHAT IS COUNTED IS THE DOCUMENT THE ENGINE RECEIVES, which since T-38 is the wrapped
-      # body rather than the template's raw output — `#pdf_document` adds a doctype, a head
-      # and the report stylesheet, a few kilobytes per document. That is the right thing to
-      # count (the budget exists to bound what is held in memory and posted to an engine) and
-      # it is not free of consequence: `test_the_budget_admits_a_run_exactly_at_the_limit`
-      # derives its budget from `ReportDocument.wrap(body).bytesize` for exactly this reason,
-      # and it caught the change rather than being told about it.
+      # 128 MiB is a ceiling rather than a target: four full-size documents or fifty ordinary
+      # ones, and the worst case bounded twelve-fold. A CONSTANT and not a setting, for the
+      # reason `Resolver`'s caps are: a safety property is not a preference, and a setting is
+      # a thing an operator can be talked into raising.
       #
-      # 128 MiB is the ceiling rather than a target: it still admits four full-size
-      # documents or fifty ordinary ones, and it bounds the worst case twelve-fold. It is a
-      # CONSTANT and not a setting for the reason `Resolver`'s caps are — a safety property
-      # is not a preference, and a setting is a thing an operator can be talked into raising.
-      #
-      # Past it the run is REFUSED, not truncated: half an export is the outcome §9b.2 and
-      # the per-record abort rule both reject, and `:resource_limit` is the code that says
-      # so without implicating the engine.
+      # Past it the run is REFUSED, not truncated — half an export is the outcome the
+      # per-record abort rule rejects — and `:resource_limit` says so without implicating the
+      # engine.
       MAX_RUN_ASSET_BYTES = 128 * 1024 * 1024
 
-      # FR-27 — "resolve the install-wide engine choice from the plugin settings", as a value
-      # that is DISTINCT from "there is no choice".
+      # The install-wide engine choice, as a value DISTINCT from "there is no choice".
       #
-      # THE SENTINEL EXISTS BECAUSE `nil` ALREADY MEANS SOMETHING, and §Findings E-27 records
-      # what happens without one: the Gotenberg adapter's `credential: nil` fell through to
-      # the environment, so `Gotenberg.new(credential: nil)` — the exact subject of every
-      # security example — silently picked up `RRD_GOTENBERG_USERNAME`. Green on a clean
-      # laptop, red in the one CI job that exports it, and there was no way to express
-      # "explicitly no credential" at all. That was fixed with a `FROM_ENV` sentinel; this is
-      # the same shape one layer up, so a DB-less example can say `engine_preference: nil` and
-      # mean it.
+      # THE SENTINEL EXISTS BECAUSE `nil` ALREADY MEANS SOMETHING. The Gotenberg adapter's
+      # `credential: nil` fell through to the environment, so `Gotenberg.new(credential: nil)`
+      # — the exact subject of every security example — silently picked up
+      # `RRD_GOTENBERG_USERNAME`: green on a clean laptop, red in the one CI job that exports
+      # it, with no way to express "explicitly no credential" at all. This is the same shape
+      # one layer up, so a DB-less example can say `engine_preference: nil` and mean it.
       FROM_SETTINGS = :from_settings
 
       # One document to produce. `record` is nil for a combined report and the one row for
@@ -804,82 +794,31 @@ module RedmineReporterDashboards
         )
       end
 
-      # TWO STATES, AND THEY SPENT THIS PLUGIN'S WHOLE HISTORY SHARING ONE FALSE SENTENCE.
+      # TWO STATES, TWO SENTENCES. `resolve_engine` answers nil for two different
+      # installations, and telling both "no render engine is registered" is untrue in the
+      # second — an engine IS registered while the operator is told none is.
       #
-      # `resolve_engine` answers nil for two different installations, and *"no render engine
-      # is registered"* was told to both. An independent review measured the second one and
-      # the sentence is simply untrue there — `spec/reporting/report_run_spec.rb` asserts
-      # `Registry.ids == [:gotenberg]` three lines above the expectation, so an engine IS
-      # registered while the operator is told none is. That predates the code change it was
-      # found under; it is fixed here rather than recorded, because `message` is what the
-      # diagnostics panel and the failure mail print (`_diagnostics.html.erb`,
-      # `scheduled_report_failure.text.erb`).
+      #   nothing registered      no adapter at all; the remedy is an install.
+      #                           `:engine_unavailable`.
+      #   registered, none usable every registered adapter needs a separate service, which is
+      #                           the only thing `auto_selectable?` refuses on. The engines
+      #                           are there, and the remedy is an operator's — so the sentence
+      #                           points at the page carrying the control.
       #
-      # NOT THE FAILURE PDF, and the first draft of this comment said it was. A review
-      # measured the artefact: `failure_document.rb` carries a deliberately NARROWER field set
-      # and says so — *"`Diagnostic#message` is NOT among them, and neither is `#detail`. The
-      # document is the artefact that TRAVELS, so it gets the narrower set"*. Which is also
-      # why the sentence below spells the menu path with `>` and not `→`: `MinimalPdf` draws
-      # Windows-1252 and would replace an unencodable string wholesale, so a sentence that
-      # might ever reach an artefact must stay drawable.
+      # THE SENTENCE SAYS NOTHING ABOUT WHAT WAS SELECTED. A third state exists — a stored
+      # selection naming an engine that is no longer registered — which production cannot
+      # reach (`EnginePreference` drops an unregistered id at the settings boundary) but the
+      # `engine_preference:` port can. A claim the code cannot support does not belong here.
       #
-      #   nothing registered      no adapter at all. Nothing is there, and what would fix it
-      #                           is an install — `:engine_unavailable`, which is where this
-      #                           has always been and where `render/failure.rb`'s rule keeps
-      #                           it.
-      #   registered, none usable every registered adapter is one the catalogue SAYS needs a
-      #                           separate service — that is the only thing `auto_selectable?`
-      #                           refuses on — so nothing here can be picked automatically.
-      #                           The engines ARE there, the remedy is an operator's and it is
-      #                           nameable: `technical-spec.md` §5.2 clause 4 put the control
-      #                           on a page this sentence can point at.
+      # THE DISCRIMINATOR IS NOT IN `detail`. `Diagnostic#detail` is printed nowhere:
+      # `_diagnostics.html.erb` excludes it by name, `#to_h` omits it so no serialiser picks
+      # it up, and `FailureDocument` excludes it. The stored value reaches the operator
+      # through the log instead — `EnginePreference.from_settings` in production, and
+      # `selected_engine_id`'s own line through the port.
       #
-      # THE SENTENCE SAYS NOTHING ABOUT WHAT WAS SELECTED, and that is a correction rather than
-      # an omission. It used to end *"and none has been selected"*, which two independent
-      # measurements — an adversarial pass here and a fourth review — found FALSE for a third
-      # state: a stored selection naming an engine that is no longer registered
-      # (`selected_engine_id`'s own comment calls that §7 rule 5's routine case). Production
-      # cannot reach it, because `EnginePreference` drops an unregistered id at the settings
-      # boundary; the `engine_preference:` port can, and this file already carries one example
-      # that exists purely because "the port is public". So the claim the code cannot support
-      # is gone.
-      #
-      # AND THE DISCRIMINATOR IS NOT PUT IN `detail`, WHICH WAS THE FIRST FIX AND WAS WORSE.
-      # `Diagnostic#detail` is printed NOWHERE: `_diagnostics.html.erb` has a "WHAT IS
-      # DELIBERATELY NOT PRINTED" section naming it, `Diagnostic#to_h` omits it so no
-      # serialiser can pick it up by accident, `FailureDocument` excludes it, and no logger
-      # writes it — its only readers are the two `restamp` call sites. A fifth review measured
-      # all of that after a draft had shipped `selected=<value>` into it, described as
-      # "admin-facing". It is not, and the information is not missing either — but WHICH line
-      # carries it depends on the surface, and the first correction named the wrong one:
-      #
-      #   in production   `EnginePreference.from_settings` writes *"[reporter_dashboards]
-      #                   render setting render_engine="athena" dropped: no render engine is
-      #                   registered under that name. Known: …"* and hands this class `nil`. So
-      #                   `selected_engine_id` returns at its own `id.nil?` guard and its
-      #                   `warn_line` never runs.
-      #   through the port `selected_engine_id`'s own line does run — *"this installation
-      #                   selects render engine "athena", which is not registered here"* — and
-      #                   an example pins it.
-      #
-      # A review measured that, after a comment here had cited the second as though it were
-      # the first. Either way an operator gets the stored value in the log; neither way does it
-      # belong in a `Diagnostic` field nobody prints. So the third state's fix is the SENTENCE
-      # being true, and nothing else was needed.
-      #
-      # AND THE OTHER SURFACE NOW AGREES, which is worth stating because this paragraph spent
-      # three commits saying it did not. `PreflightCommand` used to answer exit 0 for the second
-      # state while this one called it a misconfiguration; §Findings **E-27 row 7** is CLOSED as
-      # of 2026-08-12 by curator decision — an all-deferred run exits `NOTHING_TO_RUN` (2),
-      # because it verified nothing. So both surfaces report this installation as a problem, and
-      # the operator gets the same answer whichever one they look at.
-      #
-      # THE HISTORY IS KEPT BECAUSE IT COST THREE ROUNDS. A draft cited preflight as AGREEING
-      # when it did not (measured inverted); the correction said the disagreement was open and
-      # was right; and this paragraph then survived the commit that closed it, still saying
-      # "OPEN and awaiting a curator decision" one line above a passing test of the opposite.
-      # A comment that outlives the decision it describes is how a closed question gets
-      # re-opened by the next reader.
+      # The menu path below is spelled with `>` and not `→` because `MinimalPdf` draws
+      # Windows-1252 and would replace an unencodable string wholesale, and a sentence that
+      # might reach an artefact has to stay drawable.
       def no_engine_diagnostic(sections)
         registry = ::RedmineReporterDashboards::Render::Registry
         ids = registry.ids

@@ -2,101 +2,45 @@
 
 module RedmineReporterDashboards
   module Permissions
-    # T-27 — the UPGRADE DIAGNOSTIC. Which roles hold a code-execution privilege over
-    # report templates: the base plugin's, ours, or both.
+    # THE UPGRADE DIAGNOSTIC: which roles hold a code-execution privilege over report
+    # templates — the base plugin's, ours, or both. It decides nothing and grants nothing; it
+    # makes the existing grants READABLE on a page an administrator already has.
     #
-    # --- WHY THIS EXISTS AT ALL, AND WHAT IT REPLACED ---
+    # Two grants to surface, for opposite reasons:
     #
-    # `technical-spec.md` §4 answered INV-9 — *template authoring IS code execution* — with a
-    # `template_authoring` plugin setting. T-40 deleted that shape (see `permissions.rb` for
-    # the argument) and replaced it with role permissions, which left `[OQ-F]`'s second worry
-    # unanswered by anything mechanical: *an upgraded install must not widen code execution
-    # silently.* This module is that answer. It does not decide anything and it grants
-    # nothing; it makes the existing grants READABLE, on a page an administrator already has.
+    #   * THE BASE PLUGIN'S. An install upgrading from it has roles holding
+    #     `:manage_report_templates`. An administrator deciding who should author HERE needs
+    #     that list rather than having to reconstruct it.
+    #   * OURS. Core's `DefaultData::Loader` grants Manager every setable permission of ours
+    #     on a fresh install (`lib/redmine/default_data/loader.rb`, identical on 5.1 through
+    #     7.0), `require: :member` included. On that path nobody CHOSE to hand out code
+    #     execution, and this is the only thing that says it happened.
     #
-    # Two grants it has to surface, and they are found the same way for opposite reasons:
+    # `BASE_AUTHORING` NAMES ONE PERMISSION, and it was read from that plugin's own
+    # repository rather than inferred. Of the six it registers, only
+    # `:manage_report_templates` is code execution: its controller does
+    # `params[:report_template][:type].constantize.new` and then assigns the body from the
+    # request. The other five render templates that are already STORED — consuming, not
+    # authoring — and listing them would cry wolf on every role that may read a report, which
+    # is the fastest way to make a diagnostic ignored.
     #
-    #   * **The base plugin's.** An install upgrading from it has roles
-    #     holding `:manage_report_templates`. Those roles keep authoring there, and an
-    #     administrator deciding who should author HERE needs to see that list rather than
-    #     reconstruct it.
-    #   * **Ours.** Core's `DefaultData::Loader` grants Manager every setable permission of
-    #     ours on a fresh install (`lib/redmine/default_data/loader.rb:51`, identical on 5.1
-    #     through 7.0), `require: :member` included. On that path nobody CHOSE to hand out
-    #     code execution, and this diagnostic is the only thing that says it happened.
+    # IT ASKS THE PLUGIN REGISTRY NOTHING, and that is the decision rather than an omission.
+    # A permission grant is a string in `roles.permissions`, and Redmine never prunes one when
+    # the plugin that registered it goes away. So a role can hold `:manage_report_templates`
+    # on an install where the base plugin is no longer present — which is exactly when an
+    # administrator needs the list, and exactly when gating on a presence check would print
+    # an empty one.
     #
-    # --- THE MEASUREMENT THIS FILE RESTS ON ---
+    # What that dangling grant does, measured: it is invisible on the roles screen (which
+    # renders `setable_permissions`, and an unregistered permission is not setable);
+    # `Role#allowed_to?` still answers true (`allowed_permissions` has no registry filter);
+    # but every real check is project-scoped and answers false, because `Project#allows_to?`
+    # is built from `AccessControl.modules_permissions`. So it is STALE DATA that re-arms if
+    # the plugin is reinstalled, not a live code-execution path while it is gone.
     #
-    # `BASE_AUTHORING` is not inferred from this plugin's overrides, which is how several
-    # earlier rounds of this project got the base plugin wrong (HANDOVER §1). It was read
-    # from that plugin's own repository at `b1d1736`, `init.rb:19-32`, where it registers
-    # six permissions. Exactly ONE of them is a code-execution privilege:
-    #
-    #     permission :manage_report_templates, {
-    #       report_templates: [:new, :create, :edit, :update, :destroy, :preview, ...],
-    #       report_schedules: [...] }
-    #
-    # because `ReportTemplatesController#create` is
-    # `params[:report_template][:type].constantize.new` followed by `safe_attributes =
-    # params[:report_template]` — the template BODY arrives in the request and is executed
-    # server-side. The other five (`generate_issue_reports`, `view_issue_reports`,
-    # `send_issue_reports`, `generate_time_entries_reports`, `view_time_entries_reports`)
-    # render templates that are already STORED: `IssuesReportTemplatesController` resolves
-    # `@report_templates` by id and calls `generate_reports` on them. Consuming, not
-    # authoring. Listing those here would cry wolf on every role that may read a report,
-    # which is the fastest way to make a diagnostic ignored.
-    #
-    # --- AND WHY IT IS NOT ASKED OF THE PLUGIN REGISTRY ---
-    #
-    # WRITTEN AGAINST `ReporterPresence`, WHICH NO LONGER EXISTS — curator decision #1
-    # deleted the detection on 2026-08-14, because the patch that was its last consumer went
-    # with the host-render path. The reasoning below is kept verbatim rather than trimmed,
-    # because it is the argument against REINTRODUCING a detection to gate this page, and
-    # that is a thing a later session would otherwise propose as a tidy-up. Read
-    # `ReporterPresence` below as "any question put to `Redmine::Plugin.installed?`".
-    #
-    # This is the decision T-27 owed, and the answer inverts the brief's guess that the boot
-    # log line is "the diagnostic in embryo". A permission grant is a STRING in
-    # `roles.permissions`, and Redmine never prunes one when the plugin that registered it
-    # goes away: `Role#permissions=` writes what it is given, and nothing anywhere reconciles
-    # the column against the registry. So a role can hold `:manage_report_templates` on an
-    # install where the base plugin is **no longer installed at all**, and gating this module
-    # on `ReporterPresence.present?` would print an empty list in exactly that case.
-    #
-    # --- WHAT THE DANGLING GRANT DOES AND DOES NOT DO, MEASURED --------------------
-    #
-    # The first version of this comment said the grant is invisible on the roles screen
-    # "while `Role#allowed_to?` keeps honouring it", which overstated the consequence. An
-    # independent review measured it against core and the precise picture is:
-    #
-    #   * INVISIBLE on the roles screen: `app/views/roles/_form.html.erb` renders
-    #     `setable_permissions`, built from `Redmine::AccessControl` — an unregistered
-    #     permission is not setable, so nothing shows the grant. TRUE as stated.
-    #   * `Role#allowed_to?(:manage_report_templates)` still answers **true**:
-    #     `Role#allowed_permissions` (`role.rb:304-311`) is `permissions +
-    #     public_permissions` with no registry filter at all.
-    #   * But every REAL check is project-scoped, and there it answers **false**:
-    #     `User#allowed_to?(action, project)` returns early on
-    #     `Project#allows_to?` (`user.rb:777`), which is built from
-    #     `AccessControl.modules_permissions` (`project.rb:1311-1319`). The base plugin
-    #     declares this permission inside `project_module :issue_tracking`, so while that
-    #     plugin is uninstalled nothing is authorized by the grant.
-    #
-    # So it is STALE DATA that re-arms the moment the plugin is reinstalled — not a live
-    # code-execution path while it is gone. That is still exactly what this page is for: an
-    # administrator migrating needs the list, and needs it after the old plugin has been
-    # removed, which is when no other surface in Redmine will show it to them.
-    #
-    # Therefore: the audit reads Redmine's own permission tables and asks the plugin registry
-    # NOTHING. When this was written the detection still had one real consumer of its own;
-    # since decision #1 it has none and is deleted, so there is not even a module left to be
-    # tempted to wire in here.
-    #
-    # --- PURE, LIKE `Permissions.collisions` AND FOR THE SAME REASON ---
-    #
-    # The caller passes the roles. Anything answering `id`, `name`, `builtin` and
-    # `permissions` will do, which `Role` does and so does a Struct, so every rule below is
-    # asserted in a DB-less spec instead of only in a suite that needs Redmine booted.
+    # PURE. The caller passes the roles; anything answering `id`, `name`, `builtin` and
+    # `permissions` will do, so every rule below is asserted in a DB-less spec rather than
+    # only in a suite that needs Redmine booted.
     module AuthoringAudit
       # The base plugin's authoring permission — see the measurement above. An Array
       # because "how many are there" is a question the reader should not have to re-derive
