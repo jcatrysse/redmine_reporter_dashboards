@@ -229,6 +229,22 @@ score, and the usability walkthrough are **advisory — non-deterministic — no
 guarantee**: never report them as PASS/FAIL. Conversely, never reclassify G7–G12 as advisory to reach
 green. If a hard gate cannot pass, that is the finding.
 
+**The one standing exception, by curator decision on 2026-08-15: the `Gotenberg CVE scan` reports and
+does not block.** Its gate step carries `continue-on-error: true`. **This is not yours to undo, and it
+is written here because the rule above would otherwise tell a future session to "fix" it.** The
+reasoning is a scope argument rather than a security one: Gotenberg is an external component this
+repository neither bundles, starts, nor ever auto-selects — a service-requiring engine has to be
+deployed, credentialed and chosen by an administrator, and the default renderer is headless Chromium
+on the Redmine host. **Which PDF renderer to run, and what vulnerability posture to accept in it, is
+that administrator's decision on their own estate.** A red cell here made a third party's Chromium CVE
+read as a defect in this plugin, on a repository that ships none of the bytes and can fix none of
+them. What did **not** change, and must not: the scan still runs nightly and still says what it found;
+the allowlist keeps its per-CVE reasons and dates; `cve_accepted_diff_selftest.sh` still **hard**-fails,
+because "the gate can still say no" is a property of the script and a broken script would report a
+clean image; and `ci.yml`'s `gotenberg_accepted_cves` step is still **hard**, because it validates the
+shape of *our* file rather than facts about somebody else's image. Nothing else in this repository is
+allowed to follow this precedent — the argument is specific to a component we do not ship.
+
 **If you cannot verify a gate, you must stop at a pause point** — state which gate, the exact command,
 and what output would satisfy it. A gate you could not check is reported as `UNVERIFIED`, never as
 PASS.

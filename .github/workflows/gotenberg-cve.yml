@@ -239,8 +239,38 @@ jobs:
       # ---------------------------------------------------------------------------------
       # THE GATE.
       # ---------------------------------------------------------------------------------
+      # CURATOR DECISION, 2026-08-15: THIS REPORTS, IT DOES NOT BLOCK.
+      #
+      # `continue-on-error` here is a deliberate departure from CLAUDE.md §7's "never make a
+      # hard gate advisory to get to green", and it is recorded in §7 itself so that a later
+      # session reads the decision rather than the rule and "fixes" it back. The reasoning is
+      # the curator's and it is a scope argument, not a security one:
+      #
+      #   Gotenberg is an EXTERNAL component. This repository does not bundle it, does not
+      #   start it, and never auto-selects it — a service-requiring engine has to be deployed,
+      #   credentialed and chosen by an administrator, and the default renderer is headless
+      #   Chromium on the Redmine host. Which PDF renderer to run, and what vulnerability
+      #   posture to accept in it, is that administrator's decision on their own estate. A
+      #   red cell here was making a third party's Chromium CVE read as a defect in this
+      #   plugin, on a repository that did not ship the bytes and cannot fix them.
+      #
+      # WHAT IS NOT CHANGED, because the reasons for it survive the decision:
+      #
+      #   * the scan still runs nightly and still says exactly what it found. An operator
+      #     deciding whether to deploy the pinned image is the person this output is for, and
+      #     they now get it without it being addressed to us as a build failure;
+      #   * the allowlist keeps its per-CVE reasons and dates — it is the only place the
+      #     reachability argument for each finding is written down;
+      #   * the self-test below still runs, and still HARD-fails. "The gate can still say no"
+      #     is a property of the script, and a broken script would silently report a clean
+      #     image, which is the one outcome nobody wants informative or otherwise;
+      #   * `ci.yml`'s `gotenberg_accepted_cves` step is untouched and still hard. It
+      #     validates the SHAPE of the allowlist — a malformed record, a date that is not a
+      #     day, an unbounded acceptance — and those are mistakes in this repository's own
+      #     file rather than facts about somebody else's image.
       - name: Compare the findings against what has been accepted
         id: gate
+        continue-on-error: true
         run: |
           set -euo pipefail
 
@@ -288,8 +318,15 @@ jobs:
       # A findings-free scan is the ordinary outcome, and it should still say what it
       # checked. A job whose only successful output is a green tick teaches nobody which
       # digest was clean on which night — nor, now, what it was clean APART FROM.
+      #
+      # `steps.gate.outcome`, NOT `success()`, AND THE DIFFERENCE IS A LIE. `continue-on-error`
+      # on the gate above masks its failure from the JOB, so `success()` is true whether the
+      # image was clean or carried forty unaccepted advisories — and this step would then
+      # announce "no fixable HIGH/CRITICAL findings" over a scan that found them. `outcome`
+      # is the step's result BEFORE continue-on-error is applied, which is the only thing
+      # here that still knows what actually happened.
       - name: Say what was clean
-        if: success()
+        if: steps.gate.outcome == 'success'
         env:
           PINNED: ${{ steps.pin.outputs.ref }}
           ACCEPTED: ${{ steps.gate.outputs.accepted }}
@@ -298,34 +335,43 @@ jobs:
                "$ACCEPTED accepted, reasoned and dated in" \
                "script/gates/gotenberg_accepted_cves.allowlist."
 
-      # WHAT TO DO WHEN THIS GOES RED, written here because the person reading it at
-      # 04:17 did not write the compose file. The recipe now names what the tag actually
-      # resolves to, because the first version of this text told a human to move a pin
-      # that had nowhere to move to.
-      # CONDITIONED ON THE GATE, not on `failure()`. Unqualified, this fired for every
-      # cause — including a Trivy database outage, whose own message says "NOTHING WAS
-      # SCANNED, this is not a verdict about the image" and which was then immediately
-      # contradicted by "it is a fact about the pinned image" plus a recipe for moving the
-      # pin. The commit that introduced this text exists because the previous version
-      # printed a remediation naming an action that did not exist; unconditioned, it still
-      # did, for every failure that is not the gate's.
-      - name: What a red run means
-        if: failure() && steps.gate.outcome == 'failure'
+      # WHAT UNACCEPTED FINDINGS MEAN, written here because the person reading it at 04:17
+      # did not write the compose file. The recipe names what the tag actually resolves to,
+      # because the first version of this text told a human to move a pin that had nowhere
+      # to move to.
+      #
+      # `::warning::`, NOT `::error::`, and the step no longer fails the job. See the curator
+      # decision above the gate: this is a fact about a third party's image that this
+      # repository neither ships nor starts, addressed to the administrator who will decide
+      # whether to deploy it — not a defect report addressed to us.
+      #
+      # CONDITIONED ON THE GATE'S `outcome`, and now that is the only thing it can be
+      # conditioned on. Before `continue-on-error` it also carried `failure()`, because
+      # unqualified it fired for every cause — including a Trivy database outage, whose own
+      # message says "NOTHING WAS SCANNED, this is not a verdict about the image" and which
+      # was then immediately contradicted by a recipe for moving the pin. `failure()` is now
+      # permanently false for this job, so keeping it would have made this step dead code
+      # that no run could reach: the same trap in the other direction.
+      - name: What unaccepted findings mean
+        if: steps.gate.outcome == 'failure'
         env:
           PINNED: ${{ steps.pin.outputs.ref }}
           TAG: ${{ steps.pin.outputs.tag }}
           CURRENT: ${{ steps.tag.outputs.current }}
         run: |
-          echo "::error::This is not a defect in the plugin — it is a fact about the pinned image."
-          echo "::error::pinned:  $PINNED"
-          echo "::error::$TAG now resolves to: $CURRENT"
-          echo "::error::"
-          echo "::error::If those two digests DIFFER, upstream has rebuilt and the fix is to move the pin:"
-          echo "::error::  1. put the digest above in docker-compose.gotenberg.yml"
-          echo "::error::  2. update config/capabilities.yml's verification_note, which names the version"
-          echo "::error::  3. re-run render-smoke, which runs the corpus against it"
-          echo "::error::"
-          echo "::error::If they are the SAME, there is nowhere to move to and the decision is a human"
-          echo "::error::one: accept the finding for a bounded time by adding it — with a reason and a"
-          echo "::error::valid-through date — to the accepted list in this workflow, or stop"
-          echo "::error::recommending the container. Do not delete the gate."
+          echo "::warning::This is not a defect in the plugin — it is a fact about an image"
+          echo "::warning::this repository documents as an OPTIONAL renderer and never deploys."
+          echo "::warning::pinned:  $PINNED"
+          echo "::warning::$TAG now resolves to: $CURRENT"
+          echo "::warning::"
+          echo "::warning::If those two digests DIFFER, upstream has rebuilt and the pin can move:"
+          echo "::warning::  1. put the digest above in docker-compose.gotenberg.yml"
+          echo "::warning::  2. update config/capabilities.yml's verification_note, which names the version"
+          echo "::warning::  3. re-run render-smoke, which runs the corpus against it"
+          echo "::warning::"
+          echo "::warning::If they are the SAME there is nowhere to move to, and that is not this"
+          echo "::warning::repository's problem to solve. Whether to run Gotenberg at all, and what"
+          echo "::warning::posture to accept in it, belongs to the administrator deploying it: the"
+          echo "::warning::default renderer is headless Chromium on the Redmine host and needs none of"
+          echo "::warning::this. Adding a reasoned, dated entry to the accepted list is still the way to"
+          echo "::warning::record a finding somebody HAS examined. Do not delete the list."
