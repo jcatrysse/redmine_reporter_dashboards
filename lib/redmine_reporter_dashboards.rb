@@ -131,7 +131,9 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/starter_gallery'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards
-  # Patches that include/prepend into Redmine core (Project, ProjectsHelper).
+  # Patches that include into Redmine core. The list is the list: Project and Role,
+  # each gaining one association and no method override. (It read ProjectsHelper until
+  # 2026-08-21; nothing here has ever patched it — see init.rb for why not.)
   # Loaded from after_plugins_loaded so the target classes are present.
   PATCH_FILES = %w[
     redmine_reporter_dashboards/patches/project_patch

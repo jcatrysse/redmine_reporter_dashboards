@@ -175,8 +175,13 @@ end
 # ---------------------------------------------------------------------------
 # Patch + Liquid tag loading
 #
-# Everything that prepends/includes into core classes is deferred to
-# after_plugins_loaded so that Project / ProjectsHelper are fully defined.
+# Everything that includes into core classes is deferred to after_plugins_loaded so
+# that Project and Role are fully defined. Those two are the whole list, and both
+# patches add an association only — no core method is overridden anywhere in this
+# plugin. ProjectsHelper was named here until 2026-08-21 and never was patched: the
+# per-project surface is core's own Modules checkbox plus three project MENU items
+# (templates, schedules, dashboard), never a tab inside Project settings, so
+# `project_settings_tabs` is deliberately untouched.
 #
 # IT USED TO BE DEFERRED FOR A SECOND REASON THAT IS GONE: the reporter classes
 # (IssueListReportTemplate, ReportTemplatesController) had to have been registered
