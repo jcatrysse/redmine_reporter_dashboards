@@ -509,12 +509,18 @@ class ReporterPreflightControllerTest < ActionController::TestCase
             'engine',
     'es' => 'El motor de renderizado necesita un servicio y no es el motor elegido de esta ' \
             'instalación',
+    'fr' => 'Le moteur de rendu nécessite un service et n\'est pas le moteur retenu pour ' \
+            'cette installation',
     'hu' => 'A renderelő motor szolgáltatást igényel, és nem ez a telepítés ' \
             'kiválasztott motorja',
     'it' => 'Il motore di rendering richiede un servizio e non è il motore scelto per ' \
             'questa installazione',
+    'nl' => 'De render-engine heeft een dienst nodig en is niet de geselecteerde engine ' \
+            'van deze installatie',
     'pl' => 'Silnik renderujący wymaga działania osobnej usługi renderowania i nie ' \
             'jest wybranym silnikiem tej instalacji',
+    'pt' => 'O motor de rendição precisa de um serviço e não é o motor selecionado ' \
+            'nesta instalação',
     'pt-BR' => 'O mecanismo de renderização precisa de um serviço e não é o mecanismo ' \
                'escolhido desta instalação',
     'ru' => 'Механизму рендеринга нужна служба, и он не является выбранным механизмом ' \

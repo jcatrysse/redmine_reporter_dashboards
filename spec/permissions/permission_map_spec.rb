@@ -48,9 +48,9 @@ module RedmineReporterDashboards
   # The plugin root, from `spec/permissions/`.
   PERMISSION_SPEC_ROOT = File.expand_path('../..', __dir__)
 
-  # The nine locales of CLAUDE.md §10, named rather than globbed: a locale file that
-  # disappeared should fail here too, not quietly shrink the parity check to eight.
-  PERMISSION_SPEC_LOCALES = %w[de en es hu it pl pt-BR ru zh].freeze
+  # The twelve locales of CLAUDE.md §10, named rather than globbed: a locale file that
+  # disappeared should fail here too, not quietly shrink the parity check to eleven.
+  PERMISSION_SPEC_LOCALES = %w[de en es fr hu it nl pl pt pt-BR ru zh].freeze
 
   # A controller read as source. Everything it answers comes from Ruby's own parser.
   class ControllerSource
@@ -803,7 +803,7 @@ module RedmineReporterDashboards
         end
       end
 
-      it 'is labelled in all nine locales' do
+      it 'is labelled in all twelve locales' do
         described_class::REGISTERED.each do |entry|
           PERMISSION_SPEC_LOCALES.each do |locale|
             label = locale_data(locale)["permission_#{entry.name}"]
@@ -816,7 +816,7 @@ module RedmineReporterDashboards
         end
       end
 
-      it 'has its project MODULE labelled in all nine locales too' do
+      it 'has its project MODULE labelled in all twelve locales too' do
         # The module is what the fieldset legend on the roles screen shows, through
         # `l_or_humanize(mod, prefix: 'project_module_')` — in `roles/_form` and again in
         # `projects/settings/_modules`. Nothing asserted this until the review of T-40, which

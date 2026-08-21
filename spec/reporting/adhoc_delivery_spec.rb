@@ -123,7 +123,7 @@ RSpec.describe 'the ad-hoc mail layer, structurally' do
                                'query_unavailable', 'no_recipients')
     end
 
-    %w[de en es hu it pl pt-BR ru zh].each do |locale|
+    %w[de en es fr hu it nl pl pt pt-BR ru zh].each do |locale|
       it "has a key for each of them in #{locale}.yml" do
         strings = YAML.load_file(File.join(plugin_root, "config/locales/#{locale}.yml"))
                       .values.first

@@ -305,7 +305,7 @@ PASS.
 
 ## 10. Locales
 
-Nine locales exist: `de en es hu it pl pt-BR ru zh`. Rules:
+Twelve locales exist: `de en es fr hu it nl pl pt pt-BR ru zh`. Rules:
 
 - **No hardcoded user-facing string in a view, controller or mailer.** Keys go in `en.yml` first.
 - **Update every locale file** when you add a key — an absent key falls back to English silently,

@@ -148,8 +148,8 @@ RSpec.describe RedmineReporterDashboards::StarterGallery do
     # §10: *"Update every locale file when you add a key — an absent key falls back to English
     # silently, which reads as a bug to a Dutch or Russian user and hides the gap from
     # review."* The keys are DERIVED from the id, so this check is what makes adding a starter
-    # without its nine translations impossible rather than merely discouraged.
-    it 'has a name and a description for every entry in every one of the nine locales' do
+    # without its twelve translations impossible rather than merely discouraged.
+    it 'has a name and a description for every entry in every one of the twelve locales' do
       missing = Dir.glob(File.join(locale_root, '*.yml')).sort.flat_map do |path|
         keys = YAML.load_file(path).values.first.keys
 
@@ -162,8 +162,8 @@ RSpec.describe RedmineReporterDashboards::StarterGallery do
       expect(missing).to eq([])
     end
 
-    it 'checks all nine locales, so it cannot pass by finding one file' do
-      expect(Dir.glob(File.join(locale_root, '*.yml')).length).to eq(9)
+    it 'checks all twelve locales, so it cannot pass by finding one file' do
+      expect(Dir.glob(File.join(locale_root, '*.yml')).length).to eq(12)
     end
   end
 

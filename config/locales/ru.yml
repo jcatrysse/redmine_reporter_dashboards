@@ -113,7 +113,7 @@ ru:
 
 # T-23 - report templates: the CRUD surface, the preview, and the six permissions T-40
 # left PLANNED. `permission_*` and `project_module_*` are read by
-# `spec/permissions/permission_map_spec.rb`, which fails if any of the nine locales is
+# `spec/permissions/permission_map_spec.rb`, which fails if any of the twelve locales is
 # missing one - an absent key falls back to English silently, which reads as a bug to a
 # reader in another language and hides the gap from review (CLAUDE.md SS10).
 #
@@ -302,7 +302,7 @@ ru:
 # the remaining degradation codes still print raw and that gap is §Findings S-17, with the
 # mechanism (a key per code, `data` as interpolation, `to_s` as the fallback) settled here.
 #
-# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all nine files.
+# THE PLACEHOLDERS ARE THE DEGRADATION'S OWN `data` KEYS and are identical in all twelve files.
 # A key whose placeholder does not match its emit site raises
 # `I18n::MissingInterpolationArgument`, which `reporter_degradation_text` catches into the raw
 # fallback - so a mistake here loses the translation, never the message.

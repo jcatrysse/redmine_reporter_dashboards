@@ -202,12 +202,12 @@ class ReporterDashboardsDegradationHelperTest < ActionView::TestCase
                      reporter_diagnostic_headline(diagnostic)
   end
 
-  # A key added to `ORIGIN_LABEL_KEYS` without nine translations is a Russian operator
+  # A key added to `ORIGIN_LABEL_KEYS` without twelve translations is a Russian operator
   # reading English, which CLAUDE.md §10 forbids and which no other test here would see.
   def test_every_origin_headline_is_translated_in_every_shipped_locale
     keys = RedmineReporterDashboards::Reporting::Diagnostic::ORIGIN_LABEL_KEYS.values
 
-    %w[de en es hu it pl pt-BR ru zh].each do |locale|
+    %w[de en es fr hu it nl pl pt pt-BR ru zh].each do |locale|
       keys.each do |key|
         value = ::I18n.t(key, locale: locale, default: '')
         assert value.to_s.strip.present?, "#{key} is missing from #{locale}.yml"
