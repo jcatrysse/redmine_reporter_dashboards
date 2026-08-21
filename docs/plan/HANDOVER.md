@@ -1874,7 +1874,8 @@ constant exists and the emoticon rule still registers.
     our tab + all four sections rendered          yes
     permission matrix (6 roles)          IDENTICAL to 7.0
     plugin suite                             1062 runs, 6 failures, 12 errors
-    system tests                               12 runs, 2 failures, 0 errors
+    system tests                               12 runs, 0 failures, 0 errors
+                                                  (2 failures on the FIRST run; see below)
 
 The permission matrix being byte-identical across two Rails majors and two different sets of
 co-installed plugins is what the settings-tab design was supposed to give, and it does:
@@ -1905,6 +1906,30 @@ re-running.** Neither is a boot failure and neither is somebody else's bug:
 
 Both are reported rather than fixed here: the settings-tab task did not create them and
 absorbing them would be the scope growth CLAUDE.md §11.5 names.
+
+**AND ONE HYPOTHESIS THAT DIED, WHICH IS WORTH MORE THAN THE ONES THAT HELD.** The first 6.1
+system-test run showed two failures, both in `ReporterDashboardsAuthoringSystemTest`, one of
+them inside core's own `log_user` helper (*expected "/login" to equal "/my/page"*,
+`test/application_system_test_case.rb:82`). The obvious suspect was
+`bless_this_redmine_sso`, which prepends `AccountController#login` and `MyController#password`
+— and it is the only plugin here besides ours that touches the login flow at all.
+
+It is not the cause, and here is the sequence that settled it, because a single green run
+would have "proved" the wrong thing:
+
+    full suite, SSO REMOVED             12 runs, 0 failures   <- suggestive, proves nothing
+    login flow probed with SSO present  GET /login 200, POST /login 302 -> /my/page, 200
+    the FAILING CLASS ALONE, SSO BACK    6 runs, 0 failures   <- the hypothesis dies here
+
+So the two failures did not reproduce, with or without the suspect. **They are timing flakes
+in this container**, which runs a system test in roughly fifty seconds on software-rendered
+Chromium; `assert_current_path` and `assert_selector` both retry, and both ran out. Do not
+"fix" them and do not blame the SSO plugin — if they recur, the thing to raise is
+`Capybara.default_max_wait_time` for this environment, not the tests.
+
+Method note, and it is the transferable part: *removing the suspect and getting green is not
+evidence.* Removing it, then putting it BACK and re-running only the failures, is. The first
+step alone would have written a false finding into somebody else's plugin.
 
 ---
 
