@@ -48,8 +48,12 @@ module RedmineReporterDashboards
     # * `authoring`      INV-9: holding this is a code-execution privilege
     # * `covers`         one line, in the vocabulary an administrator reads
     # * `lands_in`       nil once registered; otherwise the task that registers it
+    # * `settings_tab`   this permission's surface is reachable from the project SETTINGS
+    #                    tab, so its registration additionally maps core's
+    #                    `projects#settings`. See `SETTINGS_TAB_ACTIONS` for why this is a
+    #                    BOOLEAN and not a second action hash
     Entry = Struct.new(:name, :project_module, :actions, :read, :requires,
-                       :group, :authoring, :covers, :lands_in,
+                       :group, :authoring, :covers, :lands_in, :settings_tab,
                        keyword_init: true) do
       # Frozen at construction, all the way down. `Array#freeze` is shallow, so freezing
       # REGISTERED alone left the entries and the action Hashes inside them mutable while
@@ -97,6 +101,27 @@ module RedmineReporterDashboards
         options[:require] = requires if requires
         options
       end
+
+      # What Redmine is actually handed, as distinct from `actions`, which stays this
+      # plugin's own controllers only.
+      #
+      # WHY THE SPLIT. `spec/permissions/permission_map_spec.rb` asserts that every
+      # controller in `actions` has a file here, that every action is public, and that
+      # `authorize` runs for it. Those three assertions are the reason the permission map
+      # cannot rot, and they can only read controllers this repository contains. Merging a
+      # CORE action into `actions` would have made all three either fail or learn to skip
+      # entries — and a check that learns to skip is a check that stops holding.
+      # FROZEN, LIKE `actions` IS. `Entry#initialize` freezes the action hash and each of
+      # its values, and `registration_dsl_spec.rb` asserts that of what `init.rb` actually
+      # hands Redmine — which is this, not `actions`. `merge` returns a NEW and unfrozen
+      # hash, so the first draft of this method quietly handed out a mutable action map and
+      # that spec caught it. Built per call rather than memoised because the Entry is frozen
+      # at construction; it runs once per permission at boot.
+      def registered_actions
+        return actions unless settings_tab
+
+        (actions || {}).merge(SETTINGS_TAB_ACTIONS).freeze
+      end
     end
 
     # Ordering only. The roles screen renders permissions in declaration order **within a
@@ -120,6 +145,24 @@ module RedmineReporterDashboards
     # for a controller in a subdirectory is the namespaced path — so the key has to carry
     # the slash. Written as a constant because a typo in it produces a permission that
     # guards nothing and looks perfectly correct on the roles screen.
+    # THE ONE CORE ACTION THIS PLUGIN MAPS, and a BOOLEAN on the entry rather than a second
+    # action hash, deliberately.
+    #
+    # Redmine has no registration API for a project settings TAB: `project_settings_tabs`
+    # is a helper method and adding an entry means patching it. Core's own convention for
+    # the permission that owns a tab is to map `projects#settings` as well — see
+    # `manage_members` and `manage_versions` in `lib/redmine/preparation.rb` — because
+    # `ProjectsController` has `before_action :authorize`, so a role holding only our
+    # permission could otherwise see the tab in the list and get a 403 opening the page it
+    # lives on.
+    #
+    # A generic `core_actions:` field would have been more flexible and is the wrong shape:
+    # it would let a later edit map `projects#destroy` or `projects#update` and hand a
+    # reader-level role the project form, with nothing in this file objecting. A boolean
+    # that expands to exactly one action cannot be misused that way, and the flag's name
+    # says what it is FOR rather than what it does.
+    SETTINGS_TAB_ACTIONS = { projects: [:settings].freeze }.freeze
+
     TEMPLATES_CONTROLLER = :'reporter_dashboards/templates'
     SCHEDULES_CONTROLLER = :'reporter_dashboards/schedules'
     MAIL_CONTROLLER = :'reporter_dashboards/mail'
@@ -194,7 +237,8 @@ module RedmineReporterDashboards
         requires: nil,
         group: :dashboards,
         authoring: false,
-        covers: 'Create, rename, reorder and delete the tabs of a project dashboard'
+        covers: 'Create, rename, reorder and delete the tabs of a project dashboard',
+        settings_tab: true
       ),
       # --- consuming a report ----------------------------------------------------------
       #
@@ -211,7 +255,8 @@ module RedmineReporterDashboards
         group: :reports_consume,
         authoring: false,
         covers: 'See the report templates available in a project, and open or download ' \
-                'the document one produces'
+                'the document one produces',
+        settings_tab: true
       ),
       Entry.new(
         name: :view_reporter_dashboards_schedules,
@@ -226,7 +271,8 @@ module RedmineReporterDashboards
         group: :reports_consume,
         authoring: false,
         covers: 'See a schedule and its run state — last run, status, duration, error — ' \
-                'without being able to change it'
+                'without being able to change it',
+        settings_tab: true
       ),
       # --- authoring: every one of these is a code-execution privilege (INV-9) ----------
       #
@@ -415,7 +461,8 @@ module RedmineReporterDashboards
         # writes none. The flag would additionally derive `require: :member`, which is
         # precisely the value §4.1 says this row must not have.
         authoring: false,
-        covers: 'Send a report by e-mail on demand, to Redmine users'
+        covers: 'Send a report by e-mail on demand, to Redmine users',
+        settings_tab: true
       ),
       # T-28 PROMOTES BOTH, and they map to the SAME action set on purpose. Redmine cannot
       # express "this one action additionally needs a second permission", so `#create` is
@@ -551,7 +598,7 @@ module RedmineReporterDashboards
       # so the spec asserts each module occupies a single contiguous run of REGISTERED.
       def registrations_by_module
         REGISTERED.group_by(&:project_module).transform_values do |entries|
-          entries.map { |entry| [entry.name, entry.actions, entry.registration_options] }
+          entries.map { |entry| [entry.name, entry.registered_actions, entry.registration_options] }
         end
       end
 

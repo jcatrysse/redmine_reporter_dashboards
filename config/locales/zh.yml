@@ -436,3 +436,14 @@ zh:
   label_reporter_render_engine_deprecated: "已弃用"
   label_reporter_render_engine_unverified: "未经测试运行验证"
   text_reporter_render_engine_service_warning: "%{engine} 需要一项本插件从不启动的服务。在依赖它之前，请在“管理 → %{preflight}”中检查它。它的地址和凭据保存在 Redmine 的环境变量中，而不在本页面上，因为设置表既未加密，也不会对任何能读取它的人隐藏。"
+
+# --- The project SETTINGS tab (curator decision 2026-08-21) ---
+# The tab LABEL names both surfaces it covers rather than reusing
+# `project_module_reporter_dashboards_reports`: the tab holds the dashboard's configuration
+# as well as the reporting one, and two controls reading "Reports" is how an administrator
+# clicks the wrong one. The three counts use "Label: %{count}." instead of the "(s)" hedging
+# elsewhere in this file, because a bare count needs no noun agreement in any of the twelve.
+  label_reporter_settings_tab: "报表与仪表板"
+  text_reporter_settings_dashboard_tabs: "本项目的仪表板标签页数：%{count}。"
+  text_reporter_settings_templates: "您在本项目中可见的报表模板数：%{count}。"
+  text_reporter_settings_schedules: "本项目已启用的计划数：%{count}。"

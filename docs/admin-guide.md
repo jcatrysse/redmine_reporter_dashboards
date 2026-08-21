@@ -89,6 +89,26 @@ databases.
 There are two modules, because "we want dashboards, not the reporting surface" is a real
 answer.
 
+### The project settings tab
+
+**Project → Settings → Reports and dashboards.**
+
+One tab, covering the configuration and the logs of both modules, with links to the pages
+themselves. It is a summary — counts and the scheduler's state — and deliberately not the
+lists: Redmine renders every settings tab's content on every visit to that page, so a full
+template list in a tab would be paid for by everyone who opens Project settings.
+
+**Four permissions open it, and each of them therefore also permits
+`projects#settings`:** `manage_reporter_project_tabs`, `view_reporter_dashboards_reports`,
+`view_reporter_dashboards_schedules` and `mail_reporter_dashboards_reports`. That is worth
+knowing when you read a role: granting one of the four lets that role open the project
+settings page, where it sees this tab and nothing else — core's own tabs each require their
+own permission. It is the same arrangement Redmine uses for `manage_members` and
+`manage_versions`, and without it the tab would 403 on the page it lives on.
+
+Two of the four are `read` permissions, so on a **closed** project the tab still opens for
+them. The content is read-only, which is the point.
+
 ### Project dashboard
 
 **Project → Settings → Modules → Project dashboard.**

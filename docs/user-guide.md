@@ -4,6 +4,7 @@ For people who use dashboards and reports. If you write templates, read
 [Template authoring](template-authoring.md) next. If you install and configure the plugin,
 read the [Administrator guide](admin-guide.md).
 
+- [Where everything lives](#where-everything-lives)
 - [Project dashboards](#project-dashboards)
 - [Report templates](#report-templates)
 - [Reading a report](#reading-a-report)
@@ -12,6 +13,17 @@ read the [Administrator guide](admin-guide.md).
 - [Share links](#share-links)
 - [Import and export](#import-and-export)
 - [When something goes wrong](#when-something-goes-wrong)
+
+## Where everything lives
+
+**Project → Settings → Reports and dashboards** is the one place that lists all of it: how
+many dashboard tabs this project has, how many report templates you can see, whether the
+scheduler is running, and links to each of those pages. It appears as soon as you hold any
+one of the four permissions it covers, so a role that may only watch schedules run still
+gets it.
+
+The dashboard itself stays where it is — **Project → Project dashboard** in the project
+menu — because it is something you read rather than something you configure.
 
 ## Project dashboards
 
@@ -53,6 +65,7 @@ are not shared between projects, and moving one does not affect anybody else's p
 
 ## Report templates
 
+**Project → Settings → Reports and dashboards → Report templates**, or
 **Project → Report templates.**
 
 A report template is a Liquid document that the plugin renders against the project's issues
@@ -153,6 +166,7 @@ If the render fails, nobody is mailed. You get the error and a correlation ID on
 
 ## Scheduled reports
 
+**Project → Settings → Reports and dashboards → Report schedules**, or
 **Project → Report schedules.**
 
 A schedule mails a report template to a list of Redmine users on a repeating day: daily,

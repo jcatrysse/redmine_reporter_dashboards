@@ -437,3 +437,14 @@ pt-BR:
   label_reporter_render_engine_deprecated: "obsoleto"
   label_reporter_render_engine_unverified: "não verificado pela execução dos testes"
   text_reporter_render_engine_service_warning: "%{engine} precisa de um serviço que este plugin nunca inicia. Verifique-o em Administração → %{preflight} antes de depender dele. O endereço e a credencial ficam no ambiente do Redmine e não nesta página, porque a tabela de configurações não é criptografada nem oculta para quem possa lê-la."
+
+# --- The project SETTINGS tab (curator decision 2026-08-21) ---
+# The tab LABEL names both surfaces it covers rather than reusing
+# `project_module_reporter_dashboards_reports`: the tab holds the dashboard's configuration
+# as well as the reporting one, and two controls reading "Reports" is how an administrator
+# clicks the wrong one. The three counts use "Label: %{count}." instead of the "(s)" hedging
+# elsewhere in this file, because a bare count needs no noun agreement in any of the twelve.
+  label_reporter_settings_tab: "Relatórios e painéis"
+  text_reporter_settings_dashboard_tabs: "Abas do painel neste projeto: %{count}."
+  text_reporter_settings_templates: "Modelos de relatório que você pode ver neste projeto: %{count}."
+  text_reporter_settings_schedules: "Agendamentos ativados neste projeto: %{count}."

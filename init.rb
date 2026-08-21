@@ -175,13 +175,17 @@ end
 # ---------------------------------------------------------------------------
 # Patch + Liquid tag loading
 #
-# Everything that includes into core classes is deferred to after_plugins_loaded so
-# that Project and Role are fully defined. Those two are the whole list, and both
-# patches add an association only — no core method is overridden anywhere in this
-# plugin. ProjectsHelper was named here until 2026-08-21 and never was patched: the
-# per-project surface is core's own Modules checkbox plus three project MENU items
-# (templates, schedules, dashboard), never a tab inside Project settings, so
-# `project_settings_tabs` is deliberately untouched.
+# Everything that patches a core class is deferred to after_plugins_loaded. Project and
+# Role gain an association each and override nothing. ProjectsHelper is the one exception
+# and the one overridden core method in this plugin: `project_settings_tabs`, by `prepend`,
+# adding a single project settings tab (curator decision 2026-08-21).
+#
+# For the helper the timing is load-bearing rather than merely convenient. Nine plugins in a
+# real installation alias-chain that same method, and a prepend installed BEFORE such a
+# chain makes the next chain capture our method as its `_without_` — measured to be a
+# `NoMethodError` on `super`, i.e. a 500 on the project settings page, in their code.
+# after_plugins_loaded is the one hook that runs after every plugin's init.rb, in every
+# to_prepare cycle. See patches/projects_helper_patch.rb for the measurement.
 #
 # IT USED TO BE DEFERRED FOR A SECOND REASON THAT IS GONE: the reporter classes
 # (IssueListReportTemplate, ReportTemplatesController) had to have been registered

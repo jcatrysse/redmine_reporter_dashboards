@@ -437,3 +437,14 @@ de:
   label_reporter_render_engine_deprecated: "veraltet"
   label_reporter_render_engine_unverified: "vom Testlauf nicht bestätigt"
   text_reporter_render_engine_service_warning: "%{engine} benötigt einen Dienst, den dieses Plugin nie selbst startet. Prüfen Sie ihn unter Administration → %{preflight}, bevor Sie sich darauf verlassen. Adresse und Zugangsdaten stehen in der Umgebung von Redmine und nicht auf dieser Seite, denn die Einstellungstabelle ist weder verschlüsselt noch für Lesende verborgen."
+
+# --- The project SETTINGS tab (curator decision 2026-08-21) ---
+# The tab LABEL names both surfaces it covers rather than reusing
+# `project_module_reporter_dashboards_reports`: the tab holds the dashboard's configuration
+# as well as the reporting one, and two controls reading "Reports" is how an administrator
+# clicks the wrong one. The three counts use "Label: %{count}." instead of the "(s)" hedging
+# elsewhere in this file, because a bare count needs no noun agreement in any of the twelve.
+  label_reporter_settings_tab: "Berichte und Dashboards"
+  text_reporter_settings_dashboard_tabs: "Dashboard-Tabs in diesem Projekt: %{count}."
+  text_reporter_settings_templates: "Berichtvorlagen, die Sie in diesem Projekt sehen können: %{count}."
+  text_reporter_settings_schedules: "Aktivierte Zeitpläne in diesem Projekt: %{count}."

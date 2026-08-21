@@ -90,8 +90,16 @@ module RedmineReporterDashboards
       [:reporter_project_dashboards, :manage_reporter_project_page,
        { reporter_project_pages: [:update_page, :add_block, :remove_block, :move_block] },
        {}],
+      # `projects: [:settings]` IS NOT A CHANGE TO WHAT THIS PERMISSION GUARDS. The tab this
+      # permission owns lives on `ProjectsController#settings`, which has
+      # `before_action :authorize` — so without this mapping a role holding only our
+      # permission would see the tab in the list and get a 403 opening the page. Core maps
+      # the same action from `manage_members` and `manage_versions` for the same reason
+      # (`lib/redmine/preparation.rb:46-47`). It comes from `Entry#settings_tab`, never from
+      # a hand-written second controller key — see `Permissions::SETTINGS_TAB_ACTIONS`.
       [:reporter_project_dashboards, :manage_reporter_project_tabs,
-       { reporter_project_tabs: [:create, :update, :destroy, :order] }, {}]
+       { reporter_project_tabs: [:create, :update, :destroy, :order],
+         projects: [:settings] }, {}]
     ].freeze
 
     def record

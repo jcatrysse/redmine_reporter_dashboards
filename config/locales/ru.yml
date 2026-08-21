@@ -438,3 +438,14 @@ ru:
   label_reporter_render_engine_deprecated: "устарел"
   label_reporter_render_engine_unverified: "не подтверждён тестовым прогоном"
   text_reporter_render_engine_service_warning: "Механизму %{engine} нужна служба, которую этот плагин никогда не запускает. Проверьте её в разделе «Администрирование → %{preflight}», прежде чем полагаться на неё. Её адрес и учётные данные находятся в окружении Redmine, а не на этой странице, потому что таблица настроек не зашифрована и не скрыта от того, кто может её прочитать."
+
+# --- The project SETTINGS tab (curator decision 2026-08-21) ---
+# The tab LABEL names both surfaces it covers rather than reusing
+# `project_module_reporter_dashboards_reports`: the tab holds the dashboard's configuration
+# as well as the reporting one, and two controls reading "Reports" is how an administrator
+# clicks the wrong one. The three counts use "Label: %{count}." instead of the "(s)" hedging
+# elsewhere in this file, because a bare count needs no noun agreement in any of the twelve.
+  label_reporter_settings_tab: "Отчёты и панели"
+  text_reporter_settings_dashboard_tabs: "Вкладок панели в этом проекте: %{count}."
+  text_reporter_settings_templates: "Шаблонов отчётов, доступных вам в этом проекте: %{count}."
+  text_reporter_settings_schedules: "Включённых расписаний в этом проекте: %{count}."

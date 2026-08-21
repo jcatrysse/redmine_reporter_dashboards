@@ -898,15 +898,18 @@ module RedmineReporterDashboards
                                        :move_block] },
              {}],
             [:manage_reporter_project_tabs,
-             { reporter_project_tabs: [:create, :update, :destroy, :order] },
+             { reporter_project_tabs: [:create, :update, :destroy, :order],
+               projects: [:settings] },
              {}]
           ],
           reporter_dashboards_reports: [
             [:view_reporter_dashboards_reports,
-             { :'reporter_dashboards/templates' => [:index, :show, :document] },
+             { :'reporter_dashboards/templates' => [:index, :show, :document],
+               projects: [:settings] },
              { read: true }],
             [:view_reporter_dashboards_schedules,
-             { :'reporter_dashboards/schedules' => [:index, :show] },
+             { :'reporter_dashboards/schedules' => [:index, :show],
+               projects: [:settings] },
              { read: true }],
             [:add_reporter_dashboards_templates,
              { :'reporter_dashboards/templates' => [:new, :create, :preview, :import] },
@@ -942,7 +945,8 @@ module RedmineReporterDashboards
             # `Role#setable_permissions` subtracts `loggedin_only_permissions` there — an
             # anonymous visitor able to make this installation send mail is a spam relay.
             [:mail_reporter_dashboards_reports,
-             { :'reporter_dashboards/mail' => [:index, :new, :create] },
+             { :'reporter_dashboards/mail' => [:index, :new, :create],
+               projects: [:settings] },
              { require: :loggedin }],
             # T-28's two, and they map to the SAME controller and overlapping actions on
             # purpose. Redmine's map answers "may this actor reach this action"; the

@@ -1,0 +1,93 @@
+<%#
+  The project settings tab (curator decision 2026-08-21).
+
+  Redmine's own chrome only: `fieldset.box`, `legend`, `p`, `p.nodata`, `.warning`.
+  CLAUDE.md §4 forbids plugin-local design tokens in chrome, and there are none here.
+
+  --- NO PLUGIN HELPER IS CALLED FROM THIS FILE, DELIBERATELY ---
+
+  Redmine sets `include_all_helpers = false`, so a partial rendered by a CORE controller sees
+  core's helper set and not ours. `reporter_dashboard_icon` — this plugin's 5.1-vs-6 icon
+  shim, used by every one of its own views — is therefore unavailable here, and calling it
+  would be a NameError on the project settings page rather than on any page we test. Hence
+  plain text links: identical on 5.1 through 7.0, and nothing to shim.
+
+  For the same reason the data comes from a fully-qualified lib module rather than a helper.
+
+  --- AND WHY IT IS COUNTS RATHER THAN THE LISTS THEMSELVES ---
+
+  `common/_tabs.html.erb` renders every tab's partial on every request and hides the
+  unselected ones with CSS. Somebody renaming the project pays for whatever is in here, so
+  what is in here is four statements at most and constant in the size of the data. The work
+  surfaces keep their own paginated pages; this links to them. See SettingsTab's header.
+%>
+<%
+  project = @project
+  actor = User.current
+  summary = RedmineReporterDashboards::SettingsTab.summary(project, actor)
+%>
+
+<% if RedmineReporterDashboards::SettingsTab.allowed?(:dashboard, project, actor) %>
+  <fieldset class="box">
+    <legend><%= l(:label_reporter_dashboard_tabs) %></legend>
+    <p><%= l(:text_reporter_settings_dashboard_tabs, count: summary.dashboard_tabs) %></p>
+    <%# THE TABS THEMSELVES ARE EDITED ON THE DASHBOARD, not here. Two places to rename a
+        tab is two places for the permission check to drift, and the dashboard already has
+        the gear that does it.
+
+        SEPARATELY GATED, and not on the section's own permission. This section is opened by
+        `manage_reporter_project_tabs`; OPENING the dashboard needs
+        `view_reporter_project_page`, and Redmine lets an administrator grant either without
+        the other. Reusing the section's check would have offered a link to a 403 — rare, and
+        exactly the kind of rare a role audit produces. %>
+    <% if actor.allowed_to?(:view_reporter_project_page, project) %>
+      <p><%= link_to l(:label_reporter_project_page),
+                     project_reporter_page_path(project) %></p>
+    <% end %>
+  </fieldset>
+<% end %>
+
+<% if RedmineReporterDashboards::SettingsTab.allowed?(:templates, project, actor) %>
+  <fieldset class="box">
+    <legend><%= l(:label_reporter_template_plural) %></legend>
+    <p><%= l(:text_reporter_settings_templates, count: summary.templates) %></p>
+    <p><%= link_to l(:label_reporter_template_plural),
+                   project_reporter_templates_path(project) %></p>
+  </fieldset>
+<% end %>
+
+<% if RedmineReporterDashboards::SettingsTab.allowed?(:schedules, project, actor) %>
+  <fieldset class="box">
+    <legend><%= l(:label_reporter_schedule_plural) %></legend>
+    <%# FR-44 IN THE SECOND PLACE SOMEBODY LOOKS, through the SAME `Status` and the same two
+        keys the schedules index uses — so "the scheduler is not running" cannot come to read
+        differently in the two places an operator might see it. %>
+    <% if summary.schedules.warning? %>
+      <div class="warning">
+        <p><strong><%= l(:label_reporter_schedule_not_running) %></strong></p>
+        <p><%= l(:text_reporter_schedule_needs_cron) %></p>
+      </div>
+    <% end %>
+    <p><%= l(:text_reporter_settings_schedules, count: summary.schedules.enabled_count) %></p>
+    <% if summary.schedules.last_attempt_at %>
+      <p>
+        <%= l(:label_reporter_schedule_last_run) %>:
+        <%= format_time(summary.schedules.last_attempt_at) %>
+      </p>
+    <% end %>
+    <p><%= link_to l(:label_reporter_schedule_plural),
+                   project_reporter_schedules_path(project) %></p>
+  </fieldset>
+<% end %>
+
+<% if RedmineReporterDashboards::SettingsTab.allowed?(:mail, project, actor) %>
+  <fieldset class="box">
+    <legend><%= l(:label_reporter_adhoc_mail_audit) %></legend>
+    <%# NO COUNT HERE, and that is not an omission. `mail#index` shows an admin the whole
+        project's sends and everybody else only their own; reproducing that rule for a
+        number would put the disclosure decision in two files. The link goes to the page
+        that owns it. %>
+    <p><%= link_to l(:label_reporter_adhoc_mail_audit),
+                   project_reporter_mail_sends_path(project) %></p>
+  </fieldset>
+<% end %>

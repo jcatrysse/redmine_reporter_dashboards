@@ -9,6 +9,10 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions'
 # The upgrade diagnostic, next to the permission model it reads. A `manage_report_templates`
 # grant outlives the plugin that registered it, so this has to work with that plugin gone.
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/permissions/authoring_audit'
+# The project settings tab: which sections an actor may see, and the bounded counts the
+# partial prints. Next to the permission model because it is one — the tab is registered
+# under whichever of four permissions the actor holds.
+require File.dirname(__FILE__) + '/redmine_reporter_dashboards/settings_tab'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/positioned'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/report_frame'
 # Called from a my-page partial, which core renders through its OWN helper set
@@ -131,13 +135,21 @@ require File.dirname(__FILE__) + '/redmine_reporter_dashboards/starter_gallery'
 require File.dirname(__FILE__) + '/redmine_reporter_dashboards/project_page'
 
 module RedmineReporterDashboards
-  # Patches that include into Redmine core. The list is the list: Project and Role,
-  # each gaining one association and no method override. (It read ProjectsHelper until
-  # 2026-08-21; nothing here has ever patched it — see init.rb for why not.)
-  # Loaded from after_plugins_loaded so the target classes are present.
+  # Patches into Redmine core. The list is the list, and each entry's kind matters:
+  #
+  #   * Project, Role         — an association each, no method override
+  #   * ProjectsHelper        — ONE method, `project_settings_tabs`, by `prepend`, and the
+  #                             only overridden core method in this plugin. Read that file's
+  #                             header before touching the loading order: nine other plugins
+  #                             alias-chain that method, and prepend composes with an alias
+  #                             chain in one direction only.
+  #
+  # Loaded from after_plugins_loaded so the target classes are present — and, for the
+  # helper, so we are behind every one of those nine chains.
   PATCH_FILES = %w[
     redmine_reporter_dashboards/patches/project_patch
     redmine_reporter_dashboards/patches/role_patch
+    redmine_reporter_dashboards/patches/projects_helper_patch
   ].freeze
 
   # THE REPORTER PDF PATCH IS GONE (T-26a, 2026-08-12), and `REPORTER_PATCH_FILES` with it.
