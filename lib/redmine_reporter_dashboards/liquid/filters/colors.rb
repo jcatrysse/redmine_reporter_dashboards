@@ -13,18 +13,8 @@ module RedmineReporterDashboards
       # and the author would spend an afternoon looking for it in their data. nil renders
       # empty, the CSS declaration is invalid, and the browser falls back visibly.
       module Colors
-        HEX = /\A#?(\h{3}|\h{6})\z/.freeze
-
-        # `abc` / `#abc` / `aabbcc` / `#AABBCC` -> `#aabbcc`. Three-digit form expanded,
-        # because `darken` cannot work on it and two spellings of one colour is how a
-        # palette ends up with two entries for the same swatch.
         def hex_color(input)
-          match = HEX.match(input.to_s.strip)
-          return nil if match.nil?
-
-          digits = match[1].downcase
-          digits = digits.chars.map { |char| char * 2 }.join if digits.length == 3
-          "##{digits}"
+          Support.hex_color(input)
         end
 
         # Black or white, whichever a reader can actually read on this background.
@@ -35,7 +25,7 @@ module RedmineReporterDashboards
         # `#0000ff` — both the wrong way round. 0.179 is the crossover where contrast
         # against black and against white are equal.
         def contrasting_text_color(input, dark = '#000000', light = '#ffffff')
-          rgb = to_rgb(input)
+          rgb = Support.to_rgb(input)
           return nil if rgb.nil?
 
           luminance = rgb.zip([0.2126, 0.7152, 0.0722]).sum do |channel, weight|
@@ -46,36 +36,38 @@ module RedmineReporterDashboards
         end
 
         def darken(input, percent = 10)
-          shift(input, -Support.number(percent).to_f)
+          Support.shift_toward(input, -Support.number(percent).to_f)
         end
 
         def lighten(input, percent = 10)
-          shift(input, Support.number(percent).to_f)
+          Support.shift_toward(input, Support.number(percent).to_f)
         end
 
-        private
-
-        def to_rgb(input)
-          normalised = hex_color(input)
-          return nil if normalised.nil?
-
-          normalised[1..].scan(/\h{2}/).map { |pair| pair.to_i(16) }
-        end
-
-        # Toward white or toward black by a percentage of the REMAINING distance, which
-        # is what "10% lighter" means to a designer. A flat `+25` per channel saturates
-        # a bright colour and does almost nothing to a dark one.
-        def shift(input, percent)
-          rgb = to_rgb(input)
-          return nil if rgb.nil?
-
-          ratio = percent.clamp(-100.0, 100.0) / 100.0
-          moved = rgb.map do |channel|
-            target = ratio.negative? ? 0 : 255
-            (channel + ((target - channel) * ratio.abs)).round.clamp(0, 255)
-          end
-          format('#%02x%02x%02x', *moved)
-        end
+        # --- THERE IS NO `private` SECTION HERE, AND THAT IS THE POINT ---
+        #
+        # `to_rgb`, `shift_toward` and the `HEX` pattern live in `Support`. They were
+        # private methods of this module until 2026-08-21, and one of them was named
+        # `shift` — which turned every template render into a 500 on an install with the
+        # vendor gem present:
+        #
+        #     Liquid::MethodOverrideError: Filter overrides registered public methods as
+        #     non public: shift
+        #
+        # A filter module's PRIVATE and PROTECTED methods are part of what Liquid
+        # inspects. `Strainer.add_filter` refuses the module outright when one of those
+        # names is already an invokable filter, and the gem globally registers 91 of them
+        # — `shift` among them — the moment any plugin that depends on it is installed.
+        # So one
+        # private helper made this whole module unaddable and took `darken` and `lighten`
+        # with it. `shift` is also in `Filters::REMOVED` ("mutates a shared object
+        # mid-render"), so a name this plugin deliberately does not offer was sitting
+        # inside a filter module regardless.
+        #
+        # `Filters.registered_names` could not have caught it: it reads
+        # `public_instance_methods(false)`, and the hazard is precisely what it skips.
+        # `spec_liquid/filters_spec.rb` now asserts that NO filter module has a non-public
+        # instance method at all, which is the rule `support.rb`'s own header already
+        # stated and this file was the exception to.
       end
     end
   end

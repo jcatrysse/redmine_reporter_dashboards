@@ -448,6 +448,87 @@ module RedmineReporterDashboards
           end
         end
       end
+
+      # ----------------------------------------------------------------
+      # Living in a process with somebody else's global filter registration
+      # ----------------------------------------------------------------
+
+      # THE REGRESSION THESE THREE EXIST FOR, AND IT WAS A 500 ON EVERY RENDER.
+      #
+      # Measured 2026-08-21 on Redmine 6.0-stable with the operator's 41 plugins installed.
+      # `Filters::Colors` had a PRIVATE helper named `shift`, and the vendor gem — pulled
+      # in by every one of the operator's paid plugins — globally registers 91 filters at require
+      # time, `shift` among them. `Strainer.add_filter` inspects a module's private and
+      # protected methods and refuses the module outright when one of those names is
+      # already an invokable filter:
+      #
+      #     Liquid::MethodOverrideError: Filter overrides registered public methods as
+      #     non public: shift
+      #
+      # So one private helper made the whole `Colors` module unaddable and took `darken`
+      # and `lighten` with it. `registered_names` could not have caught it: it reads
+      # `public_instance_methods(false)`, and the hazard is exactly the methods it skips.
+      #
+      # These run WITHOUT the gem installed, because the failure does not need it — a
+      # foreign module publicly defining the name is all it takes, and that is what the
+      # first example builds.
+      describe 'a foreign filter module that registered the same names first' do
+        # THE RULE, and it is mechanical: Liquid inspects a filter module's PRIVATE and
+        # PROTECTED methods too. `support.rb`'s header already stated it for the public
+        # ones — a helper beside `avg` becomes `{{ x | numeric_values }}` — and this is the
+        # other half, which cost a release: `Strainer.add_filter` REFUSES a module whose
+        # non-public method collides with a name already registered as a filter.
+        #
+        # Helpers therefore live in `Support`, which is not a filter module, and a filter
+        # module has no non-public instance methods at all. Nothing to collide, nothing to
+        # keep in anybody's head.
+        it 'gives no filter module a non-public instance method' do
+          Filters.modules.each do |mod|
+            non_public = mod.private_instance_methods + mod.protected_instance_methods
+            expect(non_public).to eq([]),
+                                  "#{mod} keeps #{non_public.inspect} — move it to Support: " \
+                                  'a foreign plugin registering that name as a filter makes ' \
+                                  'this whole module unaddable'
+          end
+        end
+
+        # NOT VACUOUS, and this is the example that says so. Built to fail the way `Colors`
+        # failed, so the rule above cannot quietly become a tautology if `modules` is ever
+        # empty or the reflection changes.
+        it 'is refused by Liquid when a module does keep one' do
+          offender = Module.new do
+            def darker(input) = shift(input)
+            private
+
+            def shift(input) = input
+          end
+          foreign = Module.new do
+            def shift(input) = input
+          end
+
+          expect { ::Liquid::Strainer.create(::Liquid::Context.new, [foreign, offender]) }
+            .to raise_error(::Liquid::MethodOverrideError, /non public: shift/)
+        end
+
+        # Every filter module has to survive the real shape of the failure: a foreign
+        # module that already owns all of ours, added first.
+        it 'adds every filter module after a foreign one owning every registered name' do
+          foreign = Module.new do
+            RedmineReporterDashboards::Liquid::Filters.registered_names.each do |name|
+              define_method(name) { |*_args| nil }
+            end
+          end
+
+          expect { ::Liquid::Strainer.create(::Liquid::Context.new, [foreign] + Filters.modules) }
+            .not_to raise_error
+        end
+
+        # `darken` and `lighten` are what the move had to keep working.
+        it 'still darkens and lightens through the helper that moved' do
+          expect(render('{{ "#808080" | darken: 50 }}')).to eq('#404040')
+          expect(render('{{ "#808080" | lighten: 50 }}')).to eq('#c0c0c0')
+        end
+      end
     end
   end
 end

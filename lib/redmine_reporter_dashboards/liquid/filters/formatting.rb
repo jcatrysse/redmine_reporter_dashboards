@@ -52,7 +52,7 @@ module RedmineReporterDashboards
           hours = Support.number(input)
           return nil if hours.nil?
 
-          case format_name || redmine_timespan_format
+          case format_name || Support.redmine_timespan_format
           when 'minutes' then format('%d:%02d', hours.to_i, ((hours.abs % 1) * 60).round)
           else format('%.2f', hours)
           end
@@ -70,9 +70,9 @@ module RedmineReporterDashboards
           text = input.to_s
           return '' if text.empty?
           unless defined?(::Redmine::WikiFormatting)
-            degrade(:wiki_unavailable,
-                    'Redmine::WikiFormatting is not available in this process, so wiki ' \
-                    'markup was rendered as escaped plain text')
+            Support.degrade(@context, :wiki_unavailable,
+                            'Redmine::WikiFormatting is not available in this process, ' \
+                            'so wiki markup was rendered as escaped plain text')
             return CGI.escapeHTML(text)
           end
 
@@ -90,18 +90,15 @@ module RedmineReporterDashboards
           input
         end
 
-        private
-
-        def redmine_timespan_format
-          return 'decimal' unless defined?(::Setting) && ::Setting.respond_to?(:timespan_format)
-
-          ::Setting.timespan_format.to_s
-        end
-
-        def degrade(code, detail)
-          context = Support.render_context(@context)
-          context&.diagnostics&.degrade(code, detail: detail)
-        end
+        # NO `private` SECTION, AND NOT BY STYLE. `redmine_timespan_format` and `degrade`
+        # were private methods here until 2026-08-21; they now live in `Support`, which is
+        # not a filter module. `Strainer.add_filter` inspects a filter module's private and
+        # protected methods and refuses the whole module when one of those names is already
+        # an invokable filter — see `colors.rb`, where a private `shift` did exactly that
+        # against the vendor gem's global registration and 500'd every render.
+        #
+        # `degrade` takes `@context` as an argument for the same reason: reading the Liquid
+        # instance variable is what made it want to be a method on this module.
       end
     end
   end

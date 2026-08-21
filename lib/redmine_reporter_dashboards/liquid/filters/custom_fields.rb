@@ -31,7 +31,7 @@ module RedmineReporterDashboards
       # by-name form — which is why the addon grew `custom_field_value[20]` on its own.
       module CustomFields
         def custom_field(input, field_name)
-          lookup(input, field_name)
+          Support.custom_field_value(input, field_name)
         end
 
         # `Integer(...)` rather than `to_i`: `to_i` turns "Department" into 0 and then
@@ -40,7 +40,7 @@ module RedmineReporterDashboards
         # and should read as one.
         def custom_field_by_id(input, field_id)
           id = Integer(field_id.to_s, 10)
-          lookup(input, id)
+          Support.custom_field_value(input, id)
         rescue ArgumentError, TypeError
           nil
         end
@@ -52,12 +52,12 @@ module RedmineReporterDashboards
           Support.read(input, 'custom_field_values') || []
         end
 
-        private
-
-        def lookup(input, key)
-          values = Support.read(input, 'custom_field_value')
-          values.nil? ? nil : Support.read(values, key)
-        end
+        # NO `private` SECTION. The lookup this module used to keep here was a second copy
+        # of `Support.custom_field_value`, which `Grouping` also needed — so moving it out
+        # removed a duplicate as well as a hazard. Liquid inspects a filter module's private
+        # and protected methods too, and `Strainer.add_filter` refuses the whole module when
+        # one of those names is already a registered filter (`colors.rb` has the render that
+        # 500'd because of it).
       end
     end
   end

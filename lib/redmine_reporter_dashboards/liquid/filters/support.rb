@@ -96,6 +96,90 @@ module RedmineReporterDashboards
           RenderContext.from(liquid_context)
         end
 
+        # --- GROUPING HELPERS, FOR THE SAME REASON AS EVERYTHING ELSE IN THIS FILE ---
+
+        # A nil group is a REAL group and it is named, because "(none)" in a table is
+        # information — 40 issues with no target version is the finding. Dropping them
+        # would make the group sizes stop summing to the total, which is how a reader
+        # discovers a filter lost rows.
+        NONE = '(none)'
+
+        def label(value)
+          return NONE if value.nil?
+
+          text = value.to_s
+          text.empty? ? NONE : text
+        end
+
+        def truthy?(value)
+          return false if value.nil?
+          return false if value.respond_to?(:empty?) && value.empty?
+
+          value != false
+        end
+
+        def custom_field_value(item, field)
+          lookup = read(item, 'custom_field_value')
+          lookup.nil? ? nil : read(lookup, field)
+        end
+
+        # --- COLOUR ARITHMETIC, HERE RATHER THAN INSIDE `Colors` ---
+        #
+        # These were private methods of `Colors` until 2026-08-21, and one of them was
+        # named `shift`. See `colors.rb`: a filter module's PRIVATE methods are part of
+        # what `Strainer.add_filter` inspects, and it refuses the whole module when one
+        # of them collides with a name another plugin has already registered publicly.
+        # This module is not a filter module, so nothing here can collide with anything.
+
+        HEX = /\A#?(\h{3}|\h{6})\z/
+
+        # `abc` / `#abc` / `aabbcc` / `#AABBCC` -> `#aabbcc`, or nil.
+        def hex_color(input)
+          match = HEX.match(input.to_s.strip)
+          return nil if match.nil?
+
+          digits = match[1].downcase
+          digits = digits.chars.map { |char| char * 2 }.join if digits.length == 3
+          "##{digits}"
+        end
+
+        def to_rgb(input)
+          normalised = hex_color(input)
+          return nil if normalised.nil?
+
+          normalised[1..].scan(/\h{2}/).map { |pair| pair.to_i(16) }
+        end
+
+        # Toward white or toward black by a percentage of the REMAINING distance, which
+        # is what "10% lighter" means to a designer. A flat `+25` per channel saturates
+        # a bright colour and does almost nothing to a dark one.
+        def shift_toward(input, percent)
+          rgb = to_rgb(input)
+          return nil if rgb.nil?
+
+          ratio = percent.clamp(-100.0, 100.0) / 100.0
+          moved = rgb.map do |channel|
+            target = ratio.negative? ? 0 : 255
+            (channel + ((target - channel) * ratio.abs)).round.clamp(0, 255)
+          end
+          format('#%02x%02x%02x', *moved)
+        end
+
+        # `Setting.timespan_format`, or 'decimal' where there is no Setting at all — the
+        # bare spec runs have no Redmine.
+        def redmine_timespan_format
+          return 'decimal' unless defined?(::Setting) && ::Setting.respond_to?(:timespan_format)
+
+          ::Setting.timespan_format.to_s
+        end
+
+        # A visible degradation on the render's own diagnostics. Takes the Liquid context
+        # explicitly, because it used to read `@context` as a private method of
+        # `Formatting` and that is the shape this file exists to avoid.
+        def degrade(liquid_context, code, detail)
+          render_context(liquid_context)&.diagnostics&.degrade(code, detail: detail)
+        end
+
         # Integers stay integers. `2 + 3` should not print `5.0` because a filter
         # decided everything is a Float — a report full of `5.0` where the source data
         # is a count reads as a rounding bug.

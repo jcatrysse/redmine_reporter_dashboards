@@ -37,12 +37,12 @@ module RedmineReporterDashboards
         # be silently re-sorted by a filter that decided it knew better, and on a report
         # that is a wrong answer rather than a cosmetic one.
         def group_by(input, property = nil)
-          buckets = Support.each(input).group_by { |item| label(Support.read(item, property)) }
+          buckets = Support.each(input).group_by { |item| Support.label(Support.read(item, property)) }
           buckets.map { |name, items| { 'name' => name, 'items' => items, 'size' => items.length } }
         end
 
         def group_by_custom_field(input, field)
-          buckets = Support.each(input).group_by { |item| label(custom_field_value(item, field)) }
+          buckets = Support.each(input).group_by { |item| Support.label(Support.custom_field_value(item, field)) }
           buckets.map { |name, items| { 'name' => name, 'items' => items, 'size' => items.length } }
         end
 
@@ -51,37 +51,16 @@ module RedmineReporterDashboards
         # kept so an author does not have to learn a second rule.
         def where_custom_field(input, field, value = nil)
           Support.each(input).select do |item|
-            found = custom_field_value(item, field)
-            value.nil? ? truthy?(found) : found.to_s == value.to_s
+            found = Support.custom_field_value(item, field)
+            value.nil? ? Support.truthy?(found) : found.to_s == value.to_s
           end
         end
 
-        private
-
-        # A nil group is a REAL group and it is named, because "(none)" in a table is
-        # information — 40 issues with no target version is the finding. Dropping them
-        # would make the group sizes stop summing to the total, which is how a reader
-        # discovers a filter lost rows.
-        NONE = '(none)'
-
-        def label(value)
-          return NONE if value.nil?
-
-          text = value.to_s
-          text.empty? ? NONE : text
-        end
-
-        def truthy?(value)
-          return false if value.nil?
-          return false if value.respond_to?(:empty?) && value.empty?
-
-          value != false
-        end
-
-        def custom_field_value(item, field)
-          lookup = Support.read(item, 'custom_field_value')
-          lookup.nil? ? nil : Support.read(lookup, field)
-        end
+        # NO `private` SECTION. `NONE`, `label`, `truthy?` and `custom_field_value` live
+        # in `Support`, which is not a filter module: Liquid inspects a filter module's
+        # private and protected methods too, and `Strainer.add_filter` refuses the whole
+        # module when one of those names is already a registered filter. See `colors.rb`
+        # for the render that 500'd because of it.
       end
     end
   end
