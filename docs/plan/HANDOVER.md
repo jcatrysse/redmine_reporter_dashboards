@@ -1779,52 +1779,60 @@ id sequences: six `ReporterProjectTabsControllerTest` failures appeared that way
 after `DROP DATABASE`. Drop and re-migrate between probing and measuring, or the numbers mean
 nothing.
 
-**THE FINDING THAT MATTERS MOST, AND IT IS ABOUT THIS PLUGIN TOO — ON REDMINE 7.0 `db:migrate`
-ALSO RUNS THE PLUGINS, INTO ONE `schema_migrations` TABLE, AND LEGACY PLUGIN NUMBERING THEN
-COLLIDES.** Measured 2026-08-21 with 42 plugins installed on 7.0-stable.
+**RETRACTED — THE "PLUGIN MIGRATION NUMBERING COLLISION" DOES NOT EXIST, AND THIS ENTRY IS
+KEPT AS THE RECORD OF HOW IT GOT WRITTEN TWICE.** Retracted 2026-08-21 on the 6.0 run, by
+reading the core source instead of inferring from a table count.
 
-**The wording here said "numbering collision" until the 6.1 run corrected it, and the
-difference decides whether it is a plugin bug or a core one.** On **6.1** the same 41 plugins
-with the same `001_*`…`003_*` numbering produce a COMPLETE schema — 139 tables,
-`custom_workflows.active` present — because `redmine:plugins:migrate` keeps a per-plugin row
-in `plugin_schema_info` and each plugin's `001` is therefore its own. So the numbering alone
-is harmless. What breaks 7.0 is the **double mechanism**: `db:migrate` migrates plugins too,
-records them in the shared `schema_migrations` by their bare number, and there the numbering
-overlaps. Nobody's `001_*.rb` is at fault; the two migration paths are.
+What the source says, identically on **5.1-stable, 6.0-stable, 6.1-stable and 7.0-stable**
+(`lib/redmine/plugin.rb`, `Plugin::Migrator`):
 
-`plugin_schema_info` does not exist on 7.0 — `to_regclass` is NULL after a full migrate.
-Plugin migrations run through the ordinary migrator and are recorded in `schema_migrations`
-as their BARE number. And plugin migrations are numbered from 1:
+    def record_version_state_after_migrating(version)
+      super(version.to_s + "-" + current_plugin.id.to_s)
+    end
 
-    17 plugins ship a migration `001_*.rb`  (this one included)
-    14 ship `002_*.rb`
-    11 ship `003_*.rb`
+Plugin migrations are recorded in `schema_migrations` as `"<number>-<plugin_id>"`, and
+`get_all_versions` reads them back by grouping on that suffix. **So two plugins' `001_*.rb`
+cannot collide, on any supported version.** Measured on a clean 6.0 database with 41 plugins:
+135 tables, 317 core versions with no suffix and **208 suffixed plugin versions across 24
+plugin ids**, every one of this plugin's twelve tables present, `custom_workflows.active`
+present.
 
-So the first plugin's `001` writes version `1`, and every other plugin's `001` is then
-considered already applied and silently skipped. `schema_migrations` here held bare versions
-`1 … 108`. The visible cost in the suite was **215 `PG::UndefinedColumn` errors** — the first
-being `column custom_workflows.active does not exist`, from a migration that never ran — and
-those 215 look for all the world like interaction bugs in this plugin's code. They are not.
+The claim was wrong twice, in opposite directions, and both errors have the same root:
 
-**This is core behaviour and no plugin can fix it, but it is a task for THIS repository
-anyway**, on two counts:
+  * The **first** version said 7.0 records plugin migrations by their bare number and that the
+    17 plugins shipping a `001_*.rb` therefore overwrite each other. The evidence was
+    *"`schema_migrations` held bare versions 1 … 108"*. Those are **core's own
+    legacy-numbered migrations** — `db/migrate/001_setup.rb` through the 130s, 317 files in
+    total on 6.0 — read as though they were plugin migrations. Nothing was colliding.
+  * The **second** version "corrected" it to a `plugin_schema_info`-versus-`schema_migrations`
+    difference between 6.x and 7.0. There is no such difference: **`plugin_schema_info` exists
+    on none of the four branches**, and the suffix scheme above is what all four use.
 
-  * `db/migrate/001_*` through `010_*` here are in the colliding range. On a 7.0 install with
-    other plugins present, whether this plugin's schema is created at all depends on which
-    plugin the migrator happens to reach first. It survived the measured run; that is luck,
-    not design. Timestamped migration names are the fix, and renaming them is a schema
-    decision, not a cleanup — **curator call**.
-  * **G11 is specified against `plugin_schema_info`** (`CLAUDE.md` §7: *"schema equals the
-    pre-install dump (`plugin_schema_info` included)"*), a table 7.0 does not have. The gate
-    cannot hold there as written, and `.codex/test_setup.sh` / `test_plugin.sh` still call
-    `redmine:plugins:migrate`, which on 7.0 re-runs from zero and dies on the first
-    `DuplicateTable`. Also a curator call.
+`plugin_schema_info` being absent is still true and still matters, but the finding is bigger
+and simpler than "7.0 removed it": **G11 is specified against a table no supported Redmine
+has.** `CLAUDE.md` §7 requires *"schema equals the pre-install dump (`plugin_schema_info`
+included)"*, and on 5.1 through 7.0 alike there is nothing to include. The gate cannot hold as
+written anywhere in the matrix, which makes it a **curator call** about the gate's wording
+rather than a 7.0 exception. The migration-renaming question is **withdrawn**: `001_*` … `010_*`
+in `db/migrate/` are fine as they are, and renaming them would have been a schema change made
+to fix a bug that was not there.
 
-Until it is decided, the working 7.0 recipe measured here is: `rake db:migrate`, then
-`redmine:plugins:migrate NAME=<plugin>` once per plugin, tolerating the failures (they mean
-"already applied"). That produced 159 tables and a bootable application, but NOT a provably
-complete schema for every plugin — which is why the 7.0 suite numbers below are reported as
-blocked rather than as a result.
+**What the 7.0 run actually hit is therefore still open, and the honest state is UNVERIFIED.**
+`redmine:plugins:migrate` did abort there and the suite did show 215 `PG::UndefinedColumn`
+errors, the first being `column custom_workflows.active does not exist` — but the explanation
+above is not the cause, so the cause is not yet known. `redmine_agile`'s non-idempotent
+migration is the first candidate: `Plugin.migrate` walks plugins in one `each`, so the first
+plugin to raise takes every plugin after it, and a partial schema is exactly what was seen.
+**Re-measure on 7.0 before writing anything else down here.**
+
+**AND THE TRAP THAT PRODUCED BOTH ERRORS, WHICH IS THE PART TO CARRY FORWARD.** Both wrong
+versions came from reading a *summary* of a migration run rather than its result: a
+`| tail -3` on `rake db:migrate` that happened to cut the exception off, leaving what looked
+like a completed run. On 6.0 that showed 52 tables and a core migrate that had silently
+stopped at `017_create_settings`, and the plugin failure downstream
+(*`relation "enabled_modules" does not exist`*) then looked like a plugin bug. **After any
+migration, assert the schema — table count, a named column, this plugin's twelve tables — and
+never infer a completed migration from the last lines of its log.**
 
 **WHAT WAS PROVEN ON 7.0 WITH ALL 42 PLUGINS, AND IT IS THE PART THAT MATTERS FOR THIS
 PLUGIN.** After `.codex/fix_foreign_plugins.sh` (seven categories of boot blocker, all in
@@ -1867,6 +1875,8 @@ constant exists and the emoticon rule still registers.
     plugins booted                                 41
     schema                                    complete (139 tables,
                                                         custom_workflows.active present)
+                                              — NOT because of plugin_schema_info; see the
+                                                retraction above
     alias chains on project_settings_tabs           8
     prepends ahead of ProjectsHelper                2  (ours FIRST, then wiki_extensions)
     GET /projects/x/settings                      200  (tab ids: … reporter_dashboards,
