@@ -1779,6 +1779,69 @@ id sequences: six `ReporterProjectTabsControllerTest` failures appeared that way
 after `DROP DATABASE`. Drop and re-migrate between probing and measuring, or the numbers mean
 nothing.
 
+**THE FINDING THAT MATTERS MOST, AND IT IS ABOUT THIS PLUGIN TOO — REDMINE 7.0 PUTS EVERY
+PLUGIN'S MIGRATIONS IN ONE `schema_migrations` TABLE, AND LEGACY PLUGIN NUMBERING COLLIDES.**
+Measured 2026-08-21 with 42 plugins installed on 7.0-stable.
+
+`plugin_schema_info` does not exist on 7.0 — `to_regclass` is NULL after a full migrate.
+Plugin migrations run through the ordinary migrator and are recorded in `schema_migrations`
+as their BARE number. And plugin migrations are numbered from 1:
+
+    17 plugins ship a migration `001_*.rb`  (this one included)
+    14 ship `002_*.rb`
+    11 ship `003_*.rb`
+
+So the first plugin's `001` writes version `1`, and every other plugin's `001` is then
+considered already applied and silently skipped. `schema_migrations` here held bare versions
+`1 … 108`. The visible cost in the suite was **215 `PG::UndefinedColumn` errors** — the first
+being `column custom_workflows.active does not exist`, from a migration that never ran — and
+those 215 look for all the world like interaction bugs in this plugin's code. They are not.
+
+**This is core behaviour and no plugin can fix it, but it is a task for THIS repository
+anyway**, on two counts:
+
+  * `db/migrate/001_*` through `010_*` here are in the colliding range. On a 7.0 install with
+    other plugins present, whether this plugin's schema is created at all depends on which
+    plugin the migrator happens to reach first. It survived the measured run; that is luck,
+    not design. Timestamped migration names are the fix, and renaming them is a schema
+    decision, not a cleanup — **curator call**.
+  * **G11 is specified against `plugin_schema_info`** (`CLAUDE.md` §7: *"schema equals the
+    pre-install dump (`plugin_schema_info` included)"*), a table 7.0 does not have. The gate
+    cannot hold there as written, and `.codex/test_setup.sh` / `test_plugin.sh` still call
+    `redmine:plugins:migrate`, which on 7.0 re-runs from zero and dies on the first
+    `DuplicateTable`. Also a curator call.
+
+Until it is decided, the working 7.0 recipe measured here is: `rake db:migrate`, then
+`redmine:plugins:migrate NAME=<plugin>` once per plugin, tolerating the failures (they mean
+"already applied"). That produced 159 tables and a bootable application, but NOT a provably
+complete schema for every plugin — which is why the 7.0 suite numbers below are reported as
+blocked rather than as a result.
+
+**WHAT WAS PROVEN ON 7.0 WITH ALL 42 PLUGINS, AND IT IS THE PART THAT MATTERS FOR THIS
+PLUGIN.** After `.codex/fix_foreign_plugins.sh` (seven categories of boot blocker, all in
+other plugins, all one or two lines):
+
+    plugins booted                                 42
+    alias chains on project_settings_tabs           8
+    prepends ahead of ProjectsHelper                3  (ours FIRST, then ai_triage,
+                                                        then wiki_extensions)
+    GET /projects/x/settings                      200
+    our tab + all four sections rendered          yes
+    permission matrix (6 roles)                   unchanged from the 7-plugin run
+    /reporter, /reporter/templates, /reporter/schedules   200 each
+
+The three-prepend case is worth keeping: prepends compose with each other in any order — it
+is only prepend-then-ALIAS-CHAIN that breaks — so being one of three is fine, and being
+LAST-installed is what keeps us in front.
+
+**CHROMIUM IS SOLVED, AND THE SYSTEM SUITE IS GREEN: 12 of 12 on 7.0.** Two things were
+wrong and only one of them was obvious. The container's browser and driver were six majors
+apart (Playwright's Chromium 141, npm's chromedriver 147), which reports as `cannot find
+Chrome binary`; and Chrome refuses to start as root without `--no-sandbox`, which is the one
+control that contains a compromised renderer. A matched Chrome-for-Testing pair plus a
+non-root user fixes both, and `CONTRIBUTING.md` now carries the recipe. `RRD_CHROME_PATH`
+was already the right seam; it just had nothing correct to point at.
+
 ---
 
 ## 3. Environment quirks (cloud sessions)

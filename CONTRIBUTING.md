@@ -82,6 +82,36 @@ business rather than the test's:
 If Selenium warns that the chromedriver in `PATH` does not match the browser, take that
 driver off `PATH` and let Selenium Manager fetch the matching one.
 
+**A recipe that works in a bare container, measured 2026-08-21 on Redmine 7.0 / Rails 8.1
+(12 of 12 examples green), and the two things it gets right.** Both are the reason the
+naive version fails:
+
+```bash
+# 1. A MATCHED PAIR. Chrome and chromedriver must agree on the MAJOR version. A
+#    container that has both usually has them from different sources — here it was
+#    Playwright's Chromium 141 and npm's chromedriver 147, six majors apart, which
+#    reports as `cannot find Chrome binary` / `session not created` and reads like a
+#    broken suite.
+curl -s https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json
+#    take the Stable channel's `chrome` and `chromedriver` linux64 URLs, unzip both, then
+ln -sf /opt/cft/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+
+# 2. A NON-ROOT USER, rather than `--no-sandbox`. Chrome refuses to start as root
+#    without that flag, and the flag turns off the one control that contains a
+#    compromised renderer. A user costs three lines.
+useradd -m -u 4242 rrdtest
+chmod a+rX /path/to/plugin /path/to/plugin/redmine
+chown -R rrdtest redmine/tmp redmine/log redmine/files
+
+su rrdtest -c 'export HOME=/home/rrdtest RAILS_ENV=test \
+  RRD_CHROME_PATH=/opt/cft/chrome-linux64/chrome \
+  GOOGLE_CHROME_OPTS_ARGS="--headless=new,--disable-gpu,--disable-dev-shm-usage" && \
+  cd redmine && bundle exec rails test plugins/<name>/test/system'
+```
+
+The `dbus` errors Chrome prints on start-up in a container are noise; the run is green
+with them present.
+
 `spec/adapter/` is the exception to "no database". It loads the real ActiveRecord,
 recreates a small schema and runs the aggregator for real, so it always runs as its
 own `rspec` invocation — `test_plugin.sh` excludes it from the main run and then
