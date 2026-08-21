@@ -1709,6 +1709,78 @@ own header carries this.
 
 ---
 
+## 2b. Measured 2026-08-21: what the other plugins in this account's Redmine do
+
+The settings-tab work (`ca4397b`) was verified in two real Redmines with the account's own
+other plugins installed alongside. Everything below is **pre-existing and not this plugin's**
+— each was re-run at `7aa34d1` in the same install and fails identically — but every one of
+them costs a session time if it is met cold, and two of them are release blockers for
+somebody upgrading.
+
+**`redmine_reporter` TAKES THE PROJECT SETTINGS PAGE DOWN ON REDMINE 7.0.**
+`app/models/report_template.rb:26` declares `enum` with keyword arguments, which Rails 8.1
+**removed** (7.2 only deprecated it). The model therefore cannot load, its settings-tab
+partial raises `ArgumentError: wrong number of arguments (given 0, expected 1..2)`, and
+because `common/_tabs.html.erb` renders every tab's partial in one request, the WHOLE page
+500s — including every other plugin's tab and ours. Measured: with reporter present the
+settings page is 500; with it removed, 200. Nothing on our side can defend against this, and
+it is worth knowing while the migration away from that plugin is in progress.
+
+**`redmine_itil_priority` BLOCKS REDMINE 7.0 AT `bundle install`.** Its `Gemfile:5` pins
+`gem 'activesupport', '>= 6.1', '< 8.0'`. Redmine 7.0 needs Rails 8.1.3.1, so bundler
+refuses to resolve and the whole application will not start — not just that plugin.
+
+**`redmine_contacts` AND THE `redmineup` GEM CLAIM THE SAME ROUTE NAME.**
+`redmine_contacts/config/routes.rb:97` defines `auto_complete_taggable_tags`, and
+`redmineup` (checked at 1.1.12) defines it too. With both present Rails raises
+*"Invalid route name, already in use"* at boot. No RedmineUP plugin pins a redmineup version,
+so a fresh `bundle install` reproduces it. `redmine_contacts_helpdesk` depends on contacts and
+goes with it.
+
+**`redmine_questions` CHANGES `transliterate` FOR THE WHOLE PROCESS, FROM ITS `en.yml`.**
+It ships an `i18n.transliterate.rule` mapping Cyrillic characters — inside `en.yml`, and also
+cs/de/hu/it/pt-BR/zh. I18n merges locale files, so the rule is global and
+`ActiveSupport::Inflector.transliterate` starts transliterating Cyrillic everywhere. Two of
+this plugin's own tests are the visible cost: `SnapshotTest` and `ScheduledDeliveryTest`
+assert that a non-Latin template name FALLS BACK to `report-<id>`, and with questions
+installed they get `otchyot` / `ezhenedelnyy-otchyot` instead. Neither assertion is wrong; the
+environment moved under them.
+
+**`redmine_agile`'s migrations are not idempotent on a fresh 7.0 database** —
+`PG::DuplicateTable: relation "agile_colors" already exists` — and because
+`redmine:plugins:migrate` walks plugins in one pass, that abort takes every plugin after it
+with it.
+
+**REDMINE 7.0 MIGRATES PLUGINS THROUGH `db:migrate`, AND `plugin_schema_info` IS GONE.**
+Measured on 7.0-stable: after a plain `rake db:migrate` on an empty database, the plugin
+tables exist, `schema_migrations` holds 327 rows, and `to_regclass('plugin_schema_info')` is
+NULL. `redmine:plugins:migrate` then re-runs migrations and fails with `DuplicateTable` for
+every plugin. **This is a problem for gate G11**, which `CLAUDE.md` §7 specifies as
+*"up → `VERSION=0` → schema equals the pre-install dump (`plugin_schema_info` included)"* —
+a table 7.0 does not have. G11 as written cannot hold on 7.0 and the gate needs a curator
+decision, not a quiet edit. `.codex/test_setup.sh` and `test_plugin.sh` also still call the
+old task.
+
+**Two of our own, also pre-existing and worth their own tasks.** The `aggregate-report`
+starter does not parse on **Liquid 4.0.4** ("'endcomment' is not a valid delimiter for for
+tags"), which 6.1-stable pins and the gemspec claims to support (`liquid (>= 4.0, < 6.0)`) —
+so a supported configuration ships a broken starter. And
+`test/unit/reporter_dashboards_import_runner_test.rb:53` drops `report_templates` without
+`force: :cascade`, so whenever a `report_schedules` table carrying an FK to it exists the
+teardown raises and takes 34 tests with it.
+
+**What the environment cannot run here.** The 12 system tests need a browser; Selenium
+reports *"cannot find Chrome binary"* because the only chromium here is Playwright's, and per
+§3 below it cannot run as root anyway. They were NOT run.
+
+**And a warning about the probes themselves.** `rails runner` scripts that create projects,
+users or tabs write into `redmine_test`, and a minitest run afterwards inherits the shifted
+id sequences: six `ReporterProjectTabsControllerTest` failures appeared that way and vanished
+after `DROP DATABASE`. Drop and re-migrate between probing and measuring, or the numbers mean
+nothing.
+
+---
+
 ## 3. Environment quirks (cloud sessions)
 
 - **REDMINE 5.1 *CAN* BE RUN HERE, AND `test_setup.sh` MAKES IT LOOK AS THOUGH IT CANNOT.**
