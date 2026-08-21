@@ -1884,6 +1884,12 @@ constant exists and the emoticon rule still registers.
     our tab + all four sections rendered          yes
     permission matrix (6 roles)          IDENTICAL to 7.0
     plugin suite                             1062 runs, 6 failures, 12 errors
+                                              — the 12 ERRORS are UNVERIFIED: that database
+                                                was prepared with `rake db:drop db:create
+                                                db:migrate`, which §3 now shows cannot work
+                                                here. 6.0 ran the same suite on a PROVEN
+                                                schema and had 0 errors. Re-measure before
+                                                quoting the 12 anywhere.
     system tests                               12 runs, 0 failures, 0 errors
                                                   (2 failures on the FIRST run; see below)
 
@@ -1916,6 +1922,56 @@ re-running.** Neither is a boot failure and neither is somebody else's bug:
 
 Both are reported rather than fixed here: the settings-tab task did not create them and
 absorbing them would be the scope growth CLAUDE.md §11.5 names.
+
+### 6.0-stable with 41 plugins — the third engine, and the finding that was OURS
+
+Redmine **6.0-stable / Rails 7.2.3.2 / Ruby 3.3.6 / PostgreSQL**, the same 41 plugins as 6.1.
+Booted first try, `BOOT_OK 41`, again with no fix beyond the ten already branched.
+
+    plugins booted                                 41
+    schema                                    complete (135 tables, our 12,
+                                                        enabled_modules present)
+    alias chains on project_settings_tabs           8
+    prepends ahead of ProjectsHelper                2  (ours FIRST, then wiki_extensions)
+    GET /projects/x/settings                      200
+    our tab + all four sections rendered          yes
+    permission matrix (6 roles)          IDENTICAL to 6.1 and 7.0
+    spec/ (no Rails)                         2913 examples, 0 failures, 163 pending
+    spec_liquid/ (real gem)                   366 examples, 3 failures
+    units / functionals / integration        1050 runs, 5 failures, 0 ERRORS
+
+**Every one of the eight failures is classified, and none of them is the settings-tab work.**
+Five are the cross-plugin findings already recorded above — `redmineup_tags`' extra `tags`
+dimension, `redmine_questions`' global transliterate rule (twice), the `aggregate-report`
+starter that does not parse on Liquid 4.0.4, and `redmine_people`'s N+1 in the mail audit.
+Three are `spec_liquid/escaping_regression_spec.rb`: `| json` no longer round-trips U+2028
+and U+2029 under **json 2.21.2**, which is a gem regression and a task of its own — proven
+pre-existing by stashing the day's changes and re-running at the untouched tree.
+
+**AND THE ONE THIS RUN EXISTS FOR: A 500 ON EVERY TEMPLATE RENDER, IN THIS PLUGIN'S OWN
+CODE.** Fixed in `e1b58b3`; the detail is in `colors.rb`'s header and the commit message,
+and the short version is:
+
+    Liquid::MethodOverrideError: Filter overrides registered public methods as
+    non public: shift
+
+`Filters::Colors` kept a **private** helper named `shift`. Liquid inspects a filter module's
+private and protected methods too, and `Strainer.add_filter` refuses the whole module when
+one of those names is already an invokable filter — and the vendor gem, present the moment
+any of the operator's paid plugins is installed, globally registers **91** filters with
+`shift` among them. So `Colors` became unaddable and `darken` and `lighten` went with it.
+
+Three things about it are worth carrying:
+
+  * **The bare suite could never have found it.** No vendor gem, no global registration, no
+    collision. It took a real install, which is what this whole exercise is for.
+  * **`Filters.registered_names` was looking at the wrong half.** It reads
+    `public_instance_methods(false)`; the hazard is exactly the methods it skips. `shift` is
+    in `Filters::REMOVED` and the inventory spec was green throughout.
+  * **The fix is the rule, not the name.** `support.rb` already existed for this and its
+    header already stated it for the public case; four filter files were the exception.
+    Every non-public helper moved there, no filter module has one any more, and the spec
+    asserts that rather than asserting a list of forbidden names.
 
 **AND ONE HYPOTHESIS THAT DIED, WHICH IS WORTH MORE THAN THE ONES THAT HELD.** The first 6.1
 system-test run showed two failures, both in `ReporterDashboardsAuthoringSystemTest`, one of
