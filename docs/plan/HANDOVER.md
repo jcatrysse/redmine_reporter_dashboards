@@ -1779,9 +1779,18 @@ id sequences: six `ReporterProjectTabsControllerTest` failures appeared that way
 after `DROP DATABASE`. Drop and re-migrate between probing and measuring, or the numbers mean
 nothing.
 
-**THE FINDING THAT MATTERS MOST, AND IT IS ABOUT THIS PLUGIN TOO — REDMINE 7.0 PUTS EVERY
-PLUGIN'S MIGRATIONS IN ONE `schema_migrations` TABLE, AND LEGACY PLUGIN NUMBERING COLLIDES.**
-Measured 2026-08-21 with 42 plugins installed on 7.0-stable.
+**THE FINDING THAT MATTERS MOST, AND IT IS ABOUT THIS PLUGIN TOO — ON REDMINE 7.0 `db:migrate`
+ALSO RUNS THE PLUGINS, INTO ONE `schema_migrations` TABLE, AND LEGACY PLUGIN NUMBERING THEN
+COLLIDES.** Measured 2026-08-21 with 42 plugins installed on 7.0-stable.
+
+**The wording here said "numbering collision" until the 6.1 run corrected it, and the
+difference decides whether it is a plugin bug or a core one.** On **6.1** the same 41 plugins
+with the same `001_*`…`003_*` numbering produce a COMPLETE schema — 139 tables,
+`custom_workflows.active` present — because `redmine:plugins:migrate` keeps a per-plugin row
+in `plugin_schema_info` and each plugin's `001` is therefore its own. So the numbering alone
+is harmless. What breaks 7.0 is the **double mechanism**: `db:migrate` migrates plugins too,
+records them in the shared `schema_migrations` by their bare number, and there the numbering
+overlaps. Nobody's `001_*.rb` is at fault; the two migration paths are.
 
 `plugin_schema_info` does not exist on 7.0 — `to_regclass` is NULL after a full migrate.
 Plugin migrations run through the ordinary migrator and are recorded in `schema_migrations`
@@ -1841,6 +1850,61 @@ Chrome binary`; and Chrome refuses to start as root without `--no-sandbox`, whic
 control that contains a compromised renderer. A matched Chrome-for-Testing pair plus a
 non-root user fixes both, and `CONTRIBUTING.md` now carries the recipe. `RRD_CHROME_PATH`
 was already the right seam; it just had nothing correct to point at.
+
+### 6.1-stable with 41 plugins — the second engine, and two findings about OUR code
+
+Redmine **6.1-stable / Rails 7.2.3.2 / Ruby 3.3.6 / PostgreSQL**, everything above installed
+except `redmine_reporter` (being replaced), `redmine_stealth` (retired by the operator) and
+`redmine_ai_triage` — the last self-declares `REQUIRED_REDMINE_SERIES = '7.0'` and the
+operator confirms it is Redmine-7-only, so 41 plugins rather than 42.
+
+**It booted first try, `BOOT_OK 41`, with no fix beyond the ten already branched for 7.0.**
+That is the useful part: every one of those ten is version-safe, so they are honest pull
+requests for their own plugins rather than 7.0-only shims. The `defined?` guard in
+`redmine_wiki_extensions` is the one to check if any of them is ever revisited — on 6.1 the
+constant exists and the emoticon rule still registers.
+
+    plugins booted                                 41
+    schema                                    complete (139 tables,
+                                                        custom_workflows.active present)
+    alias chains on project_settings_tabs           8
+    prepends ahead of ProjectsHelper                2  (ours FIRST, then wiki_extensions)
+    GET /projects/x/settings                      200  (tab ids: … reporter_dashboards,
+                                                        custom_workflows)
+    our tab + all four sections rendered          yes
+    permission matrix (6 roles)          IDENTICAL to 7.0
+    plugin suite                             1062 runs, 6 failures, 12 errors
+    system tests                               12 runs, 2 failures, 0 errors
+
+The permission matrix being byte-identical across two Rails majors and two different sets of
+co-installed plugins is what the settings-tab design was supposed to give, and it does:
+`view_…_schedules` / `view_…_reports` / `manage_…_tabs` / `mail_…_reports` each get 200, the
+tab, and only their own section; `edit_project` alone gets 200 and no tab; no permission gets
+**403**; modules off means no tab even for an administrator.
+
+The 34 importer errors from the 7.0 run are **gone** here, and not because 6.1 is different —
+they came from `redmine_reporter` being installed, and it is not installed here. That is the
+first evidence in this project of the standalone run being *cleaner* than the with-reporter
+run rather than merely equal.
+
+**Two NEW findings, both about THIS plugin, both isolated by removing the culprit plugin and
+re-running.** Neither is a boot failure and neither is somebody else's bug:
+
+  * **`redmineup_tags` adds a `tags` criterion to the time report, and our aggregator drops
+    it.** With that plugin installed the criteria list grows a dimension this plugin's
+    aggregation does not know, and it is silently ignored rather than reported. A dimension
+    that vanishes without a word is the failure mode INV-5 exists for — an operator gets a
+    report that looks complete. Needs its own task: either support the criterion or refuse it
+    visibly.
+  * **`redmine_people` makes our own mail-audit page scale with rows, breaking our own G6
+    assertion.** `36 queries / 2 rows` becomes `96 queries / 12 rows` with people installed —
+    the per-row user link goes through that plugin's patched helper. Our query-count test
+    passes in a bare install and would fail in the operator's real one, which means the
+    assertion measures the wrong thing: it needs to hold with a patched `link_to_user`, or it
+    is not measuring what G6 claims.
+
+Both are reported rather than fixed here: the settings-tab task did not create them and
+absorbing them would be the scope growth CLAUDE.md §11.5 names.
 
 ---
 
