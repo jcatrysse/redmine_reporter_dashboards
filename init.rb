@@ -129,38 +129,23 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
        { controller: 'reporter_preflight', action: 'show' },
        caption: :label_reporter_preflight
 
-  # T-23. A SECOND project menu item, because the reports module is a second module: a
-  # project can have dashboards without the reporting surface, which is the question
-  # `:reporter_dashboards_reports` exists to ask. Both conditions are checked — the module
-  # AND the permission — because `module_enabled?` alone would show the link to somebody
-  # the controller then refuses, and `allowed_to?` alone would show it in a project that
-  # has the feature switched off.
-  menu :project_menu, :reporter_dashboards_templates,
-       { controller: 'reporter_dashboards/templates', action: 'index' },
-       caption: :label_reporter_template_plural,
-       after: :reporter_project_page,
-       param: :project_id,
-       if: proc { |project|
-         project.module_enabled?(:reporter_dashboards_reports) &&
-           (User.current.admin? ||
-             User.current.allowed_to?(:view_reporter_dashboards_reports, project))
-       }
-
-  # T-25. A THIRD project menu item, gated on the READ permission rather than on the
-  # authoring one: `view_reporter_dashboards_schedules` exists so an operator can answer
-  # "did it run" without being able to change who receives it, and a link they cannot see
-  # is a question they cannot answer.
-  menu :project_menu, :reporter_dashboards_schedules,
-       { controller: 'reporter_dashboards/schedules', action: 'index' },
-       caption: :label_reporter_schedule_plural,
-       after: :reporter_dashboards_templates,
-       param: :project_id,
-       if: proc { |project|
-         project.module_enabled?(:reporter_dashboards_reports) &&
-           (User.current.admin? ||
-             User.current.allowed_to?(:view_reporter_dashboards_schedules, project))
-       }
-
+  # ONE PROJECT MENU ITEM, AND THE OTHER TWO WERE DELETED RATHER THAN HIDDEN.
+  #
+  # T-23 and T-25 each added one — `reporter_dashboards_templates` and
+  # `reporter_dashboards_schedules`, both gated on the reports module and a read permission.
+  # Curator decision 2026-08-21 moved both under **Project → Settings → Reports and
+  # dashboards**, which is where a Redmine administrator looks for configuration, logs and
+  # management. The pages, their routes, their controllers and their permissions are all
+  # unchanged; only the way in moved.
+  #
+  # WHAT SURVIVES IS THE DASHBOARD, and the distinction is Redmine's own: the project menu
+  # holds things you READ — Issues, Activity, Roadmap, Documents — and Project settings holds
+  # things you CONFIGURE. A dashboard is the first kind. A template list and a schedule's run
+  # history are the second.
+  #
+  # Two entry points to one page is not a courtesy either: the settings tab and a menu item
+  # would drift on the permission they check the first time one of them is edited, and a user
+  # who found the page in the menu would never discover the tab that is supposed to own it.
   menu :project_menu, :reporter_project_page,
        { controller: 'reporter_project_pages', action: 'show' },
        caption: :label_reporter_project_page,
