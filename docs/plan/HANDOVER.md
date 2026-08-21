@@ -1945,6 +1945,36 @@ step alone would have written a false finding into somebody else's plugin.
 
 ## 3. Environment quirks (cloud sessions)
 
+- **`rake db:drop db:create db:migrate` DOES NOT WORK IN A MULTI-PLUGIN INSTALL, AND FAILS IN
+  A WAY THAT LOOKS LIKE A PLUGIN BUG.** Measured 2026-08-21 on 6.0-stable with 41 plugins.
+  `db:create` loads the application, at least one installed plugin reads `Setting` during
+  boot, and the database it is about to create does not exist yet — so the task dies with
+  `ActiveRecord::NoDatabaseError: We could not find your database: redmine_test` *before its
+  own body runs*. `db:drop` fails the same way once the database is already gone. Chain them
+  and you get a half-dropped, half-migrated schema; the first plugin migration that needs a
+  core table then reports *`relation "enabled_modules" does not exist`*, and that is the line
+  a session spends an hour on.
+
+  Use the server's own tools for the two that cannot boot, and only then Rails for the one
+  that must:
+
+      sudo -u postgres psql -tAc "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+        WHERE datname='redmine_test' AND pid <> pg_backend_pid()"
+      sudo -u postgres dropdb --if-exists redmine_test
+      sudo -u postgres createdb -O redmine redmine_test
+      bundle exec rake db:migrate
+      bundle exec rake redmine:plugins:migrate
+
+  The `pg_terminate_backend` line is not optional either: one leftover connection from a
+  previous run makes `dropdb` fail with *"database is being accessed by other users"*, and a
+  test run started from the surviving schema is measuring the wrong database. **`.codex/test_setup.sh`
+  still chains the three**, which is correct for the one-or-two-plugin configurations CI uses and
+  wrong for this one — do not "fix" the script for an integration run it was not written for.
+
+  And per §2b: after any migration, ASSERT the schema — `enabled_modules` present, this
+  plugin's twelve `reporter_*` tables present, a table count — rather than reading the tail of
+  the log. Both retracted versions of the migration finding came from trusting that tail.
+
 - **REDMINE 5.1 *CAN* BE RUN HERE, AND `test_setup.sh` MAKES IT LOOK AS THOUGH IT CANNOT.**
   Measured 2026-08-14 while reproducing a 5.1-only CI failure. The script ends with *"mise is
   required to install Ruby 2.7. Please install mise or set PATH to a compatible ruby"* and
