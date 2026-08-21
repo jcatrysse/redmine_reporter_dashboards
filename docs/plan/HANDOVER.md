@@ -1994,6 +1994,7 @@ it is `rg "requires_redmine" plugins/*/init.rb`, which is also how `redmine_ai_t
     spec/ (no Rails)                         2913 examples, 0 failures, 164 pending
     spec_liquid/ (real gem)                   366 examples, 3 failures
     units / functionals / integration        1050 runs, 5 failures, 0 ERRORS
+    system tests (real Chromium)               12 runs, 0 failures, 0 errors
 
 **The failure set is byte-identical to 6.0's** — the same five cross-plugin findings and the
 same three `json` 2.21.2 escaping regressions, on a different Rails major with a different
@@ -2014,6 +2015,7 @@ Two things worth keeping from this run specifically:
 
     version   Rails      plugins   booted   settings 200   perm matrix   app suite
     5.1       6.1.7.10      38       yes         yes        identical    1050 / 5F / 0E
+                                                                            + system 12/12
     6.0       7.2.3.2       41       yes         yes        identical    1050 / 5F / 0E
     6.1       7.2.3.2       41       yes         yes        identical    see the caveat
     7.0       8.1.3.1       42       yes         yes        identical    blocked (schema)
@@ -2050,6 +2052,19 @@ step alone would have written a false finding into somebody else's plugin.
 ---
 
 ## 3. Environment quirks (cloud sessions)
+
+- **`/usr/local/bin/bundle` IS A SYMLINK TO RUBY 3.3.6 AND SHADOWS THE RBENV RUBY YOU
+  SELECTED.** Measured 2026-08-21 launching the 5.1 system tests. A `PATH` that puts
+  `/usr/local/bin` before `/opt/rbenv/versions/<v>/bin` gets 3.3.6 whatever `<v>` says, and
+  the run dies with
+
+      Bundler::RubyVersionMismatch: Your Ruby version is 3.3.6, but your Gemfile
+      specified >= 2.7.0, < 3.3.0
+
+  which reads as a Gemfile problem and is a PATH-order problem. It only shows up on 5.1,
+  because 6.0/6.1/7.0 all use 3.3.6 and the shadow is invisible there. Put the rbenv bin
+  directory FIRST and keep `/usr/local/bin` after it — `chromedriver` lives there and the
+  system tests need it.
 
 - **`rake db:drop db:create db:migrate` DOES NOT WORK IN A MULTI-PLUGIN INSTALL, AND FAILS IN
   A WAY THAT LOOKS LIKE A PLUGIN BUG.** Measured 2026-08-21 on 6.0-stable with 41 plugins.
