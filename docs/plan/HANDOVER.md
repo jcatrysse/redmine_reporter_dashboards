@@ -1973,6 +1973,56 @@ Three things about it are worth carrying:
     Every non-public helper moved there, no filter module has one any more, and the spec
     asserts that rather than asserting a list of forbidden names.
 
+### 5.1-stable with 38 plugins — the oldest supported engine, and the matrix closes
+
+Redmine **5.1-stable / Rails 6.1.7.10 / Ruby 3.2.6 / PostgreSQL**. Two plugins are out, and
+**they excluded themselves**: `redmine_custom_workflows` and `redmine_wiki_extensions` both
+declare `requires_redmine version_or_higher: '6.0.0'`, so Redmine refuses to boot with them
+present. That is a declared incompatibility, not something to work around — the way to check
+it is `rg "requires_redmine" plugins/*/init.rb`, which is also how `redmine_ai_triage`
+(`REQUIRED_REDMINE_SERIES = '7.0'`) was ruled out of 5.1, 6.0 and 6.1.
+
+    plugins booted                                 39  (38 + this one)
+    schema                                    complete (126 tables, our 12,
+                                                        enabled_modules present)
+    alias chains on project_settings_tabs           8
+    prepends ahead of ProjectsHelper                1  (ours, the ONLY one — the other two
+                                                        prependers do not run on 5.1)
+    GET /projects/x/settings                      200
+    our tab + all four sections rendered          yes
+    permission matrix (6 roles)          IDENTICAL to 6.0, 6.1 and 7.0
+    spec/ (no Rails)                         2913 examples, 0 failures, 164 pending
+    spec_liquid/ (real gem)                   366 examples, 3 failures
+    units / functionals / integration        1050 runs, 5 failures, 0 ERRORS
+
+**The failure set is byte-identical to 6.0's** — the same five cross-plugin findings and the
+same three `json` 2.21.2 escaping regressions, on a different Rails major with a different
+plugin set. Nothing about them is version-specific, which is the strongest statement this
+exercise can make about them: they are properties of the plugin combination, not of Redmine.
+
+Two things worth keeping from this run specifically:
+
+  * **It booted first try with no fix beyond the ten already branched**, exactly like 6.0 and
+    6.1. So those ten are version-safe across **5.1 → 7.0** and are honest pull requests for
+    the plugins that own them rather than 7.0-only shims.
+  * **Ours is the only prepend on 5.1**, because `wiki_extensions` and `ai_triage` do not run
+    there. The ordering rule held in all four configurations — one prepend, two prepends,
+    three prepends — which is what `spec/patches/projects_helper_patch_spec.rb` claims and is
+    now measured rather than reasoned.
+
+### The matrix, in one place
+
+    version   Rails      plugins   booted   settings 200   perm matrix   app suite
+    5.1       6.1.7.10      38       yes         yes        identical    1050 / 5F / 0E
+    6.0       7.2.3.2       41       yes         yes        identical    1050 / 5F / 0E
+    6.1       7.2.3.2       41       yes         yes        identical    see the caveat
+    7.0       8.1.3.1       42       yes         yes        identical    blocked (schema)
+
+**What is still UNVERIFIED, and neither number should be quoted until it is measured:** 6.1's
+"12 errors" (that database was prepared with the chained rake task), and the cause of 7.0's
+`redmine:plugins:migrate` abort. Both predate the database-preparation fix in §3, and both
+runs would now be done differently.
+
 **AND ONE HYPOTHESIS THAT DIED, WHICH IS WORTH MORE THAN THE ONES THAT HELD.** The first 6.1
 system-test run showed two failures, both in `ReporterDashboardsAuthoringSystemTest`, one of
 them inside core's own `log_user` helper (*expected "/login" to equal "/my/page"*,
