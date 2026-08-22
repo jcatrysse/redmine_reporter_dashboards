@@ -1817,13 +1817,27 @@ rather than a 7.0 exception. The migration-renaming question is **withdrawn**: `
 in `db/migrate/` are fine as they are, and renaming them would have been a schema change made
 to fix a bug that was not there.
 
-**What the 7.0 run actually hit is therefore still open, and the honest state is UNVERIFIED.**
-`redmine:plugins:migrate` did abort there and the suite did show 215 `PG::UndefinedColumn`
-errors, the first being `column custom_workflows.active does not exist` — but the explanation
-above is not the cause, so the cause is not yet known. `redmine_agile`'s non-idempotent
-migration is the first candidate: `Plugin.migrate` walks plugins in one `each`, so the first
-plugin to raise takes every plugin after it, and a partial schema is exactly what was seen.
-**Re-measure on 7.0 before writing anything else down here.**
+**CLOSED 2026-08-22, AND THE CAUSE WAS `db/schema.rb`.** There is no migration problem on
+7.0 either. `db/schema.rb` is in Redmine's own `.gitignore`, so `redmine_clone.sh`'s
+`git checkout -f` never removes it — and in the TEST environment `rake db:migrate` LOADS that
+file instead of running the migrations. One dump taken from a polluted database therefore
+reproduced that database on every later "fresh" run, with the tell being easy to miss: the
+migrate log contains no migration banners at all, and `rake` still exits 0.
+
+    with the stale dump      328 rows, 128 tables, custom_fields.formula present (a plugin
+                             column), core's `reactions` table ABSENT, no banners logged
+    after `rm db/schema.rb`  555 rows = 327 core + 228 SUFFIXED plugin migrations,
+                             155 tables, `reactions` present, `custom_workflows.active`
+                             present, `redmine:plugins:migrate` exits clean
+
+So `redmine_agile` is exonerated too, and the 215 `PG::UndefinedColumn` errors — the first
+being `column custom_workflows.active does not exist` — all came from that snapshot. The 7.0
+suite has now been measured on a proven schema for the first time: **1057 runs, 5 failures, 0
+errors**, the same five cross-plugin findings as 5.1 and 6.0 and nothing else.
+
+`prep_db.sh` and `matrix_run.sh` both `rm -f db/schema.rb db/structure.sql` before preparing.
+**Anything that runs `rake db:migrate` in a checkout that has been used before must do the
+same**, or it is measuring a snapshot.
 
 **AND THE TRAP THAT PRODUCED BOTH ERRORS, WHICH IS THE PART TO CARRY FORWARD.** Both wrong
 versions came from reading a *summary* of a migration run rather than its result: a
@@ -2018,12 +2032,14 @@ Two things worth keeping from this run specifically:
                                                                             + system 12/12
     6.0       7.2.3.2       41       yes         yes        identical    1050 / 5F / 0E
     6.1       7.2.3.2       41       yes         yes        identical    see the caveat
-    7.0       8.1.3.1       42       yes         yes        identical    blocked (schema)
+    7.0       8.1.3.1       42       yes         yes        identical    1057 / 5F / 0E
+                                                                            + system 12/12
 
-**What is still UNVERIFIED, and neither number should be quoted until it is measured:** 6.1's
-"12 errors" (that database was prepared with the chained rake task), and the cause of 7.0's
-`redmine:plugins:migrate` abort. Both predate the database-preparation fix in §3, and both
-runs would now be done differently.
+**What is still UNVERIFIED:** 6.1's "12 errors" only. That database was prepared with the
+chained rake task and quite possibly from a stale `db/schema.rb` as well; 5.1, 6.0 and 7.0
+all show 5 failures and 0 errors on proven schemas, so the 12 are almost certainly the same
+artefact — but "almost certainly" is not a measurement and the number stays flagged until
+somebody re-runs 6.1.
 
 **AND ONE HYPOTHESIS THAT DIED, WHICH IS WORTH MORE THAN THE ONES THAT HELD.** The first 6.1
 system-test run showed two failures, both in `ReporterDashboardsAuthoringSystemTest`, one of
@@ -2052,6 +2068,21 @@ step alone would have written a false finding into somebody else's plugin.
 ---
 
 ## 3. Environment quirks (cloud sessions)
+
+- **`db/schema.rb` IS GITIGNORED, SURVIVES `git checkout -f`, AND `db:migrate` LOADS IT IN
+  THE TEST ENVIRONMENT.** This is the single most expensive trap of the 2026-08-21/22
+  sessions: it produced two retracted "findings" about plugin migrations on Redmine 7.0 and
+  cost most of a day. `redmine_clone.sh` switches branches with `git checkout -f`, which
+  cannot remove an ignored file, so a schema dumped from one version's database is still
+  there for the next. `rake db:migrate` in `RAILS_ENV=test` then loads that dump instead of
+  migrating — **exits 0, logs no migration banners at all**, and leaves a database that looks
+  plausible and is somebody else's.
+
+      rm -f db/schema.rb db/structure.sql     # BEFORE every db:migrate
+
+  The tell, when you suspect it: `grep -c '^== .*migrated' <migrate log>` returns 0 on what
+  should have been a full migrate of an empty database. Both `prep_db.sh` and `matrix_run.sh`
+  now delete it first. See §2b for what it cost.
 
 - **`/usr/local/bin/bundle` IS A SYMLINK TO RUBY 3.3.6 AND SHADOWS THE RBENV RUBY YOU
   SELECTED.** Measured 2026-08-21 launching the 5.1 system tests. A `PATH` that puts
