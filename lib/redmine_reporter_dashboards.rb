@@ -138,14 +138,16 @@ module RedmineReporterDashboards
   # Patches into Redmine core. The list is the list, and each entry's kind matters:
   #
   #   * Project, Role         — an association each, no method override
-  #   * ProjectsHelper        — ONE method, `project_settings_tabs`, by `prepend`, and the
-  #                             only overridden core method in this plugin. Read that file's
-  #                             header before touching the loading order: nine other plugins
-  #                             alias-chain that method, and prepend composes with an alias
-  #                             chain in one direction only.
+  #   * ProjectsHelper        — ONE method, `project_settings_tabs`, and the only overridden
+  #                             core method in this plugin. NOT patched into ProjectsHelper:
+  #                             the module goes into `ProjectsController._helpers` via
+  #                             `ProjectsController.helper`, above the core helper, so
+  #                             `super` reaches it and no `alias_method` on ProjectsHelper
+  #                             can see us. Eight other plugins alias-chain that method;
+  #                             read that file's header for what it costs to be inside it.
   #
-  # Loaded from after_plugins_loaded so the target classes are present — and, for the
-  # helper, so we are behind every one of those nine chains.
+  # Loaded from after_plugins_loaded so the target classes are present, and so the helper
+  # module goes back into `_helpers` after each `to_prepare` throws the controllers away.
   PATCH_FILES = %w[
     redmine_reporter_dashboards/patches/project_patch
     redmine_reporter_dashboards/patches/role_patch

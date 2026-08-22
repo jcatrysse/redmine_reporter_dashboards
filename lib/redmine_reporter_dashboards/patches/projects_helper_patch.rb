@@ -2,56 +2,68 @@
 
 # One project SETTINGS tab, appended to Redmine's own list.
 #
-# --- THIS IS THE ONLY WAY, AND THAT IS A FACT ABOUT CORE RATHER THAN A PREFERENCE ---
+# --- REACHING THE HELPER IS THE ONLY WAY, AND THAT IS A FACT ABOUT CORE ---
 #
 # `app/views/projects/settings.html.erb` is three lines: an `<h2>`, `render_tabs
 # project_settings_tabs`, and `html_title`. There is no `call_hook` on it. The only hooks
 # anywhere near the settings page are `view_projects_form` (inside the Info tab) and two in
-# the members table, so a plugin that wants a TAB has to reach the helper method. Checked
-# against 7.0-devel on 2026-08-21.
+# the members table, so a plugin that wants a TAB has to reach that helper method.
 #
-# --- WHY `prepend` IS SAFE HERE, WITH NINE PLUGINS ALIAS-CHAINING THIS METHOD ---
+# --- AND IT IS REACHED THROUGH THE CONTROLLER'S HELPER CHAIN, NOT THROUGH ProjectsHelper ---
 #
-# `project_settings_tabs` is the most-wrapped method in the Redmine plugin ecosystem. In one
-# real installation nine plugins chain it — the base reporting plugin, agile, checklists,
-# contacts, contacts_helpdesk, depending_custom_fields, itil_priority, mail_digest and
-# questions — all with the `alias_method :x_without_y, :x` / `alias_method :x, :x_with_y`
-# pair that replaced `alias_method_chain` when Rails 5.1 removed it.
+# `ProjectsController.helper` puts the module below into `ProjectsController._helpers`, which
+# the view context class includes AFTER `ProjectsHelper`. So at render time the lookup order
+# is: this module, then `ProjectsHelper` with whatever every other plugin has done to it.
+# `super` therefore resolves to whatever `ProjectsHelper` holds AT CALL TIME.
 #
-# A prepend and an alias chain compose in ONE direction only, and the failure of the wrong
-# direction was MEASURED rather than reasoned about — the first draft of this comment
-# predicted infinite recursion and was wrong.
+# THIS MODULE IS DELIBERATELY NOT IN `ProjectsHelper.ancestors`, and that absence is the
+# whole design. `project_settings_tabs` is the most-wrapped method in the Redmine plugin
+# ecosystem — eight plugins in one real installation wrap it with the
+# `alias_method :x_without_y, :x` / `alias_method :x, :x_with_y` pair that replaced
+# `alias_method_chain` when Rails 5.1 removed it. `alias_method` resolves its source through
+# `ProjectsHelper.ancestors`, so anything sitting in there can be COPIED by the next plugin
+# to install a chain. Nothing that is not in there can be.
 #
-# Prepend first, and the next plugin's `alias_method :x_without_y, :x` resolves `:x` through
-# `ProjectsHelper.ancestors`, finds OUR method at the front, and copies it into
-# `ProjectsHelper` as `x_without_y`. Calling `x` then enters our method, whose `super` now
-# resolves from `ProjectsHelper`'s own position — below which there is only the module the
-# other plugin included, which does not define `x`. The measured result, on 1, 2 and 3 late
-# chains and with chains on both sides:
+# --- WHAT THIS REPLACED, AND WHY THE OLD VERSION WAS NOT WRONG BUT WAS FRAGILE ---
 #
-#     NoMethodError: super: no superclass method `tabs'
+# This used to be `ProjectsHelper.prepend`, and it worked — but only because it was installed
+# LAST. A prepend and an alias chain compose in one direction only, and the failure of the
+# wrong direction was MEASURED rather than reasoned about (the first draft of the comment it
+# replaced predicted infinite recursion and was wrong):
 #
-# So the project settings page 500s for everybody, deterministically, in somebody else's
-# plugin. Loud rather than subtle, which is the only good news in it.
+#     prepend, THEN a neighbour's chain
+#       -> the neighbour's `alias_method :x_without_y, :x` finds OUR method at the front of
+#          ProjectsHelper.ancestors and copies it into ProjectsHelper as `x_without_y`.
+#          Calling `x` enters our method, whose `super` now resolves from ProjectsHelper's
+#          own position, below which nothing defines `x`:
 #
-# Chain first and prepend last, and the same code is correct: we sit in front, `super`
-# enters the nine-deep chain once and unwinds. Measured on nine stacked chains.
-# `spec/patches/projects_helper_patch_spec.rb` is that measurement, both directions.
+#              NoMethodError: super: no superclass method `project_settings_tabs'
 #
-# So the ordering is not a preference, and it is not left to luck either.
-# `Redmine::PluginLoader.load` is:
+#          i.e. the project settings page 500s for everybody, in somebody else's plugin.
 #
-#     Rails.application.config.to_prepare do
-#       PluginLoader.directories.each(&:run_initializer)
-#       Redmine::Hook.call_hook :after_plugins_loaded
-#     end
+# So the old arrangement was correct only for as long as `after_plugins_loaded` kept us
+# behind every chain in the process. That held, but it made a page other plugins own depend
+# on our boot position — and `redmine_ai_triage` shipped exactly that bug by prepending from
+# its `init.rb` instead.
 #
-# Every `init.rb` runs, and THEN `after_plugins_loaded` fires — in every `to_prepare` cycle,
-# so it also holds after each development reload that throws `ProjectsHelper` away. This
-# plugin installs its patches from that hook, which is the one position in the boot that is
-# guaranteed to be after every alias chain in the process. (All nine also happen to sort
-# alphabetically before `redmine_reporter_dashboards`, and `Dir.glob` has sorted since Ruby
-# 3.0 — but that is a coincidence worth knowing about, not the mechanism.)
+# Out of the helper module, the question does not arise: **both orders work**, because no
+# `alias_method` on `ProjectsHelper` can see this module at all.
+# `test/unit/reporter_dashboards_settings_tab_wiring_test.rb` asserts the absence and the
+# position against the REAL `ProjectsHelper` and the REAL `ProjectsController._helpers`, so
+# a return to `prepend` fails in the suite rather than on somebody's settings page.
+#
+# --- WHAT DID NOT CHANGE ---
+#
+# The install still happens from `after_plugins_loaded`, for a different and smaller reason:
+# `Rails.application.config.to_prepare` throws the controller classes away on every reload,
+# and `_helpers` is rebuilt with them. That hook fires at the end of every `to_prepare`
+# cycle, so the module goes back in each time. It is reload-safety now, not
+# ordering-safety.
+#
+# `ProjectsController` is also the only entry point that needs it. Measured across core and
+# all 42 plugins of one real installation: the sole caller of `project_settings_tabs` is
+# `app/views/projects/settings.html.erb`, and no plugin renders that template from another
+# controller. Adding the module anywhere else would be surface with no reader.
 #
 # --- AND WHY THE PERMISSION FILTER IS OURS ---
 #
@@ -72,6 +84,9 @@ module RedmineReporterDashboards
   end
 end
 
-unless ProjectsHelper.ancestors.include?(RedmineReporterDashboards::Patches::ProjectsHelperPatch)
-  ProjectsHelper.prepend(RedmineReporterDashboards::Patches::ProjectsHelperPatch)
-end
+# `helper` is public API on ActionController::Base and has been since Rails 3, and it is
+# idempotent: `Module#include` of a module already in the chain is a no-op, so the reload
+# cycle above cannot stack copies of this. Both facts are asserted in the wiring test rather
+# than trusted, because "public since Rails 3" is a claim about four Rails majors this
+# plugin supports and only running it makes it true.
+ProjectsController.helper(RedmineReporterDashboards::Patches::ProjectsHelperPatch)

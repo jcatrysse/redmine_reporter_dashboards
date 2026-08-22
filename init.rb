@@ -161,16 +161,24 @@ end
 # Patch + Liquid tag loading
 #
 # Everything that patches a core class is deferred to after_plugins_loaded. Project and
-# Role gain an association each and override nothing. ProjectsHelper is the one exception
-# and the one overridden core method in this plugin: `project_settings_tabs`, by `prepend`,
-# adding a single project settings tab (curator decision 2026-08-21).
+# Role gain an association each and override nothing. `project_settings_tabs` is the one
+# overridden core method in this plugin, adding a single project settings tab (curator
+# decision 2026-08-21) — and it is overridden from `ProjectsController._helpers` rather than
+# from ProjectsHelper itself.
 #
-# For the helper the timing is load-bearing rather than merely convenient. Nine plugins in a
-# real installation alias-chain that same method, and a prepend installed BEFORE such a
-# chain makes the next chain capture our method as its `_without_` — measured to be a
-# `NoMethodError` on `super`, i.e. a 500 on the project settings page, in their code.
-# after_plugins_loaded is the one hook that runs after every plugin's init.rb, in every
-# to_prepare cycle. See patches/projects_helper_patch.rb for the measurement.
+# THE TIMING USED TO BE LOAD-BEARING AND NO LONGER IS. The override was a
+# `ProjectsHelper.prepend`, which composes with the `alias_method` chains eight other
+# plugins put on that same method in ONE direction only: a chain installed after a prepend
+# captures the prepended method as its `_without_` and strands its `super` — measured, a
+# `NoMethodError` and a 500 on the project settings page, in their code. Being installed
+# last was the protection. From the controller's helper chain the question does not arise,
+# because `alias_method` resolves through `ProjectsHelper.ancestors` and this module is not
+# in there. Both orders now work, and the suite says so.
+#
+# after_plugins_loaded is still where it happens, for a smaller reason: `to_prepare` throws
+# the controller classes away on every reload and rebuilds `_helpers` with them, and this
+# hook fires at the end of every such cycle. Reload-safety, not ordering-safety. See
+# patches/projects_helper_patch.rb and test/unit/reporter_dashboards_settings_tab_wiring_test.rb.
 #
 # IT USED TO BE DEFERRED FOR A SECOND REASON THAT IS GONE: the reporter classes
 # (IssueListReportTemplate, ReportTemplatesController) had to have been registered
