@@ -10,6 +10,20 @@ REPORTER_PLUGIN_NAME="${REPORTER_PLUGIN_NAME:-redmine_reporter}"
 # installs gems `without development`, so that environment cannot even load.
 export RAILS_ENV="${RAILS_ENV:-test}"
 
+# A UTF-8 LOCALE, BECAUSE THE DEFAULT IN A CLOUD CONTAINER IS US-ASCII AND THAT FAILS
+# EXAMPLES THAT ARE NOT BROKEN. With LANG and LC_ALL unset, Ruby's
+# Encoding.default_external is US-ASCII, and every spec that hands a non-ASCII string to
+# JSON.parse dies with `Encoding::InvalidByteSequenceError: "\xE2" on US-ASCII` --
+# spec_liquid/escaping_regression_spec.rb's U+2028/U+2029 payloads are the three that do.
+# It reads as a lost byte in the code under test and is a property of the shell. GitHub
+# runners set LANG=C.UTF-8, so CI cannot see it and a green CI cell is no protection: the
+# same three failures were written up once as a `json` gem regression before anybody looked
+# at the locale (HANDOVER §3).
+#
+# Only when unset, so an operator who deliberately runs under another locale still gets it.
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+
 reporter_required() {
   case "${REQUIRE_REPORTER_PLUGIN:-}" in
     1|true|TRUE|yes|YES) return 0 ;;

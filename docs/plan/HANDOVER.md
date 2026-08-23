@@ -1962,6 +1962,15 @@ Three are `spec_liquid/escaping_regression_spec.rb`: `| json` no longer round-tr
 and U+2029 under **json 2.21.2**, which is a gem regression and a task of its own — proven
 pre-existing by stashing the day's changes and re-running at the untouched tree.
 
+> **RETRACTED 2026-08-23. Those three are not a `json` regression, they are this container's
+> LOCALE.** `LANG` and `LC_ALL` are unset in a cloud session, so `Encoding.default_external`
+> is **US-ASCII**, and the failure is `Encoding::InvalidByteSequenceError: "\xE2" on
+> US-ASCII` raised by `JSON.parse` in the spec's own `first_label` helper — not a lost byte
+> and not `| json`'s output. Re-measured on the same tree, same gem (json 2.21.2), same
+> Liquid 5.13.0, in the Redmine 5.1 bundle: **3 failures with `LANG` unset, 0 failures with
+> `LANG=C.UTF-8`.** CI never saw them because GitHub runners set `LANG=C.UTF-8`. There is no
+> gem task here; there is a §3 entry below. Nothing about the payload table changes.
+
 **AND THE ONE THIS RUN EXISTS FOR: A 500 ON EVERY TEMPLATE RENDER, IN THIS PLUGIN'S OWN
 CODE.** Fixed in `e1b58b3`; the detail is in `colors.rb`'s header and the commit message,
 and the short version is:
@@ -2065,9 +2074,54 @@ Method note, and it is the transferable part: *removing the suspect and getting 
 evidence.* Removing it, then putting it BACK and re-running only the failures, is. The first
 step alone would have written a false finding into somebody else's plugin.
 
+### 5.1, 6.0 and 6.1 STANDALONE — measured 2026-08-23, and every cell is zero
+
+§2b above measures this plugin *inside the operator's plugin set*, which is the harder
+question and the one whose failures belong to other people. This is the other half: the same
+three Redmine branches with **no other plugin installed at all**, which is what
+`requires_redmine version_or_higher: '5.1'` actually claims and what a fresh install gets.
+
+    Redmine        Rails      Ruby    units/functionals/integration     spec/   spec_liquid/
+    5.1.13         6.1.7.10   3.2.6   1057 runs, 0F, 0E, 5 skips        2957/0  366/0
+    6.0 e22f28f    7.2.3.2    3.3.6   1057 runs, 0F, 0E, 4 skips        2957/0  366/0
+    6.1 ffffc4c    7.2.3.2    3.3.6   1057 runs, 0F, 0E, 4 skips        2957/0  366/0
+
+PostgreSQL 16 throughout, `LANG=C.UTF-8`, `db/schema.rb` deleted before every migrate. Core
+migrate, `redmine:plugins:migrate` and all ten plugin migrations ran clean on each. On 5.1
+`spec_liquid/` was additionally run against **both Liquid majors** (4.0.4 and 5.13.0):
+366/0 on each.
+
+**The one extra skip on 5.1 is the right one and is not a gap.**
+`ReporterProjectPagesHelperTest#test_reporter_dashboard_icon_uses_the_svg_sprite_on_redmine_6_and_later`
+skips with *"this Redmine (5.1.13.stable) has no SVG icon sprite"*. The 5.1 branch of that
+same divergence IS asserted, by stubbing `reporter_dashboard_svg_icons?` false — which is
+exactly the arrangement `Compat.svg_icons?`' header describes, and it is why one seam can be
+tested from a machine that cannot run the other version.
+
+**So "5.1/6.x support" is now measured twice, from two directions, and neither run needed a
+single version branch beyond the four already in `compat.rb`.** If a later session is told
+this plugin is Redmine-7-only, this table is the answer — and re-running it costs three
+clones and about forty minutes, not a rewrite.
+
 ---
 
 ## 3. Environment quirks (cloud sessions)
+
+- **`LANG` AND `LC_ALL` ARE UNSET, SO `Encoding.default_external` IS US-ASCII — AND THAT
+  FAILS THREE ESCAPING EXAMPLES THAT ARE NOT BROKEN.** Measured 2026-08-23; it is what the
+  "`json` 2.21.2 escaping regression" above actually was, and that entry is retracted.
+
+      ruby -e 'p Encoding.default_external'   # => US-ASCII in a cloud session
+
+  Any spec that hands a non-ASCII string to `JSON.parse` then dies with
+  `Encoding::InvalidByteSequenceError: "\xE2" on US-ASCII`, which reads as a lost byte in the
+  code under test and is a property of the shell. `spec_liquid/escaping_regression_spec.rb`
+  is the one that trips on it (U+2028, U+2029 and the combined payload). GitHub runners set
+  `LANG=C.UTF-8`, so CI cannot see it and a green CI cell is no protection.
+
+      export LANG=C.UTF-8 LC_ALL=C.UTF-8      # BEFORE any rspec or rake in this container
+
+  Same tree, same gems, `LANG` the only variable: **3 failures unset, 0 failures set.**
 
 - **`db/schema.rb` IS GITIGNORED, SURVIVES `git checkout -f`, AND `db:migrate` LOADS IT IN
   THE TEST ENVIRONMENT.** This is the single most expensive trap of the 2026-08-21/22

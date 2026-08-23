@@ -175,6 +175,19 @@ including the specs. `./.codex/check_ruby_floor.sh` greps for the constructs tha
 floor rules out (endless method definitions, `Hash#except`, hash value omission) and
 runs in CI.
 
+### Run under a UTF-8 locale
+
+`./.codex/test_plugin.sh` sets `LANG=C.UTF-8` when it is unset, and if you invoke `rspec`
+or `rake` yourself you want the same. With `LANG` and `LC_ALL` unset — the default in a
+container — Ruby's `Encoding.default_external` is **US-ASCII**, and every spec that hands a
+non-ASCII string to `JSON.parse` fails with
+
+    Encoding::InvalidByteSequenceError: "\xE2" on US-ASCII
+
+`spec_liquid/escaping_regression_spec.rb`'s U+2028 and U+2029 payloads are the three that
+trip on it. It reads as a lost byte in the code under test; it is the shell. GitHub runners
+set `LANG=C.UTF-8`, so CI cannot warn you.
+
 ## The `redmine_reporter` dependency — optional
 
 **You do not need it.** Clone this repository, run the scripts, and the whole suite

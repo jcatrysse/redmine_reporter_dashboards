@@ -48,6 +48,27 @@ module RedmineReporterDashboards
         hash.each_with_object({}) { |(key, value), out| out[key.to_s] = value }
       end
 
+      # Adding filter modules to a context the way `TemplateRenderer` does, so the
+      # refusal below is raised by the code path production actually takes.
+      #
+      # WHY NOT `Liquid::Strainer.create`, which is what this said first: that constant
+      # exists on Liquid 4 and NOT on Liquid 5, which replaced it with `StrainerFactory`
+      # and `StrainerTemplate`. The plugin's Gemfile declares `>= 4.0, < 6.0` because an
+      # install carrying the vendor gem has 4.x and must not be forced to upgrade, so a
+      # spec that names a constant from one major is a spec that cannot run on the other
+      # — and the two examples below failed on every supported Redmine for exactly that.
+      #
+      # `Context#add_filters` and `Context#strainer` are public and identically named on
+      # both majors, and BOTH calls are needed: Liquid 4 builds the strainer inside
+      # `add_filters` and raises there, Liquid 5 only appends and raises later, from
+      # `strainer`. Calling both leaves the raise inside the caller's `expect` block on
+      # either major.
+      def add_filters(*modules)
+        context = ::Liquid::Context.new
+        context.add_filters(modules.flatten)
+        context.strainer
+      end
+
       # ----------------------------------------------------------------
       # The inventory
       # ----------------------------------------------------------------
@@ -458,9 +479,9 @@ module RedmineReporterDashboards
       # Measured 2026-08-21 on Redmine 6.0-stable with the operator's 41 plugins installed.
       # `Filters::Colors` had a PRIVATE helper named `shift`, and the vendor gem — pulled
       # in by every one of the operator's paid plugins — globally registers 91 filters at require
-      # time, `shift` among them. `Strainer.add_filter` inspects a module's private and
-      # protected methods and refuses the module outright when one of those names is
-      # already an invokable filter:
+      # time, `shift` among them. Liquid's strainer (`Strainer` on 4, `StrainerTemplate` on 5)
+      # inspects a module's private and protected methods when it adds it, and refuses the
+      # module outright when one of those names is already an invokable filter:
       #
       #     Liquid::MethodOverrideError: Filter overrides registered public methods as
       #     non public: shift
@@ -476,8 +497,8 @@ module RedmineReporterDashboards
         # THE RULE, and it is mechanical: Liquid inspects a filter module's PRIVATE and
         # PROTECTED methods too. `support.rb`'s header already stated it for the public
         # ones — a helper beside `avg` becomes `{{ x | numeric_values }}` — and this is the
-        # other half, which cost a release: `Strainer.add_filter` REFUSES a module whose
-        # non-public method collides with a name already registered as a filter.
+        # other half, which cost a release: adding a filter module REFUSES it outright when
+        # one of its non-public methods collides with a name already registered as a filter.
         #
         # Helpers therefore live in `Support`, which is not a filter module, and a filter
         # module has no non-public instance methods at all. Nothing to collide, nothing to
@@ -495,18 +516,30 @@ module RedmineReporterDashboards
         # NOT VACUOUS, and this is the example that says so. Built to fail the way `Colors`
         # failed, so the rule above cannot quietly become a tautology if `modules` is ever
         # empty or the reflection changes.
+        #
+        # The three method bodies are written the long way on purpose. An endless
+        # definition (`def shift(input) = input`) needs Ruby 3.0, and Redmine 5.1 runs on
+        # Ruby >= 2.7 — so the short spelling put this file outside the floor the plugin
+        # declares, which is what `.codex/check_ruby_floor.sh` is for and what it caught.
         it 'is refused by Liquid when a module does keep one' do
           offender = Module.new do
-            def darker(input) = shift(input)
+            def darker(input)
+              shift(input)
+            end
+
             private
 
-            def shift(input) = input
+            def shift(input)
+              input
+            end
           end
           foreign = Module.new do
-            def shift(input) = input
+            def shift(input)
+              input
+            end
           end
 
-          expect { ::Liquid::Strainer.create(::Liquid::Context.new, [foreign, offender]) }
+          expect { add_filters(foreign, offender) }
             .to raise_error(::Liquid::MethodOverrideError, /non public: shift/)
         end
 
@@ -519,7 +552,7 @@ module RedmineReporterDashboards
             end
           end
 
-          expect { ::Liquid::Strainer.create(::Liquid::Context.new, [foreign] + Filters.modules) }
+          expect { add_filters(foreign, Filters.modules) }
             .not_to raise_error
         end
 
