@@ -1,0 +1,87 @@
+{% comment %}
+=====================================================================
+ One document for the whole set — counted in SQL, not in Liquid
+ ---------------------------------------------------------------------
+ Set the template's OUTPUT to "One document for the whole set" and its
+ SOURCE to "Issues".
+
+ THE ONE THING WORTH LEARNING FROM THIS FILE: `{% sql_aggregate %}`
+ counts in the database. It does not load the issues, so a report over
+ 40 000 issues costs the same as one over 40 — and the numbers are
+ computed over exactly the issues the reader is allowed to see.
+
+ A `{% for issue in issues %}` loop is the alternative and it is the
+ wrong tool for a total: it reads every row to add up numbers the
+ database can add up itself.
+
+ `drill: true` puts a URL on every bucket, so every row below is a link
+ into the issue list filtered to that row. It works in the PDF as well —
+ those are real link annotations, not blue text.
+=====================================================================
+{% endcomment %}
+
+{% sql_aggregate from: issues, group_by: status, drill: true, assign_to: by_status %}
+{% sql_aggregate from: issues, group_by: priority, drill: true, assign_to: by_priority %}
+
+<h1>Issue report — {{ project.name }}</h1>
+<p class="rrd-muted">{{ by_status.total }} issues in scope</p>
+
+<div class="rrd-card">
+  <h2>By status</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th class="rrd-number">Issues</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for bucket in by_status.buckets %}
+        <tr>
+          <td>
+            {% comment %} `bucket.url` is nil for a row that cannot be expressed as an
+               issue-list filter, so the link is conditional rather than assumed — a link
+               to nowhere is worse than a plain label. {% endcomment %}
+            {% if bucket.url %}
+              <a href="{{ bucket.url }}">{{ bucket.label }}</a>
+            {% else %}
+              {{ bucket.label }}
+            {% endif %}
+          </td>
+          <td class="rrd-number">{{ bucket.count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>Total</th>
+        <th class="rrd-number">{{ by_status.total }}</th>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<div class="rrd-card">
+  <h2>By priority</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Priority</th>
+        <th class="rrd-number">Issues</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for bucket in by_priority.buckets %}
+        <tr>
+          <td>{{ bucket.label }}</td>
+          <td class="rrd-number">{{ bucket.count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% comment %} A table long enough to cross a page keeps its header on every page, and a
+   `.rrd-card` is never split down the middle. Neither needs anything from you — the report
+   stylesheet does both, in the HTML preview and in the PDF. {% endcomment %}
+<p class="rrd-muted">Counted in SQL over the issues this report's reader may see.</p>

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-23</title>
+@@REPORT_STYLESHEET@@
+</head><body>
+<h1>DRILL-THROUGH</h1>
+
+<!-- The WITNESS: an ordinary HTML link around text. Every engine in the matrix turns this
+     into an annotation, and poppler can see it — which is what lets the harness tell "this
+     engine draws no SVG links" from "our reader cannot see them". -->
+<p><a href="https://drill.example/plain?filter=all">PLAIN-LINK</a></p>
+
+<!-- Shaped like `Charts::SvgRenderer` really emits: `<a xlink:href href target>` around a
+     `<rect>`, with the datum's value in a `<title>` inside the anchor. BOTH href spellings,
+     because SVG 2 deprecated the xlink form and SVG 1.1 readers only know it. -->
+<svg class="rrd-chart" xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink" width="300" height="140"
+     role="img" aria-labelledby="d-t d-d">
+  <title id="d-t">bar chart</title>
+  <desc id="d-d">bar chart. 2 categories: New, Closed. Issues: 12, 43</desc>
+  <rect x="0" y="0" width="300" height="140" fill="#FFFFFF"/>
+  <a xlink:href="https://drill.example/bar?status=new" href="https://drill.example/bar?status=new" target="_blank"><rect x="20" y="60" width="60" height="60" fill="#0072B2" stroke="#00528C" stroke-width="1"/><title>New: 12</title></a>
+  <a xlink:href="https://drill.example/bar?status=closed" href="https://drill.example/bar?status=closed" target="_blank"><rect x="110" y="20" width="60" height="100" fill="#E69F00" stroke="#A67300" stroke-width="1"/><title>Closed: 43</title></a>
+</svg>
+</body></html>

@@ -1,112 +1,74 @@
 # frozen_string_literal: true
 
-require_relative 'scope_resolution'
-require_relative 'drill_through'
+require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
+require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
+require_relative '../redmine_reporter_dashboards/liquid/tag_params'
+require_relative '../redmine_reporter_dashboards/aggregation/drill_through'
 
 module SqlAggregation
   # Liquid tag: {% sql_aggregate ... %}   (legacy alias: {% geo_aggregate ... %})
   #
-  # Runs server-side SQL aggregation and assigns results to a Liquid variable.
-  # Replaces expensive {% for issue in issues %} loops in report templates.
+  # Runs server-side SQL aggregation and assigns the result to a Liquid variable, instead of
+  # a {% for issue in issues %} loop. The parameter surface is documented for the people who
+  # write templates in `docs/template-authoring.md`; what follows is the behaviour a
+  # maintainer needs and the doc does not carry.
   #
-  # Usage (primary — uses the issues drop already in context):
-  #   {% sql_aggregate from: issues, period: month, periods: 6,
-  #      closed_statuses: "Closed;Rejected", assign_to: stats %}
+  # --- MODE SWITCHING ---
   #
-  # Usage (after reporter plugin fix exposes query_id):
-  #   {% sql_aggregate query_id: query_id, period: week, periods: 13,
-  #      closed_statuses: "Closed;Rejected", assign_to: stats %}
+  #   no group_by                 time series
+  #   group_by                    breakdown
+  #   group_by + split_by         crosstab
+  #   group_by: flags             scalar counters; never valid as split_by
+  #   group_by: completeness      filled/empty per field; never valid as split_by
   #
-  # Usage (custom field breakdown, crosstab, age histogram, KPI tiles):
-  #   {% sql_aggregate from: issues, group_by: cf_92, sort: count, limit: 10,
-  #      assign_to: by_department %}
-  #   {% sql_aggregate from: issues, group_by: cf_92, split_by: cf_86, assign_to: matrix %}
-  #   {% sql_aggregate from: issues, group_by: period, split_by: cf_86,
-  #      period: month, periods: 12, assign_to: per_month %}
-  #   {% sql_aggregate from: issues, group_by: age, age_buckets: "30;60;90;180", assign_to: ages %}
-  #   {% sql_aggregate from: issues, group_by: flags, closed_statuses: "Closed;Rejected", assign_to: kpi %}
+  # A `group_by` over one of the seven core fields with none of the newer parameters runs
+  # the original `.breakdown` path unchanged, so templates written before the dimension API
+  # keep their exact keys, ordering and labels.
   #
-  # --- Dimensions (group_by / split_by) ---
+  # `sort` / `limit` / `other_label` are IGNORED for `period` and `age`: those axes are
+  # always chronological or ascending and include their empty buckets.
   #
-  #   status | priority | tracker | assignee | author | category | version
-  #   cf_<id>   issue custom field by numeric id (cf_92)
-  #   period    date bucket    — period / periods / date_field
-  #   age       age bucket     — age_buckets / age_field
-  #   flags        scalar counters  — group_by only, never split_by
-  #   completeness filled/empty per field (fields:) — group_by only, never split_by
+  # --- RESULT KEYS ---
   #
-  # --- Parameters ---
+  #   time series  labels, created, closed, open_now, total, period, periods
+  #   breakdown    buckets [{label, count, value, filter}], total, group_by, dimension,
+  #                field_name, multi_value, truncated
+  #   crosstab     + series, series_entries, rows [{label, total, counts, cells, value,
+  #                filter}], matrix, columns, split_by, series_field_name
+  #   flags        flags {...}, the same counters at top level, and
+  #                stages [{key, label, count, filter}]
+  #   completeness buckets [{label, count, empty, total, pct, value, filter, empty_filter}]
+  #                in the order `fields:` names them, plus fields and total
   #
-  #   assign_to       — result variable name                     (default: stats)
-  #   from            — Liquid var holding the issues drop       (default: issues)
-  #   query_id        — IssueQuery id to aggregate instead
-  #   group_by        — dimension; switches to breakdown mode
-  #   split_by        — second dimension; requires group_by, produces a crosstab
-  #   period          — day | week | month | year                (default: month)
-  #   periods         — number of periods back  (default 30/13/6/3, capped 90/52/24/10)
-  #   months          — backward-compatible alias for periods when period is month
-  #   date_field      — created | closed: which timestamp `period` buckets on (default: created)
-  #   closed_statuses — semicolon/comma-separated status names (else the is_closed flag)
-  #   sort            — count (desc) | label (asc, natural) | position  (default: count)
-  #   limit           — keep the top N rows, remainder collapses into `other_label` (default: 0 = all)
-  #   other_label     — label of the collapsed row                (default: Other)
-  #   empty_label     — label of the no-value row (default: (none); Unassigned for assignee)
-  #   age_buckets     — ascending day boundaries                 (default: 30;60;90;180)
-  #   age_field       — created | updated | due                  (default: created)
-  #   fields          — semicolon/comma-separated field list for group_by: completeness
-  #   user_label      — name | login for the assignee/author dimensions (default: name)
-  #   measure         — count (default) | distinct | sum | avg
-  #   of              — field the measure applies to (author, cf_94, estimated_hours, …)
-  #   drill           — true adds drill-through URLs                (default: false)
-  #   drill_max_url   — maximum URL length before an element gets no URL (default: 2000)
-  #   drill_inherit   — all (default) | filters: what a drill-down URL inherits
+  # --- DRILL-THROUGH ---
   #
-  # sort / limit / other_label are IGNORED for `period` and `age`: those axes are
-  # always in chronological / ascending order and include their empty buckets.
+  # `drill: true` adds drill_available, drill_degraded, base_url, a `url` on every bucket,
+  # row, series entry and stage, and `cell_urls` (+ cell_urls_truncated) for a crosstab.
   #
-  # --- Result keys ---
+  # It IMPLIES the dimension path, because only that path knows the raw stored value behind
+  # a label — so for a core field the labels become the dimension ones (display name for
+  # users) rather than the legacy ones; `user_label: login` keeps the old text.
   #
-  #   Time series (no group_by): labels, created, closed, open_now, total, period, periods
-  #   Breakdown:                 buckets [{label, count, value, filter}], total,
-  #                              group_by, dimension, field_name, multi_value, truncated
-  #   Crosstab (split_by):       + series, series_entries, rows [{label, total,
-  #                              counts, cells, value, filter}], matrix, columns,
-  #                              split_by, series_field_name
-  #   flags:                     flags {...} plus the same counters at top level,
-  #                              and stages [{key, label, count, filter}]
-  #   completeness:              buckets [{label, count, empty, total, pct, value,
-  #                              filter, empty_filter}] in the order fields: names
-  #                              them, plus fields and total (the issue count)
-  #
-  # --- Drill-through (drill: true) ---
-  #
-  #   Adds drill_available, drill_degraded, base_url, a `url` on every bucket /
-  #   row / series_entries entry / stage, and `cell_urls` (+ cell_urls_truncated)
-  #   for a crosstab (rows x series, aligned with `matrix`). Each URL is the Redmine issue list showing the
-  #   report's own issues — filters, columns, grouping, totals and sort inherited
-  #   — narrowed to that one element.
-  #
-  #   drill: true implies the dimension path, because only it knows the raw stored
-  #   value behind a label. For one of the seven core fields that means the
-  #   dimension labels (display name for users) instead of the legacy ones; pass
-  #   user_label: login to keep the old text.
-  #
-  #   Nothing is emitted when no IssueQuery can be resolved: drill_available is
-  #   then false and there are no URLs at all, because a dimension-only URL would
-  #   silently show issues from outside the report scope.
-  #
-  # A `group_by` over the seven core fields with none of the new parameters runs
-  # the original .breakdown code path unchanged, so templates written before the
-  # dimension API keep their exact keys, ordering and labels.
+  # Nothing is emitted when no IssueQuery can be resolved: `drill_available` is false and
+  # there are no URLs at all, because a dimension-only URL would silently show issues from
+  # outside the report scope.
   #
   # On any error the tag assigns an empty-safe hash and logs to Rails.logger
   # so the rest of the template renders without crashing.
 
   class LiquidAggregateTag < Liquid::Tag
-    include SqlAggregation::ScopeResolution
+    # T-07: two resolution sources, both starting from Issue.visible. The six-source
+    # archaeology this replaced lived in Glue::Legacy::ScopeResolution and was DELETED by
+    # S-30 (2026-08-13). Since curator decision #1 (2026-08-14) a render arriving with no
+    # RenderContext resolves NOTHING AT ALL — `query_id:` included, because resolving it
+    # needed an ambient actor and that read is gone with the host-render path it served. The
+    # tag assigns the empty result and logs, as it already did for an unresolvable scope.
+    include RedmineReporterDashboards::Liquid::ScopeBinding
 
-    # Matches: key: "quoted" | key: 'quoted' | key: bare_value
-    PARAM_RE = /(\w+)\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s,]+))/
+    # Markup parsing and the quoted-means-literal rule live in one place for all four
+    # tags — see `RedmineReporterDashboards::Liquid::TagParams`, which carries the
+    # decision and the upgrade note.
+    TagParams = RedmineReporterDashboards::Liquid::TagParams
 
     # Parameters that only exist in dimension mode. When none of them is used and
     # group_by names one of the seven core fields, the legacy .breakdown path runs
@@ -124,10 +86,25 @@ module SqlAggregation
 
     def initialize(tag_name, markup, tokens)
       super
-      @raw_params = parse_markup(markup)
+      @raw_params = TagParams.parse(markup)
     end
 
     def render(context)
+      # THE COOPERATIVE DEADLINE (T-17). One line, at the top of `render`, because a
+      # resource limit bounds WORK UNITS and this tag's cost is TIME: a
+      # sql_aggregate tag running a ninety-second query costs exactly one render-score
+      # point, and no resource limit will ever notice it.
+      #
+      # STALE UNTIL S-30 CORRECTED IT: this used to say "a no-op today on every existing
+      # install: these tags still run inside the host plugin's renderer". `TemplateRenderer`
+      # has been the renderer for every report this plugin produces since T-23, and it
+      # binds a budget. The sentence survives as a note on the OTHER case — a template
+      # rendered by the host plugin binds no budget, and `Budget.from` answers a null
+      # object rather than nil precisely so this call site is safe there. When
+      # `TemplateRenderer` is the one rendering, this same
+      # line is what stops a slow template.
+      RedmineReporterDashboards::Liquid::Budget.from(context).check!('sql_aggregate')
+
       # Resolve assign_to first so the rescue block always has the correct name,
       # even if resolve_scope raises before we reach the assignment below.
       assign_to = str_param(@raw_params['assign_to'], context, default: 'stats')
@@ -137,6 +114,23 @@ module SqlAggregation
       if scope.nil?
         Rails.logger.warn('[sql_aggregate] could not resolve an AR scope — skipping aggregation')
         context.scopes.last[assign_to] = empty_result
+        return ''
+      end
+
+      # A TIME-ENTRY SCOPE GOES TO THE TIME-ENTRY AGGREGATOR — T-31 increment 2. This kernel
+      # counts `DISTINCT issues.id`, so answering a time-entry scope with it is §Findings
+      # S-13: issue counts under time-entry labels. Increment 1 refused here because there was
+      # nowhere correct to send it; now there is, and what remains refused is a source with no
+      # aggregator at all — see `time_entry_result`.
+      #
+      # `{% version_rollup %}` still REFUSES rather than dispatching, through
+      # `ScopeBinding.issue_kernel_permitted?`, which is why that method still exists with one
+      # caller: a per-target-version rollup over time entries is a different report nobody has
+      # specified.
+      source = RedmineReporterDashboards::Liquid::ScopeBinding.report_source(context)
+      if source != :issues
+        result = time_entry_result(scope, context, source)
+        context.scopes.last[assign_to] = result || empty_result
         return ''
       end
 
@@ -176,9 +170,106 @@ module SqlAggregation
 
     private
 
-    # Scope resolution (resolve_scope, scope_from_registers, scope_from_query_id,
-    # scope_from_drop, ar_scope?) lives in SqlAggregation::ScopeResolution, shared
-    # with {% version_rollup %}.
+    # THE OWNED TIME-ENTRY PATH. One dispatch, and everything about how a time entry is
+    # aggregated lives in `Aggregation::TimeEntryAggregator` — including the positional
+    # grouped read that D-1's still-open `SUM` hazard requires. This method's whole job is to
+    # translate the tag's markup into that module's arguments and to refuse a source it has
+    # no aggregator for.
+    #
+    # `group_by` IS REQUIRED HERE, unlike the issue path's time series. There is no
+    # time-entry equivalent of `aggregate`'s created/closed flow — a time entry is not opened
+    # and closed — so a tag with no dimension has nothing to ask for, and answering the empty
+    # result says that more honestly than inventing a series.
+    def time_entry_result(scope, context, source)
+      render_context = RedmineReporterDashboards::Liquid::RenderContext.from(context)
+      diagnostics    = render_context&.diagnostics
+      aggregator     = RedmineReporterDashboards::Aggregation::TimeEntryAggregator
+
+      unless source == :time_entries
+        degrade_here(diagnostics, :aggregation_source_unsupported,
+                     "no aggregator for a #{source} scope",
+                     source: source.to_s, tag: 'sql_aggregate')
+        return nil
+      end
+
+      group_by = str_param(@raw_params['group_by'], context)
+      if group_by.strip.empty?
+        degrade_here(diagnostics, :aggregation_group_by_required,
+                     'a time-entry aggregation needs group_by',
+                     source: source.to_s)
+        return nil
+      end
+
+      report_unsupported_params(diagnostics, context)
+
+      aggregator.breakdown(
+        scope,
+        group_by: group_by,
+        # EXPLICIT, NEVER `User.current` (INV-1). The aggregator needs it for exactly one
+        # thing — scoping the `issue` dimension's labels by visibility — and a nil actor makes
+        # it withhold those labels rather than read them unscoped.
+        actor: render_context&.actor,
+        measure: str_param(@raw_params['measure'], context, default: aggregator::DEFAULT_MEASURE),
+        sort: str_param(@raw_params['sort'], context, default: aggregator::DEFAULT_SORT),
+        limit: int_param(@raw_params['limit'], context, default: aggregator::DEFAULT_LIMIT),
+        other_label: str_param(@raw_params['other_label'], context,
+                               default: aggregator::DEFAULT_OTHER_LABEL),
+        empty_label: str_param(@raw_params['empty_label'], context, default: nil),
+        logger: Rails.logger,
+        # THE AUTHOR SEES THE REFUSAL TOO. A mistyped `group_by` used to answer the empty
+        # result with the reason only in the server log — the same finding an independent
+        # review raised against increment 1, one layer down (INV-4).
+        diagnostics: diagnostics
+      )
+    end
+
+    # Parameters the issue path understands and the time-entry path does not. **They used to
+    # be dropped in silence**, which an independent review measured end to end: a template
+    # asking for a crosstab got a single axis, `drill: true` produced no `bucket.url` at all,
+    # and nothing on the page said either — while the README promised drill-through. HANDOVER
+    # §1's rule is that every aggregator entry point LOGS AND DEGRADES on an argument it
+    # cannot use, and these are arguments it cannot use.
+    #
+    # Named individually rather than as "anything not in the supported list", because a typo
+    # is a different finding from an unsupported feature and the message has to say which.
+    TIME_ENTRY_UNSUPPORTED_PARAMS = {
+      'split_by' => 'a crosstab over two dimensions',
+      'period' => 'period bucketing',
+      'periods' => 'period bucketing',
+      'months' => 'period bucketing',
+      'drill' => 'drill-through URLs',
+      'age_buckets' => 'age bucketing',
+      'age_field' => 'age bucketing',
+      'date_field' => 'date-field selection',
+      'user_label' => 'the user-label switch',
+      'of' => 'a measured custom field',
+      'fields' => 'the completeness field list',
+      'closed_statuses' => 'the closed-status list'
+    }.freeze
+
+    def report_unsupported_params(diagnostics, _context)
+      present = TIME_ENTRY_UNSUPPORTED_PARAMS.keys.select { |key| @raw_params.key?(key) }
+      return if present.empty?
+
+      wanted = present.map { |key| TIME_ENTRY_UNSUPPORTED_PARAMS[key] }.uniq
+      degrade_here(diagnostics, :aggregation_params_unsupported,
+                   "#{present.join(', ')} #{present.one? ? 'is' : 'are'} not supported over " \
+                   "time entries (#{wanted.join('; ')}); the aggregation ran without " \
+                   "#{present.one? ? 'it' : 'them'}",
+                   params: present.join(','))
+    end
+
+    # Both halves, in one place: the log line for whoever is on call and the degradation the
+    # template author reads on the page.
+    def degrade_here(diagnostics, code, message, **data)
+      Rails.logger.warn("[sql_aggregate] #{message}")
+      diagnostics&.degrade(code, detail: message, **data)
+    end
+
+    # Scope resolution (resolve_scope, resolve_query) lives in
+    # RedmineReporterDashboards::Liquid::ScopeBinding, shared with {% version_rollup %}.
+    # It has exactly two sources; see that file for why there is no enforce_visibility
+    # any more.
 
     # ------------------------------------------------------------------
     # Modes — each returns a result Hash, or nil for "assign the empty result"
@@ -425,27 +516,25 @@ module SqlAggregation
     # Parameter helpers
     # ------------------------------------------------------------------
 
-    def parse_markup(markup)
-      params = {}
-      markup.to_s.scan(PARAM_RE) do |key, dq, sq, bare|
-        params[key.strip] = dq || sq || bare || ''
-      end
-      params
-    end
-
+    # QUOTED MEANS LITERAL, BARE MEANS A VARIABLE — decided once, in `TagParams`,
+    # which carries the reasoning and the upgrade note.
     def str_param(value, context, default: '')
-      return default if value.nil? || value.empty?
-
-      resolved = context[value]
-      resolved.nil? ? value : resolved.to_s
+      TagParams.resolve(value, context, default: default)
     end
 
     def int_param(value, context, default: 0)
       return default if value.nil? || value.empty?
 
       # Skip context lookup for plain numeric literals — avoids accidentally
-      # resolving a context key named e.g. "6" to an unrelated variable.
-      resolved = value.match?(/\A\d+\z/) ? value : (context[value] || value)
+      # resolving a context key named e.g. "6" to an unrelated variable. A QUOTED
+      # value is a literal for the same reason every other quoted value is: `limit: "6"`
+      # asks for six, never for whatever a variable named `6` holds.
+      resolved =
+        if TagParams.quoted?(value) || value.match?(/\A\d+\z/)
+          value.to_s
+        else
+          context[value.to_s] || value.to_s
+        end
       n = resolved.to_i
       n.zero? ? default : n
     end

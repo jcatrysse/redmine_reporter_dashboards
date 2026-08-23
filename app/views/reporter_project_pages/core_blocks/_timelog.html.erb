@@ -1,6 +1,6 @@
 <% if editable %>
   <div class="contextual">
-    <%= link_to_function sprite_icon('settings', l(:label_options)),
+    <%= link_to_function reporter_dashboard_icon('settings', l(:label_options)),
                          "$('##{block}-settings').toggle();",
                          class: 'icon-only icon-settings',
                          title: l(:label_options) %>
@@ -10,7 +10,7 @@
 <h3>
   <%= link_to l(:label_spent_time), project_time_entries_path(project, user_id: 'me') %>
   (<%= l(:label_last_n_days, days) %>: <%= l_hours_short entries.sum(&:hours) %>)
-  <%= link_to sprite_icon('time-add', l(:button_log_time)),
+  <%= link_to reporter_dashboard_icon('time-add', l(:button_log_time)),
               new_time_entry_path(project_id: project.id),
               class: 'icon-only icon-add',
               title: l(:button_log_time) if User.current.allowed_to?(:log_time, project) %>

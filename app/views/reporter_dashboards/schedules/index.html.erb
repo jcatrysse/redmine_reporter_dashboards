@@ -1,0 +1,71 @@
+<%#
+  T-25 — the schedules of one project.
+
+  Redmine's own chrome only: `.contextual`, `h2`, `table.list`, `p.nodata`, `.warning`.
+  CLAUDE.md §4 forbids plugin-local design tokens in chrome, and there are none here.
+%>
+<div class="contextual">
+  <% if User.current.allowed_to?(:manage_reporter_dashboards_schedules, @project) %>
+    <%= link_to reporter_dashboard_icon('add', l(:label_reporter_schedule_new)),
+                new_project_reporter_schedule_path(@project), class: 'icon icon-add' %>
+  <% end %>
+</div>
+
+<h2><%= l(:label_reporter_schedule_plural) %></h2>
+
+<%#
+  FR-44 IN THE PLACE SOMEBODY LOOKS. The rake task prints the same warnings, but an
+  operator wondering where their report went comes HERE first — and the failure this
+  guards is one where nothing is red anywhere: the cron entry was never added, so every
+  schedule sits looking perfectly configured and nothing is ever sent.
+%>
+<% if @heartbeat.warning? %>
+  <div class="warning">
+    <p><strong><%= l(:label_reporter_schedule_not_running) %></strong></p>
+    <p><%= l(:text_reporter_schedule_needs_cron) %></p>
+  </div>
+<% end %>
+
+<% if @schedules.any? %>
+  <table class="list">
+    <thead>
+      <tr>
+        <th><%= l(:field_redmine_reporter_dashboards_schedule_template) %></th>
+        <th><%= l(:field_redmine_reporter_dashboards_schedule_repeat) %></th>
+        <th><%= l(:label_reporter_schedule_next_run) %></th>
+        <th><%= l(:label_reporter_schedule_last_run) %></th>
+        <th><%= l(:field_redmine_reporter_dashboards_schedule_render_as) %></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @schedules.each do |schedule| %>
+        <tr class="<%= cycle('odd', 'even') %>">
+          <td>
+            <%= link_to reporter_schedule_name(schedule),
+                        project_reporter_schedule_path(@project, schedule) %>
+            <%# A DISABLED SCHEDULE IS STILL LISTED AND SAYS SO. Hiding it is how somebody
+                spends an afternoon wondering where a report they switched off went. %>
+            <% unless schedule.enabled %>
+              <span class="tag"><%= l(:label_reporter_schedule_disabled) %></span>
+            <% end %>
+          </td>
+          <td><%= reporter_schedule_repeat_label(schedule) %></td>
+          <td><%= format_date(schedule.next_run_on_or_nil) || '-' %></td>
+          <td><%= reporter_schedule_last_run(schedule) %></td>
+          <td><%= reporter_schedule_identity_label(schedule) %></td>
+          <td class="buttons">
+            <% if User.current.allowed_to?(:manage_reporter_dashboards_schedules, @project) %>
+              <%= link_to reporter_dashboard_icon('edit', l(:button_edit)),
+                          edit_project_reporter_schedule_path(@project, schedule),
+                          class: 'icon icon-edit' %>
+              <%= delete_link project_reporter_schedule_path(@project, schedule) %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>

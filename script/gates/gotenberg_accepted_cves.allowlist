@@ -1,0 +1,84 @@
+# Vulnerabilities accepted, for a bounded time, in the Gotenberg image pinned by
+# docker-compose.gotenberg.yml. Gate: script/gates/cve_accepted_diff.sh, run nightly by
+# .github/workflows/gotenberg-cve.yml.
+#
+# Format, one record per line:
+#
+#     ADVISORY-ID | valid-through (YYYY-MM-DD) | why it is accepted
+#
+# Blank lines and `#` lines are ignored. Every field is validated and a malformed record
+# FAILS the gate rather than being skipped: an acceptance whose date does not parse is an
+# acceptance that never expires, and this project already has a rule about things that
+# never expire.
+#
+# --- WHY THIS FILE EXISTS AT ALL ------------------------------------------------------
+#
+# The scan was `trivy --exit-code 1` first, and on its first real run it went red and
+# STAYED red for a reason it had no way to say. MEASURED 2026-08-10: the pinned image has
+# five fixable HIGH findings across four advisories, and `gotenberg/gotenberg:8` and
+# `gotenberg/gotenberg:8.35.0` BOTH resolve to the digest already pinned — 8.35.0 being
+# the newest tag upstream publishes. The workflow's own remediation ("move the pin")
+# named an action that did not exist.
+#
+# A gate nobody can satisfy gets switched off, and a gate switched off is worse than no
+# gate — INV-4. Making it advisory is forbidden in the other direction (CLAUDE.md §7). So
+# the gate stays a gate and the exceptions are enumerated here, each dated, each with a
+# reason. What the gate then refuses is:
+#
+#   1. a fixable HIGH/CRITICAL this file does not name  — a new vulnerability
+#   2. an entry whose valid-through date has passed     — an acceptance nobody re-examined
+#   3. an entry the scan no longer reports              — a stale exemption; delete it
+#   4. a malformed record — an id that could not have come off a scan, a date that is not
+#      a real day, no reason, or an expiry more than 90 days out
+#
+# (2) is HARD in the nightly scan and in any change touching this file, the compose pin or
+# the gate. It is a WARNING in `ci.yml`'s `gates` job, which runs on every branch: a hard
+# expiry there turns the morning after a date passes into a red build on work that cannot
+# fix it, and the cheapest unblock would be a date bump nobody thought about. (4) is hard
+# everywhere.
+#
+# THE 90-DAY CEILING IS THE GATE'S, not a convention. `2099-12-31 | reason` is a permanent
+# exemption wearing a date, and requiring an expiry to be PRESENT does not bound it.
+#
+# (3) is what stops this file becoming permanent furniture, and it is the same assertion
+# zero_reporter.allowlist above it lives under: THIS LIST MAY ONLY SHRINK, except when a
+# newly published vulnerability is consciously accepted with a date.
+#
+# --- WHAT `valid-through` MEANS -------------------------------------------------------
+#
+# Not a prediction of when a fix lands. It is the date somebody must LOOK AGAIN: has
+# upstream rebuilt, and is the reason on the record still true? Thirty days makes that a
+# nightly build going red once a month rather than a calendar entry nobody keeps. The gate
+# will not accept more than 90.
+#
+# ======================================================================================
+# Gotenberg 8.35.0 — digest a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+# ======================================================================================
+#
+# ALL FOUR ENTRIES SHARE THE REASON ABOVE: there is nowhere to move the pin to. The Debian
+# fixes exist; a Gotenberg image carrying them does not.
+#
+# WHAT CONTAINS THEM MEANWHILE is in docker-compose.gotenberg.yml and is not rhetorical:
+# `internal: true` (no route off the network), a non-root user with Chromium's own sandbox
+# left ON, a read-only root filesystem, `cap_drop: ALL`, `no-new-privileges`, and the
+# LibreOffice and PDF-engine routes switched off. None of that fixes a use-after-free. It
+# decides what an attacker reaches after one.
+
+# THE ONE THAT MATTERS, because Chromium is the render path — the process that parses a
+# report's HTML. A sandbox escape means the containment above is all that is left, which
+# is exactly why the compose file refuses `--no-sandbox` and keeps the container non-root.
+CVE-2026-19155 | 2026-09-09 | chromium/chromium-common 151.0.7922.71: sandbox escape via use-after-free in Payments; fixed in 151.0.7922.108-1~deb13u1, which no published Gotenberg image contains.
+
+# THE THREE IN `usr/bin/pdfcpu`, reachable only through the PDF-engine routes — which the
+# documented compose file starts the container WITHOUT (`--pdfengines-disable-routes`), so
+# neither this plugin nor anyone following the example reaches the code. That is a
+# mitigation and NOT an argument that the finding is wrong: Trivy scans the image, and an
+# operator who drops that flag gets the exposure back.
+CVE-2026-46602 | 2026-09-09 | pdfcpu / golang.org/x/image v0.41.0: unbounded allocation decoding a TIFF; fixed in 0.43.0. Unreachable with --pdfengines-disable-routes.
+# CVE-2026-46604 (x/image: panic decoding an invalid TIFF) was accepted alongside the two
+# entries around it on 2026-08-10 and DELETED on 2026-08-11, when the stale arm fired on
+# run 31468632140: the scan of the SAME digest no longer reports it, so the acceptance
+# exempted nothing. The image did not change — the vulnerability database did. This
+# comment is not an exemption; it exists so the next scan that reports the id again reads
+# as "the database re-listed it" rather than as a new finding nobody has seen.
+CVE-2026-56852 | 2026-09-09 | pdfcpu / golang.org/x/text v0.37.0: denial of service on invalid UTF-8 input; fixed in 0.39.0. Unreachable with --pdfengines-disable-routes.

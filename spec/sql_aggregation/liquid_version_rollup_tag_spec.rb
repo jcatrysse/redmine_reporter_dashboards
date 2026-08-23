@@ -27,8 +27,38 @@ unless defined?(Setting)
   end
 end
 
-require_relative '../../lib/sql_aggregation/query_aggregator'
+# `User.current` — NOW AN EXPLODING STUB, WHICH IS THE OPPOSITE OF WHAT IT USED TO BE.
+#
+# It answered a memoised `Object.new` from T-20, and it had to: `Drops::VersionDrop` refuses a
+# nil RenderContext (INV-1), so the tag asked `Liquid::TagContext` for one, and on a render
+# this plugin did not produce that fallback read `User.current`. A DB-less spec process does
+# not define it, and the tag's rescue turned the resulting NameError into an EMPTY row list —
+# a degradation indistinguishable from an aggregation that found nothing.
+#
+# Curator decision #1 deleted `TagContext` and the fallback. The first version of this comment
+# claimed the stub was still load-bearing "because the frozen aggregation kernel reads
+# `User.current` too", and MUTATION REFUTED THAT IN ONE RUN: replacing the body with a `raise`
+# left all 15 examples green, because the kernel is doubled in this DB-less file and nothing
+# else on the tag's path touches it. That is `HANDOVER.md`'s "believe a survivor" — the claim
+# was written from reading the code, and reading was wrong.
+#
+# So rather than delete the stub or keep a false reason for it, it is inverted into a control:
+# if any part of this tag's path ever reaches for the ambient actor again, these examples fail
+# loudly instead of quietly resolving somebody. Same shape as
+# `spec/liquid/scope_binding_spec.rb`'s `never reads User.current`, and it costs nothing.
+class RollupTagUser
+  def self.current
+    raise 'User.current was read: the version_rollup tag takes its actor from the ' \
+          'RenderContext, and a render without one never reaches decoration ' \
+          '(INV-1, curator decision #1)'
+  end
+end
+
+require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 require_relative '../../lib/sql_aggregation/liquid_version_rollup_tag'
+# S-30: the legacy resolution module is DELETED. These examples build every context
+# from an owned `RenderContext` (see `owned_registers` below), which is how every render
+# has been constructed since T-26a, so there is nothing left to require here.
 
 # AR-scope stub that satisfies ar_scope? (where/group/count).
 class RollupTagScope
@@ -78,6 +108,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
 
   before do
     stub_const('Version', RollupTagVersion)
+    stub_const('User', RollupTagUser)
     RollupTagVersion.registry = {
       1 => RollupTagVersion::Ver.new(1, 'Beta 2.0', nil, nil, 'open'),
       2 => RollupTagVersion::Ver.new(2, 'Alpha 1.0', nil, nil, 'open')
@@ -93,45 +124,126 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     Liquid::Context.new({}, assigns, registers)
   end
 
-  def drop_with(scope)
-    obj = Object.new
-    obj.instance_variable_set(:@issues, scope)
-    obj
+  # --- S-30 · THE OWNED HARNESS -------------------------------------------------------
+  #
+  # These examples used to hand the tag a scope through an `issues` drop, one of the six
+  # sources `Glue::Legacy::ScopeResolution` resolved. That module is deleted, so the scope
+  # arrives the way every production render has supplied it since T-26a: an explicit
+  # `RenderContext` in the registers. `actor:` is mandatory, which is INV-1 working.
+  # A memoised METHOD and not a constant — see the identical note in
+  # `liquid_aggregate_tag_spec.rb`. Two files each assigning `SPEC_ACTOR` inside a
+  # `describe` block define one `Object::SPEC_ACTOR` between them.
+  def spec_actor
+    @spec_actor ||= Struct.new(:id, :login).new(1, 'spec-actor').freeze
+  end
+
+  def owned_registers(scope: nil)
+    context = RedmineReporterDashboards::Liquid::RenderContext.new(
+      actor: spec_actor, scope: scope
+    )
+    { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY => context }
   end
 
   describe 'aggregation + decoration' do
     it 'assigns the rows to the default variable "versions"' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues').render(ctx)
       expect(ctx.scopes.last['versions']).to be_an(Array)
     end
 
     it 'decorates each row with a version name (None for a nil version_id)' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, assign_to: versions').render(ctx)
       names = ctx.scopes.last['versions'].map { |r| r['name'] }
       expect(names).to eq(['Alpha 1.0', 'Beta 2.0', 'None']) # sorted case-insensitively
     end
 
-    it 'attaches a VersionDrop for real versions and nil for the None bucket' do
-      ctx = build_context('issues' => drop_with(scope))
+    # T-20 changed the CLASS behind `row['version']` from the addon's own drop to the
+    # owned `Drops::VersionDrop`. Asserted by class, because the accessor set is what a
+    # template sees and the two answer the same names — a duck-typed assertion would
+    # have passed the deleted class just as happily.
+    it 'attaches the owned VersionDrop for real versions and nil for the None bucket' do
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues').render(ctx)
       rows = ctx.scopes.last['versions']
       real = rows.find { |r| r['version_id'] == 1 }
       none = rows.find { |r| r['version_id'].nil? }
-      expect(real['version']).to be_a(RedmineReporterDashboards::Liquid::VersionDrop)
+      expect(real['version']).to be_a(RedmineReporterDashboards::Liquid::Drops::VersionDrop)
       expect(none['version']).to be_nil
     end
 
+    # The accessors a shipped template actually reads off `row.version`
+    # (`examples/version_status_dashboard.liquid` uses every one of these). T-20 is a
+    # class swap and must not be a vocabulary change; `project_name` and
+    # `project_identifier` in particular were only on the addon's drop until this task.
+    it 'answers every accessor the retired drop published' do
+      ctx = build_context({}, owned_registers(scope: scope))
+      build_tag('from: issues').render(ctx)
+      drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']
+
+      expect(drop.name).to eq('Beta 2.0')
+      expect(drop.url).to eq('https://redmine.test/versions/1')
+      expect(drop.issues_url).to include('status_id=*')
+      expect(drop.open_issues_url).to include('status_id=o')
+      expect(drop.closed_issues_url).to include('status_id=c')
+      expect(drop.time_url).to include('issue.fixed_version_id')
+      expect(drop.roadmap_url).to include('/roadmap')
+      # nil project on this fixture — the point is that it answers rather than raises.
+      expect(drop.project_identifier).to be_nil
+      expect(drop.project_name).to be_nil
+    end
+
+    # ONE context for the whole decoration, not one per row. Two rows have a version,
+    # so a per-row build would read the ambient actor twice and hand out two Batches
+    # for one render.
+    it 'builds one render context for every row' do
+      ctx = build_context({}, owned_registers(scope: scope))
+      build_tag('from: issues').render(ctx)
+      contexts = ctx.scopes.last['versions'].filter_map { |r| r['version'] }
+                    .map { |d| d.instance_variable_get(:@render_context) }
+
+      expect(contexts.length).to eq(2)
+      expect(contexts.uniq(&:object_id).length).to eq(1)
+    end
+
+    # S-30 DELETED the example that used to sit here: *"renders under the legacy fallback
+    # context when no owned renderer supplied one"*. Its subject was the seam itself — a
+    # render arriving with NO `RenderContext`, where the actor came from the ambient
+    # `User.current` via `TagContext`. There is no such render any more, so the example
+    # asserted the behaviour of deleted code.
+    #
+    # What it was really protecting is INV-1 — that the drop carries an EXPLICIT actor
+    # rather than reading an ambient one — and that is kept, pointed at the owned path,
+    # by the example below.
+    #
+    # CURATOR DECISION #1 then deleted `TagContext` itself, and this example's precondition
+    # with it — it used to read `expect(TagContext).to be_owned(ctx)`, a predicate that
+    # existed so a spec could tell the owned branch from the fallback branch WITHOUT
+    # inferring it. With one branch left there is nothing to tell apart, so the precondition
+    # is now the direct question: is there a `RenderContext` in these registers at all? Kept
+    # rather than dropped, because an example whose subject is "the actor came from the
+    # context" is vacuous if no context was there — which is precisely what the deleted
+    # predicate was guarding against.
+    it 'carries the owning context\'s actor into every decorated version drop' do
+      ctx = build_context({}, owned_registers(scope: scope))
+
+      expect(RedmineReporterDashboards::Liquid::RenderContext.from(ctx)).not_to be_nil
+
+      build_tag('from: issues').render(ctx)
+      drop = ctx.scopes.last['versions'].find { |r| r['version_id'] == 1 }['version']
+
+      expect(drop.instance_variable_get(:@render_context).actor).to eq(spec_actor)
+    end
+
     it 'returns an empty string (side-effect tag)' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect(build_tag('from: issues').render(ctx)).to eq('')
     end
   end
 
   describe 'parameter parsing' do
     it 'parses closed_statuses and cost_fields and forwards them to the aggregator' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect(SqlAggregation::QueryAggregator).to receive(:version_rollup)
         .with(scope, closed_statuses: ['Closed', 'Rejected'], cost_field_ids: [20, 21])
         .and_return(rollup_rows)
@@ -139,7 +251,7 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     end
 
     it 'defaults to empty closed_statuses and cost_field_ids' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect(SqlAggregation::QueryAggregator).to receive(:version_rollup)
         .with(scope, closed_statuses: [], cost_field_ids: [])
         .and_return(rollup_rows)
@@ -147,22 +259,58 @@ RSpec.describe SqlAggregation::LiquidVersionRollupTag do
     end
 
     it 'resolves a custom assign_to variable' do
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       build_tag('from: issues, assign_to: my_versions').render(ctx)
       expect(ctx.scopes.last['my_versions']).to be_an(Array)
+    end
+
+    # CURATOR DECISION #3 — A QUOTED PARAMETER IS LITERAL TEXT, ON THIS TAG TOO.
+    #
+    # Added after a mutation: reverting this tag's `str_param` to the old unconditional
+    # lookup left 813 examples green, so the rule was provably untested here. The two
+    # examples above use quoted values and pass either way, because neither text happens
+    # to be an assigned variable — which is exactly the "right by accident" the decision
+    # replaces with "right by rule".
+    it 'does not look a quoted status list up, even when it collides with a variable' do
+      ctx = build_context({ 'Closed;Rejected' => 'SHOULD NOT WIN' },
+                          owned_registers(scope: scope))
+      expect(SqlAggregation::QueryAggregator).to receive(:version_rollup)
+        .with(scope, closed_statuses: %w[Closed Rejected], cost_field_ids: [])
+        .and_return(rollup_rows)
+
+      build_tag('from: issues, closed_statuses: "Closed;Rejected"').render(ctx)
+    end
+
+    it 'assigns under the quoted name itself, not under a variable of that name' do
+      ctx = build_context({ 'my_versions' => 'somewhere_else' },
+                          owned_registers(scope: scope))
+
+      build_tag('from: issues, assign_to: "my_versions"').render(ctx)
+
+      expect(ctx.scopes.last['my_versions']).to be_an(Array)
+      expect(ctx.scopes.last).not_to have_key('somewhere_else')
+    end
+
+    # ...and BARE still resolves, which is the half that does not change.
+    it 'still resolves a bare assign_to from a variable' do
+      ctx = build_context({ 'target' => 'somewhere_else' }, owned_registers(scope: scope))
+
+      build_tag('from: issues, assign_to: target').render(ctx)
+
+      expect(ctx.scopes.last['somewhere_else']).to be_an(Array)
     end
   end
 
   describe 'error handling' do
     it 'assigns an empty array when no scope can be resolved' do
-      ctx = build_context('issues' => nil)
+      ctx = build_context({}, owned_registers(scope: nil))
       expect { build_tag('from: issues').render(ctx) }.not_to raise_error
       expect(ctx.scopes.last['versions']).to eq([])
     end
 
     it 'assigns an empty array and does not raise when the aggregator fails' do
       allow(SqlAggregation::QueryAggregator).to receive(:version_rollup).and_raise(StandardError, 'db error')
-      ctx = build_context('issues' => drop_with(scope))
+      ctx = build_context({}, owned_registers(scope: scope))
       expect { build_tag('from: issues').render(ctx) }.not_to raise_error
       expect(ctx.scopes.last['versions']).to eq([])
     end

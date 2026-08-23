@@ -1,0 +1,404 @@
+# Decisions waiting on the curator
+
+Eleven open items, written for a reader who has not been in the code. Each one says what
+the situation is, what the choices are, what each choice costs, and which one I would
+take. **Nothing here is decided.** A session that picks one by inference is doing the
+thing `CLAUDE.md` §11 forbids.
+
+Answer them by editing the **Decision:** line under each item — `Decision: 2` or
+`Decision: leave it` is enough. A session can then implement the lot without asking again.
+
+**STATUS 2026-08-13: ALL ELEVEN ARE SETTLED.** The curator answered "follow the
+recommendation everywhere except where I say otherwise", overrode #3 to land in 1.0 rather
+than 1.1, and resolved #1's conditional with *"niemand gebruikt dat nog"* — so #1 is
+option 2, the full withdrawal.
+
+**STATUS 2026-08-14 (later the same day): ALL EIGHT ARE IMPLEMENTED. THE LIST IS CLOSED.**
+#1 landed as the withdrawal (option 2). `ZERO_REPORTER_MODE=strict` now passes with **0**
+non-`[permanent]` entries, which was #1's stated destination.
+
+| | landed | where |
+|---|---|---|
+| #2 MariaDB grouped sum/avg/distinct | 2026-08-13 | `2c22c74` |
+| #3 quoted parameters are literal | 2026-08-14 | `880c783`, `160dc67`, `9122ceb`, `27865db` |
+| #4 narrow the diagnostic | 2026-08-14 | `f77dde4`, `27865db` (the page's copy) |
+| #5 `[permanent]` on the two comment-only files | 2026-08-14 | `f77dde4` |
+| #6 the README's spent-time table | 2026-08-14 | `f77dde4` |
+| #7 `<html lang>` from the installation default | 2026-08-14 | `f77dde4`, `ea9c4fb`, `27865db` |
+| #8 FR-50 renumbered | 2026-08-14 | `f77dde4` (nine locale headers), `27865db` (the seventeen CODE files it had missed) |
+| **#1 withdraw host-plugin renders** | 2026-08-14 | this commit — see *"What #1 owed, and what it cost"* below |
+
+**An independent review of #3-#8 found 1 blocker, 5 majors and 8 minors; all are closed
+in `27865db`.** The blocker was #3's own acceptance condition failing on `query_id:` — a
+report that rendered complete and read zero, with nothing on the page. Read that commit
+message before assuming the decisions landed cleanly.
+
+**#1 was left deliberately, not forgotten.** It is the item this file's own closing
+section puts last, it is the only one with an irreversible deletion in it, and S-30's
+lesson is that a deletion half-done is worse than one not started. What it needed is
+below under "What #1 still owes", and what it turned out to cost is under
+"What #1 owed, and what it cost" after it.
+
+Ordered by what it costs you to get it wrong, not by effort.
+
+---
+
+## Part 1 — must be settled before 1.0
+
+### 1. Are reports rendered *by the old plugin* still supported?
+
+**The situation.** This plugin's aggregation tags (`{% sql_aggregate %}`,
+`{% version_rollup %}`) are registered with Liquid process-wide, so they work in any
+template in the installation — including templates the old `redmine_reporter` plugin
+renders itself. Until S-30 those renders got their data through a compatibility layer.
+That layer is now deleted, so such a template shows **zeros instead of real numbers**
+unless it names a saved query explicitly with `query_id:`.
+
+It is not a data leak — nothing shows figures the reader may not see — and it writes a
+warning to the log. But a report that looks finished and reads zero is the worst kind of
+wrong, and `technical-spec.md` §7 treats "both plugins installed side by side" as a
+supported setup.
+
+We also still ship a small patch (`reporter_report_content_patch.rb`) whose only purpose
+is to make *that* render path faster. So today we speed up a path we just stopped
+supporting. That is incoherent whichever way you decide — it is the clearest signal that
+this needs an answer.
+
+**Options.**
+
+1. **Keep supporting them.** Require such templates to name their query with
+   `query_id:` and document it. Small change, mostly README. Keeps §7 honest.
+2. **Stop supporting them.** Then finish the job in one go: delete the speed-up patch,
+   delete the last piece of old-plugin detection, and fix the README sections that still
+   tell authors to put these tags in a Reporter template. This is the only option that
+   also empties the remaining coupling list (5 files → 2).
+3. **Leave it.** Accept zeros-plus-a-log-line, and say so in the README so nobody spends
+   a day debugging it.
+
+**My recommendation: option 2**, *if* you can confirm no customer is running both plugins
+with shared templates. The whole point of this project was to stop needing the paid
+plugin; half-keeping the bridge costs code, a gate exemption, and exactly this kind of
+confusion. If you cannot confirm that, take option 1 — it is cheap and honest. **Do not
+take option 3**: it is option 2 without the tidying, and the next person will rediscover
+it as a bug.
+
+**Decision: 2** (curator, 2026-08-13). The conditional was resolved by the curator directly:
+*"niemand gebruikt dat nog"* — nobody is still running templates on that path. So host-plugin
+renders are WITHDRAWN, and the tidy-up is part of the change rather than a follow-up.
+
+**One interaction to handle rather than trip over.** S-30's review fix made `query_id:`
+resolve on a context-less render, taking its actor from `TagContext`'s ambient fallback.
+With host renders withdrawn there is no context-less render left — `ReportRun` builds a
+context for every one — so that path and the ambient fallback become unreachable together.
+Remove them in the same change or the deletion is half-done again, which is the exact state
+S-30 was created to clean up.
+
+---
+
+### 2. MariaDB gets sums and averages wrong (release blocker)
+
+**The situation.** On MariaDB only, grouping by age with `sum`, `average` or `distinct`
+returns wrong numbers once you use more than about four age brackets. MariaDB cuts off
+long column labels at 256 characters, and the code reads results back by that label. The
+counting path was fixed for this in T-08; the three calculating paths were not.
+
+PostgreSQL and MySQL are unaffected. The plan already labels this a release blocker.
+
+**Options.**
+
+1. **Fix it.** Read the results by position instead of by label, the same way the
+   counting path already does. Known shape, known fix, well understood.
+2. **Ship 1.0 without MariaDB support** and say so in the README.
+3. **Leave it and document the limit** ("do not use more than four age brackets on
+   MariaDB").
+
+**My recommendation: option 1.** The fix pattern already exists in this codebase and was
+measured to be *faster*, not slower. Option 2 throws away a supported database for one
+bug; option 3 is a footgun with a note next to it.
+
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
+
+---
+
+### 3. Quoted values in tags mean the wrong thing
+
+**The situation.** Writing `group_by: "user"` in a tag does not mean the word *user* — it
+looks up a variable called `user`, which every report already has, so it silently asks for
+`group_by: "Jan Catrysse"`. Two of the four spent-time groupings cannot be written at all
+because of this. It fails visibly (an error on the page), so nobody gets wrong numbers.
+
+The fix is small. The risk is not: 23 places read parameters this way, so making quotes
+mean "literal text" changes the meaning of every quoted value in every template that
+already exists.
+
+**Options.**
+
+1. **Fix it properly** — quotes mean literal text everywhere. Cleanest, but any existing
+   template that relies on the current behaviour breaks. Needs an upgrade note.
+2. **Fix only the affected groupings** — a small allowlist of parameter names that are
+   always literal. Narrow, ugly, safe.
+3. **Document it** — tell authors those two groupings are unavailable.
+
+**My recommendation: option 1, but in its own release**, not in 1.0. It is the right
+answer and it is a breaking change; bundling a breaking change into the release that also
+removes the old dependency makes it impossible to tell which change broke somebody. Ship
+1.0 with option 3, do option 1 in 1.1 with a note.
+
+**Decision: 1, NOW — in 1.0** (curator, 2026-08-13, overriding the recommended timing).
+The fix itself is what I recommended; only the release it lands in changed. Two things
+follow and neither is optional: the change needs an **upgrade note** saying quoted tag
+parameters now mean literal text, and it needs a test proving an existing template that
+relied on the old behaviour fails **visibly** rather than silently reporting different
+numbers. 23 call sites go through `str_param`; that is the blast radius to cover.
+
+---
+
+### 4. One permission is labelled as dangerous but cannot do the dangerous thing
+
+**The situation.** The permission "Manage public report templates" is flagged internally
+as *code execution*. It is not: a role holding only that permission is refused when it
+tries to create a template. Because of the flag, the new admin diagnostic page warns
+"check this was intended" about people who cannot actually write templates — crying wolf,
+which is the one thing that page must not do.
+
+**Options.**
+
+1. **Change the flag** — it is not a code-execution permission. Risk: the flag also
+   forces "members only" on the permission, so removing it would let an admin grant this
+   to non-members. Needs the requirement written by hand instead.
+2. **Narrow the diagnostic** — keep the flag, teach the page to report only the three
+   permissions that genuinely create templates.
+
+**My recommendation: option 2.** It is a one-line change in one place and touches no
+permission contract. Option 1 changes what an installed permission means, which is a
+migration and an upgrade note for a cosmetic gain.
+
+**Decision: 2** (curator, 2026-08-13 — "follow the recommendation").
+
+---
+
+## Part 2 — should be settled, but will not stop a release
+
+### 5. Two files still name the old plugin, in comments only
+
+**The situation.** Two files mention the old plugin purely in historical comments (what a
+method replaced, what a migration used to couple to). They keep the strict coupling check
+red. There is a marker that exempts a file permanently; the rules say only you may hand it
+out.
+
+**Options.** 1. Mark both permanent. 2. Reword the comments so the name disappears —
+loses the searchable name of the thing that was replaced. 3. Leave it.
+
+**My recommendation: option 1.** The comments are worth keeping; that is exactly what the
+permanent marker is for.
+
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation"). This is the marker the
+allowlist header reserves to the curator, so this line is the authority for it.
+
+---
+
+### 6. The README lists eleven spent-time groupings; the code has eight
+
+**The situation.** Three were removed during review because they had nothing to click
+through to. The README was not updated.
+
+**Options.** 1. Fix the README. 2. Put the three back.
+
+**My recommendation: option 1.** They were removed for a reason that still holds.
+
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
+
+---
+
+### 7. Reports do not declare their language
+
+**The situation.** The generated HTML and PDF carry no language marker. Screen readers and
+hyphenation need it. The blocker is deciding *whose* language a scheduled report speaks:
+the person who set up the schedule, each recipient, or the installation default.
+
+**Options.** 1. Installation default. 2. The schedule's owner. 3. Per recipient (most
+correct, most work — one render per language).
+
+**My recommendation: option 1** for 1.0. It is one line, it is right for most installs,
+and it can be refined later without breaking anything.
+
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
+
+---
+
+### 8. A specification number is used for two different things
+
+**The situation.** "FR-50" refers to the engine-selection screen in nine locale files and
+to the generated support matrix in the specification. Purely a documentation mix-up.
+
+**Options.** 1. Renumber the locale headers. 2. Renumber the spec.
+
+**My recommendation: option 1.** The specification is the reference; the comments should
+follow it.
+
+**Decision: 1** (curator, 2026-08-13 — "follow the recommendation").
+
+---
+
+## Part 3 — already answered, listed so nobody re-opens them
+
+### 9. Hungarian, Polish and Chinese translations were written by a model
+
+You already said: leave it. Recorded here so it is not raised a third time.
+
+### 10. Three accepted security advisories in the PDF container image
+
+Accepted, with a review date of **2026-09-09**. Nothing to do until then.
+
+### 11. The diagnostic table sorts roles alphabetically
+
+The most alarming row (a built-in role holding code execution) lands wherever the alphabet
+puts it, though it carries a warning icon. The table only lists roles that can author, so
+it is short by construction. Left alphabetical because that is predictable. Worth a second
+look only if a real installation shows a long list.
+
+---
+
+## After you answer
+
+A session can implement all of Part 1 and Part 2 in one pass. Suggested order, because
+some answers touch the same files:
+
+1. **#2 (MariaDB)** — self-contained, the release blocker, and settled. Start here.
+2. **#3 (quoted parameters)** — now in scope for 1.0 by curator decision, and the only
+   breaking change in the set. Do it early, while there is room to react to what it breaks.
+3. **#4, #5, #6, #7, #8** — small and independent.
+4. **#1 (old-plugin renders, option 2)** — largest blast radius, so last. Deletes the
+   speed-up patch, the ambient-actor fallback, the context-less `query_id:` path that
+   depends on it, and the last of the old-plugin detection; corrects the README. Strict
+   coupling list 5 → 2.
+
+Then: run the full test suite, read CI, bump the version from 0.5.0 to 1.0.
+
+---
+
+## What #1 still owes — scoped 2026-08-14, not started
+
+Written down so the next session does not re-derive it. Every path below was READ, not
+guessed; the line numbers are at `ea9c4fb`.
+
+**The five things to delete, and they go together or not at all.**
+
+1. `lib/reporter_report_content_patch.rb` (35 lines) and the `apply_patch(...)` call in
+   `RedmineReporterDashboards.apply_reporter_patches` — `lib/redmine_reporter_dashboards.rb:484`.
+2. `apply_reporter_patches` itself, and its caller `init.rb:215` plus the `return unless
+   reporter` above it.
+3. `reporter_present?` / `reset_reporter_presence!`
+   (`lib/redmine_reporter_dashboards.rb:342,352`), `ReporterPresence`, and the boot log
+   line at `init.rb:180-193`. **Keep the "running standalone" log line or replace it
+   deliberately** — an operator who expected the widgets reads it, and deleting it silently
+   is the kind of thing this project writes handover entries about.
+4. `TagContext`'s ambient-actor fallback (`liquid/tag_context.rb:69-75`, the one
+   `User.current` read in the plugin), **and only after proving it is unreachable**.
+5. The three non-`[permanent]` rows in `script/gates/zero_reporter.allowlist` — all three
+   are the detection. `ZERO_REPORTER_MODE=strict` then goes **3 → 0** (the decision text
+   says "5 → 2"; that was written before #5 marked the two comment-only files permanent,
+   so the arithmetic moved and the destination did not).
+
+**THE PROOF OBLIGATION, AND IT IS THE WHOLE TASK.** `ScopeBinding.bind` resolves
+`query_id:` **before** its nil-context check (`liquid/scope_binding.rb:164-167`) and takes
+its actor from `TagContext.actor`. S-30's independent review put that ordering there on
+purpose, because moving it withdrew a documented working feature as collateral. So the
+deletion is safe **only if no context-less render remains** — which is exactly what
+withdrawing host renders is supposed to establish. Establish it by MEASUREMENT before
+deleting anything, the way S-30 rebuilt the harness before removing a file: enumerate
+every producer of a `Liquid::Context` in the tree and show each one carries a
+`RenderContext`. `git grep -n 'Liquid::Template' -- lib app` is the starting point.
+
+**The README corrections.** Sections that tell an author to put `{% sql_aggregate %}` or
+`{% version_rollup %}` in a *Reporter* template, and the `query_id:` note that exists to
+narrow this case. `rg -n 'Reporter template|redmine_reporter' README.md` finds them.
+
+**And the open question this deletion inherits**, which is NOT part of #1 and should not be
+absorbed into it: eighteen README examples still write `from:` on an aggregation tag, and
+`from:` has been decorative on every render since T-26a — the owned path returns
+`render_context.scope` and never reads it. Keeping it as documentation-of-intent or
+stripping it is a separate curator call. **Still open — not absorbed.**
+
+---
+
+## What #1 owed, and what it cost — DONE 2026-08-14
+
+The record, not a task. Read this before "restoring" any of it.
+
+**THE PROOF OBLIGATION WAS DISCHARGED FIRST, AND THEN MADE MECHANICAL.** The measurement, run
+before a file was deleted:
+
+| question | answer | how |
+|---|---|---|
+| how many places construct a `Liquid::Context`? | **1** — `liquid/template_renderer.rb` | `git grep -n 'Liquid::Context' -- lib app` |
+| how many call `Liquid::Template.parse`? | **1**, same file — and already **gated** | `script/gates/single_parse.sh`, which fails on a parse outside `liquid/` |
+| how many callers does `TemplateRenderer#render` have in `app/` + `lib/`? | **1** — `Reporting::ReportRun#render_section` | `git grep -n 'TemplateRenderer\|render_context:' -- lib app` |
+| does that caller always pass a context? | **yes**, unconditionally, built at `report_run.rb:408` from an explicit actor | read `render_section` |
+
+Three greps are a measurement of today, so the third is now Ruby's job:
+**`TemplateRenderer#render`'s `render_context:` is a REQUIRED keyword**, type-checked against
+`RenderContext` (an explicit `nil` satisfies Ruby and would have sailed through). That is the
+same trade #3 took with `TagParams::Value` — guard it mechanically, not by tracing.
+
+**WHAT WAS DELETED** — the five things, all five: `lib/reporter_report_content_patch.rb`;
+`apply_reporter_patches` **and** the `apply_patch` helper it was the only caller of;
+`reporter_present?` / `reset_reporter_presence!` / `ReporterPresence` (+ its spec);
+`Liquid::TagContext` **entirely** (+ its spec) rather than only its fallback; and the three
+non-`[permanent]` allowlist rows. Strict went **3 → 0**.
+
+**`TagContext` WENT WHOLE, AND THAT IS A DEVIATION FROM THE SCOPE NOTE ABOVE**, which said to
+delete "the ambient-actor fallback". With the fallback gone the module was three one-line
+delegations to `RenderContext.from`, and its own header argued for its existence entirely from
+the host-render case — a second way to ask a question that now has one answer, which
+`CLAUDE.md` §6 rule 6 forbids. The three call sites ask `RenderContext.from` directly.
+
+**THE ONE THING THE SCOPE NOTE DID NOT ANTICIPATE, AND IT IS THE WHOLE DESIGN.** "Delete the
+fallback" cannot mean "pass a nil actor instead", and this is measured rather than argued:
+`Query.visible` opens with `user = args.shift || User.current` (`app/models/query.rb:385`) and
+`Version.visible` with `args.first || User.current` — **checked on all four supported branches,
+5.1 / 6.0 / 6.1 / 7.0.** A nil actor does not fail closed; it reads the ambient actor *inside
+Redmine core*, where no gate or grep in this plugin can see it. So the fallback is replaced by
+an **explicit refusal**, not by a nil:
+
+- `ScopeBinding.bind` returns `NONE` for a context-less render **before** looking at
+  `query_id:`. This restores the ordering S-30's independent review had rejected — and the
+  review was right at the time: hoisting the check then withdrew a documented working feature
+  as collateral. Decision #1 withdraws that feature *on purpose*, so the collateral is now the
+  intent. **The README paragraph that documented it is corrected in the same commit.**
+- `{% geo_version_map %}` needed its own refusal and is the only tag that did: it resolves no
+  scope, so it never met the `scope.nil?` branch the two aggregation tags already had.
+- Both refusals log, naming the MECHANISM ("this render was not produced by this plugin's own
+  TemplateRenderer") rather than the base plugin — because `zero_reporter.sh` matches that
+  plugin's id inside a string as readily as inside a `require`, and getting to 0 was the point.
+
+**WHAT AN INSTALL WITH BOTH PLUGINS LOSES, stated rather than left to be discovered:** that
+plugin's own reports keep working; its `report_content` action goes back to materialising Issue
+objects (its behaviour before this plugin existed). One of ITS templates using
+`{% sql_aggregate %}` / `{% version_rollup %}` / `{% geo_version_map %}` still PARSES — Liquid
+tag registration is process-wide and cannot be scoped per renderer — and now resolves nothing,
+renders structurally intact with zeros, and logs a warn line per tag. Fails closed, never a
+leak. The README says so under a new heading.
+
+**THREE THINGS MEASUREMENT CONTRADICTED, all of them things this session had written down as
+true:**
+
+1. A comment claiming the `User.current` stub in `liquid_version_rollup_tag_spec.rb` was still
+   load-bearing "because the frozen kernel reads it too". **Mutation refuted it in one run** —
+   replacing the body with a `raise` left all 15 examples green. The stub is now an exploding
+   control instead, which is what it should have been.
+2. Two of the three new `geo_version_map` refusal examples **passed vacuously.** Restoring the
+   pre-decision code showed why: with the file's exploding `User.current`, the mutant raised
+   *before* `Version.visible`, so `not_to receive(:visible)` was satisfied by the raise and the
+   tag's own rescue turned it into the empty map the example expected. 1 of 3 discriminated.
+   They now give the ambient read a **usable** answer — what production has — and all 3 fail
+   against the old code.
+3. The required-keyword type check, written inside `#render`'s body, was **swallowed by that
+   method's own `rescue StandardError`** and then died in `failure` on `monotonic_ms - started`
+   with `started` still nil — reporting `TypeError: nil can't be coerced into Float` from a line
+   that does arithmetic. Found by the two new negative examples on their first run. The guard now
+   sits outside the rescued body, in a `#render` that delegates to a private `#render_document`.
+
+**Verified here** (Redmine 7.0-stable, PostgreSQL 16, standalone): see the commit message for
+the numbers. **NOT verified here:** MariaDB, the conformance corpus and the starter gallery —
+no engines and no MariaDB in this container.

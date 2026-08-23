@@ -1,22 +1,69 @@
 <%#
-  Override of redmine_reporter's app/views/my/blocks/_report_by_issues.erb.
+  T-26a increment 3 — THE OWNED MY-PAGE ISSUE REPORT WIDGET (FR-01).
 
-  Carries the performance fix: feed the report a lazy AR relation
-  (query.base_scope) instead of query.issues, which materialises every issue
-  into memory. This override wins over the vendor partial because
-  redmine_reporter_dashboards sorts after redmine_reporter in the plugin view
-  load path. If the vendor rewrites this partial, revisit this override.
-%>
-<%
-  block ||= 'report_by_issues'
-  settings ||= User.current.pref.my_page_settings(block) # The settings variable not defined in Redmine versions < 3.4
-  query = IssueQuery.visible.find_by(id: settings[:query_id])
-  report_template = IssueListReportTemplate.find_by(id: settings[:report_template_id])
-%>
+  This file used to render one of the BASE PLUGIN's report templates through
+  `my/_report.erb`, which iframed that plugin's own route. Nothing here does any more: the
+  lookup is `WidgetReport` (`Template.visible(actor)`) and the render is
+  `Reporting::ReportRun`. With this, no surface of this plugin needs the base plugin.
 
-<% if query && report_template %>
-  <%= render partial: 'my/report', locals: { block: block, settings: settings, query: query, collection: query.base_scope, report_template: report_template } %>
-<% else %>
-  <%= render partial: 'my/report_settings',
-             locals: { block: block, settings: settings, queries: IssueQuery.visible, report_templates: IssueListReportTemplate.all } %>
+  --- THIS FILE'S PATH IS ITS REGISTRATION, AND THAT IS WHY THE GUARD IS HERE ---
+
+  Redmine core discovers my-page blocks by GLOBBING plugin view directories —
+  `Dir.glob(".../*/app/views/my/blocks/_*.{rhtml,erb}")` in `lib/redmine/my_page.rb`,
+  unchanged 5.1 -> 7.0 — so the existence of this file makes this plugin contribute a core
+  my-page block on every install, with no line in `init.rb` anywhere. Then note what core
+  does NOT do: `MyHelper#render_block_content` rescues only `ActionView::MissingTemplate`,
+  so ANY other exception from this body is a 500 on `/my/page` — taking down the one page
+  that carries this block's own close button. That is §Findings **E-39**, measured.
+
+  So the body is wrapped, and the rescue takes `ScriptError` as well as `StandardError`
+  (a class body that fails to parse raises `SyntaxError`; a bad `require` raises
+  `LoadError`; neither is a `StandardError`). It logs and degrades VISIBLY rather than
+  swallowing — CLAUDE.md §5.
+
+  THE PLACEHOLDER IS DELIBERATELY NOT NIL. `MyHelper#render_block` wraps a block only
+  `if content.present?`, so a widget that renders as nothing loses the contextual controls
+  that carry its own close button, and the user is left with a block they cannot remove.
+
+  Nothing is appended to the output buffer before the rescue: the only writes in the
+  guarded body are the `<%= render %>` calls, and `render` builds its result before
+  returning, so a raise inside one leaves the buffer untouched.
+
+  --- WHAT IS DIFFERENT FROM THE PROJECT DASHBOARD ---
+
+  `include_all_helpers = false`, so this view cannot call this plugin's helpers and neither
+  can a partial it renders (a partial runs in the CALLING controller's view context). Every
+  piece of presentation it needs is therefore a MODULE — `ReportFrame`, `DegradationText` —
+  which is why those two were extracted rather than left as helper methods.
+
+  There is no project, and no project SELECTOR either: the saved query defines the input
+  data, and with no query the report covers everything the viewer can see.
+%>
+<% begin %>
+  <%
+    block ||= 'report_by_issues'
+    # `User.current` is read ONCE, here, and passed explicitly from then on (INV-1). A
+    # my-page block genuinely is "the page of whoever is logged in" — this is the one place
+    # that fact enters, rather than being re-read three frames down.
+    rrd_actor = User.current
+    settings ||= rrd_actor.pref.my_page_settings(block)
+    rrd_widget = RedmineReporterDashboards::WidgetReport.render_for_my_page(
+      actor: rrd_actor, block: block, settings: settings, logger: Rails.logger
+    )
+  %>
+
+  <% if rrd_widget %>
+    <%= render partial: 'reporter_dashboards/widgets/my_report',
+               locals: { block: block, widget: rrd_widget, user: rrd_actor } %>
+  <% else %>
+    <%= render partial: 'reporter_dashboards/widgets/my_report_settings',
+               locals: { block: block, settings: settings, report_type: :issues,
+                         queries: IssueQuery.visible(rrd_actor).sorted,
+                         report_templates: RedmineReporterDashboards::WidgetReport.templates_for(
+                           project: nil, actor: rrd_actor, source: 'issues'
+                         ) } %>
+  <% end %>
+<% rescue StandardError, ScriptError => rrd_error %>
+  <% RedmineReporterDashboards::WidgetReport.log_my_page_failure(rrd_error) %>
+  <p class="nodata"><%= l(:error_reporter_widget_render_failed) %></p>
 <% end %>

@@ -1,0 +1,115 @@
+# Files allowed to mention redmine_reporter, Redmineup or up_acts_as_list, with the
+# reason for each. Gate: script/gates/zero_reporter.sh.
+#
+# This list may only SHRINK, and since 2026-08-08 that is ENFORCED rather than asked for:
+# an entry whose file no longer matches anything fails the gate. Adding an entry is a
+# decision to take in review, with a reason written here, not a way to make the gate green.
+#
+# --- THE `[permanent]` MARKER ---
+#
+# An entry whose reason begins `[permanent]` is exempt from `ZERO_REPORTER_MODE=strict`.
+# Everything else on this list is DEBT that strict refuses, which is what makes strict a
+# reachable target rather than an aspiration: before 2026-08-08 strict meant "any reference
+# fails, allowlist or not", and the curator's own decision below made that unpassable for
+# ever. Only the importer carries the marker, and adding it to anything else is a curator
+# decision, not a way to get a gate green.
+#
+# THE 1.0 TARGET, decided by the curator 2026-08-05: **empty except the importer.** The
+# importer ships permanently, and reading the base plugin's data by name is what it is
+# for — so this list cannot reach zero, and pretending otherwise would make the gate's
+# own goal unreachable. Everything above the importer section must still go.
+#
+# Note the negative lookahead in the gate: `redmine_reporter(?!_dashboards)`. A plain
+# grep for "redmine_reporter" matches this plugin's own name several hundred times.
+#
+# Format: <path><TAB or spaces><reason>
+
+# --- THE DETECTION IS GONE (curator decision #1, 2026-08-14), AND SO ARE ITS THREE ENTRIES.
+#
+# This section listed `reporter_presence.rb`, `lib/redmine_reporter_dashboards.rb` and
+# `init.rb`. It shrank twice on its way out and the history is worth two lines, because both
+# steps were sessions predicting the arithmetic and getting it wrong:
+#
+#   T-27 (2026-08-13) decided what the detection was FOR — "`load_patches` requires
+#   REPORTER_GLUE_FILES only on a true answer" — and predicted the strict count would go
+#   6 -> 3 when the glue went.
+#
+#   S-30 deleted the glue and it went 6 -> 5, not 6 -> 3, because `reporter_present?` had a
+#   SECOND consumer nobody had enumerated: `apply_reporter_patches`, installing
+#   `reporter_report_content_patch` — a performance fix on the host plugin's own
+#   `report_content` action. Decision #5 then marked two comment-only files `[permanent]`,
+#   which took the strict-relevant count to 3.
+#
+#   Decision #1 withdraws renders BY that plugin, so speeding that path up became incoherent
+#   (`DECISIONS-PENDING.md` §1 says so in as many words). The patch went, the detection
+#   became a memo with no reader and went too, and `ZERO_REPORTER_MODE=strict` reaches its
+#   1.0 target: **0 non-`[permanent]` entries.**
+#
+# THE LESSON, SINCE IT COST TWO PREDICTIONS: enumerate a thing's callers from the SOURCE
+# (`git grep -n reporter_present?`) before quoting a destination count. Both wrong numbers
+# were written by sessions that had read the code and reasoned about it instead.
+#
+# What deliberately did NOT join this list on the way past: T-27's upgrade diagnostic
+# (`permissions/authoring_audit.rb`, its view section and nine locale files) names the base
+# plugin NOWHERE — it matches the permission NAME `manage_report_templates`, which carries no
+# plugin id, and its prose says "the base plugin". Naming it would have added ten entries to
+# the list it is supposed to shrink, and worse, implied the audit depends on that plugin being
+# installed. It does not: the grant it looks for outlives the plugin, which is the case it
+# exists for.
+
+# --- THE WIDGET SURFACE IS GONE (T-26a, 2026-08-12). This section used to list both report
+# --- widgets on two surfaces, their PDF export, the optional-widget machinery, the reporter
+# --- PDF patch and its ES5 shims. All deleted: `patches/report_patch.rb`,
+# --- `glue/legacy/wk_legacy_shims.rb`, `reporter_report_templates.rb`, `my/_report.erb`.
+# --- Nothing in this plugin PATCHES the base plugin any more.
+
+# --- Historical record. Comments only; no executable reference.
+#
+# MARKED `[permanent]` BY THE CURATOR, 2026-08-13 — decision #5 in
+# `docs/plan/DECISIONS-PENDING.md`, which is the authority this file's header reserves to
+# them ("adding it to anything else is a curator decision"). The options were to mark both
+# permanent, to reword the comments until the name disappears, or to leave the gate red;
+# the curator took the first, on the ground that the comments are worth keeping and that
+# is what the marker is for.
+#
+# Neither file references anything: both name `up_acts_as_list` / the base plugin inside a
+# COMMENT, recording what a method replaced and what a migration used to couple to. Rewording
+# them would lose the searchable name of the thing that was replaced, which is the one thing
+# those comments are for. Strict is a claim about COUPLING, and a historical note is not
+# coupling.
+lib/redmine_reporter_dashboards/positioned.rb          [permanent] comments naming the vendor gem method it replaced
+db/migrate/001_create_reporter_dashboards_tables.rb    [permanent] migration comment referring to the original coupling
+
+# --- THE IMPORTER (T-02 onward). A different category from everything above, and the
+# --- one entry in this file that this gate's own "empty at 1.0" goal cannot absorb.
+#
+# These files name reporter because reading reporter's data is what they are FOR. That
+# is the opposite of coupling: the survey reads TABLES, never reporter's classes, and
+# it is designed to work on a database from which the plugin has already been removed
+# (that is the migration case). Nothing here loads, patches, or depends on reporter
+# code — spec/adapter/import_survey_spec.rb proves it runs against bare tables.
+#
+# So the gate is matching a STRING here, not a dependency. Two consequences, and the
+# second is a question for the curator rather than a decision taken here:
+#
+#   1. Removing these mentions would make the tool worse, not purer: `rake -T` has to
+#      say which plugin's data it reads, the report has to name the tables it looked
+#      for, and the usage groups have to say that six accessors come from paid
+#      RedmineUP plugins — an operator deciding what to drop needs that.
+#   2. The header above said "At 1.0 it should be empty." With an importer that ships, it
+#      cannot be — and the question of what to do about that was left to the curator.
+#      **ANSWERED 2026-08-08, in T-26:** the 1.0 target is "empty except the importer", and
+#      the mechanism is the `[permanent]` marker rather than an exclusion hidden in the
+#      gate's search paths. These four entries carry it; nothing else does, and strict mode
+#      now refuses everything else on this list.
+lib/redmine_reporter_dashboards/import/survey.rb         [permanent] reads reporter's tables by name; that is the task
+lib/redmine_reporter_dashboards/import/plan_report.rb    [permanent] tells the operator which plugin's data was surveyed
+lib/redmine_reporter_dashboards/import/runner.rb         [permanent] T-24 copies reporter's templates; naming its tables IS the migration path
+lib/tasks/reporter_dashboards.rake                       [permanent] `rake -T` must say what import:plan surveys
+
+# --- The legacy glue (T-07) IS GONE (S-30, 2026-08-13). `glue/` is deleted entirely and
+# --- this entry with it. The first attempt was reverted at 166 of 249 DB-less examples
+# --- red, because the tag suite used that path as its HARNESS; the suite was rebuilt onto
+# --- RenderContext first, and then the deletion was a deletion.
+# --- `spec/golden/scope/scope.jsonl` survives as the record of what the six sources
+# --- answered. It is the one artefact here that cannot be regenerated.

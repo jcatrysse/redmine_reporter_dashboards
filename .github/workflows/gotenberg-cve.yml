@@ -1,0 +1,377 @@
+# NIGHTLY CVE SCAN OF THE PINNED GOTENBERG DIGEST — T-34.
+#
+# `technical-spec.md` §5.2 makes the container a documented option rather than a
+# dependency, and the price of documenting it is keeping the recommendation current: a
+# pinned digest is a promise that the bytes do not move, which is exactly what makes a
+# published vulnerability in them YOUR problem rather than a tag's.
+#
+# WHY THIS IS A SEPARATE WORKFLOW. `ci.yml` runs on push and pull_request. Adding a
+# nightly schedule to it would run the whole matrix — four Redmine branches, three
+# database engines, a browser — every night to answer one question. It is also the
+# honest boundary: a red cell here is a fact about somebody else's image on a day nobody
+# changed this repository, and it must not read as "the plugin is broken".
+#
+# WHAT MAKES IT MEANINGFUL RATHER THAN DECORATIVE. The digest is READ OUT OF
+# `docker-compose.gotenberg.yml` rather than written here. Two pins drift; this project
+# has the receipts (a stale table in HANDOVER §3 named seven tables when the schema had
+# eleven). There is one pin, it is in the file an operator copies, and this scans that.
+#
+# --- WHY THE GATE IS A SET COMPARISON AND NOT `trivy --exit-code 1` -------------------
+#
+# The first version of this workflow was `trivy ... --exit-code 1`, and on its first real
+# run it went red and STAYED red, for a reason it could not express: the pinned image has
+# five fixable HIGH findings across four advisories, and upstream has published no rebuilt
+# image to move to.
+# MEASURED 2026-08-10 — `gotenberg/gotenberg:8` and `gotenberg/gotenberg:8.35.0` both
+# resolve to the pinned digest, and 8.35.0 is the newest tag published. The remediation
+# this workflow printed ("move the pin") named an action that did not exist.
+#
+# A gate that cannot be satisfied by any action gets switched off within a week, and a
+# gate switched off is worse than no gate — that is INV-4. But making it advisory is
+# forbidden in the other direction (CLAUDE.md §7). So the gate stays a gate and the
+# accepted findings are enumerated, each with a reason and an EXPIRY DATE, in
+# `script/gates/gotenberg_accepted_cves.allowlist` — beside `zero_reporter.allowlist` and
+# `migration_reversibility.allowlist`, because it is the same kind of object and this
+# repository already has a shape for it. What fails is then exactly three things:
+#
+#   1. a fixable HIGH/CRITICAL the list does not name  — a new vulnerability;
+#   2. an entry whose expiry has passed               — an acceptance nobody re-examined;
+#   3. an entry the scan no longer reports            — a stale exemption.
+#
+# (3) is what stops this list from becoming permanent furniture, and it is the same
+# assertion `script/gates/layer_purity.sh` makes about its own exemption: an exemption
+# that no longer exempts anything must be deleted, not left lying around looking like it
+# still means something. All three are proved reachable by the self-test step below.
+---
+name: Gotenberg CVE scan
+
+on:
+  schedule:
+    # 04:17 UTC. Not on the hour: every scheduled workflow on GitHub fires at :00, and a
+    # queue is how a nightly job becomes a job that ran at 07:00 or not at all.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+  # Also on a change to the pin itself, so the answer to "is this digest clean" arrives
+  # in the pull request that moves it rather than the following night — and on a change to
+  # the ACCEPTED LIST or the gate that reads it, because an edit to either is exactly the
+  # moment somebody needs to know whether the result still holds. Leaving the allowlist
+  # off this filter would let an exemption be added in a pull request that never ran the
+  # gate, which is how an allowlist stops meaning anything.
+  #
+  # AND ON PUSH, with the same paths. Without it a direct push that moves the pin or edits
+  # an acceptance never runs the comparison at all — only `ci.yml`'s record-validation
+  # half, which by construction cannot see a new vulnerability. Not every change to these
+  # files arrives as a pull request.
+  push:
+    paths: &pin_paths
+      - 'docker-compose.gotenberg.yml'
+      - '.github/workflows/gotenberg-cve.yml'
+      - 'script/gates/gotenberg_accepted_cves.allowlist'
+      - 'script/gates/cve_accepted_diff.sh'
+      - 'script/gates/cve_accepted_diff_selftest.sh'
+      - 'script/gates/cve_findings_from_trivy.sh'
+      - 'script/gates/fixtures/trivy-report.sample.json'
+  pull_request:
+    paths: *pin_paths
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan the pinned Gotenberg image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ONE PIN, READ FROM THE FILE THAT CARRIES IT. If the compose file ever loses its
+      # digest — someone "simplifying" it back to a bare `:8` tag — this fails rather than
+      # silently scanning whatever `:8` means today, which would be a scan of a different
+      # image reported under this one's name.
+      - name: Read the digest out of the compose file
+        id: pin
+        run: |
+          set -euo pipefail
+          # `|| true` IS LOad-BEARING. Under `set -euo pipefail` a `grep` that matches
+          # nothing exits 1 and aborts the step HERE, so the four explanatory lines below
+          # were unreachable and an operator got a bare non-zero with no message. Measured
+          # by de-pinning the compose file and running this step.
+          ref="$(grep -oE 'gotenberg/gotenberg:[0-9]+@sha256:[0-9a-f]{64}' \
+                 docker-compose.gotenberg.yml | head -1 || true)"
+          if [ -z "$ref" ]; then
+            echo "::error file=docker-compose.gotenberg.yml::no digest-pinned gotenberg image."
+            echo "::error::The example compose file must pin by digest — a tag is a moving"
+            echo "::error::target and a CVE scan against one measures nothing. See §5.2."
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "tag=${ref%@*}" >> "$GITHUB_OUTPUT"
+          echo "scanning $ref"
+
+      # WHERE THE TAG POINTS TODAY — resolved WITHOUT pulling, and NON-FATAL.
+      #
+      # This exists so a red run can tell the difference between "there is a newer image,
+      # move the pin" and "upstream has not rebuilt, there is nowhere to move to". Those
+      # are opposite situations and the first version of this workflow printed the first
+      # message in the second situation, which is how it came to instruct a human to run
+      # three commands that would change nothing.
+      #
+      # It is deliberately NOT a failure when the tag has moved. A published release does
+      # not make a clean pin wrong, and failing here would make every upstream release
+      # a red build in a repository that did not change.
+      - name: Where does the tag point today
+        id: tag
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          tag="${{ steps.pin.outputs.tag }}"
+          # buildx prints `Digest:` for the index; `--format` is ignored by some builds,
+          # so the default output is parsed instead — measured, rather than assumed.
+          current="$(docker buildx imagetools inspect "$tag" 2>/dev/null \
+                     | awk '/^Digest:/{print $2; exit}')" || true
+          if [ -z "${current:-}" ]; then
+            echo "could not resolve $tag (registry unreachable or rate-limited)"
+            echo "current=unknown" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "$tag currently resolves to $current"
+
+      # PULLED BY DIGEST, so what is scanned is what an operator following the example
+      # will actually run — not the tag as it stands tonight.
+      - name: Pull it
+        run: docker pull "${{ steps.pin.outputs.ref }}"
+
+      # The digest is asserted AFTER the pull, because `docker pull` on a digest ref is
+      # the only thing that proves the registry still serves those exact bytes. A deleted
+      # or re-pushed digest fails here, loudly, which is itself worth knowing.
+      - name: Confirm the bytes are the ones named
+        run: |
+          set -euo pipefail
+          want="${{ steps.pin.outputs.ref }}"
+          digest="${want##*@}"
+          docker image inspect "$want" --format '{{join .RepoDigests "\n"}}' | grep -q "$digest" \
+            || { echo "::error::the pulled image does not carry $digest"; exit 1; }
+          echo "confirmed $digest"
+
+      # TRIVY'S OWN IMAGE, NOT A MARKETPLACE ACTION. The first version pinned
+      # `aquasecurity/trivy-action@0.28.0`, a version tag I could not verify from this
+      # environment and which does not exist — the job failed with "unable to resolve
+      # action". Running the scanner's published image needs no action resolution, uses the
+      # docker that is already here, and is verifiable: `aquasec/trivy:latest --version`
+      # answered 0.73.0 when this was written.
+      #
+      # `latest` IS CORRECT FOR THE SCANNER and pinning is correct for the SCANNED — they
+      # are opposite requirements. A scanner pinned to an old release stops knowing about
+      # new vulnerabilities, which is the one failure this job must not have.
+      #
+      # THE DB DOWNLOAD IS ITS OWN STEP, and that is the point. Trivy exits non-zero both
+      # when it FINDS something and when it CANNOT RUN, so a single invocation cannot tell
+      # "this image has a critical CVE" from "the vulnerability database was unreachable".
+      # This repository has a rule about checks that cannot distinguish those. Splitting
+      # them makes everything after it mean exactly one thing.
+      - name: Fetch the vulnerability database
+        run: |
+          set -euo pipefail
+          if ! docker run --rm -v /tmp/trivy-cache:/root/.cache/trivy \
+                 aquasec/trivy:latest image --download-db-only; then
+            echo "::error::the Trivy vulnerability database could not be downloaded, so"
+            echo "::error::NOTHING WAS SCANNED. This is not a verdict about the image."
+            exit 1
+          fi
+
+      # THE HUMAN-READABLE SCAN. `--exit-code 0`: this step reports, it does not judge.
+      # The judging is one step further down, where the reason for a verdict can be
+      # printed alongside it.
+      #
+      # HIGH AND CRITICAL ONLY, and UNFIXED ONES REPORTED BUT NOT COUNTED
+      # (`--ignore-unfixed`). A CVE with no fix available cannot be acted on by bumping
+      # the pin, and failing on it would train whoever reads this into ignoring the job —
+      # which is how a real, fixable finding gets missed.
+      - name: Scan for known vulnerabilities
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --scanners vuln \
+            --skip-db-update \
+            --exit-code 0 \
+            --format table \
+            "${{ steps.pin.outputs.ref }}"
+
+      # THE SAME SCAN AS MACHINE-READABLE FACTS. Two invocations rather than one plus a
+      # `trivy convert`, because both of these commands are ones this workflow has already
+      # been observed to run, and the conversion is one that has not.
+      - name: Take the findings as data
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/trivy-out
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/trivy-cache:/root/.cache/trivy \
+            -v /tmp/trivy-out:/out \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --scanners vuln \
+            --skip-db-update \
+            --exit-code 0 \
+            --format json \
+            --output /out/report.json \
+            "${{ steps.pin.outputs.ref }}"
+
+          # A REPORT WITH NO TARGETS IS UNMEASURED, NOT CLEAN. This image has a debian
+          # layer, a jar and two Go binaries; a run that found no targets at all scanned
+          # nothing, and "no findings" from it would be the most dangerous green in this
+          # repository.
+          targets="$(jq '[.Results[]?] | length' /tmp/trivy-out/report.json)"
+          if [ "${targets:-0}" -lt 1 ]; then
+            echo "::error::Trivy produced a report with no targets. NOTHING WAS SCANNED."
+            echo "::error::This is not a verdict about the image."
+            exit 1
+          fi
+          echo "scanned $targets target(s)"
+
+      # ---------------------------------------------------------------------------------
+      # THE GATE.
+      # ---------------------------------------------------------------------------------
+      # CURATOR DECISION, 2026-08-15: THIS REPORTS, IT DOES NOT BLOCK.
+      #
+      # `continue-on-error` here is a deliberate departure from CLAUDE.md §7's "never make a
+      # hard gate advisory to get to green", and it is recorded in §7 itself so that a later
+      # session reads the decision rather than the rule and "fixes" it back. The reasoning is
+      # the curator's and it is a scope argument, not a security one:
+      #
+      #   Gotenberg is an EXTERNAL component. This repository does not bundle it, does not
+      #   start it, and never auto-selects it — a service-requiring engine has to be deployed,
+      #   credentialed and chosen by an administrator, and the default renderer is headless
+      #   Chromium on the Redmine host. Which PDF renderer to run, and what vulnerability
+      #   posture to accept in it, is that administrator's decision on their own estate. A
+      #   red cell here was making a third party's Chromium CVE read as a defect in this
+      #   plugin, on a repository that did not ship the bytes and cannot fix them.
+      #
+      # WHAT IS NOT CHANGED, because the reasons for it survive the decision:
+      #
+      #   * the scan still runs nightly and still says exactly what it found. An operator
+      #     deciding whether to deploy the pinned image is the person this output is for, and
+      #     they now get it without it being addressed to us as a build failure;
+      #   * the allowlist keeps its per-CVE reasons and dates — it is the only place the
+      #     reachability argument for each finding is written down;
+      #   * the self-test below still runs, and still HARD-fails. "The gate can still say no"
+      #     is a property of the script, and a broken script would silently report a clean
+      #     image, which is the one outcome nobody wants informative or otherwise;
+      #   * `ci.yml`'s `gotenberg_accepted_cves` step is untouched and still hard. It
+      #     validates the SHAPE of the allowlist — a malformed record, a date that is not a
+      #     day, an unbounded acceptance — and those are mistakes in this repository's own
+      #     file rather than facts about somebody else's image.
+      - name: Compare the findings against what has been accepted
+        id: gate
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          # THE EXTRACTION IS A TESTED SCRIPT, not a jq line in a YAML string. It was
+          # the latter, and a review broke it in one command by applying the same `^CVE-`
+          # narrowing that mutation testing had caught inside the gate — green job,
+          # unaccepted advisory in the image, self-test still reporting every case passing.
+          # It also owns "an unusable report is UNMEASURED, never clean", which is the
+          # distinction the whole DB-download split exists to preserve.
+          ./script/gates/cve_findings_from_trivy.sh /tmp/trivy-out/report.json \
+            > /tmp/found-ids.txt
+
+          # THE DECISION IS THE SCRIPT'S, and the step after this one runs THAT SAME
+          # SCRIPT on synthetic inputs to prove every one of its refusals is reachable.
+          ./script/gates/cve_accepted_diff.sh \
+            script/gates/gotenberg_accepted_cves.allowlist /tmp/found-ids.txt \
+            | tee /tmp/gate-out.txt
+
+          # THE COUNT COMES FROM THE GATE, not from a second grep over the same file. The
+          # first version re-counted here with a slightly different regexp, so a duplicated
+          # or REJECTED record could inflate the notice above what the gate actually
+          # honoured — two ways of doing one thing, which is what the gate itself is about.
+          echo "accepted=$(sed -nE 's/^cve_accepted_diff: accepted=([0-9]+)$/\1/p' \
+            /tmp/gate-out.txt | tail -1)" >> "$GITHUB_OUTPUT"
+
+      # THE GATE MUST BE ABLE TO FAIL, AND THIS IS WHERE THAT IS PROVED RATHER THAN
+      # ASSERTED. Every case runs THE SAME SCRIPT the step above just ran, each
+      # constructed so that only one of its refusals can be what fires, and each matching
+      # the TEXT of the refusal rather than only its exit code — every refusal exits 1, so
+      # an exit code alone cannot tell the arms apart.
+      #
+      # This exists because a gate over an accepted-findings list is an unusually easy
+      # place to build something that cannot go red: the event it guards against — a NEW
+      # vulnerability in an image nobody here controls — does not exist on the day it is
+      # written, so nothing disproves a gate that never fires. Mutation testing on
+      # The score is not written here, because a number in a comment goes stale and this
+      # one already did — three different figures shipped in one commit. It is reproducible
+      # instead: `python3 script/gates/cve_accepted_diff_mutation.py`, committed beside the
+      # gate. Several of its cases exist BECAUSE a mutant survived: `GHSA-…` ids silently
+      # dropped from both sides of the comparison, a date validated by shape and never as
+      # a day, and an empty found list reading as a clean image.
+      - name: Prove the gate can fail
+        run: bash script/gates/cve_accepted_diff_selftest.sh
+
+      # A findings-free scan is the ordinary outcome, and it should still say what it
+      # checked. A job whose only successful output is a green tick teaches nobody which
+      # digest was clean on which night — nor, now, what it was clean APART FROM.
+      #
+      # `steps.gate.outcome`, NOT `success()`, AND THE DIFFERENCE IS A LIE. `continue-on-error`
+      # on the gate above masks its failure from the JOB, so `success()` is true whether the
+      # image was clean or carried forty unaccepted advisories — and this step would then
+      # announce "no fixable HIGH/CRITICAL findings" over a scan that found them. `outcome`
+      # is the step's result BEFORE continue-on-error is applied, which is the only thing
+      # here that still knows what actually happened.
+      - name: Say what was clean
+        if: steps.gate.outcome == 'success'
+        env:
+          PINNED: ${{ steps.pin.outputs.ref }}
+          ACCEPTED: ${{ steps.gate.outputs.accepted }}
+        run: |
+          echo "::notice::$PINNED: no fixable HIGH/CRITICAL findings beyond the" \
+               "$ACCEPTED accepted, reasoned and dated in" \
+               "script/gates/gotenberg_accepted_cves.allowlist."
+
+      # WHAT UNACCEPTED FINDINGS MEAN, written here because the person reading it at 04:17
+      # did not write the compose file. The recipe names what the tag actually resolves to,
+      # because the first version of this text told a human to move a pin that had nowhere
+      # to move to.
+      #
+      # `::warning::`, NOT `::error::`, and the step no longer fails the job. See the curator
+      # decision above the gate: this is a fact about a third party's image that this
+      # repository neither ships nor starts, addressed to the administrator who will decide
+      # whether to deploy it — not a defect report addressed to us.
+      #
+      # CONDITIONED ON THE GATE'S `outcome`, and now that is the only thing it can be
+      # conditioned on. Before `continue-on-error` it also carried `failure()`, because
+      # unqualified it fired for every cause — including a Trivy database outage, whose own
+      # message says "NOTHING WAS SCANNED, this is not a verdict about the image" and which
+      # was then immediately contradicted by a recipe for moving the pin. `failure()` is now
+      # permanently false for this job, so keeping it would have made this step dead code
+      # that no run could reach: the same trap in the other direction.
+      - name: What unaccepted findings mean
+        if: steps.gate.outcome == 'failure'
+        env:
+          PINNED: ${{ steps.pin.outputs.ref }}
+          TAG: ${{ steps.pin.outputs.tag }}
+          CURRENT: ${{ steps.tag.outputs.current }}
+        run: |
+          echo "::warning::This is not a defect in the plugin — it is a fact about an image"
+          echo "::warning::this repository documents as an OPTIONAL renderer and never deploys."
+          echo "::warning::pinned:  $PINNED"
+          echo "::warning::$TAG now resolves to: $CURRENT"
+          echo "::warning::"
+          echo "::warning::If those two digests DIFFER, upstream has rebuilt and the pin can move:"
+          echo "::warning::  1. put the digest above in docker-compose.gotenberg.yml"
+          echo "::warning::  2. update config/capabilities.yml's verification_note, which names the version"
+          echo "::warning::  3. re-run render-smoke, which runs the corpus against it"
+          echo "::warning::"
+          echo "::warning::If they are the SAME there is nowhere to move to, and that is not this"
+          echo "::warning::repository's problem to solve. Whether to run Gotenberg at all, and what"
+          echo "::warning::posture to accept in it, belongs to the administrator deploying it: the"
+          echo "::warning::default renderer is headless Chromium on the Redmine host and needs none of"
+          echo "::warning::this. Adding a reasoned, dated entry to the accepted list is still the way to"
+          echo "::warning::record a finding somebody HAS examined. Do not delete the list."

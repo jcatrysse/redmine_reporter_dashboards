@@ -1,0 +1,36 @@
+<%#
+  T-26a — THE OWNED SPENT-TIME REPORT WIDGET (FR-01). See the note in
+  report_blocks/_report_by_issues.erb; this is the same shape over the other source.
+
+  The `:view_time_entries` guard is NOT here and that is deliberate:
+  `ReporterProjectPagesHelper#render_reporter_project_block` refuses to render this block
+  at all without it, and `ReporterProjectPagesController#report_block_permitted?` asks the
+  same question for the export. Two places, one rule, both above this file — a third copy
+  here would be the one that goes stale.
+
+  `TimeEntryQuery.visible(user)` and not `.visible`: see the note in
+  report_blocks/_report_by_issues.erb — the bare form reads `User.current`.
+%>
+<%
+  block ||= 'report_by_spent_time'
+  settings ||= tab.block_settings(block)
+  widget = RedmineReporterDashboards::WidgetReport.render(
+    project: project, actor: user, block: block, settings: settings, logger: Rails.logger
+  )
+%>
+
+<% if widget %>
+  <%= render partial: 'reporter_project_pages/report',
+             locals: { block: block, widget: widget, user: user,
+                       project: project, tab: tab } %>
+<% elsif editable %>
+  <%= render partial: 'reporter_project_pages/report_settings',
+             locals: { block: block, settings: settings, report_type: :spent_time,
+                       queries: TimeEntryQuery.visible(user).where(project_id: [nil, project.id]).sorted,
+                       report_templates: RedmineReporterDashboards::WidgetReport.templates_for(
+                         project: project, actor: user, source: 'time_entries'
+                       ),
+                       project: project, tab: tab } %>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>

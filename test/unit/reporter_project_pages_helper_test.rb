@@ -3,6 +3,48 @@ require File.expand_path('../test_helper', __dir__)
 class ReporterProjectPagesHelperTest < ActionView::TestCase
   include ReporterProjectPagesHelper
 
+  # The icon divergence, both branches, on whichever Redmine is running.
+  #
+  # The Redmine 5.1 branch cannot be reached by running the suite on 6.x, and 5.1
+  # cannot be run at all on a container whose Ruby its Gemfile refuses — so the
+  # predicate is stubbed instead of the version. That is the whole point of having a
+  # predicate: the divergence becomes testable everywhere rather than only where it
+  # bites. It bit for real — 27 errors in the first 5.1 CI run, every one of them
+  # `undefined method 'sprite_icon'`.
+  def test_reporter_dashboard_icon_uses_the_svg_sprite_on_redmine_6_and_later
+    unless reporter_dashboard_svg_icons?
+      skip "this Redmine (#{Redmine::VERSION}) has no SVG icon sprite"
+    end
+
+    icon = reporter_dashboard_icon('settings', 'Settings')
+
+    assert_includes icon, '<svg', 'expected the core sprite_icon output'
+    assert_includes icon, 'Settings', 'the label must survive: icon-only hides it, it is the accessible name'
+  end
+
+  def test_reporter_dashboard_icon_is_the_bare_label_where_there_is_no_sprite_helper
+    # Redmine 5.1: IconsHelper does not exist, so sprite_icon must never be reached.
+    # `icon icon-<name>` on the link paints the glyph there; the label is the body.
+    # Mocha, not `Object#stub`. This file used the latter WITHOUT requiring
+    # `minitest/mock` and worked only because two other test files in the same process
+    # required it first — so removing those requires would have broken this file for a
+    # reason nothing here mentions. A dependency satisfied by load order is not a
+    # dependency anybody can see.
+    stubs(:reporter_dashboard_svg_icons?).returns(false)
+
+    assert_equal 'Settings', reporter_dashboard_icon('settings', 'Settings')
+  end
+
+  def test_reporter_dashboard_icon_never_calls_sprite_icon_without_the_sprite
+    calls = 0
+    define_singleton_method(:sprite_icon) { |*| calls += 1; 'should not happen' }
+
+    stubs(:reporter_dashboard_svg_icons?).returns(false)
+    reporter_dashboard_icon('close', 'Delete')
+
+    assert_equal 0, calls, 'sprite_icon does not exist on Redmine 5.1 — calling it is the defect'
+  end
+
   def test_reporter_project_limit_options_includes_unlimited
     options = reporter_project_limit_options(nil)
     assert_includes options, 'value="0"'

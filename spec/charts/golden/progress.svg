@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="rrd-chart-progress-title rrd-chart-progress-desc" font-family="Helvetica, Arial, sans-serif" class="rrd-chart">
+<rect x="0" y="0" width="640" height="360" fill="#FFFFFF"/>
+<title id="rrd-chart-progress-title">Release 2026.1</title>
+<desc id="rrd-chart-progress-desc">progress chart. 1 categories: complete. percent: 67</desc>
+<text x="12" y="26" font-size="14" font-weight="bold" fill="#333333">Release 2026.1</text>
+<rect x="12" y="31" width="616" height="24" rx="4" fill="#E4E4E4"/>
+<rect x="12" y="31" width="515.9" height="24" rx="4" fill="#0072B2"><title>complete: 67</title></rect>
+<text x="628" y="70" text-anchor="end" font-size="11" fill="#333333">84%</text>
+</svg>

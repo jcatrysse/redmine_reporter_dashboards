@@ -1,0 +1,32 @@
+<%#
+  T-28 — the page a share link answers with when it will not serve.
+
+  --- WHY THIS PAGE IS DELIBERATELY BARE ---
+
+  Its reader is very often NOT a Redmine user: a public link (FR-62) is opened by whoever
+  was sent it, on an instance they have no account on and whose navigation means nothing to
+  them. So there is one sentence, and it is the whole page. No project, no template name, no
+  "who to ask" — every one of those would tell a stranger something about an installation
+  they have no relationship with, and the refusal is not made more useful by any of them.
+
+  --- WHY IT LOOKS LIKE CORE'S OWN ERROR PAGE ---
+
+  `h2` plus `p#errorExplanation` is exactly `app/views/common/error.html.erb`, which is what
+  a Redmine 404 and 403 already look like — §9b's rule is native chrome, and a page that
+  looks like the rest of the instance is what tells a reader the link reached the right
+  place and simply is not live any more.
+
+  NO ICON HELPER, and that is a version decision rather than an omission: core's error page
+  calls `notice_icon`, which exists on Redmine 6+ and raises on 5.1 (D-3, the same divergence
+  `reporter_dashboard_icon` shims). This controller declares no helper, and an anonymous
+  error page is the last surface that should carry a version-specific call.
+
+  NO "back" LINK either, though core's error page has one. `history.back()` from a link
+  opened out of a mail goes nowhere, and to a stranger it offers to navigate into an
+  instance they have no account on.
+%>
+<h2><%= l(:label_reporter_share_refused) %></h2>
+
+<p id="errorExplanation"><%= @message %></p>
+
+<% html_title l(:label_reporter_share_refused) %>

@@ -1,0 +1,88 @@
+    # {group value => measure}, the grouped counterpart.
+    def self.measure_groups(relation, measure)
+      return grouped_counts(relation) if measure.nil? || measure.kind == :count
+
+      grouped_measure(relation, measure)
+    end
+    private_class_method :measure_groups
+
+    # DEFECT D-1, SECOND HALF. `grouped_counts` below fixed the COUNTED axis by reading
+    # the GROUP BY positionally; this does the same for `sum`, `avg` and `distinct`,
+    # which went on calling `.sum`/`.average`/`.count` on a grouped relation and so went
+    # on keying their result Hash by the group expression's own TEXT — the alias MariaDB
+    # truncates at 256 characters. The `grouped_counts` comment argues the whole
+    # mechanism and every word of it applies here; the only reason the two are separate
+    # methods is that the aggregate differs.
+    #
+    # It was left exposed deliberately in T-08 and written down as such, in the README's
+    # database section and in this file's own G7 exception entry. A `SUM(hours)` over an
+    # age axis is exactly the shape that crosses the limit, so "documented" was never
+    # going to be the end state.
+    #
+    # `measure_number` is applied per row rather than to a Hash afterwards because the
+    # rows arrive as [key..., value] tuples, which is the same shape `grouped_counts`
+    # folds — one reading pattern in this file, not two.
+    def self.grouped_measure(relation, measure)
+      expressions = relation.group_values
+      return {} if expressions.empty?
+
+      rows = relation.pluck(*expressions, Arel.sql(grouped_aggregate_sql(measure)))
+      rows.each_with_object({}) do |row, out|
+        *key, value = row
+        out[expressions.length == 1 ? key.first : key] = measure_number(value, measure)
+      end
+    end
+    private_class_method :grouped_measure
+
+    # The aggregate `grouped_measure` selects, spelled to match what `raw_measure` asks
+    # ActiveRecord for on the UNGROUPED path — `.sum(expr)` emits `SUM(expr)`,
+    # `.average(expr)` emits `AVG(expr)`, and `.count("DISTINCT expr")` emits
+    # `COUNT(DISTINCT expr)`. The scalar and grouped paths must not compute different
+    # things, and this is the one place that could make them diverge.
+    def self.grouped_aggregate_sql(measure)
+      case measure.kind
+      when :distinct then "COUNT(DISTINCT #{measure.expression})"
+      when :sum      then "SUM(#{measure.expression})"
+      when :avg      then "AVG(#{measure.expression})"
+      end
+    end
+    private_class_method :grouped_aggregate_sql
+
+    # The counted axis, read back BY POSITION — defect D-1's fix.
+    #
+    # ActiveRecord's grouped `.count` derives a result-column ALIAS from the group
+    # expression's own text (execute_grouped_calculation -> ColumnAliasTracker#
+    # column_alias_for -> table_alias_for, which slices at table_alias_length) and then
+    # looks each key up by that alias. MariaDB truncates a returned column label at 256
+    # characters — measured with the age CASE, 261 works and 262 does not — so the two
+    # ends asked and answered with different names, EVERY key came back nil, the whole
+    # axis collapsed into the empty bucket, and the total was taken from whichever group
+    # the server returned last. Four age boundaries cross it and DEFAULT_AGE_BUCKETS is
+    # four, so that was the default on MariaDB, in production.
+    #
+    # Shortening the expression is not the fix and was measured not to be: on PostgreSQL
+    # the alias is ALREADY truncated (limit 63) and the answer is correct, because AR
+    # asks for the same truncated name it sent. The defect is the two ends DISAGREEING,
+    # so a shorter CASE only moves the cliff. `SELECT <expr>, COUNT(...) GROUP BY <expr>`
+    # read positionally carries no alias for anything to disagree about.
+    #
+    # It is the same statement and the same GROUP BY — this changes how the result is
+    # READ, not how much work the server does. Query count is unchanged. Reading it any
+    # other way (one conditional aggregate per bucket) was tried and is dramatically
+    # slower on MariaDB, which is the engine the defect is on.
+    #
+    # `group_values` is what was passed to `.group`, so the key shape matches `.count`'s
+    # exactly: one group expression gives a bare key, several give an Array key.
+    def self.grouped_counts(relation)
+      expressions = relation.group_values
+      return {} if expressions.empty?
+
+      rows = relation.pluck(*expressions, Arel.sql("COUNT(#{DISTINCT_ISSUES})"))
+      rows.each_with_object({}) do |row, out|
+        *key, count = row
+        out[expressions.length == 1 ? key.first : key] = count.to_i
+      end
+    end
+    private_class_method :grouped_counts
+
+    def self.raw_measure(relation, measure)

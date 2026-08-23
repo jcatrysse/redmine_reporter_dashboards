@@ -1,0 +1,10 @@
+<p><%= l(:text_reporter_schedule_mail_intro, name: @template_name, date: format_date(@occurrence_date)) %></p>
+
+<%# FR-47 — see the text part for why this line is not decoration. %>
+<p><%= l(:text_reporter_schedule_mail_rendered_as, user: @rendered_as.name) %></p>
+
+<% if @project %>
+  <p><%= l(:field_project) %>: <%= @project.name %></p>
+<% end %>
+
+<p style="color:#888;"><%= l(:label_reporter_report_diagnostic_correlation_id) %>: <%= @correlation_id %></p>

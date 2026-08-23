@@ -1,0 +1,761 @@
+{
+  "idea": "004-redmine-reporter-modern",
+  "note": "Belief-state register (conventions.md §7). model.json = STRUCTURE; this = BELIEFS. Seeded by /analyze-idea from the analysis's own stated weak points; /challenge-analysis is the producer/updater and should contest every discriminator below. Each live claim carries a DISCRIMINATOR: the evidence or outcome that would flip it. NOTE: the discriminator gate is PRESENCE, not quality — a red-team/curator judgement is still required. TOOLING LIMIT: analysis-check resolves depends_on against a FLAT readdir of the idea folder, so reference/*.md cannot be a depends_on token even though those files exist and are load-bearing evidence. They are cited in evidence_for/against instead; the invalidation channel therefore does NOT cover changes to reference/ material. Raised with the curator as a platform finding (belongs to idea 002/003, not fixed here).",
+  "claims": [
+    {
+      "id": "C-001",
+      "claim": "The load-bearing problem is DISTRIBUTION — a paid, private, un-CI-able dependency — not the age of the base plugin's code.",
+      "status": "supported",
+      "confidence": "likely",
+      "prior": "The author's stated framing: the base plugin is 'hopelessly outdated' and 'old and worn out', so it must be rewritten.",
+      "evidence_for": [
+        {
+          "ref": "reference/source-inventory.md",
+          "note": "the Redmine 7 blocker is ONE line (report_template.rb:26); the base plugin is only ~6300 LOC — small, not a legacy monolith"
+        },
+        {
+          "ref": "reference/source-inventory.md",
+          "note": "the addon's full-app CI job cannot run on a fork PR at all; the secret, probe job, conditional and ~40 lines of CONTRIBUTING exist solely to work around one private dependency"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "8 of 10 core dashboard widgets have no reporter dependency; init.rb's hard raise is stricter than the code requires"
+        },
+        {
+          "ref": "05-decision.md",
+          "note": "OQ-2 closed as PUBLIC OPEN SOURCE, which is the branch on which this claim holds. The discriminator resolved in favour: audience is public, so distribution genuinely was the load-bearing problem — and the permission's condition means it cannot be solved by simply republishing the fork"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "02-analysis.md",
+          "note": "wkhtmltopdf's age is genuinely load-bearing and recurring: it taxes EVERY new template, in three layers. That is a code-age cost, not a distribution cost, and it is the pain the author actually feels most often"
+        },
+        {
+          "ref": "01-context.md",
+          "note": "if the audience is GEOxyz-internal (OQ-2), the distribution problem is not a cost at all and this claim is simply wrong"
+        },
+        {
+          "ref": "00-idea.md",
+          "note": "licence resolved 2026-08-04, which removes one component of the distribution problem (permission) while leaving the other (a paid dependency users must still buy, and a gem that still blocks clean CI)"
+        },
+        {
+          "ref": "04-risks.md",
+          "note": "RED TEAM: both stated 'remaining components' of the distribution problem were eroded — 'users must still buy it' is a function of permission (partly resolved), and 'the gem blocks clean CI' is FACTUALLY WRONG (E1: the gem is public; the private reporter repo is the only token gate). Post-resolution the code-age half (the wkhtmltopdf tax) may be the MORE load-bearing half — i.e. this claim may have been true and then quietly inverted"
+        }
+      ],
+      "discriminator": "RESOLVED 2026-08-04 in favour: audience is public (OQ-2) and redistribution is permitted only without wholesale copying (OQ-9), so distribution could not be solved by republishing. Would be reopened only by the permission narrowing or the project going internal.",
+      "depends_on": [
+        "GATE-AUDIENCE",
+        "00-idea.md",
+        "01-context.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [
+          "C-004"
+        ],
+        "supports": []
+      },
+      "source": "02-analysis.md — Summary and Business perspective",
+      "updated": "2026-08-04",
+      "bias_watch": "This reframing is more interesting than the author's own framing, which makes it attractive for the wrong reason. The red team must check whether it is being preferred because it is true or because it is a better story."
+    },
+    {
+      "id": "C-002",
+      "claim": "R3 ('at least the same functionality') is the single biggest scope risk, because parity pulls effort toward the per-issue drop path that the author's own work has already abandoned.",
+      "status": "refuted",
+      "confidence": "likely",
+      "prior": "Feature parity is the obvious and safe definition of done for a replacement plugin.",
+      "evidence_for": [
+        {
+          "ref": "reference/redmineup-gem-drop-surface.md",
+          "note": "across all three representative templates, ZERO gem-defined IssueDrop accessors are consumed; time_in_status, watchers, images, attachments, spent_time_by_date are unused"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "~60% of the base plugin's production code is periphery relative to the stated pain; parity costs roughly 2.5x the core"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "three parity items have NEGATIVE value — reimplementing them clean-room means owning the defect"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "03-options.md",
+          "note": "steelman: parity is the only definition of done that cannot be argued with, and it protects the author from users they cannot enumerate — exactly right when there is no usage data"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "the Tier-3 'dead weight' ranking is inference from ABSENCE of evidence, which is weak evidence of absence"
+        },
+        {
+          "ref": "00-idea.md",
+          "note": "licence resolution removes the clean-room fidelity tax: behaviour can be READ rather than inferred, so parity is cheaper per feature than costed. Weakens the cost half of this claim; does not touch the 'which features are worth having' half"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "CURATOR DECISION 2026-08-04: all six former Tier-3 items are REQUIRED. The 'plausibly dead weight' ranking was inference from absence of evidence, and the curator — who is the user — answered directly. The claim's cost half may still hold, but its actionable conclusion (drop the Tier-3 surface) is refuted"
+        }
+      ],
+      "discriminator": "REFUTED 2026-08-04 by curator decision, not by measurement. The four production queries remain worth running, but they now inform SIZING AND DEFAULTS (how much time-entry reporting, how many active schedules, whether public links are used enough to justify prominence) rather than keep-or-drop. Lesson recorded: 'no evidence of use' was doing work that only the curator could do.",
+      "depends_on": [
+        "00-idea.md",
+        "02-analysis.md",
+        "DROPS-OWN"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": [
+          "C-001"
+        ]
+      },
+      "source": "02-analysis.md — Business perspective, R3 interrogated",
+      "updated": "2026-08-04"
+    },
+    {
+      "id": "C-003",
+      "claim": "The aggregation subsystem must be ported verbatim, not rewritten; rewriting 2194 lines of visibility-aware SQL is the highest-risk single decision available.",
+      "status": "supported",
+      "confidence": "likely",
+      "prior": "R4 says do not carry the old code over — which reads as applying to everything.",
+      "evidence_for": [
+        {
+          "ref": "reference/source-inventory.md",
+          "note": "0.5.0 fixed FIVE distinct visibility leaks, each a one-line difference that reads like a style choice — precisely what a clean-room rewrite loses silently"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "a wrong number is worse than a crash: a crash is self-reporting, a wrong number is silently believed and distributed as authoritative"
+        },
+        {
+          "ref": "model.json",
+          "note": "AGG-CORE carries 722 of 884 rspec examples plus 49 that execute real SQL on three engines with an independent oracle"
+        },
+        {
+          "ref": "spec/golden/kernel_exception.rb",
+          "note": "MEASURED 2026-08-05 and it answers the entry below it. Defect D-1 IS fixed inside the ported kernel, without a rewrite: ONE declared hunk against the v0.5.0 blob (spec/golden/kernel_exception.rb, gate G7's exception mechanism with its own ratchet), changing only how a grouped result is READ — positionally instead of by the column alias ActiveRecord derives from the group expression's text. All 176 recorded corpus values are byte-identical on PostgreSQL and the per-adapter overlay is EMPTY again, RATCHET 0, with the corpus (MariaDB 11) CI cell green while it is empty. That directly weakens the 'can only be FIXED by the kind of change a rewrite affords and a port does not' entry opposite: it took one argued hunk in one method. Two caveats, both stated rather than smoothed: a MEASURED age axis still reads through the alias and is still exposed (README, database section), and a FIRST attempt that dropped the GROUP BY entirely was correct but pathologically slow on MariaDB — evidence that the port's own shapes are load-bearing for performance in ways the specs do not gate. Status and confidence remain the curator's."
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "02-analysis.md",
+          "note": "the MariaDB ONLY_FULL_GROUP_BY limitation on group_by:age is architectural (an inline CASE in the group expression) and can only be FIXED by the kind of change a rewrite affords and a port does not"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "if the drop/scope API changes shape, a 'verbatim port' is not actually available — the seam moves and the work is a re-architecture whether or not it is called one"
+        },
+        {
+          "ref": "04-risks.md",
+          "note": "RED TEAM E2 (verified): liquid_aggregate_tag.rb:106 includes SqlAggregation::ScopeResolution and :135 calls resolve_scope — i.e. the tag bundled into AGG-CORE is soldered to the module marked TO BE DELETED. 'Port AGG-CORE verbatim' overstates it; the portable unit is the kernel (query_aggregator + drill_through), with the tag re-seamed"
+        },
+        {
+          "ref": "04-risks.md",
+          "note": "RED TEAM: the risk work is done by the GOLDEN CORPUS, not by the verbatim port. A golden-guided rewrite is equally protected against silent drift — so the strong form ('rewriting is the highest-risk decision available') is true of an UNGUIDED rewrite and much weaker of a guided one. bias_watch live"
+        },
+        {
+          "ref": "spec/golden/adapter_overlay.rb",
+          "note": "MEASURED 2026-08-05 by the T-01 corpus, BEFORE any port, and CORRECTED the same day by the first CI run: a second architectural defect in the same dimension. group_by:age collapses into the (none) bucket on MARIADB (10.11 and 11) once the generated CASE passes the 256-character column-label limit — four boundaries, i.e. the DEFAULT. PostgreSQL 16 and MySQL 8.0.46 are unaffected; the first write-up here said 'the whole MySQL family' and that was an inference from one engine, which CI refuted. So the frozen corpus is not green on all three engines without a per-adapter overlay entry, and the cause is structural (an inline CASE read back by its own text), not a value drift a verbatim port could carry across. Evidence on the discriminator's 'without structural change' clause; the discriminator ITSELF has not been run — the port is T-07/T-08 — so status and confidence are left for the curator"
+        }
+      ],
+      "discriminator": "Attempt the port behind the frozen 0.5.0 golden corpus. If the ported aggregator cannot be made green against the goldens on all three engines without structural change, 'verbatim port' was never on the table and the decision is subset-vs-rewrite instead.",
+      "depends_on": [
+        "AGG-CORE",
+        "SCOPE-RES",
+        "INV-1",
+        "INV-2",
+        "INV-3"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "02-analysis.md — Cross-cutting tension 3",
+      "updated": "2026-08-05",
+      "bias_watch": "The author wrote this code. 'Port it verbatim' may be protecting sunk effort rather than managing risk. The counter-check is that the tests, not the code, are the asset — and tests can outlive a rewrite."
+    },
+    {
+      "id": "C-004",
+      "claim": "The full-parity rewrite is not worth its cost; a bounded subset captures ~85-90% of the stated value for ~55-60% of the effort.",
+      "status": "open",
+      "confidence": "hypothesis",
+      "prior": "A rewrite that meets all ten stated requirements is the deliverable.",
+      "evidence_for": [
+        {
+          "ref": "02-analysis.md",
+          "note": "full-parity midpoint ~22 author-weeks vs ~11-14 for the subset; 22 AW is 2.4x the entire elapsed history of the addon"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "R-02 (stall, score 20) and R-09 (abandonment, 16) are both driven by total scope, and both are highest for the full-parity path"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "02-analysis.md",
+          "note": "MEASURED velocity of ~2200 LOC/week means ~22000 LOC is ~10-12 weeks, not 22 author-weeks — my own evidence argues against my own estimate by roughly a factor of two"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "no usage data exists, so 'which 10-15% can be dropped' is reviewer judgement, not a finding"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "Revision 2026-08-04: clean-room burden removed, so the full-parity estimate was inflated by a cost that no longer exists"
+        },
+        {
+          "ref": "05-decision.md",
+          "note": "ADR-004 accepted the more expensive path knowingly, because the two cheaper ones are excluded by the permission. So 'not worth its cost' is no longer decision-relevant: there is no cheaper permitted option to lose to"
+        }
+      ],
+      "discriminator": "A 2-week timeboxed spike on own-drops + one PDF engine, rendering the three existing example templates end-to-end. If it lands inside 2 weeks, the case for cutting scope loses most of its force and full parity is defensible.",
+      "depends_on": [
+        "OPT-B",
+        "OPT-E",
+        "02-analysis.md",
+        "03-options.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [
+          "C-001"
+        ],
+        "supports": [
+          "C-002"
+        ]
+      },
+      "source": "02-analysis.md — Cost & risk perspective",
+      "updated": "2026-08-04",
+      "bias_watch": "Cost estimates for rewrites are systematically pessimistic in the literature AND systematically optimistic in practice. This claim leans on an author-week unit that is itself derived from one 9-week sample."
+    },
+    {
+      "id": "C-005",
+      "claim": "R8 (pluggable PDF engines) and R9 (easy for new users) cannot both be satisfied at equal quality by a single maintainer; the only honest resolution is a declared asymmetry — one CI-verified reference engine plus a documented, explicitly unverified seam.",
+      "status": "open",
+      "confidence": "likely",
+      "prior": "A pluggable engine is straightforwardly good: users pick what suits their deployment.",
+      "evidence_for": [
+        {
+          "ref": "02-analysis.md",
+          "note": "page furniture, asset resolution and print-background defaults are genuinely non-portable across the candidate engines — the abstraction cannot hide them"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "naive matrix is 4 Redmine x 3 DB x 3 engines = 36 configurations, which must be refused"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "wkhtmltopdf's install friction is genuinely near-zero (gem-provisioned binary, zero config); both modern candidates make R9 WORSE, not better"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "03-options.md",
+          "note": "deployment diversity is real: shared hosting cannot run Chrome, compose adds Gotenberg in five lines, some on-prem sites forbid new network services. Any single choice is wrong for someone, so the seam has genuine option value"
+        }
+      ],
+      "discriminator": "Write the engine conformance fixture corpus and run it with the engine in a DIFFERENT network namespace than the app. If a single adapter passes every declared capability on every supported Redmine with no per-engine template divergence, the asymmetry is unnecessary and this claim is refuted.",
+      "depends_on": [
+        "ENG-SEAM",
+        "PREFLIGHT",
+        "READINESS",
+        "GATE-AUDIENCE"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "02-analysis.md — Cross-cutting tension 1",
+      "updated": "2026-08-04"
+    },
+    {
+      "id": "C-006",
+      "claim": "The template JS-escaping defect is denial-of-rendering, not XSS: the injection is real but no tested payload executes.",
+      "status": "supported",
+      "confidence": "likely",
+      "prior": "The security review ranked it as its HIGHEST finding — data-driven stored XSS reachable by any project member who can name a version.",
+      "evidence_for": [
+        {
+          "ref": "reference/verification-liquid-js-escaping.md",
+          "note": "0 of 2940 crafted payloads executed; re-synchronising the JS parse requires emitting a quote, and both shipped idioms either delete quotes or entity-encode them (inert inside <script>)"
+        },
+        {
+          "ref": "reference/verification-liquid-js-escaping.md",
+          "note": "confirmed by experiment that Liquid's escape filter passes a backslash through unchanged, so the injection premise itself is correct"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "reference/verification-liquid-js-escaping.md",
+          "note": "a bounded negative search is not a proof: 2940 payloads over 14 fragments, V8 only, and only the two idioms present in THESE repos. wkhtmltopdf's JavaScriptCore was not tested and its error recovery may differ"
+        },
+        {
+          "ref": "reference/verification-liquid-js-escaping.md",
+          "note": "the defence is ACCIDENTAL — quote-stripping happens to remove the re-sync primitive. It is one payload shape away from executable"
+        }
+      ],
+      "discriminator": "A payload — of any shape, including one using a construct not enumerated in the test — that executes JavaScript through either shipped idiom. Finding one restores the High/XSS classification immediately.",
+      "depends_on": [
+        "INV-9",
+        "02-analysis.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "reference/verification-liquid-js-escaping.md — experiment run 2026-08-04",
+      "updated": "2026-08-04",
+      "bias_watch": "I ran the experiment that downgraded another reviewer's top finding. Motivated reasoning risk: a negative result is easier to accept than to keep attacking. The red team should attempt the payload search independently rather than accept 0/2940."
+    },
+    {
+      "id": "C-007",
+      "claim": "The dominant operational risk is render-path containment (uncapped synchronous renders, no timeout, no run state for schedules), not the choice of PDF engine.",
+      "status": "open",
+      "confidence": "likely",
+      "prior": "Replacing the obsolete engine is the main operational improvement on offer.",
+      "evidence_for": [
+        {
+          "ref": "02-analysis.md",
+          "note": "ZIP export renders N PDFs serially in one web request, uncapped, entirely in memory, each chart PDF paying a 3s floor with the runaway-script guard disabled — the only failure mode here that degrades unrelated Redmine functionality"
+        },
+        {
+          "ref": "reference/source-inventory.md",
+          "note": "schedules have no last_run_at, no per-schedule rescue and an undocumented external cron: a missed day is permanently lost and unknowable, and one bad template embargoes every later schedule in id order"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "02-analysis.md",
+          "note": "if real usage is single-report interactive export only, the uncapped ZIP path is theoretical and the engine choice dominates instead. No evidence either way was found"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "the same curator decision: ad-hoc mail and public links are required, so the 'plausibly dead weight' framing behind this claim's ranking is weakened on the same grounds as C-002"
+        }
+      ],
+      "discriminator": "Whether anyone has ever exported a multi-hundred-issue ZIP, and whether any production report_schedules rows exist. If both are effectively zero, this claim's ranking is wrong even though the defects are real.",
+      "depends_on": [
+        "INV-4",
+        "INV-5",
+        "02-analysis.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "02-analysis.md — Operations perspective",
+      "updated": "2026-08-04"
+    },
+    {
+      "id": "C-008",
+      "claim": "R6 (own drops) is forced by a technical constraint independent of any licensing argument: the redmineup gem pins liquid to < 5.0.",
+      "status": "parked",
+      "confidence": "certain",
+      "prior": "Own drops is a design preference, and possibly a licensing necessity because the gem was believed proprietary.",
+      "evidence_for": [
+        {
+          "ref": "reference/redmineup-gem-drop-surface.md",
+          "note": "gemspec line 23: add_runtime_dependency 'liquid', '> 4.0', '< 5.0'. Verifiable from the gemspec alone"
+        },
+        {
+          "ref": "reference/redmineup-gem-drop-surface.md",
+          "note": "the gem is public and GPL-2.0-declared, so the licensing argument for R6 is WEAKER than assumed — leaving the technical one as the load-bearing reason"
+        },
+        {
+          "ref": "00-idea.md",
+          "note": "curator decision 2026-08-04: 'not going to use the redmineup gem ... genuinely independent' — R6 upgraded from wish to decision"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "reference/redmineup-gem-drop-surface.md",
+          "note": "not verified whether the gem actually BREAKS on Liquid 5 or merely declines to declare it; relaxing the gemspec constraint in a fork might suffice without owning the drops"
+        },
+        {
+          "ref": "01-context.md",
+          "note": "nothing in the analysis establishes that Liquid 5 is actually NEEDED — 'we cannot use Liquid 5' is only a cost if something in Liquid 5 is required"
+        }
+      ],
+      "discriminator": "PARKED, not refuted. The belief still holds (the gemspec pin is real); it simply no longer bears on any choice, because the gem is out by curator decision 2026-08-04. Not marked 'superseded' because no successor claim replaced it — a decision removed the question. Would become live again only if the independence decision were reversed. (Preserved for re-activation: the original runnable test was — relax the gemspec pin, install Liquid 5, run the existing suite; if it passes, the pin was a declaration rather than a real incompatibility.)",
+      "depends_on": [
+        "DROPS-OWN",
+        "02-analysis.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "reference/redmineup-gem-drop-surface.md",
+      "updated": "2026-08-04"
+    },
+    {
+      "id": "C-009",
+      "claim": "With licensing resolved and R6 decided, the A-vs-B choice is worth materially less than the bounded-subset-vs-full-parity choice (roughly 5-7 AW against roughly 8-11 AW).",
+      "status": "open",
+      "confidence": "hypothesis",
+      "prior": "Absorb-vs-clean-room was the central architectural decision.",
+      "evidence_for": [
+        {
+          "ref": "03-options.md",
+          "note": "A ~4-7 AW vs B subset ~11-14 AW, but R6-as-decided adds the ~1240-line drop layer to A as well, narrowing the gap"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "full parity ~22 AW vs bounded subset ~11-14 AW — a much larger delta than any A-vs-B delta"
+        },
+        {
+          "ref": "03-options.md",
+          "note": "ARITHMETIC, shown rather than asserted: A 4-7 AW plus the ~1240-line drop layer vs B-subset 11-14 AW => gap ~4-10 AW (midpoints ~5.5+ vs ~12.5). Subset-vs-parity: 11-14 vs 16-40 (midpoint 22) => gap ~8-11 AW. The earlier '~3-4 vs ~8' figures understated both and were not derivable from the option costs"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "03-options.md",
+          "note": "A and B differ in RISK CLASS, not only cost: A's risks are known defects, B's are silent regressions (R-03/R-04). A cost-only comparison understates that difference"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "the subset boundary rests on usage data nobody has, so its 8-AW saving is provisional in a way the A-vs-B delta is not"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "all AW figures are now upper bounds: none were re-costed after the clean-room burden was removed, so both deltas may shrink and their ratio may move"
+        },
+        {
+          "ref": "04-risks.md",
+          "note": "RED TEAM: reducing a decision that carries a score-15-to-20 silent-damage delta (R-03/R-04, specific to B) to an author-week delta is a CATEGORY ERROR — precisely the move a non-committal synthesis makes to avoid picking a winner. The bias_watch on this claim is correct"
+        },
+        {
+          "ref": "05-decision.md",
+          "note": "ADR-004 made the A-vs-B choice on the PERMISSION'S CONDITION, not on cost or risk class at all — so both halves of this claim's framing were beside the point for the actual decision. The claim survives as a statement about where cost sits, but it did not decide anything"
+        }
+      ],
+      "discriminator": "TWO-PART, rewritten 2026-08-04 after the red team found the original tested only cost. (1) COST: cost the drop layer and render path independently of the A-vs-B choice; if they dominate both estimates, the cost half holds. (2) RISK CLASS — the part the original could not fail on: run a seeded-mutation test against a golden-guided clean-room build (inject a visibility-clause mutation, e.g. Issue.visible -> Issue.where, and a non-additive-measure folding error). If ANY such mutation survives the golden corpus plus the multi-actor visibility suite undetected, then A and B are NOT commensurable on cost — they carry different risk classes — and this claim is refuted regardless of the arithmetic.",
+      "depends_on": [
+        "OPT-A",
+        "OPT-B",
+        "DROPS-OWN",
+        "CLEANROOM-BURDEN",
+        "03-options.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [
+          "C-004"
+        ],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "03-options.md — revised recommendation, 2026-08-04",
+      "updated": "2026-08-04",
+      "bias_watch": "Framing the headline decision as low-stakes is convenient for an analysis that did not pick a winner. Check whether it is true or self-serving."
+    },
+    {
+      "id": "C-010",
+      "claim": "The RedmineUP standing agreement covers REDISTRIBUTION of their code in a plugin we publish — not merely use and development collaboration. Every post-2026-08-04 simplification depends on this reading.",
+      "status": "supported",
+      "confidence": "likely",
+      "prior": "The shipped artefact's own EULA forbids redistributing images, manuals, CSS and JavaScript, and the vendor's licence record is internally inconsistent.",
+      "evidence_for": [
+        {
+          "ref": "00-idea.md",
+          "note": "curator statement 2026-08-04: a standing agreement treats everything as an open licence; the author describes himself as effectively part of RedmineUP's team and contributing to their development"
+        },
+        {
+          "ref": "01-context.md",
+          "note": "the author is the party with the relationship and the standing to know; RedmineUP is also the only party with standing to object, so their consent is the whole question"
+        },
+        {
+          "ref": "00-idea.md",
+          "note": "curator statement 2026-08-04 (second): 'I may reuse the code and then open-source it… as long as I do not just loosely copy the whole thing' — redistribution confirmed, WITH a condition on manner"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "reference/source-inventory.md",
+          "note": "doc/LICENSE:9,13,24 puts images, manuals, CSS and JavaScript under a RedmineUP Proprietary Use License stating they 'may not be redistributed in any form without prior consent' — the artefact and the agreement disagree, and only the artefact is written down"
+        },
+        {
+          "ref": "01-context.md",
+          "note": "A9: the vendor's own licence record is internally inconsistent (doc/COPYING says GPL-2, extra/version.rb stamps GPL-3, the forked tree carries no headers). That inconsistency bears directly on relying on the same vendor's unwritten word"
+        },
+        {
+          "ref": "04-risks.md",
+          "note": "RED TEAM (self-falsifying its own attack): 'we treat everything as an open licence' reads naturally as permitting redistribution, but if it licenses USE and collaboration rather than redistribution of RedmineUP's code, then Option A is unpublishable again and Option E stays condemned — the option set INVERTS. The dossier treated 'licence resolved' as binary when the operative question is scope"
+        }
+      ],
+      "discriminator": "RESOLVED 2026-08-04: redistribution permitted, conditioned on not wholesale-copying. Still live in one direction — a written instrument would harden it, and a change of contact/role/ownership at RedmineUP would reopen it. ADR-004 records supersession on that trigger.",
+      "depends_on": [
+        "GATE-OWNERSHIP",
+        "CLEANROOM-BURDEN",
+        "00-idea.md",
+        "01-context.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": [
+          "C-009"
+        ]
+      },
+      "source": "ratchet-reviewer mandatory item 3, 2026-08-04",
+      "updated": "2026-08-04",
+      "bias_watch": "Every downstream simplification in this dossier — clean-room removed, Option A reopened, R-07 at 3 — rests on this one unwritten premise. A dossier has a standing incentive not to examine the assumption that makes its own work easier."
+    },
+    {
+      "id": "C-011",
+      "claim": "Liquid is the right template language for this plugin.",
+      "status": "open",
+      "confidence": "uncertain",
+      "prior": "R5 states it as a requirement; the dossier accepted it without interrogation.",
+      "evidence_for": [
+        {
+          "ref": "00-idea.md",
+          "note": "R5 is an explicit author requirement, and every existing template plus the whole tag ecosystem is Liquid — switching breaks all of them"
+        },
+        {
+          "ref": "reference/redmineup-gem-drop-surface.md",
+          "note": "Liquid is a real sandbox: no arbitrary method dispatch, no eval, drop-mediated access only"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "04-risks.md",
+          "note": "RED TEAM: INV-9 (template authorship = code execution), the absent resource limits, .html_safe output, the gem's call_method(input, method_name) filter and template-supplied regex_replace are ALL downstream of choosing a server-side-executed drop-accessing template language. The most severe security finding is R5's direct consequence and the trade was never weighed"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "the recommended hybrid already pushes chart logic server-side, so the dossier is partly migrating away from in-template computation anyway"
+        }
+      ],
+      "discriminator": "Enumerate what the existing templates actually COMPUTE (not display). If it is all aggregation plus formatting, a declarative data-only report spec with server-side rendering would cover it and eliminate the code-execution privilege class — refuting the claim. If templates carry genuine per-report logic that cannot be pushed down, Liquid is justified.",
+      "depends_on": [
+        "INV-9",
+        "02-analysis.md",
+        "00-idea.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "04-risks.md — red-team gap, 2026-08-04",
+      "updated": "2026-08-04",
+      "bias_watch": "R5 is an explicit author requirement, which makes it socially expensive to question. That is exactly why it went uninterrogated for a full analysis pass."
+    },
+    {
+      "id": "C-012",
+      "claim": "R1 ('one plugin') is worth what it costs.",
+      "status": "open",
+      "confidence": "uncertain",
+      "prior": "R1 is the author's first stated requirement and was treated as a hard constraint.",
+      "evidence_for": [
+        {
+          "ref": "00-idea.md",
+          "note": "R1 is the author's first requirement; one plugin means one install, one version, one support surface"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "absorbing reporter deletes ~600 lines of pure coupling workaround and removes the CI token gate"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "04-risks.md",
+          "note": "RED TEAM: the dossier's own 'hard contradiction' (R3 vs R1+R4+R6 => a template-compatibility break BY CONSTRUCTION) is CAUSED by insisting on one-plugin-with-own-drops. Two cleanly separated open plugins with a public contract solve distribution and bus factor equally and dissolve it. 'Option C fails R1' is scored as a defect without ever asking what R1 buys"
+        }
+      ],
+      "discriminator": "Name a concrete user-visible or maintenance benefit of one-plugin that two-clean-plugins-with-a-public-contract does not deliver. If none survives (i.e. the benefit is packaging aesthetics), R1 should not outrank the structural contradiction it creates, and this claim is refuted.",
+      "depends_on": [
+        "OPT-C",
+        "OPT-D",
+        "00-idea.md",
+        "02-analysis.md"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "04-risks.md — red-team gap, 2026-08-04",
+      "updated": "2026-08-04"
+    },
+    {
+      "id": "C-013",
+      "claim": "Redesigning the six carried-forward capabilities keeps every capability while removing every defect, and in four of the six the result is strictly more useful than the original.",
+      "status": "open",
+      "confidence": "likely",
+      "prior": "The three defects were treated as reasons to drop the capabilities that contained them.",
+      "evidence_for": [
+        {
+          "ref": "technical-spec.md",
+          "note": "time-entry reporting as a `source` field is CHEAPER than a third template branch and lets one template span issues and time — which the two-branch design could not do"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "share links gain listing, expiry, revocation and an access log, none of which exist today; the snapshot mode removes the visibility bypass entirely rather than patching it"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "the failure report keeps the user informed (correlation id, template, engine) while removing the lie — today an operator gets a green-looking mail and must open the attachment to discover it is broken"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "technical-spec.md",
+          "note": "§7c: Phase 4 grows by two tables, a UI, an access log, the bundle importer, the mail controls and an audit log. The generalisation offsets part of it, not all"
+        },
+        {
+          "ref": "04-risks.md",
+          "note": "share links and outbound mail are the two paths that reach OUTSIDE Redmine's permission model, so the security surface returns deliberately. The controls (digest-only storage, snapshots, auditing) are load-bearing and cutting them later restores the original defects"
+        },
+        {
+          "ref": "02-analysis.md",
+          "note": "R-02 (stall, 20) is driven by total scope, and this decision increases total scope in the phase most likely to be reached last"
+        }
+      ],
+      "discriminator": "Build T-31 (the `source` field) first among the six. If generalising to time entries costs materially MORE than a separate template branch would have, the 'strictly more useful and cheaper' claim is wrong for its clearest case and the others deserve re-examination.",
+      "depends_on": [
+        "CARRIED-SIX",
+        "ENG-SEAM",
+        "OPT-B"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "technical-spec.md §7b — curator decision 2026-08-04",
+      "updated": "2026-08-04",
+      "bias_watch": "'We can keep everything AND make it better' is exactly what an analysis says when it does not want to deliver bad news about scope. §7c exists to force the cost into the open; check that it actually did."
+    },
+    {
+      "id": "C-014",
+      "claim": "Letting the plugin fetch external assets and hand bytes to the engine (rather than letting the engine fetch) preserves INV-8 while satisfying the curator's 'let it download' — i.e. the capability is added without adding the SSRF surface that motivated denying egress.",
+      "status": "open",
+      "confidence": "likely",
+      "prior": "Zero egress was treated as the single cheapest control that kills SSRF value; any fetch capability was assumed to erode it.",
+      "evidence_for": [
+        {
+          "ref": "technical-spec.md",
+          "note": "§5.1: the fetch happens in the Rails process, which already makes outbound calls, under an explicit host allowlist, anonymously, https-only, with post-DNS private/link-local rejection and redirect count 0 — a narrower capability than a browser given the network"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "§5.1: :asset_http stays OFF even in :external mode wherever the engine supports :asset_upload, so the engine's name resolution stays denied in the normal case"
+        },
+        {
+          "ref": "functional-spec.md",
+          "note": "FR-64/FR-65 make the policy per-install, so an author (who already holds a code-execution privilege, INV-9) cannot widen egress from template content"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "02-analysis.md",
+          "note": "the SSRF argument was never only about WHO makes the request — a fetcher inside Rails has MORE internal reachability than an isolated renderer container, so :external moves the SSRF surface to a more privileged process rather than removing it"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "the allowlist is the whole defence, and an operator who adds a wildcard-ish internal host to make one report work has silently granted an author-reachable internal fetcher"
+        },
+        {
+          "ref": "04-risks.md",
+          "note": "every control in this dossier that depends on an operator configuring something correctly has been treated with suspicion elsewhere; this one should not get an exemption"
+        }
+      ],
+      "discriminator": "Write T-33's negative tests FIRST, specifically the post-DNS private-range refusal and the empty-allowlist-equals-:bundled case. If either needs a carve-out to make a real report render (an internal host that only resolves privately, say), then :external cannot be both usable and safe as specified, and the honest resolution is upload-only with a documented pre-fetch step outside the plugin.",
+      "depends_on": [
+        "ASSET-POLICY",
+        "INV-8",
+        "ENG-SEAM"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "technical-spec.md §5.1 — curator decision 2026-08-04 (OQ-4)",
+      "updated": "2026-08-04",
+      "bias_watch": "This claim lets the analysis say yes to the curator without withdrawing the zero-egress posture it argued for hard. That is exactly the shape of a rationalisation. The evidence_against here is stronger than the comfortable framing suggests."
+    },
+    {
+      "id": "C-015",
+      "claim": "Specifying the authoring experience (§9b) closes R9 rather than merely appearing to: the four surfaces are the ones that decide whether a new user succeeds, and the two mechanised checks (generated drop reference, linter parity) carry most of the weight.",
+      "status": "open",
+      "confidence": "plausible",
+      "prior": "R9 was operationalised as install-in-3-commands, and the residue was labelled 'a usability question' — which functioned as a permission not to specify it.",
+      "evidence_for": [
+        {
+          "ref": "technical-spec.md",
+          "note": "§9b.1: the drop reference is generated from the same declaration the runtime enforces, so the one document a template author needs most cannot go stale — mechanised, not aspirational"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "§9b.1: one linter object, two surfaces, with a test comparing both finding lists — the editor cannot drift from the rake task"
+        },
+        {
+          "ref": "00-idea.md",
+          "note": "the curator's own two templates are 747 lines of Liquid, which is direct evidence that 'start from an example' matters more than any editor affordance"
+        }
+      ],
+      "evidence_against": [
+        {
+          "ref": "technical-spec.md",
+          "note": "§9b.5 states it plainly: this section was written AFTER the red-team pass and has not been attacked; its two weakest claims are self-identified"
+        },
+        {
+          "ref": "technical-spec.md",
+          "note": "a generated API reference is a known-mediocre substitute for task-oriented documentation; asserting parity proves it is CORRECT, not that it is USEFUL"
+        },
+        {
+          "ref": "functional-spec.md",
+          "note": "the top criterion — a first template without opening documentation — remains a 3-participant walkthrough, i.e. advisory, and advisory criteria are the ones this dossier has repeatedly watched get quietly dropped"
+        }
+      ],
+      "discriminator": "Run the 3-participant walkthrough on the starter gallery + generated reference BEFORE building the CodeMirror editor and the chart form. If participants succeed without them, the editor work is decoration; if they fail WITH them, the gallery-and-reference theory of R9 is wrong and the missing piece is task-oriented documentation, not tooling.",
+      "depends_on": [
+        "AUTHORING-UX",
+        "DROPS-OWN",
+        "READINESS"
+      ],
+      "related": {
+        "supersedes": [],
+        "refines": [],
+        "conflicts_with": [],
+        "supports": []
+      },
+      "source": "technical-spec.md §9b — gap closed 2026-08-04",
+      "updated": "2026-08-04",
+      "bias_watch": "A newly-written section that grades itself well. The cheap version of this claim is 'we wrote a UX section, so UX is handled'. Check that the two mechanised checks are actually load-bearing and not just the only two things that happened to be mechanisable."
+    }
+  ],
+  "review_due": [
+    "C-014",
+    "C-015",
+    "C-011",
+    "C-012",
+    "C-013",
+    "C-004"
+  ]
+}

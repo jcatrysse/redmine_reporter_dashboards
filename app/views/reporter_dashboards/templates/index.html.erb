@@ -1,0 +1,83 @@
+<%#
+  T-23 — the report templates of one project.
+
+  Redmine's own chrome only: `.contextual`, `h2`, `table.list`, `p.nodata`, `.box`.
+  CLAUDE.md §4 forbids plugin-local design tokens in chrome, and there are none here.
+%>
+<div class="contextual">
+  <% if User.current.allowed_to?(:add_reporter_dashboards_templates, @project) %>
+    <%= link_to reporter_dashboard_icon('add', l(:label_reporter_template_new)),
+                new_project_reporter_template_path(@project), class: 'icon icon-add' %>
+  <% end %>
+</div>
+
+<h2><%= l(:label_reporter_template_plural) %></h2>
+
+<% if @templates.any? %>
+  <table class="list">
+    <thead>
+      <tr>
+        <th><%= l(:field_name) %></th>
+        <th><%= l(:field_description) %></th>
+        <th><%= l(:field_redmine_reporter_dashboards_template_output) %></th>
+        <th><%= l(:field_visible) %></th>
+        <th><%= l(:field_author) %></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @templates.each do |template| %>
+        <tr class="<%= cycle('odd', 'even') %>">
+          <td>
+            <%= link_to template.name, project_reporter_template_path(@project, template) %>
+            <%# A DISABLED TEMPLATE IS STILL LISTED AND SAYS SO. Hiding it would leave its
+                author looking for something they can see in the editor and not here. %>
+            <% unless template.enabled %>
+              <span class="tag"><%= l(:label_reporter_template_disabled) %></span>
+            <% end %>
+          </td>
+          <td><%= template.description %></td>
+          <td><%= l(:"label_reporter_template_output_#{template.output}") %></td>
+          <td><%= reporter_template_visibility_label(template) %></td>
+          <td><%= link_to_user(template.author) %></td>
+          <td class="buttons">
+            <% if template.editable_by?(User.current) %>
+              <%#
+                CORE'S OWN TWO HELPERS. `delete_link` carries the verb, the confirmation
+                and the class so this page cannot come to disagree with the rest of
+                Redmine about what a delete looks like, and `reporter_dashboard_icon` is
+                this plugin's existing D-3 shim: `sprite_icon` exists on 6+ and RAISES on
+                5.1, and the shim already answers that question in one place.
+              %>
+              <%= link_to reporter_dashboard_icon('edit', l(:button_edit)),
+                          edit_project_reporter_template_path(@project, template),
+                          class: 'icon icon-edit' %>
+              <%= delete_link project_reporter_template_path(@project, template) %>
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>
+
+<%# IMPORT IS ON THIS PAGE RATHER THAN BEHIND ITS OWN, and only for somebody who holds
+    BOTH authoring permissions — the same conjunction the controller enforces, so the
+    form is not offered to a person the action would refuse. %>
+<% if User.current.allowed_to?(:add_reporter_dashboards_templates, @project) &&
+      User.current.allowed_to?(:edit_reporter_dashboards_templates, @project) %>
+  <div class="box">
+    <h3><%= l(:label_reporter_template_import) %></h3>
+    <%= form_tag(import_project_reporter_templates_path(@project),
+                 multipart: true) do %>
+      <p>
+        <label for="file"><%= l(:label_reporter_template_import_file) %></label>
+        <%= file_field_tag 'file', accept: '.json,.yml,.yaml,application/json' %>
+      </p>
+      <p><em class="info"><%= l(:text_reporter_template_import_info) %></em></p>
+      <p><%= submit_tag l(:button_reporter_template_import) %></p>
+    <% end %>
+  </div>
+<% end %>

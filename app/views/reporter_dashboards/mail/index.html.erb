@@ -1,0 +1,104 @@
+<%#
+  T-32 / FR-61 — the audit. §7b.5's justification in its own words: *"today nothing records
+  what left the building. Now there is a log you can answer questions from."*
+
+  Redmine's own chrome only: `h2`, `table.list`, `p.nodata`, `em.info`.
+
+  --- WHAT AN ADMIN SEES AND WHAT EVERYBODY ELSE SEES ---
+
+  The controller narrows a non-admin to their own rows. FR-61 requires the log to be
+  visible to ADMINS; showing one holder of `mail_…_reports` who else mailed which report to
+  whom would be a new disclosure that no requirement asks for. The sentence below says
+  which list is being shown, because a page that silently shows you a subset is a page you
+  will later swear was empty.
+%>
+<h2><%= l(:label_reporter_adhoc_mail_audit) %></h2>
+
+<p class="nodata">
+  <%= User.current.admin? ? l(:text_reporter_adhoc_audit_scope_all) :
+                            l(:text_reporter_adhoc_audit_scope_own) %>
+</p>
+
+<% if @mail_sends.any? %>
+  <%# BOUNDED, AND THE PAGE SAYS SO WHEN IT IS TRUNCATED. §9b.2's "Preview of 50 of 1 284"
+      pattern: a list that silently stops at 100 is a list somebody will read as complete,
+      which for an audit is the one reading that must never happen. %>
+  <% if @mail_sends_total > @mail_sends.length %>
+    <p class="nodata">
+      <%= l(:text_reporter_adhoc_audit_truncated,
+            shown: @mail_sends.length, total: @mail_sends_total) %>
+    </p>
+  <% end %>
+
+  <table class="list">
+    <thead>
+      <tr>
+        <th><%= l(:label_date) %></th>
+        <th><%= l(:field_user) %></th>
+        <th><%= l(:label_reporter_template) %></th>
+        <th><%= l(:label_reporter_adhoc_mail_recipients) %></th>
+        <th><%= l(:field_status) %></th>
+        <th><%= l(:label_reporter_report_diagnostic_correlation_id) %></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @mail_sends.each do |send| %>
+        <tr>
+          <td><%= format_time(send.created_at) %></td>
+          <td><%= link_to_user(@page_users[send.author_id]) %></td>
+          <td>
+            <%# THE STORED NAME, not the association. A deleted or renamed template would
+                otherwise make the audit describe something other than what was sent. %>
+            <%= send.template_name.presence || l(:label_reporter_adhoc_mail) %>
+            <% if send.source.present? %>
+              <em class="info">(<%= send.source %>)</em>
+            <% end %>
+          </td>
+          <td>
+            <%#
+              THE ADDRESSES ARE THE POINT OF THIS COLUMN. An auditor asking "has anything
+              gone to example.com" is asking exactly this, and a count would not answer it.
+              A Redmine user is named rather than addressed, because the account already
+              says where their mail goes and printing it here would put every colleague's
+              address on a page that does not otherwise carry one.
+            %>
+            <% send.recipients.each do |recipient| %>
+              <% if recipient.external? %>
+                <div><%= recipient.address %> <em class="info">(<%= l(:label_reporter_adhoc_mail_external) %>)</em></div>
+              <% else %>
+                <%#
+                  `.presence`, AND THE `||` ALONE WAS A DEAD GUARD OVER A MISSING KEY —
+                  two bugs, one hiding the other, found by an independent review.
+
+                  `link_to_user(nil)` returns `""` (core's helper ends in `h(user.to_s)`),
+                  which is TRUTHY, so `||` never fired and a deleted account rendered an
+                  empty cell. Underneath it, `label_user_deleted` exists in neither core nor
+                  this plugin — it would have printed "Translation missing" the moment the
+                  guard worked — while `label_reporter_adhoc_mail_user_gone`, which IS
+                  translated into all nine locales, was referenced nowhere in the tree.
+                %>
+                <div><%= link_to_user(@page_users[recipient.user_id]).presence ||
+                         l(:label_reporter_adhoc_mail_user_gone) %></div>
+              <% end %>
+            <% end %>
+            <% if send.recipients.empty? %>
+              <em class="info"><%= l(:label_none) %></em>
+            <% end %>
+          </td>
+          <td>
+            <%= send.status %>
+            <% if send.error.present? %>
+              <%# TRUNCATED IN THE CELL AND WHOLE IN THE TITLE. The column is bounded text
+                  and an error can be a paragraph; hiding it entirely would remove the one
+                  thing the row is consulted for after a failure. %>
+              <div><em class="info" title="<%= send.error %>"><%= truncate(send.error, length: 120) %></em></div>
+            <% end %>
+          </td>
+          <td><%= send.correlation_id %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>

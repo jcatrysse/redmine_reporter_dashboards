@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="rrd-chart-line-title rrd-chart-line-desc" font-family="Helvetica, Arial, sans-serif" class="rrd-chart">
+<rect x="0" y="0" width="640" height="360" fill="#FFFFFF"/>
+<title id="rrd-chart-line-title">Created and closed</title>
+<desc id="rrd-chart-line-desc">line chart. 6 categories: Jan, Feb, Mar, Apr, May, Jun. created: 12, 18, —, 22, 9, 14. closed: 8, 20, 15, —, 11, 19</desc>
+<text x="12" y="26" font-size="14" font-weight="bold" fill="#333333">Created and closed</text>
+<line x1="33" y1="288.0" x2="628" y2="288.0" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="223.75" x2="628" y2="223.75" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="159.5" x2="628" y2="159.5" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="95.25" x2="628" y2="95.25" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="31.0" x2="628" y2="31.0" stroke="#DDDDDD" stroke-width="1"/>
+<polyline points="82.59,198.05 181.76,120.95" fill="none" stroke="#0072B2" stroke-width="2"/>
+<polyline points="380.09,69.55 479.26,236.6 578.42,172.35" fill="none" stroke="#0072B2" stroke-width="2"/>
+<circle cx="82.59" cy="198.05" r="3" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="0"><title>created — Jan: 12</title></circle>
+<circle cx="181.76" cy="120.95" r="3" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="1"><title>created — Feb: 18</title></circle>
+<circle cx="380.09" cy="69.55" r="3" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="3"><title>created — Apr: 22</title></circle>
+<circle cx="479.26" cy="236.6" r="3" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="4"><title>created — May: 9</title></circle>
+<circle cx="578.42" cy="172.35" r="3" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="5"><title>created — Jun: 14</title></circle>
+<polyline points="82.59,249.45 181.76,95.25 280.92,159.5" fill="none" stroke="#E69F00" stroke-width="2"/>
+<polyline points="479.26,210.9 578.42,108.1" fill="none" stroke="#E69F00" stroke-width="2"/>
+<circle cx="82.59" cy="249.45" r="3" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="0"><title>closed — Jan: 8</title></circle>
+<circle cx="181.76" cy="95.25" r="3" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="1"><title>closed — Feb: 20</title></circle>
+<circle cx="280.92" cy="159.5" r="3" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="2"><title>closed — Mar: 15</title></circle>
+<circle cx="479.26" cy="210.9" r="3" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="4"><title>closed — May: 11</title></circle>
+<circle cx="578.42" cy="108.1" r="3" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="5"><title>closed — Jun: 19</title></circle>
+<line x1="33" y1="288.0" x2="628" y2="288.0" stroke="#767676" stroke-width="1"/>
+<line x1="33" y1="31" x2="33" y2="288" stroke="#767676" stroke-width="1"/>
+<text x="82.59" y="303" text-anchor="middle" font-size="11" fill="#333333">Jan</text>
+<text x="181.76" y="303" text-anchor="middle" font-size="11" fill="#333333">Feb</text>
+<text x="280.92" y="303" text-anchor="middle" font-size="11" fill="#333333">Mar</text>
+<text x="380.09" y="303" text-anchor="middle" font-size="11" fill="#333333">Apr</text>
+<text x="479.26" y="303" text-anchor="middle" font-size="11" fill="#333333">May</text>
+<text x="578.42" y="303" text-anchor="middle" font-size="11" fill="#333333">Jun</text>
+<text x="25" y="291.67" text-anchor="end" font-size="11" fill="#666666">5</text>
+<text x="25" y="227.42" text-anchor="end" font-size="11" fill="#666666">10</text>
+<text x="25" y="163.17" text-anchor="end" font-size="11" fill="#666666">15</text>
+<text x="25" y="98.92" text-anchor="end" font-size="11" fill="#666666">20</text>
+<text x="25" y="34.67" text-anchor="end" font-size="11" fill="#666666">25</text>
+<text x="330.5" y="327" text-anchor="middle" font-size="12" fill="#333333">Month</text>
+<rect x="12" y="328" width="10" height="10" fill="#0072B2" stroke="#005280" stroke-width="1"/>
+<text x="28" y="338" font-size="11" fill="#333333">created</text>
+<rect x="84.35" y="328" width="10" height="10" fill="#E69F00" stroke="#A67200" stroke-width="1"/>
+<text x="100.35" y="338" font-size="11" fill="#333333">closed</text>
+</svg>

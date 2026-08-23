@@ -1,55 +1,83 @@
+<%#
+  T-26a — one rendered report, in a dashboard box.
+
+  --- WHAT REPLACED WHAT ---
+
+  This partial used to be an `<iframe src=…>` pointing at the base plugin's
+  `report_content_report_template_path`, plus a jQuery block that read
+  `frame.contentWindow.document` to size it. Both are gone with the dependency.
+
+  The frame is now `RedmineReporterDashboards::ReportFrame` — `srcdoc` under
+  `sandbox="allow-scripts"`, i.e. an OPAQUE ORIGIN — which is the same frame the template
+  editor's preview draws and the reason the auto-size script could not survive: a parent
+  cannot read `contentWindow.document` across an opaque origin, and the one token that
+  would let it (`allow-same-origin`) is exactly what turns the sandbox into a decoration.
+  So the height is CSS (`.reporter-report-frame--widget`, with `resize: vertical` so a
+  reader can drag it) rather than measured. That is a deliberate trade and it is the
+  security half that wins.
+
+  --- WHY A FAILURE IS A LINE AND NOT THE `_diagnostics` PANEL ---
+
+  INV-5 either way: an error is never rendered AS the document. But the audience differs.
+  `_diagnostics` is FR-58's full panel — code, Liquid line, engine, duration — for the
+  author standing in the editor. The person looking at a dashboard is usually not that
+  author, and eight rows of engine detail per box is noise they cannot act on. They get
+  the headline and the correlation id, which is the one value FR-58 asks a reader to
+  quote, and the full panel is on the template's own page — which this heading does NOT
+  link to, deliberately: the link would need `view_reporter_dashboards_reports` checked
+  per viewer, and a heading that is a link for some readers and text for others is a
+  second thing to get wrong. An earlier version of this comment said "one click away",
+  which described a link nobody had written.
+
+  Degradations DO render here, through the shared partial rather than a second copy:
+  "this collection was truncated" is a fact about the numbers in front of them.
+%>
 <h3>
-  <%= report_template.name %>
+  <%= widget.template.name %>
 
-  (<%= "#{query.project} |" if query.project %>
+  <% if widget.query %>
+    (<%= "#{widget.query.project} |" if widget.query.project %>
+    <% options = (widget.query.try(:as_params) || {}) %>
+    <% if widget.query.is_a?(IssueQuery) %>
+      <%= link_to widget.query.name, _project_issues_path(widget.query.project, options) %>
+    <% else %>
+      <%= link_to widget.query.name, _time_entries_path(widget.query.project, nil, options) %>
+    <% end %>)
+  <% end %>
 
-  <% options = (query.try(:as_params) || {}) %>
-  <% if query.is_a?(IssueQuery) %>
-    <%= link_to query.name, _project_issues_path(query.project, options) %>
-  <% else %>
-    <%= link_to query.name, _time_entries_path(query.project, nil, options) %>
-  <% end %>)
-
-  (<%= collection.respond_to?(:size) ? collection.size : collection %>)
+  (<%= widget.outcome.total_count %>)
 
   <%# Icon-only PDF link. sprite_icon MUST keep its label: on Redmine 5 it renders
       no <svg>, so without a label the link_to body is empty and Rails prints the
       href as the visible link text. The label gives the link a body (and the
       accessible name); the `icon-only` class hides that text while `icon icon-pdf`
       shows the glyph (background image on R5, SVG sprite on R6). %>
-  <%= link_to sprite_icon('application-pdf', l(:label_reporter_export_report_pdf)),
+  <%= link_to reporter_dashboard_icon('application-pdf', l(:label_reporter_export_report_pdf)),
               report_pdf_reporter_project_page_path(project, tab: tab.id, block: block),
               class: 'icon icon-pdf icon-only reporter-report-pdf',
               target: '_blank', rel: 'noopener',
               title: l(:label_reporter_export_report_pdf) %>
 </h3>
 
-<% iframe_id = "#{block}-report-content-frame" %>
-<iframe src="<%= report_content_report_template_path(report_template, query_id: query.id) %>"
-        id="<%= iframe_id %>"
-        width="100%"
-        scrolling="no"
-        frameborder="no"></iframe>
+<%# §Findings S-14 — the narrowing is stated, never silent. Answers nil for an issue
+    template and for an actor who sees every hour here, so it is asked unconditionally
+    rather than behind a branch a later edit can get wrong. %>
+<% if (rrd_notice = reporter_time_entry_visibility_notice(widget.template, user, project)) %>
+  <p class="warning"><%= rrd_notice %></p>
+<% end %>
 
-<%= javascript_tag do %>
-  $('#<%= iframe_id %>').on('load', function () {
-    var frame = this;
-    function fit() {
-      var doc = frame.contentWindow.document;
-      var body = doc && doc.body;
-      if (!body) { return; }
-      // Measure the CONTENT (body) height only — not documentElement, which is
-      // always at least the frame's own height and would keep the frame from
-      // shrinking.
-      var height = Math.max(body.scrollHeight, body.offsetHeight);
-      if (height > 0) { $(frame).height(height); }
-    }
-    fit();
-    // Re-fit a few times to catch layout that settles after the load event
-    // (web fonts, the asynchronously loaded Chart.js). This is safe as long as
-    // report charts have a fixed size: give each canvas an explicit width/height
-    // and use Chart.js responsive:false. The content height then does not depend
-    // on the frame height, so these re-measures cannot grow the frame in a loop.
-    [250, 700, 1500].forEach(function (delay) { setTimeout(fit, delay); });
-  });
+<%= render partial: 'reporter_dashboards/templates/degradations',
+           locals: { outcome: widget.outcome } %>
+
+<% if widget.outcome.ok? %>
+  <% widget.outcome.sections.each do |section| %>
+    <%= reporter_report_frame(section,
+                              css_class: RedmineReporterDashboards::ReportFrame::WIDGET_CHROME) %>
+  <% end %>
+<% else %>
+  <p class="nodata reporter-report-diagnostic">
+    <%= reporter_diagnostic_headline(widget.outcome.diagnostic) %>
+    <%= l(:label_reporter_report_diagnostic_correlation_id) %>:
+    <code><%= widget.outcome.diagnostic.correlation_id %></code>
+  </p>
 <% end %>

@@ -1,0 +1,12 @@
+# Files allowed to call `raw(`, with the reason for each. Gate: script/gates/no_html_safe.sh.
+#
+# T-27's Accept: caps this at TWO files, and the gate enforces the cap rather than
+# describing it. The list is EMPTY today, which is the strongest state it can be in:
+# nothing in app/ or lib/ calls `raw(` at all.
+#
+# An entry here is a decision taken in review, with its reason written on the line, not
+# a way to make the gate green. And the gate refuses a STALE entry: a path that calls no
+# `raw(` any more fails, because an allowlist entry permitting nothing today is what
+# silently permits something tomorrow.
+#
+# Format: <path><TAB or spaces><reason>

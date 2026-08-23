@@ -1,0 +1,27 @@
+<%#
+  TWO INTROS, because the two recipients are in different positions. A Redmine user is a
+  colleague who can open the report's project; an allowlisted external address belongs to
+  somebody with no account here, so the mail says which installation it came from and does
+  not invite them to a page they cannot reach.
+%>
+<% if @external %>
+<%= l(:text_reporter_adhoc_mail_intro_external, name: @template_name, user: @requester.name, site: Setting.app_title) %>
+<% else %>
+<%= l(:text_reporter_adhoc_mail_intro, name: @template_name, user: @requester.name) %>
+<% end %>
+
+<%#
+  FR-47 — "shared output is labelled with the identity it was rendered as", and on this
+  path that identity is the REQUESTER rather than the recipient. It matters here for the
+  same reason it matters on the scheduled path and for one more: an ad-hoc report is a
+  colleague handing you their view of the data, so a recipient with narrower access would
+  otherwise read numbers they could not have produced themselves and assume they could.
+
+  It is also the sentence that makes `Reply-To` make sense: the person named here is the
+  person a reply reaches.
+%>
+<%= l(:text_reporter_adhoc_mail_rendered_as, user: @requester.name) %>
+<% if @project %>
+<%= l(:field_project) %>: <%= @project.name %>
+<% end %>
+<%= l(:label_reporter_report_diagnostic_correlation_id) %>: <%= @correlation_id %>

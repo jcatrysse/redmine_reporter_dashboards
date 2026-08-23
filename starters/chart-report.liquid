@@ -1,0 +1,78 @@
+{% comment %}
+=====================================================================
+ A report with charts — one line each, drawn twice
+ ---------------------------------------------------------------------
+ Set the template's OUTPUT to "One document for the whole set".
+
+ `{% chart %}` emits NO markup of its own. What it does is record what
+ should be drawn, and the output decides how:
+
+   in the HTML preview  a <canvas> plus a JSON data block, drawn by the
+                        bundled Chart.js — no CDN, no network
+   in the PDF           an inline <svg> computed on the server: vector,
+                        selectable, clickable, and no JavaScript at all
+
+ Both are laid out by the same calculation, so the axis, the ticks, the
+ colours and the plot rectangle are identical in the two documents.
+
+ WHAT YOU DO NOT WRITE, and could not get right by hand: a canvas size, a
+ readiness handshake so the PDF engine knows when to snapshot, an escape
+ filter on every data value, or a `responsive: false` that exists because
+ of one engine's 2011 browser.
+
+ Nothing here disables a legend. A chart whose meaning rests on colour
+ alone fails the linter beside this editor — on a pie that is an error,
+ because a greyscale print of four unlabelled slices carries no findings
+ at all.
+=====================================================================
+{% endcomment %}
+
+{% sql_aggregate from: issues, group_by: status, drill: true, assign_to: by_status %}
+{% sql_aggregate from: issues, group_by: assignee, sort: count, limit: 10, drill: true, assign_to: by_assignee %}
+{% sql_aggregate from: issues, period: month, periods: 6, assign_to: per_month %}
+
+<h1>Issue report — {{ project.name }}</h1>
+<p class="rrd-muted">{{ by_status.total }} issues in scope</p>
+
+<div class="rrd-card">
+  {% chart id: status, from: by_status, title: "Issues by status", y_title: "Issues" %}
+</div>
+
+<div class="rrd-card">
+  {% comment %} Horizontal, because names are long: the layout reserves the label width on
+     the correct side rather than clipping it. {% endcomment %}
+  {% chart id: assignee, from: by_assignee, orientation: horizontal,
+     title: "Open issues by assignee" %}
+</div>
+
+<div class="rrd-card">
+  {% comment %} `y:` names which of the parallel arrays to draw. The aggregation also
+     returns `open_now`, and putting a single number on this axis would be a chart nobody
+     asked for. {% endcomment %}
+  {% chart id: trend, from: per_month, type: line, y: "created,closed",
+     title: "Created and closed per month", x_title: "Month" %}
+</div>
+
+<div class="rrd-card">
+  <h2>The numbers behind the charts</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th class="rrd-number">Issues</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for bucket in by_status.buckets %}
+        <tr>
+          <td>{{ bucket.label }}</td>
+          <td class="rrd-number">{{ bucket.count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% comment %} A chart and its table together: a reader who cannot see the chart — a
+     screen reader, a greyscale print, an engine that draws nothing — still gets the
+     findings. The SVG carries a <title> and a <desc> with the numbers in them for the
+     same reason. {% endcomment %}
+</div>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-20</title>
+<style>body { font-family: monospace; font-size: 10pt; } li { word-break: break-all; }</style>
+@@CHART_SHELL@@
+</head><body>
+<h1>ESCAPING-MARKER</h1>
+
+<!-- The data block. Its ONLY escape obligation is the closing tag sequence, written
+     <\/script> in both cases below. Everything else is ordinary JSON: no quoting for
+     the HTML parser, because to the HTML parser this element's content is data. -->
+<script type="application/json" id="payload-data">
+["x\\","-alert(1)//","<\/script>","<!--","]]>","a\"b'c","\u2028\u2029","${alert(1)}",",alert(1),","<\/SCRIPT >","\\u003c\/script\\u003e","&lt;img src=x onerror=alert(1)&gt;"]
+</script>
+
+<p id="summary">PAYLOAD-UNPARSED</p>
+<p id="canary">CANARY-PENDING</p>
+<ul id="values"></ul>
+
+<script>
+  (function () {
+    /* The canary is set by ANY payload that manages to execute. Nothing in the set is
+       supposed to be able to; that is the claim under test, not an assumption. */
+    window.__rdCanary = false;
+    window.alert = function () { window.__rdCanary = true; };
+
+    var raw = document.getElementById('payload-data').textContent;
+    var values = JSON.parse(raw);
+
+    var h = 5381;
+    var joined = values.join('\u0001');
+    for (var i = 0; i < joined.length; i++) {
+      h = ((h * 33) ^ joined.charCodeAt(i)) >>> 0;
+    }
+
+    var lengths = [];
+    var list = document.getElementById('values');
+    for (var j = 0; j < values.length; j++) {
+      lengths.push(values[j].length);
+      var li = document.createElement('li');
+      /* textContent, never innerHTML: the payload is a value, and the moment it is
+         parsed as markup this whole fixture is testing the wrong thing. */
+      li.textContent = values[j];
+      list.appendChild(li);
+    }
+
+    document.getElementById('summary').textContent =
+      'PAYLOAD-COUNT ' + values.length +
+      ' PAYLOAD-LENGTHS ' + lengths.join(',') +
+      ' PAYLOAD-CHECKSUM ' + h.toString(16);
+    document.getElementById('canary').textContent =
+      window.__rdCanary ? 'CANARY-TRIPPED' : 'CANARY-CLEAN';
+  }());
+</script>
+</body></html>

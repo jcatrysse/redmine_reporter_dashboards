@@ -1,142 +1,55 @@
 # Redmine Reporter Dashboards
 
-A dashboard extension for the [Redmine Reporter](https://www.redmineup.com/pages/plugins/reporter) plugin. Adds configurable project dashboards and replaces slow Liquid loops in report templates with fast SQL aggregations.
+Project dashboards and reporting for Redmine. Build a report once as a Liquid template,
+then show it on a dashboard, open it as a web page or PDF, mail it, schedule it, or share
+it behind an expiring link.
 
-## What does it do?
+It installs on a plain Redmine and needs no other plugin.
 
-### Project dashboards
-
-Each project gets its own dashboard page with tabs. Arrange widgets with simple up/down/left/right buttons — stack them one per line or place several per line, in any arrangement:
-
-- **Issues** — a filtered issue list driven by a saved query
-- **Report** — a Reporter report block embedded directly on the dashboard
-- **Activity**, **Calendar**, **News**, **Documents**, **Time log**
-
-Widgets are laid out as ordered rows. **Up** / **down** move a widget to the adjacent row (joining it, or splitting onto a new line); **left** / **right** reorder it within its row. There is no drag-and-drop, and the controls work on both Redmine 5 and Redmine 6. Each tab is configured independently per project and per role.
-
-### `{% sql_aggregate %}` Liquid tag
-
-The standard Liquid approach in Reporter templates iterates over all issues as objects:
-
-```liquid
-{% for issue in issues %}...{% endfor %}
+```mermaid
+flowchart LR
+  T["Report template<br/>(Liquid)"]
+  T --> D["Dashboard widget"]
+  T --> P["HTML / PDF"]
+  T --> M["E-mail"]
+  T --> S["Schedule"]
+  T --> L["Share link"]
 ```
 
-With hundreds or thousands of issues that gets slow. The `{% sql_aggregate %}` tag does the same work entirely in SQL — no Issue objects loaded, no memory pressure — and returns the result as a Liquid variable you can use directly in your template.
+## What you get
 
-With `drill: true` every bar, slice, point and cell also carries a link to the Redmine issue list, filtered to exactly the issues behind it, inheriting the report query's own filters, columns, grouping, totals and sort order. See [Drill-through URLs](#drill-through-urls).
+**Project dashboards.** Each project gets a dashboard page with tabs. Add widgets — issue
+lists, reports, activity, calendar, news, documents, time log — and arrange them in rows
+with up/down/left/right buttons. Each tab is configured per project.
 
-### `{% geo_version_map %}` Liquid tag
+**Report templates.** A Liquid document rendered against a project's issues or time
+entries. Write it in the browser, preview it before saving, and export it as HTML or PDF.
 
-The Reporter issue drop exposes `issue.version` as a scalar (the name only), with no id. That makes it impossible to build version-filtered URLs — roadmap, issues list, time entries — from a template. The `{% geo_version_map %}` tag provides a lookup from version name to its id and metadata so you can construct those links.
+**SQL aggregation tags.** `{% sql_aggregate %}`, `{% version_rollup %}` and the time-entry
+tags do their counting in SQL instead of looping over issues in Liquid. A breakdown over
+50 000 issues costs the same handful of queries as one over 50.
 
-### `{% version_rollup %}` Liquid tag
+**Charts and diagrams.** `{% chart %}` draws bar, line, pie and progress charts; `{% mermaid %}`
+draws flowcharts and sequence diagrams. Both libraries ship inside the plugin — nothing is
+fetched from the internet when a report is drawn. In a PDF, charts become inline SVG and
+diagrams become vector graphics: selectable, searchable and clickable.
 
-A per-**target-version** rollup, computed entirely in SQL. A "one card per version" dashboard normally loops over every version *and* every issue (`O(versions × issues)`) in Liquid, which gets very slow with many issues. `{% version_rollup %}` returns one ready-to-render row per version — counts, hours, min/max dates and summed numeric custom fields (e.g. cost) — in a handful of grouped queries, so the template only loops over the (few) versions.
+**Delivery.** Mail a report once, schedule it daily to yearly, or publish a frozen snapshot
+behind a link with an expiry, a use limit and an access log.
 
 ## Requirements
 
-- `redmine_reporter` plugin version 2.0.5 or higher
-- PostgreSQL or MySQL/MariaDB. The SQL aggregation tags use adapter-specific date
-  formatting and refuse to guess on any other database — SQLite is not supported.
+| | |
+|---|---|
+| Redmine | 5.1, 6.0, 6.1 or 7.0 |
+| Database | PostgreSQL or MySQL/MariaDB. SQLite is not supported |
+| PDF rendering | Headless Chromium on the Redmine host (default), or Gotenberg |
 
-### Support matrix
+Every combination in that table runs in CI on every push. See
+[`docs/engine-support-matrix.md`](docs/engine-support-matrix.md) for what each PDF engine
+can do.
 
-Supported means: exercised by `.github/workflows/ci.yml` on every push and pull
-request. Two suites run there, and they prove different things:
-
-- **`spec/`** — the plugin's own specs. They stub Redmine away and never boot Rails,
-  so they run against every supported Redmine branch without a database.
-- **`spec/adapter/`** — the same aggregator, but its SQL executed against a real
-  server. This is what proves the per-adapter branches (`TO_CHAR` vs `DATE_FORMAT`,
-  the numeric `CAST`, `COUNT(DISTINCT CASE …)`, the visibility clauses in the join
-  `ON` clauses) actually answer the same numbers on each engine, rather than merely
-  producing the SQL string a unit spec expected.
-
-| Redmine | Rails | Ruby (upstream range) | CI Ruby | Status |
-|---------|-------|------------------------|---------|--------|
-| 5.1 | 6.1 | >= 2.7, < 3.3 | 3.2 | tested |
-| 6.0 | 7.1 | >= 3.1, < 3.4 | 3.3 | tested |
-| 6.1 | 7.2 | >= 3.2, < 3.5 | 3.4 | tested |
-| 7.0 | 8.1 | >= 3.2, < 4.1 | 3.4 | tested, with one caveat — see below |
-
-| Database | Status |
-|----------|--------|
-| PostgreSQL 16 | tested — `spec/adapter` runs against it |
-| MySQL 8.0 | tested — `spec/adapter` runs against it |
-| MariaDB 11 | tested — `spec/adapter` runs against it |
-| anything else | not supported. The aggregation tags refuse to guess at date formatting and log one clear line instead — SQLite included |
-
-`requires_redmine` is set to 5.1 to match this table. Earlier 5.x releases may
-well work; they are simply not tested, so the plugin does not claim them.
-
-The plugin's own code stays inside Ruby 2.7 syntax, because that is the floor
-Redmine 5.1 allows. `.codex/check_ruby_floor.sh` guards it and runs in CI.
-
-#### Redmine 7.0: the report widgets need a fix in redmine_reporter first
-
-Everything in this plugin passes on Redmine 7.0, but the two **report widgets**
-(`report_by_issues`, `report_by_spent_time`) and the PDF export of a report cannot work
-there yet, because they depend on redmine_reporter's `ReportTemplate` — and merely
-referencing that class raises on Rails 8.1:
-
-```
-ArgumentError: wrong number of arguments (given 0, expected 1..2)
-  plugins/redmine_reporter/app/models/report_template.rb:26:in '<class:ReportTemplate>'
-```
-
-`ReportTemplate` declares its enum with the keyword form, `enum orientation: {...}`.
-Rails deprecated that in 7.2 ("will be removed in Rails 8.0") and removed it in 8.0:
-
-| | signature | keyword form |
-|---|---|---|
-| Rails 7.2 (Redmine 6.1) | `def enum(name = nil, values = nil, **options)` | tolerated, deprecated |
-| Rails 8.1 (Redmine 7.0) | `def enum(name, values = nil, **options)` | `ArgumentError` |
-
-The fix belongs in redmine_reporter and is one line — `enum :orientation, {...}`. This
-plugin deliberately does not patch it: reporter is a third-party plugin, and carrying a
-patch for it would have to be re-applied at every reporter upgrade.
-
-What this plugin does instead is refuse to fall over. A widget that cannot render shows
-a placeholder and keeps its controls — so the rest of the dashboard is unaffected and an
-administrator can still remove the widget — and the report PDF export answers with a
-clean error instead of a stack trace. The reason is written to `log/production.log`. The
-functional tests that have to touch a report widget **skip** on Redmine 7.0 with the
-explanation above rather than failing anonymously.
-
-So on Redmine 7.0 today: every dashboard widget except the two report widgets works
-normally, and a dashboard that contains one of those stays usable.
-
-#### One known database limitation: `group_by: age` on MariaDB with `ONLY_FULL_GROUP_BY`
-
-Every dimension groups on a bare column or a plain function — except `age`, whose
-group expression is unavoidably a `CASE` over date boundaries. MariaDB's
-`ONLY_FULL_GROUP_BY` check does not recognise a `CASE` in the select list as being
-the same expression as the `CASE` in the `GROUP BY`, so it rejects the statement with
-`'created_on' isn't in GROUP BY`. PostgreSQL and MySQL 8 both accept it (MySQL has
-had expression matching since 5.7.5, and `ONLY_FULL_GROUP_BY` is in its default
-`sql_mode`).
-
-`ONLY_FULL_GROUP_BY` is **not** in MariaDB's default `sql_mode`, so this only bites
-where a DBA has turned it on — and note that Rails appends to the server's mode
-rather than replacing it, so it stays on if it is set globally. When it happens the
-block renders empty with the error in `log/production.log`; nothing 500s. Either
-group on something else, or drop `ONLY_FULL_GROUP_BY` from that server's `sql_mode`.
-
-#### Running the adapter specs yourself
-
-```bash
-./.codex/redmine_clone.sh 6.1-stable
-RRD_DB=postgresql ./.codex/test_setup.sh    # or RRD_DB=mysql / RRD_DB=mariadb
-./.codex/test_plugin.sh
-```
-
-`test_setup.sh` creates a second database, `redmine_adapter_test`, and writes its URL
-to `redmine/.rrd_adapter_url`; `test_plugin.sh` picks it up and runs `spec/adapter` in
-its own process. Setting `RRD_ADAPTER_URL` yourself overrides that. The URL must name
-a database whose name contains `test` — the specs recreate every table in it.
-
-## Installation
+## Install
 
 ```bash
 cd {REDMINE_ROOT}/plugins
@@ -146,1001 +59,77 @@ bundle install
 bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 ```
 
-Restart Redmine after installation.
+Restart Redmine.
 
-## Enabling the dashboard for a project
+Then, per project: **Settings → Modules**, enable **Project dashboard** and **Reports**, and
+grant the permissions your roles need. The [administrator guide](docs/admin-guide.md) walks
+through both.
 
-1. Open **Project → Settings → Modules** and enable **Project dashboard**.
-2. Assign permissions to the relevant roles:
-   - `view_reporter_project_page` — view the dashboard
-   - `manage_reporter_project_page` — add and rearrange blocks
-   - `manage_reporter_project_tabs` — create and rename tabs
-3. A **Project dashboard** link appears in the project menu. The first visit automatically creates a default tab.
+## First report
 
-Widget settings (a query, a report template, an item limit, a column list) are
-validated before they are stored: a setting whose value is not of the expected shape
-is dropped rather than saved, with one line in `log/production.log` naming the widget
-and the setting. Widgets contributed by other plugins keep working — their own
-setting names are accepted, as bounded values.
+1. **Reports → Templates → New**, and pick a starter.
+2. Press **Preview** to see it without saving.
+3. Save, then open it. **Export as PDF** is on the same page.
 
-## Using the `{% sql_aggregate %}` tag
-
-Place the tag at the top of your Reporter template. It writes the result into a Liquid variable (`stats` by default) that you can then use freely.
-
-### Time series — created and closed per period
+A minimal template:
 
 ```liquid
-{% sql_aggregate from: issues, period: month, periods: 6,
-   closed_statuses: "Closed;Rejected", assign_to: stats %}
+{% sql_aggregate from: issues, group_by: status, drill: true, assign_to: by_status %}
 
-| Month | Created | Closed |
-|-------|---------|--------|
-{% for i in (0..5) %}| {{ stats.labels[i] }} | {{ stats.created[i] }} | {{ stats.closed[i] }} |
-{% endfor %}
-
-Currently open: **{{ stats.open_now }}** — Total: **{{ stats.total }}**
-```
-
-Four period sizes are supported: `day`, `week`, `month` (default) and `year`.
-
-| Parameter | Default | Maximum |
-|-----------|---------|---------|
-| `period: day` | 30 days | 90 |
-| `period: week` | 13 weeks | 52 |
-| `period: month` | 6 months | 24 |
-| `period: year` | 3 years | 10 |
-
-#### `open_at_end` — the backlog height
-
-`created` and `closed` answer "how busy were we". `open_at_end` answers "is it
-getting better": the number of issues that existed and were not yet closed at the
-end of each period, aligned with `labels`.
-
-```liquid
-{% sql_aggregate from: issues, period: month, periods: 12, assign_to: stats %}
-
-{% for label in stats.labels %}
-  {{ label }}: {{ stats.open_at_end[forloop.index0] }} open
-{% endfor %}
-```
-
-A template cannot compute this itself: a running total of `created - closed` in
-JavaScript is wrong for every issue that already existed when the window opened.
-It is one conditional aggregate per period in a single statement (chunked for a
-90-day window), and it honours `closed_statuses` exactly like the `closed` series,
-so the three can be charted together without disagreeing about what "closed" means.
-
-Two caveats, both worth knowing before you put it on a dashboard:
-
-- **A reopened issue counts as open until its last closing.** `closed_on` records
-  only the *last* closing — Redmine preserves it when an issue is reopened, it does
-  not clear it — so there is no record of an earlier one. An issue closed in March,
-  reopened in April and closed again in June therefore counts as open for every
-  period before June. Because `closed_on` survives a reopen, the query also requires
-  the issue's *current* status to be a closed one; without that, an issue that is
-  open again today would be reported as closed ever since the closing it once had.
-  Recovering the real history means replaying journals, which costs far more than
-  this query and is deliberately not done.
-- **`open_at_end` points carry no drill-through URL**, and that is not a bug. The
-  set is "created on or before X **and** (still open **or** closed after X)" — an
-  OR across two fields, which a Redmine issue query cannot express. Note that
-  `drill: true` does nothing at all in time-series mode — no series has links there,
-  not just this one — so the tag reports `drill_available: false` and points you at
-  `group_by: period` in the log. If you want a clickable period chart, use that.
-
-### Categorical breakdown
-
-With `group_by` the tag switches to a category summary instead of a time series.
-
-```liquid
-{% sql_aggregate from: issues, group_by: status, assign_to: by_status %}
+<h1>Issues by status</h1>
+{% chart id: status, from: by_status, title: "Issues by status" %}
 
 {% for bucket in by_status.buckets %}
-- {{ bucket.label }}: {{ bucket.count }}
-{% endfor %}
-Total: {{ by_status.total }}
-```
-
-### Dimensions
-
-`group_by` — and the second dimension `split_by` — accept any of these:
-
-| Value | Groups by |
-|-------|-----------|
-| `status` | Issue status |
-| `priority` | Priority |
-| `tracker` | Tracker |
-| `assignee` | Assigned user |
-| `author` | Author |
-| `category` | Category |
-| `version` | Target version |
-| `cf_<id>` | An **issue custom field** by numeric id, e.g. `cf_92` |
-| `period` | Date bucket — see `period` / `periods` / `date_field` |
-| `age` | Age bucket — see `age_buckets` / `age_field` |
-| `flags` | Scalar governance counters. `group_by` only, never `split_by` |
-
-Custom fields are resolved to their **labels**, not their stored values: for
-`enumeration` and `depending_enumeration` fields Redmine stores the enumeration
-id in `custom_values.value` (Department "Survey" is stored as `415`), so grouping
-in Liquid would need a hardcoded id-to-label map. The tag resolves the label
-through the field's own format, falling back to the enumeration name and finally
-to the raw value.
-
-An unusable dimension — a `cf_` id that does not exist, is not an issue custom
-field, or is not numeric — logs a warning and yields the empty result. It never
-raises, so a typo cannot take down a dashboard or a PDF export.
-
-**Custom field visibility is enforced**, the same way Redmine enforces it when a
-query groups or sorts on a custom field: if the field is restricted to roles, a
-viewer without one of those roles does not see its values. Their issues are
-still counted, but they land in the no-value bucket. A report can therefore be
-shared without leaking the values of a restricted field.
-
-A field the viewer is entitled to **nowhere** is refused outright — the tag logs one
-line and assigns the empty-safe result — because its *name* would otherwise appear as
-`field_name` or as a completeness label, and Redmine keeps restricted field names out
-of that user's filter list too.
-
-### Who sees what: two people, two sets of numbers
-
-A dashboard has two layers, and they answer to different people:
-
-| Layer | Decided by | Same for everyone? |
-|---|---|---|
-| The **query definition** — filters, columns, grouping | whoever built the dashboard | **yes** |
-| The **rows** it aggregates | the person looking at it | **no** |
-
-The second layer comes from `IssueQuery#base_scope`, which is
-`Issue.visible.joins(:status, :project).where(statement)`. `statement` is your filter
-definition, applied identically for everyone; `Issue.visible` takes no argument, so
-it resolves against `User.current` — the viewer. Redmine then applies `:view_issues`
-per project, the role's `issues_visibility` setting (`all`, `default` = public plus
-own, `own`) and private issues.
-
-So a project manager may see 49 issues where a team member sees 31, and everything
-derived from that moves with it: percentages, the `Other` bucket, `median_open_days`,
-the completeness figures. Four more places narrow per viewer:
-
-- a **role-restricted custom field** is refused as a dimension, measure or
-  completeness field for a viewer who is not entitled to it — the same way Redmine
-  leaves it out of that user's filter list;
-- **`of: spent_hours`** only counts time entries the viewer may see;
-- the **drill-through URLs** are built against the renderer's own available filters;
-- a widget whose saved query is **private** is not rendered for others at all (404
-  for that widget), and a template hardcoding `query_id:` of a private query gets an
-  empty result rather than someone else's numbers.
-
-**This is deliberate, and the alternative leaks.** If everyone saw the dashboard
-builder's numbers, "49" would tell a viewer who may see 31 that 18 issues exist that
-they may not. Redmine shows per-user counts everywhere — the sidebar, the issue list,
-the roadmap — and a dashboard is not the place to make an exception.
-
-In practice the numbers are usually identical: if every viewer has `:view_issues`
-with `issues_visibility: all`, there are no private issues and no role-restricted
-fields in play, everyone sees the same thing. The figures diverge exactly where
-Redmine's permissions are meant to make them diverge.
-
-If you need one set of numbers that is provably the same for everyone, export the
-**PDF once** and distribute that file. Then it is explicit that it is "the numbers as
-of this date, as seen by this account", instead of a live page that quietly reports
-something different per reader. It is also worth putting that in the caption of a
-shared widget — for example `{{ stats.total }} issues you can see` — so nobody reads
-a permission difference as a bug.
-
-### Parameters
-
-| Parameter | Default | Notes |
-|-----------|---------|-------|
-| `assign_to` | `stats` | Result variable name |
-| `from` | `issues` | Liquid variable holding the issues drop |
-| `query_id` | – | Aggregate a saved `IssueQuery` instead |
-| `group_by` | – | Dimension; switches to breakdown mode |
-| `split_by` | – | Second dimension; requires `group_by`, produces a crosstab |
-| `period` | `month` | `day` / `week` / `month` / `year` |
-| `periods` | 30 / 13 / 6 / 3 | Capped at 90 / 52 / 24 / 10 |
-| `months` | – | Legacy alias for `periods` when `period: month` |
-| `date_field` | `created` | `created` or `closed` — which timestamp `period` buckets on |
-| `closed_statuses` | – | Semicolon/comma-separated status **names**; omit to use the `is_closed` flag |
-| `sort` | `count` | `count` (desc), `label` (asc, natural), `position` (field-defined order) |
-| `limit` | `0` | Keep the top N rows; the rest collapses into one `Other` row |
-| `other_label` | `Other` | Label of the collapsed row |
-| `empty_label` | `(none)` | Label of the no-value row (`Unassigned` for `assignee`, `None` for the other core fields) |
-| `age_buckets` | `30;60;90;180` | Ascending day boundaries, semicolon or comma separated (max 24) |
-| `age_field` | `created` | `created`, `updated` or `due` |
-| `user_label` | `name` | `name` (display name) or `login`, for `assignee` / `author` |
-| `fields` | – | Field list for `group_by: completeness`, semicolon or comma separated (max 12) |
-| `measure` | `count` | `count`, `distinct`, `sum` or `avg` — see [Measures](#measures) |
-| `of` | – | Field the measure applies to (`author`, `cf_94`, `estimated_hours`, `spent_hours`) |
-| `drill` | `false` | `true` adds drill-through URLs — see [Drill-through URLs](#drill-through-urls) |
-| `drill_max_url` | `2000` | Maximum URL length; over it the URL sheds `c`/`t`, then `group_by`/`sort`, and only then gives up |
-| `drill_inherit` | `all` | `all` or `filters` — what a drill-down URL inherits from the report query |
-
-An invalid enum-ish value (`sort: banana`, `age_field: banana`) falls back to the
-default and logs a warning — it never raises.
-
-**Ordering.** Sorted rows first, then the `Other` row, then the no-value row.
-Both special rows always sit at the end, whatever `sort` says. `sort: position`
-uses the custom field's own value order (`CustomFieldEnumeration#position`, or
-the index in `possible_values`); values with no known position sort last. For
-core fields, `position` behaves like `label`.
-
-**`sort`, `limit` and `other_label` are ignored for `period` and `age`.** Those
-axes are always chronological / ascending and always contain every bucket in the
-window, including the empty ones, so a chart's x-axis has no gaps.
-
-**`group_by: period` also restricts the aggregation to that window**, exactly like
-the time-series mode: `total` is the window total, not the size of the query.
-With `date_field: closed` only issues actually closed inside the window are
-counted at all — issues that are still open have no `closed_on` date.
-
-Independently of `limit`, the number of rows and of series is capped at **200**;
-anything beyond that collapses into `Other` and sets `truncated` to `true`. This
-protects a dashboard from a `group_by` on a free-text custom field.
-
-### More examples
-
-**Weekly throughput — last quarter:**
-
-```liquid
-{% sql_aggregate from: issues, period: week, periods: 13,
-   closed_statuses: "Closed", assign_to: weekly %}
-
-{% for i in (0..12) %}
-Week {{ weekly.labels[i] }}: {{ weekly.created[i] }} created, {{ weekly.closed[i] }} closed
+  {{ bucket.label }}: {{ bucket.count }}
 {% endfor %}
 ```
 
-**Top trackers:**
+## Documentation
 
-```liquid
-{% sql_aggregate from: issues, group_by: tracker, assign_to: by_tracker %}
+| Guide | For |
+|---|---|
+| [User guide](docs/user-guide.md) | Dashboards, reports, mailing, schedules and share links |
+| [Administrator guide](docs/admin-guide.md) | Install, modules, permissions, PDF engines, assets, cron, retention |
+| [Template authoring](docs/template-authoring.md) | Liquid, the aggregation tags, charts, diagrams |
+| [Drop reference](docs/drop-reference.md) | Every object and accessor a template can read |
+| [Engine support matrix](docs/engine-support-matrix.md) | What each PDF engine supports (generated from CI) |
+| [Contributing](CONTRIBUTING.md) | Running the test suites, the quality gates |
 
-{% for bucket in by_tracker.buckets %}
-{{ bucket.label }} — {{ bucket.count }} issues
-{% endfor %}
+## Coming from `redmine_reporter`
+
+Both plugins can be installed side by side — every table here is prefixed
+`reporter_dashboards_` and every class is namespaced, so nothing collides.
+
+Survey what you have before changing anything:
+
+```bash
+bundle exec rake reporter_dashboards:migrate_from_reporter:plan RAILS_ENV=production
 ```
 
-**Via a saved query (query_id):**
-
-When the Reporter plugin exposes `query_id` in the template context:
-
-```liquid
-{% sql_aggregate query_id: query_id, period: month, periods: 3,
-   closed_statuses: "Closed;Rejected", assign_to: stats %}
-```
-
-**Issues per department (custom field 92), top 10 plus "Other":**
-
-```liquid
-{% sql_aggregate from: issues, group_by: cf_92, sort: count, limit: 10,
-   other_label: "Other departments", assign_to: by_dept %}
-
-### {{ by_dept.field_name }}
-{% for bucket in by_dept.buckets %}
-- {{ bucket.label }} — {{ bucket.count }}
-{% endfor %}
-Total: {{ by_dept.total }}{% if by_dept.truncated %} (long tail grouped){% endif %}
-```
-
-**Department × Lesson Type — a stacked Chart.js bar chart in one call:**
-
-```liquid
-{% sql_aggregate from: issues, group_by: cf_92, split_by: cf_86,
-   sort: position, assign_to: xtab %}
-
-<canvas id="deptChart" width="600" height="320"></canvas>
-<script>
-new Chart(document.getElementById('deptChart').getContext('2d'), {
-  type: 'bar',
-  data: {
-    labels: [{% for row in xtab.rows %}"{{ row.label | escape }}"{% unless forloop.last %},{% endunless %}{% endfor %}],
-    datasets: [
-      {% for name in xtab.series %}
-      {
-        label: "{{ name | escape }}",
-        backgroundColor: ['#4e79a7', '#e15759', '#59a14f'][{{ forloop.index0 }} % 3],
-        data: [{% for row in xtab.rows %}{{ row.cells[name] }}{% unless forloop.last %},{% endunless %}{% endfor %}]
-      }{% unless forloop.last %},{% endunless %}
-      {% endfor %}
-    ]
-  },
-  options: { responsive: false, animation: false,
-             scales: { xAxes: [{ stacked: true }], yAxes: [{ stacked: true, ticks: { beginAtZero: true } }] } }
-});
-</script>
-```
-
-`xtab.matrix` is the same data as one array per row, so
-`data: [{{ row.counts | join: "," }}]` works too. Every row has exactly
-`series.length` entries and every entry is a real number — never `nil` — so the
-generated JavaScript is always valid.
-
-**Lesson Type per month — a time axis split by a custom field:**
-
-```liquid
-{% sql_aggregate from: issues, group_by: period, split_by: cf_86,
-   period: month, periods: 12, date_field: created, assign_to: per_month %}
-
-| Month | {% for s in per_month.series %}{{ s }} | {% endfor %}
-|-------|{% for s in per_month.series %}---|{% endfor %}
-{% for row in per_month.rows %}| {{ row.label }} | {% for n in row.counts %}{{ n }} | {% endfor %}
-{% endfor %}
-```
-
-Every month in the window is present, including months with no issues, so the
-axis is continuous.
-
-**Age histogram — how old is the open work?**
-
-```liquid
-{% sql_aggregate from: issues, group_by: age, age_buckets: "30;60;90;180",
-   age_field: created, assign_to: ages %}
-
-{% for bucket in ages.buckets %}
-{{ bucket.label }} days: {{ bucket.count }}
-{% endfor %}
-```
-
-Buckets come back in ascending age order (`0-30`, `31-60`, `61-90`, `91-180`,
-`>180`), including empty ones. Issues whose date field is `NULL` (relevant for
-`age_field: due`) land in the `(none)` bucket, not in the oldest one.
-
-**Governance KPI tiles:**
-
-```liquid
-{% sql_aggregate from: issues, group_by: flags,
-   closed_statuses: "Closed;Rejected", assign_to: kpi %}
-
-{{ kpi.total }} issues · {{ kpi.open }} open · {{ kpi.closed }} closed
-{{ kpi.unassigned }} unassigned · {{ kpi.overdue }} overdue
-{% if kpi.oldest_open_days %}Oldest open item: {{ kpi.oldest_open_days }} days{% endif %}
-```
-
-### Result structure
-
-**Time series** (`assign_to: stats`):
-
-| Key | Type | Content |
-|-----|------|---------|
-| `stats.labels` | array | Period labels, oldest first |
-| `stats.created` | array | Issues created per period |
-| `stats.closed` | array | Issues closed per period |
-| `stats.open_at_end` | array | Issues still open at the **end** of each period |
-| `stats.open_now` | integer | Current number of open issues |
-| `stats.total` | integer | Total issues in scope |
-| `stats.period` | string | Period used (`month`, `week`, …) |
-| `stats.periods` | integer | Number of periods in the series |
-
-**Breakdown** (`assign_to: by_status`):
-
-| Key | Type | Content |
-|-----|------|---------|
-| `by_status.buckets` | array | `[{label, count}, ...]` sorted by count descending |
-| `by_status.total` | integer | Sum of all counts |
-| `by_status.group_by` | string | Grouping used |
-
-A breakdown over a custom field, `period`, `age`, or any core field combined with
-one of the new parameters additionally exposes:
-
-| Key | Type | Content |
-|-----|------|---------|
-| `.dimension` | string | The dimension that was requested (`cf_92`) |
-| `.field_name` | string | Human name of the custom field (`Department`); nil for core and pseudo dimensions |
-| `.multi_value` | boolean | True when the custom field accepts several values per issue |
-| `.truncated` | boolean | True when `limit` or the 200-row cap collapsed rows into `Other` |
-| `.buckets[].value` | string | The **raw stored value** behind the label (`415`), `nil` for the `Other` and no-value rows |
-| `.buckets[].values` | array | Every raw value an `Other` row collapsed; present on that row only |
-| `.buckets[].filter` | hash | `{field, operator, values}` — the issue-list filter isolating that row, or `nil` |
-| `.measure` | string | `count` (the default), `distinct`, `sum` or `avg` |
-| `.measure_field` | string | The `of:` field, `nil` for a plain count |
-
-`value` is what `custom_values.value` (or `issues.status_id`, …) actually holds,
-which is what a filter URL needs; `label` is unchanged and stays the text to
-print. `filter` is `nil` whenever the row cannot be expressed as an issue-list
-filter, in which case there is no drill-down URL for it either.
-
-**Crosstab** (`split_by` present):
-
-| Key | Type | Content |
-|-----|------|---------|
-| `.series` | array | Series labels — the `split_by` axis (plain strings, unchanged) |
-| `.series_entries` | array | `[{label, value, filter}, ...]`, aligned with `.series` |
-| `.rows` | array | `[{label, total, counts, cells}, ...]` |
-| `.rows[].counts` | array | One number per series, aligned with `.series` |
-| `.rows[].cells` | hash | The same numbers keyed by series label |
-| `.matrix` | array | Rows × series, aligned with `.rows` and `.series` |
-| `.columns` | array | Per-series totals, aligned with `.series` |
-| `.buckets` | array | Row totals as `[{label, count}]`, for templates that only need one dimension |
-| `.total` | integer | Sum of the whole matrix |
-| `.split_by` | string | Second dimension requested |
-| `.series_field_name` | string | Human name of the second custom field |
-
-`matrix` and `counts` are dense: every row has exactly `series.length` integers,
-zeros included, so `{{ row.counts | join: "," }}` always produces valid
-JavaScript.
-
-**Flags** (`group_by: flags`):
-
-`total`, `open`, `closed`, `assigned`, `unassigned`, `with_due_date`,
-`without_due_date`, `overdue`, `no_estimate`, `oldest_open_days`,
-`newest_open_days`, `median_open_days`, `p90_open_days`. They are available both at the top level (`{{ kpi.total }}`)
-and under `flags` (`{{ kpi.flags.total }}`). `open` / `closed` honour
-`closed_statuses`, `overdue` counts open issues past their due date, and the
-`*_open_days` values are `nil` when nothing is open.
-
-**`median_open_days` and `p90_open_days`** are fairer openers than "the oldest is
-146 days": one outlier cannot move them. `p90` is the old end — 90% of open issues
-are younger than that — so it is always at or above the median.
-
-```liquid
-Half the open work is older than {{ kpi.median_open_days }} days;
-one in ten is older than {{ kpi.p90_open_days }} days.
-```
-
-They are read with a portable offset rather than `percentile_cont`, which is
-PostgreSQL only: two indexed single-row reads ordered on `created_on`. Two
-consequences worth knowing:
-
-- It is the **lower** percentile, not the interpolated one. With an even number of
-  open issues the median is the younger of the two middle ages instead of their
-  average, and with very few open issues `p90` can land on the same issue as the
-  median. For issue ages that is a distinction without a difference, and it is what
-  buys MySQL support.
-- The offset counts **rows**. If the report query itself carries a join that
-  multiplies rows — sorting or grouping on a multi-valued custom field — the
-  percentile can shift by a place or two. The counts around it are unaffected;
-  they all count distinct issues.
-
-`stages` projects four of them as a funnel, so a funnel widget does not have to
-hardcode which counter maps to which filter:
-
-| Key | Label | Filter |
-|-----|-------|--------|
-| `total` | Registered | `nil` — the report query unchanged |
-| `assigned` | Has assignee | `assigned_to_id` `*` |
-| `with_due_date` | Has due date | `due_date` `*` |
-| `closed` | Closed | `status_id` `c` |
-
-The labels are English defaults, like `Other` and `(none)`; use `stage.key` if
-your template needs its own wording.
-
-On any error — an unresolvable scope, an invalid dimension, a database problem —
-the tag assigns an empty-safe result with **all** of these keys (empty arrays,
-zeros, `false`) and logs to `Rails.logger`, so a template that reads `res.rows`
-or `res.series` still renders.
-
-### `group_by: completeness` — how much is actually filled in
-
-Every other widget on a dashboard is only as trustworthy as the data behind it. A
-Department chart says nothing useful if Department is filled on 22% of issues.
-
-```liquid
-{% sql_aggregate from: issues, group_by: completeness,
-   fields: "cf_86;cf_92;cf_94;cf_99;assigned_to_id;due_date",
-   drill: true, assign_to: filled %}
-
-<table>
-{% for f in filled.buckets %}
-  <tr>
-    <td>{{ f.label }}</td>
-    <td>{{ f.pct }}%</td>
-    <td>{% if f.empty > 0 and f.empty_url %}
-          <a href="{{ f.empty_url }}" target="_blank">{{ f.empty }} to fix</a>
-        {% else %}{{ f.empty }}{% endif %}</td>
-  </tr>
-{% endfor %}
-</table>
-```
-
-One bucket per field named in `fields:`, **in that order** — `sort` and `limit` do
-not apply, like `period` and `age`:
-
-| Key | Content |
-|-----|---------|
-| `.buckets[].label` | The custom field's name, or the core field's label |
-| `.buckets[].count` | Issues where it **is** filled, so an existing bar chart works unchanged |
-| `.buckets[].empty` | Issues where it is not |
-| `.buckets[].total` | Issues in scope |
-| `.buckets[].pct` | `count / total`, rounded to an integer |
-| `.buckets[].value` | The field key (`cf_94`, `assigned_to_id`) |
-| `.buckets[].url` | Issue list filtered to "is set" (with `drill: true`) |
-| `.buckets[].empty_url` | Issue list filtered to "is **not** set" — the actionable one |
-| `.total` | Issues in scope, **not** the sum of the buckets |
-
-`fields:` accepts `cf_<id>` and the nullable core fields `assigned_to_id`,
-`category_id`, `fixed_version_id`, `parent_id`, `due_date`, `start_date`,
-`estimated_hours` and `description`, plus the dimension-style aliases (`assignee`,
-`version`, `category`, `parent`, `due`, `start`, `estimated`). A field that cannot
-be resolved is skipped with a logged warning; more than 12 is refused outright
-rather than building an unreadable chart.
-
-It is one statement: one conditional aggregate per field, and a **single**
-`custom_values` join for all of the custom fields rather than one join each.
-
-Three caveats:
-
-- **`empty_url` is the actionable link, and it is deliberately not in `url`.**
-  `url` is "is set", `empty_url` is "is not set". Redmine does not allow the
-  "none" operator on every filter type — a status-like list has no `!*` — so
-  `empty_url` can be `nil` while `url` works. Check it before printing a link.
-- **A multi-valued custom field counts as filled when it holds at least one value.**
-- **The percentages are what the *viewer* may see.** A custom field restricted to
-  roles is skipped entirely for a user without them — the bucket is absent rather
-  than reported as 0% — so two people can legitimately see a different number of
-  bars, and a scheduled PDF reports whatever the account rendering it can see. See
-  [Who sees what](#who-sees-what-two-people-two-sets-of-numbers).
-
-### Measures
-
-Every bucket value is a count of issues unless you say otherwise. `measure:` changes
-what the number *is*:
-
-| `measure` | Needs `of:` | Meaning |
-|-----------|-------------|---------|
-| `count` | no | Issues per bucket. The default, unchanged. |
-| `distinct` | yes | `COUNT(DISTINCT of)` — how many *different* values |
-| `sum` | yes, numeric | `SUM(of)` |
-| `avg` | yes, numeric | `AVG(of)`, rounded to 2 decimals |
-
-`of:` accepts `author`, `assignee`, `tracker`, `status`, `priority`, `category`,
-`version`, `project` and `issue` (all `distinct` only), the numeric columns
-`estimated_hours` and `done_ratio`, `spent_hours` (`sum` only), and `cf_<id>` —
-`distinct` on any format, `sum` / `avg` only on an `int` or `float` field.
-
-The question this answers that a count cannot:
-
-```liquid
-{% sql_aggregate from: issues, group_by: period, period: month, periods: 12,
-   measure: distinct, of: author, assign_to: filers %}
-
-{% for label in filers.buckets %}
-  {{ label.label }}: {{ label.count }} different people filed
-{% endfor %}
-```
-
-That is an adoption curve rather than a volume curve — twelve lessons from one
-person is not the same as twelve from twelve people, and a row count cannot tell
-them apart.
-
-The result gains `measure` and `measure_field` so a template knows what it is
-holding. Everything else — buckets, labels, drill-through, `limit`, `Other` — works
-as before, with these consequences:
-
-- **Bucket values do not add up to `total` any more.** A distinct count does not
-  add up and an average certainly does not, so for those measures `total` is the
-  same measure computed over the whole scope in its own query. It will usually be
-  *smaller* than the sum of the buckets (the same person files in several months).
-  For `measure: count` `total` stays exactly what it was: the sum of the buckets.
-- **The `Other` bucket is its own aggregate** for `distinct` and `avg`, not the sum
-  of what it collapsed. Same for the row and column totals of a crosstab.
-- **A cumulative percentage or Pareto is a count-only chart.** Running totals of
-  distinct counts or averages mean nothing.
-- **`sort: count` keeps its name** and means "by the measure value, descending".
-- **A distinct-count bar will not match the row count of its own drill-down list**,
-  and that is not a bug: the bar says "7 different authors", the list shows all
-  their issues. Drill-through URLs are unaffected by the measure.
-- **A multi-valued custom field as the dimension inflates a `sum`**, the same way it
-  inflates a count: the issue is joined once per value, so its hours are counted
-  once per value. Check `.multi_value`.
-- **A corrupt value in a numeric custom field is skipped, not fatal.** Empty values
-  never reach the cast — the join leaves them out — and a value that is not a number
-  yields `NULL`, which `SUM` and `AVG` ignore.
-- `avg` on an empty bucket is reported as `0`, not `nil`, so a chart array stays
-  valid JavaScript.
-- `measure:` needs a `group_by`. The time series always counts issues, and
-  `group_by: flags` has fixed counters; both log a warning and ignore it.
-
-### Drill-through URLs
-
-`drill: true` turns every bar, slice, point and heatmap cell into a link to the
-Redmine issue list, filtered to exactly the subset that element represents — in
-the context of the report's own query.
-
-```liquid
-{% sql_aggregate from: issues, group_by: cf_92, drill: true, assign_to: by_dept %}
-
-{% for b in by_dept.buckets %}
-  {% if b.url %}
-    <a href="{{ b.url }}" target="_blank">{{ b.label }}</a>: {{ b.count }}
-  {% else %}
-    {{ b.label }}: {{ b.count }}
-  {% endif %}
-{% endfor %}
-```
-
-Clicking *Survey* in a Department chart opens the issue list showing the
-report's own issues, narrowed to Department = Survey.
-
-**What the URL inherits.** Everything, not just the filters: the report query's
-filters, columns, grouping, totals and sort order, plus the dimension filter, with
-`set_filter=1`. A saved query cannot be extended through a URL — Redmine's
-`retrieve_query` short-circuits on `query_id` and ignores any `f`/`op`/`v` that
-follow — so the parameters are replicated instead. The serialisation is Redmine's
-own `Query#as_params`, applied to an unsaved copy of the query, so the parameter
-names stay correct across Redmine versions.
-
-**Keys added by `drill: true`:**
-
-| Key | Content |
-|-----|---------|
-| `.drill_available` | `true` when URLs were emitted, `false` when no `IssueQuery` could be resolved |
-| `.base_url` | The report query itself, unfiltered by any dimension |
-| `.buckets[].url` | One element URL, or `nil` |
-| `.rows[].url` | Crosstab row URL |
-| `.series_entries[].url` | Crosstab series URL |
-| `.stages[].url` | Funnel stage URL (`total` links to `base_url`) |
-| `.cell_urls` | Dense rows × series array, aligned with `matrix`; each entry ANDs the row and series filters |
-| `.cell_urls_truncated` | `true` when the crosstab was past the 5000-cell cap, so every `cell_urls` entry is `nil` for that reason and not for lack of a filter |
-| `.drill_degraded` | `true` when at least one URL had to drop its inherited columns and totals to fit — the linked list then matches the element but is not laid out like the report |
-
-Without `drill`, none of these keys exist and the result is exactly what it was
-before — existing templates are unaffected.
-
-**URLs are absolute** (`https://host/projects/<identifier>/issues?…`, or
-`/issues` for a query without a project), built from `Setting.protocol` and
-`Setting.host_name` like `issue.target_version` already is, because the same
-markup is exported to PDF where a relative path has nothing to resolve against.
-They are already percent-encoded; print them with `{{ b.url }}`, no `escape`
-filter needed.
-
-**`drill: true` implies the dimension path.** Only it knows the raw stored value
-behind a label. For one of the seven core fields that means the dimension's own
-labels — display names for `assignee` / `author` instead of logins; pass
-`user_label: login` to keep the legacy text. A falsy `drill` changes nothing.
-
-**What `drill_inherit: filters` is for.** The default inherits the report's
-`group_by` too, so clicking *Survey* in a Department chart lands on a list grouped
-by Department with exactly one group. Harmless, but if you would rather land on a
-plain flat list — or you want the shortest possible URL — `drill_inherit: filters`
-keeps the filters and drops the columns, grouping, totals and sort order.
-
-**No URL is better than a wrong URL.** An element gets `nil` instead of a link
-when:
-
-- the dimension is not an available issue-list filter — a custom field needs
-  `is_filter` and must be enabled for the project and the tracker (logged once
-  per render);
-- Redmine does not allow the operator on that filter type (a boolean custom field
-  is a plain list with no "none" operator, for instance);
-- the bucket cannot be expressed as a filter at all (a group value that is not a
-  period or age label);
-- the bucket range and the query's own date filter are **disjoint** — a zero-count
-  period bucket outside the report's window, which no drill-down can populate;
-- the dimension is a **date** filter but the bucket's stored value is not a date
-  Redmine accepts (a date-format custom field holding something else): Redmine
-  would answer "Date is invalid" rather than a list;
-- the URL is still over `drill_max_url` (2000 characters by default) **with the
-  filters alone** — an `Other` row collapsing hundreds of values hits this, and
-  gets no link rather than a truncated one. Each refusal logs the real length and
-  the cap, so you can raise `drill_max_url` deliberately instead of guessing why
-  some bars are clickable and others are not.
-
-**Over-long URLs shed the cosmetics before they give up.** Because a drill-down
-inherits `c[]`, a report with many columns can push a two-filter crosstab cell
-past the cap on its own. Rather than lose the link, the URL is rebuilt without the
-inherited columns and totals, and if that is still too long without the grouping
-and sort order either. The filters are never dropped — they are what makes the
-list match the element. `drill_degraded` reports that it happened, and one log
-line per render says what was dropped. Set `drill_inherit: filters` to take that
-route from the start.
-
-**Replace versus intersect.** Redmine allows exactly one filter per field, so the
-dimension filter is merged into the inherited set:
-
-- field not filtered yet → added;
-- field already filtered, **non-date** → **replaced**. A bucket is by construction
-  a subset of whatever the query filtered on that field, so replacing cannot
-  widen the result;
-- field already filtered, **date** (`period`, `age`) → **intersected**, because
-  replacing a date range could widen it. Only absolute operators (`><`, `>=`,
-  `<=`, `=`) can be intersected at render time. When the query uses a relative
-  one (`t-`, `w`, `m`, `>t-`, …) the drill-down falls back to the bucket range and
-  logs at debug level: **this is the one case where the drill-down can show more
-  issues than the chart element counted.**
-
-**Period and age ranges.** A period bucket becomes `created_on` (or `closed_on`)
-`><` the bucket's first and last day. An age bucket becomes the range its label
-names — `31-60` is `[today-60, today-31]` — with the newest bucket open at the
-recent end (`>=`) and the oldest open at the old end (`<=`). The SQL compares
-timestamps while a Redmine date filter compares dates, so an issue created on a
-boundary day can land in the neighbouring bucket; and the buckets are computed in
-the server time zone while the filter is applied in the viewer's.
-
-**Multi-valued custom fields.** As with the `multi_value` flag, an issue holding
-several values is counted once per value, and the drill-down lists every issue
-holding the clicked value. The counts agree with each other; they just sum to more
-than the number of issues. An empty entry among those values is ignored, so such an
-issue does not also appear in the no-value bucket.
-
-**Permissions.** See [Who sees what](#who-sees-what-two-people-two-sets-of-numbers)
-for the whole picture. A drill-down is only a filter — Redmine re-applies issue
-visibility when the list is rendered. A viewer may therefore see fewer issues
-than the chart suggested if the chart was rendered for someone else (a scheduled
-report, a shared PDF). That is correct behaviour, not a mismatch to fix.
-
-There is one case that goes the other way, and it cannot be fixed from here: the
-URL is built against the *renderer's* `available_filters`. If the person who opens
-a shared link may not use that filter at all — a custom field restricted to roles
-they do not have — Redmine's `add_filters` drops it and they land on the report's
-own list, unnarrowed. The link is validated when it is written, but only the click
-decides. If that matters for a report you share outside its project, prefer
-filters everyone involved can use.
-
-**`closed_statuses` and the funnel.** The `closed` stage links with
-`status_id=c`, Redmine's own `is_closed` flag, so it stays right whatever
-`closed_statuses` was passed. If you pass an explicit `closed_statuses:` that is
-not the same set, the stage count and the linked list differ; the tag logs a
-warning when both are in play.
-
-**Cost.** `drill: true` adds one `available_filters` build per render (a handful
-of small queries) and no query at all per element. It runs no extra aggregation.
-
-**Time series.** `drill: true` is not supported for the time-series mode (no
-`group_by`): its labels carry no raw value to filter on. Use
-`group_by: period` instead — same chart, drillable buckets. The tag sets
-`drill_available` to `false` and says so in the log.
-
-#### Worked example — a clickable crosstab chart
-
-`cell_urls` is aligned with `matrix`, so the Chart.js `onClick` idiom the
-"Version overview" template already uses works unchanged:
-
-```liquid
-{% sql_aggregate from: issues, group_by: cf_92, split_by: cf_86,
-   drill: true, assign_to: xt %}
-
-<canvas id="chart_xt" width="600" height="300"></canvas>
-<script>
-(function(){
-  var labels = [{% for r in xt.rows %}"{{ r.label | escape }}"{% unless forloop.last %},{% endunless %}{% endfor %}];
-  var urls   = [{% for row in xt.cell_urls %}[{% for u in row %}{% if u %}"{{ u }}"{% else %}null{% endif %}{% unless forloop.last %},{% endunless %}{% endfor %}]{% unless forloop.last %},{% endunless %}{% endfor %}];
-
-  // Same shape as openFrom() in the "Version overview" template, one dimension deeper.
-  function openCell(urlGrid, chart, evt){
-    var pts = chart.getElementAtEvent(evt);
-    if (pts && pts.length){
-      var row = urlGrid[pts[0]._index] || [];
-      var u   = row[pts[0]._datasetIndex];
-      if (u) window.open(u, '_blank');
-    }
-  }
-
-  new Chart(document.getElementById('chart_xt'), {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [
-        {% for s in xt.series_entries %}
-        { label: "{{ s.label | escape }}",
-          data: [{% for r in xt.rows %}{{ r.cells[s.label] }}{% unless forloop.last %},{% endunless %}{% endfor %}] }{% unless forloop.last %},{% endunless %}
-        {% endfor %}
-      ]
-    },
-    options: {
-      onClick: function(e){ openCell(urls, this, e); },
-      animation: { duration: 0 }
-    }
-  });
-})();
-</script>
-```
-
-For a single-dimension chart the row-only variant is simpler — collect the URLs
-into one array and reuse `openFrom(urls, this, e)` exactly as the version
-dashboard does:
-
-```liquid
-var urls = [{% for b in by_dept.buckets %}{% if b.url %}"{{ b.url }}"{% else %}null{% endif %}{% unless forloop.last %},{% endunless %}{% endfor %}];
-```
-
-**A `<canvas>` is a raster in an exported PDF: `onClick` works on screen only.**
-HTML-based widgets — a table, or the heatmap — get real `<a href>` elements and
-stay clickable in the PDF, which is the reason the URLs are absolute.
-
-### Notes and caveats
-
-- **Counting.** The dimension path counts `COUNT(DISTINCT issues.id)`, because the
-  query's own scope may already join tables that multiply rows (a filter on a
-  custom field, watchers, spent time) and the custom field dimension adds a join
-  of its own. The seven core fields keep their original plain `COUNT(*)` when
-  used without any of the new parameters, so existing templates are unaffected.
-- **Multi-valued custom fields.** An issue with several values is counted once per
-  value, so the bucket counts sum to more than the number of issues. Check
-  `.multi_value` if that matters for the caption you print. A drill-down from such
-  a bucket lists every issue holding that value, so the two agree with each other
-  — they just both exceed the issue count.
-- **Labels come from your data.** Custom field values, user names and version
-  names end up in the result. Escape them in HTML and in Chart.js label arrays
-  (`{{ label | escape }}`), exactly as the version dashboard example does.
-- **Duplicate series labels.** If two stored values resolve to the same label,
-  `series` contains that label twice and `cells` keeps only the last of them;
-  `counts` and `matrix` stay correct and aligned.
-- **Three joins.** A crosstab over two custom fields with a custom-field measure
-  carries three `custom_values` joins (`rrd_cv_g`, `rrd_cv_s`, `rrd_cv_m`). Each one
-  fans for a multi-valued field, and they multiply: an issue with 5 departments, 3
-  lesson types and 2 values in the measured field produces 30 rows. Counts stay
-  right (they are `DISTINCT`), sums do not — see the `multi_value` note above.
-- **Cost.** The time series runs one extra statement for `open_at_end` (three for a
-  90-day window, which is chunked), so an existing time-series widget costs a little
-  more than it did. Each period in it is a `COUNT(DISTINCT … CASE …)`, so a 90-day
-  window is materially more expensive than a 13-week one covering the same span —
-  prefer `week` or `month` for long windows. The aggregation itself is always a single `COUNT … GROUP BY`, one or
-  two dimensions alike. Label resolution adds at most one batched primary-key
-  lookup per dimension (one more when `sort: position` needs the enumeration
-  order). `flags` runs a handful of small aggregates. No issue is ever loaded
-  into Ruby, and nothing is done per row.
-
-### Legacy alias
-
-The tag was previously called `{% geo_aggregate %}`. That name still works as an alias so existing templates keep working without changes.
-
-## Using the `{% geo_version_map %}` tag
-
-Place the tag near the top of your Reporter template. It writes a lookup table into a Liquid variable (`geo_versions` by default), keyed by version name.
-
-```liquid
-{% geo_version_map assign_to: geo_versions %}
-
-{% for issue in issues %}
-{% assign v = geo_versions[issue.version] %}
-- {{ issue.subject }} — [roadmap](/projects/{{ v.project }}/roadmap) ·
-  [issues](/projects/{{ v.project }}/issues?set_filter=1&fixed_version_id={{ v.id }}) ·
-  [time entries](/projects/{{ v.project }}/time_entries?set_filter=1&issue.fixed_version_id={{ v.id }})
-{% endfor %}
-```
-
-By default the map covers every version (`Version.all`). Pass a project identifier to limit it to that project's shared versions:
-
-```liquid
-{% geo_version_map project: my-project, assign_to: geo_versions %}
-```
-
-The `project:` value is a literal identifier (not a Liquid variable). It is resolved by identifier first, then by numeric id. If the project cannot be found, the map is left empty rather than falling back to every version.
-
-### Result structure
-
-Each entry is keyed by the version **name**; the value exposes:
-
-| Key | Type | Content |
-|-----|------|---------|
-| `.id` | integer | Version id (use it in `fixed_version_id` filters) |
-| `.effective_date` | date / nil | The version's due date, or empty when unset |
-| `.status` | string | `open`, `locked` or `closed` |
-| `.project` | string | Identifier of the project the version belongs to |
-
-Look up a version by name — typically the scalar `issue.version` from the issue drop:
-
-```liquid
-{{ geo_versions[issue.version].id }}
-```
-
-If the name is unknown (for example an issue with no target version), the lookup returns nothing and the surrounding template still renders. The tag itself produces no output; on any error it assigns an empty map so the template never crashes.
-
-## Using the `{% version_rollup %}` tag
-
-Aggregates the report's issues per target version in SQL and assigns a ready-to-render Array. Use it instead of a nested `{% for version %}{% for issue %}` loop when you build a per-version dashboard.
-
-```liquid
-{% version_rollup from: issues, closed_statuses: "Closed;Rejected", cost_fields: "20,21", assign_to: versions %}
-{% for v in versions %}
-  <h3><a href="{{ v.version.url }}">{{ v.name }}</a></h3>   {# v.version is a VersionDrop, nil for the "None" bucket #}
-  {{ v.open }} open / {{ v.closed }} closed · {{ v.spent_hours }} / {{ v.est_hours }} h
-  {% if v.cost['20'] or v.cost['21'] %}budget {{ v.cost['21'] }} / {{ v.cost['20'] }}{% endif %}
-{% endfor %}
-```
-
-Params: `from` (issues drop, default `issues`), `closed_statuses` (semicolon/comma-separated names; else the `is_closed` flag), `cost_fields` (semicolon/comma-separated numeric custom field ids to sum), `assign_to` (default `versions`).
-
-### Result structure
-
-One row per target version (a nil version → name `None`), sorted by name. String keys, so Liquid dot-access works:
-
-| Key | Type | Content |
-|-----|------|---------|
-| `.name` | string | Version name (`None` for issues with no target version) |
-| `.version` | drop / nil | A `VersionDrop` (absolute, PDF-safe URLs: `.url`, `.roadmap_url`, `.issues_url`, …); nil for `None` |
-| `.total` `.open` `.closed` | integer | Issue counts |
-| `.open_done_sum` | integer | Σ `done_ratio` over open issues (for % complete) |
-| `.overdue_open` `.unassigned_open` `.no_estimate` | integer | Flag counts |
-| `.est_hours` `.spent_hours` | float | Σ estimated / spent hours |
-| `.start_date` `.due_date` | date / nil | MIN start / MAX due over the version's issues |
-| `.cost` | hash | `{ "<field_id>" => float }` summed per numeric custom field |
-
-Cost sums mirror Redmine's own numeric custom-field totalling (`joins(:custom_values)`, empty values skipped, `CAST(... AS decimal)`), so they are correct on PostgreSQL and MySQL. On any error the tag assigns an empty Array so the template never crashes. See [`examples/version_status_dashboard.liquid`](examples/version_status_dashboard.liquid) for a full dashboard built on this tag.
-
-## `issue.target_version` in report templates
-
-Reporter's issue drop exposes `issue.version` as a scalar (the name only). This plugin adds `issue.target_version`, a drop wrapping the issue's target version with everything needed to build links — and **all URLs are absolute**, so they keep working when a report is exported to PDF by wkhtmltopdf.
-
-```liquid
-{% if issue.target_version %}
-  <a href="{{ issue.target_version.roadmap_url }}">{{ issue.target_version.name }}</a>
-  · <a href="{{ issue.target_version.open_issues_url }}">Open issues</a>
-  · <a href="{{ issue.target_version.time_url }}">Time entries</a>
-{% endif %}
-```
-
-| Accessor | Content |
-|----------|---------|
-| `.id` `.name` `.description` | Version identity |
-| `.effective_date` | Due date (`Date` or empty) |
-| `.status` | `open` / `locked` / `closed` |
-| `.completed_percent` | Completion percentage |
-| `.project_identifier` | Identifier of the version's project |
-| `.url` | Absolute link to the version page |
-| `.roadmap_url` | Absolute link to the project roadmap |
-| `.issues_url` / `.open_issues_url` / `.closed_issues_url` | Absolute issue-list links filtered by this version (all / open / closed) |
-| `.time_url` | Absolute time-entries link filtered by this version |
-
-`issue.target_version` is `nil` when the issue has no target version, so guard with `{% if issue.target_version %}`. See [`examples/sample_report_template.liquid`](examples/sample_report_template.liquid) for it in a full template alongside `{% sql_aggregate %}` and a Chart.js chart.
-
-## `issue.custom_field_value[id]` in report templates
-
-Reporter's `{{ issue | custom_field: "Name" }}` filter looks a custom field up by **name**. When you'd rather read a custom field **by id** — stable across renames and translations — this plugin adds `issue.custom_field_value`, a drop whose bracket lookup returns **any** custom field by id:
-
-```liquid
-{{ issue.custom_field_value[20] }}                     {% comment %} value of custom field 20 {% endcomment %}
-{% assign fid = 21 %}{{ issue.custom_field_value[fid] }} {% comment %} id from a variable {% endcomment %}
-```
-
-The id can be an integer literal, a string, or a Liquid variable. The **raw stored value** is returned (a `String` for text/numeric fields, an `Array` for multi-value fields, empty/`nil` when the field is unset on the issue). For numeric fields, coerce in the template — `nil`/`""` become `0`:
-
-```liquid
-{% assign cost = issue.custom_field_value[20] | times: 1.0 %}
-{% if cost > 0 %}Cost: {{ cost | round: 0 }}{% endif %}
-```
-
-Under the hood it reads `Issue#custom_field_value(id)` (Redmine's `Acts::Customizable`). See [`examples/version_status_dashboard.liquid`](examples/version_status_dashboard.liquid), which sets two field ids at the top (`cf_est_cost` / `cf_actual_cost`) and uses this accessor to drive a per-version budget bar, badge, KPI tile and chart.
-
-## Exporting a report widget to PDF
-
-Report widgets show an **Export as PDF** link in their header. It opens the same report the widget renders — for the widget's configured query — as a PDF in a new tab, reusing the Reporter plugin's own PDF generation. (PDF output requires wkhtmltopdf to be configured for Reporter, the same as Reporter's own report preview.)
-
-## Charts in report templates (Chart.js in the PDF)
-
-Reporter renders report PDFs through **wkhtmltopdf**, whose WebKit engine is from
-around 2011: it has no ES2015 and no CSS flexbox. This plugin makes JavaScript
-charts (Chart.js and friends) render in every Reporter PDF automatically — when a
-report contains a `<canvas>`, it injects the ES2015 polyfills the old engine is
-missing and adds a bounded wait so asynchronously-loaded chart scripts finish
-before the page is captured. Chart-less reports are untouched (no delay).
-
-Your template still has to stay within what that old engine can lay out. Follow
-these four rules and a chart-heavy report renders the same in the browser and the
-PDF:
-
-1. **No flexbox** — `display:flex` collapses to a single column in the PDF. Use
-   `inline-block`, `float`, or tables for multi-column layouts.
-2. **Charts: `responsive: false` + an explicit `width`/`height` on the
-   `<canvas>`** (e.g. `<canvas width="470" height="300">`). This is the one that
-   most often bites: wkhtmltopdf's WebKit fires no resize events, so Chart.js
-   `responsive: true` reads a container width of `0` and draws an **empty**
-   canvas — the charts come out blank while everything around them renders. A
-   fixed-size canvas renders reliably. Add `max-width:100%; height:auto` in CSS so
-   the fixed-size canvas still scales down proportionally in a narrower on-screen
-   column (e.g. a dashboard tile) while staying crisp at native size in the PDF.
-3. **Disable animation** — `options.animation = { duration: 0 }` so wkhtmltopdf
-   never snapshots a chart mid-animation (a blank/half-drawn canvas).
-4. **Use Chart.js 2.8**, not 3/4 — the injected polyfills target what 2.8 needs;
-   3/4 require far more modern JS. Chart.js is loaded from a CDN, so the Redmine
-   host needs outbound access to it at PDF time (or host `Chart.min.js` locally
-   and point your template at that URL).
-5. **Wrap your chart JS in an IIFE** (`(function(){ … })();`) and avoid top-level
-   `var` names that collide with window properties — `closed`, `open`, `name`,
-   `top`, `status`, `length`. A global `var closed = [...]` silently fails
-   (`window.closed` is a read-only boolean), so `closed[i]` becomes `undefined`
-   and the data turns to `NaN`. Function scope avoids this entirely.
-
-A complete, self-contained example that combines `{% sql_aggregate %}`,
-`{% geo_version_map %}`, `issue.target_version` and a PDF-safe Chart.js chart is in
-[`examples/sample_report_template.liquid`](examples/sample_report_template.liquid).
+That writes nothing. It reports how many templates and schedules exist, which Liquid
+accessors they use, and which ones contain something that needs changing.
+
+One thing to know up front: **this plugin's tags do not work inside a template that
+`redmine_reporter` renders.** They parse there but return zeros, because they need to know
+whose visibility the report is for and the other plugin's renderer does not tell them. Move
+the template into **Reports → Templates** and it works. See
+[Migrating](docs/admin-guide.md#migrating-from-redmine_reporter).
+
+## Known limitations
+
+- SQLite and other adapters are not supported. The aggregation tags refuse to guess at date
+  formatting and log one line instead.
+- A template reports on issues **or** time entries, not both.
+- On MariaDB, `group_by: age` with a `measure:` other than `count` needs three age
+  boundaries or fewer. Plain counts are correct at any boundary count.
+- The scheduler needs a cron entry. Installing the plugin does not start anything.
+- Share links serve a frozen snapshot. Revoking stops future access; it cannot retract a
+  copy somebody already downloaded.
 
 ## Questions or issues?
 
-Open an issue on [GitHub Issues](https://github.com/jcatrysse/redmine_reporter_dashboards/issues).
-
-Contributing to the code? See [CONTRIBUTING.md](CONTRIBUTING.md) for the developer setup, test instructions and how the CI workflows work.
+<https://github.com/jcatrysse/redmine_reporter_dashboards/issues>
 
 ## License
 
-Author: Jan Catrysse
+GPL v2. See [LICENSE](LICENSE).

@@ -1,21 +1,53 @@
-# One workflow instead of the three near-identical per-version ones it replaces
-# (rspec_minitest-51/-60/-61.yml). Those were workflow_dispatch-only, because every
-# one of them checked out the PRIVATE redmine_reporter plugin with
-# secrets.REPORTER_REPO_TOKEN before running anything — a secret no fork PR can see,
-# so `on: pull_request` would have made every outside contribution red.
+# THE WHOLE SUITE RUNS ON A FORK PULL REQUEST. That is the point of this file, and it
+# is new: until redmine_reporter became optional, the functional tests checked out a
+# PRIVATE plugin using secrets.REPORTER_REPO_TOKEN. A secret is not readable from a
+# fork, so those tests were skipped on every outside contribution — and a skipped job
+# reads exactly like a passing one. An outside contributor could not have their work
+# tested, and nobody could tell.
 #
-# The split below is what makes automatic runs possible:
+# The secret, the probe job that checked whether it was readable, and the private
+# checkout step are all gone. `script/gates/no_secrets.sh` is what stops them coming
+# back, because the way they come back is not malice — it is one convenient step added
+# during an unrelated change by someone who never read this comment.
 #
-#   rspec     — the plugin's own specs. They stub Redmine away and never boot Rails,
-#               so they need neither the private plugin nor a database. Runs on every
-#               push and pull request, across the supported Redmine branches.
-#   adapter   — spec/adapter, the specs that run the aggregator's SQL against a real
-#               server. One job per engine: PostgreSQL, MySQL and MariaDB.
-#   minitest  — the functional tests, which DO boot the full app and therefore DO
-#               need redmine_reporter. Gated on the secret actually being readable,
-#               so it is skipped rather than failed on a fork PR.
+# The jobs:
+#
+#   rspec      — the plugin's own specs. They stub Redmine away and never boot Rails,
+#                so they need no database. Every supported Redmine branch.
+#   adapter    — spec/adapter, the aggregator's SQL against a real server. One job per
+#                engine: PostgreSQL, MySQL, MariaDB.
+#   minitest   — the functional tests, which boot the full application, STANDALONE:
+#                no redmine_reporter, no redmineup gem. Every supported branch.
+#                This is the configuration the plugin promises and it is now the one
+#                CI proves.
+#   baseline   — the corpus reference checks, run from the PLUGIN CHECKOUT rather than
+#                the mirror. They need git history, and redmine_clone.sh / the rsync
+#                below deliberately exclude .git, so run there they would skip — and a
+#                skipped guard is indistinguishable from a passing one. Fast, no
+#                services: the first thing to go red when the reference moves.
+#   corpus     — gate G7's differential. The declared case matrix re-run against a real
+#                server and compared with the committed corpus, on all three engines,
+#                twice. It repeats the baseline checks from the checkout on purpose, so
+#                that a green corpus job cannot mean the reference went unchecked.
+#   gates      — the non-test checks. A green suite says nothing about these.
 #   ruby-floor — the plugin declares Redmine 5.1 support, and Redmine 5.1 runs on
-#               Ruby 2.7. Guards the syntax that floor rules out.
+#                Ruby 2.7. Guards the syntax that floor rules out.
+#   render-smoke — T-12. The engine conformance corpus and the generated support
+#                matrix, gates G12 and G9. The only job with a browser in it.
+#
+# ONE render-smoke job, not one per engine, and that is a deviation from
+# technical-spec.md §8's target table worth stating rather than hiding. The target is
+# three jobs (`:chromium_cdp`, `:wkhtmltopdf`, `:gotenberg`); today one of those
+# adapters exists and the other two do not, so a three-cell matrix would be two cells
+# reporting nothing. The suite already runs every registered adapter and names each in
+# its own example, so a red engine is identifiable either way. It splits into a matrix
+# when there is a second engine whose failure could mask a first — which is a decision
+# about isolation, and today there is nothing to isolate from.
+#
+# What is NOT covered, stated rather than implied: the two report widgets need
+# redmine_reporter, which is private, so their four functional tests SKIP here with a
+# reason. They are exercised by running the suite locally with a reporter checkout
+# (see CONTRIBUTING / .codex/redmine_clone.sh). Every other test runs on every PR.
 
 name: CI
 
@@ -76,11 +108,75 @@ jobs:
         run: bundle install --jobs 4
         working-directory: redmine
 
+      # FR-72's parity gate (T-37) runs HERE and not in the `gates` job, and the reason is
+      # mechanical: "what can a template reach" is `Liquid::Drop.invokable_methods` asked of a
+      # loaded class, so this gate needs the Liquid gem — and the `gates` job installs no gems
+      # at all, deliberately, because every other gate there is a grep or a parse. Running it
+      # after `bundle install` here costs nothing, uses the LOCKED Liquid rather than whatever
+      # `gem install` would fetch, and exercises it on all four Redmine branches and three
+      # Rubies instead of one.
+      #
+      # BEFORE the specs, so that a stale `docs/drop-reference.md` is reported by the gate's
+      # own message rather than as one red example among 2 800.
+      - name: drop_reference_parity
+        run: |
+          BUNDLE_GEMFILE="$PWD/Gemfile" \
+            ./plugins/redmine_reporter_dashboards/script/gates/drop_reference_parity.sh
+        working-directory: redmine
+
       - name: Run plugin specs
         run: |
           bundle exec rspec \
             -I plugins/redmine_reporter_dashboards/spec \
                plugins/redmine_reporter_dashboards/spec \
+            --format progress
+        working-directory: redmine
+
+      # BOTH LIQUID MAJORS, and this is the only place either is pinned.
+      #
+      # `technical-spec.md` §3.3 marks NamedRefDrop `[UNVERIFIED]` until its five
+      # substitutability claims are proven "under both Liquid 4.0.x and 5.x" — because
+      # the lexer, the comparison operators and Drop's method dispatch all changed
+      # between them, and every one of those claims is about Liquid's internals.
+      #
+      # Run outside bundler, against system gems, because the point is to pin a version
+      # the plugin's Gemfile deliberately does not: it declares `>= 4.0, < 6.0` so an
+      # install that already has 4.x is not forced to upgrade. One Redmine branch only —
+      # this proves a property of the GEM, and running it four times proves it four
+      # times.
+      - name: NamedRefDrop under both Liquid majors
+        if: matrix.redmine == '6.1-stable'
+        run: |
+          gem install rspec --no-document
+          gem install liquid -v 4.0.4 --no-document
+          gem install liquid -v '~> 5.0' --no-document
+          for constraint in '4.0.4' '~> 5.0'; do
+            printf "gem 'liquid', '%s'\nrequire 'liquid'\n" "$constraint" > /tmp/pin.rb
+            echo "--- Liquid $constraint"
+            rspec -r /tmp/pin.rb spec_liquid --format progress
+          done
+        # THE PLUGIN CHECKOUT, and it needs saying every time. This job checks out into
+        # `plugin/` and every other step runs in `redmine/`; without this the step runs
+        # in the runner's default directory, finds no `spec_liquid`, and reports
+        # "0 examples, 0 failures" — which is a PASS-shaped message from a step that
+        # checked nothing. It failed here only because rspec exits non-zero on an
+        # unmatched path. HANDOVER §1 names this exact trap: "a CI step that needs the
+        # plugin checkout needs `working-directory` EVERY TIME. It is per step, not per
+        # job." That entry is there because the corpus job lost a step to it once.
+        working-directory: plugin
+
+      # A SECOND INVOCATION, and it has to be second rather than part of the first.
+      # `spec/spec_helper.rb` stubs Liquid so the tag specs can run without the gem, and
+      # the stub cannot share a process with the real gem: `Liquid::Tag.new` is public on
+      # one and private on the other. Loading both broke 200+ tag examples in an ordering
+      # that depended on filename order, which is why `spec_liquid/` is its own directory
+      # with its own run. `-r liquid` requires the gem before any spec file loads, so
+      # there is no window in which the stub could win. See spec_liquid/README.md and
+      # §Findings E-7 — this is a migration nobody has done yet, not a design.
+      - name: Run the execution-policy specs against the real Liquid gem
+        run: |
+          bundle exec rspec -r liquid \
+            plugins/redmine_reporter_dashboards/spec_liquid \
             --format progress
         working-directory: redmine
 
@@ -197,35 +293,12 @@ jobs:
         working-directory: redmine
 
   # ------------------------------------------------------------------
-  # Is the private redmine_reporter reachable from this run at all?
-  # ------------------------------------------------------------------
-  reporter-secret:
-    name: Check redmine_reporter access
-    runs-on: ubuntu-latest
-    outputs:
-      available: ${{ steps.check.outputs.available }}
-    steps:
-      - id: check
-        env:
-          TOKEN: ${{ secrets.REPORTER_REPO_TOKEN }}
-        run: |
-          if [ -n "$TOKEN" ]; then
-            echo 'available=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::REPORTER_REPO_TOKEN is not readable from this run ' \
-                 '(fork pull request, or the secret is unset), so the minitest job is skipped. ' \
-                 'The RSpec and adapter jobs do not need it.'
-          fi
-
-  # ------------------------------------------------------------------
-  # Functional tests — boot the full app, so redmine_reporter must be present
+  # Functional tests — the full application, STANDALONE. No secret, no private
+  # plugin, so this runs on a fork pull request like everything else.
   # ------------------------------------------------------------------
   minitest:
-    name: Minitest (Redmine ${{ matrix.redmine }})
+    name: Minitest standalone (Redmine ${{ matrix.redmine }})
     runs-on: ubuntu-latest
-    needs: reporter-secret
-    if: needs.reporter-secret.outputs.available == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -264,16 +337,152 @@ jobs:
           mkdir -p redmine/plugins/redmine_reporter_dashboards
           rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
 
-      # redmine_reporter is a private hard dependency: init.rb raises without it and
-      # the functional tests boot the full app. Provide a read-only credential
-      # (fine-grained PAT or deploy key) as the REPORTER_REPO_TOKEN secret, and
-      # adjust `repository` if the reporter repo lives elsewhere.
-      - name: Checkout redmine_reporter dependency (private)
+      # Nothing is checked out here on purpose. redmine_reporter is optional, and its
+      # absence is the configuration under test: the plugin must boot, the dashboards
+      # must work, and the two widgets that do need it must be absent from the picker
+      # rather than breaking the page.
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: postgresql
+            database: redmine_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+            encoding: unicode
+          EOF
+        working-directory: redmine
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: false
+          working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      - name: Populate the test database
+        run: |
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+          bundle exec rake redmine:plugins:migrate
+        working-directory: redmine
+
+      # Belt and braces: if a future change reintroduces the dependency, this fails
+      # here with one clear line instead of quietly making the run mean something else.
+      - name: Assert the standalone configuration
+        run: |
+          if [ -d redmine/plugins/redmine_reporter ]; then
+            echo "redmine_reporter is present — this job asserts its ABSENCE." >&2
+            exit 1
+          fi
+          echo 'No redmine_reporter plugin: standalone, as intended.'
+
+      # THE THREE BROWSERLESS SUITES BY NAME, NOT `redmine:plugins:test`.
+      #
+      # That task globs FOUR directories, and the fourth is `test/system/**` — so the moment
+      # T-41's browser suite landed, this job started launching Chrome on four runners that
+      # have none. Redmine provides the narrower tasks for exactly this reason. The system
+      # suite has its own job below, on the oldest and newest branch, with a browser.
+      #
+      # Named individually rather than excluded by pattern, so a fifth suite directory is a
+      # visible decision here rather than something that silently starts or stops running.
+      - name: Run plugin unit tests
+        run: bundle exec rake redmine:plugins:test:units NAME=redmine_reporter_dashboards
+        working-directory: redmine
+
+      - name: Run plugin functional tests
+        run: bundle exec rake redmine:plugins:test:functionals NAME=redmine_reporter_dashboards
+        working-directory: redmine
+
+      - name: Run plugin integration tests
+        run: bundle exec rake redmine:plugins:test:integration NAME=redmine_reporter_dashboards
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # System tests — the primary journeys IN A REAL BROWSER. R-02 / C-07.
+  #
+  # An independent review's second major finding: every other suite in this repository
+  # stops at the controller, and the repository's own history has a defect that only a
+  # browser could see (T-23's Preview button 404'd on every press, because `formaction`
+  # plus `formmethod: 'post'` plus Rails' hidden `_method=patch` is a combination a
+  # controller test constructs correctly by definition and a browser can get wrong).
+  #
+  # OLDEST AND NEWEST ONLY, which is the review's own recommendation and a deliberate
+  # narrowing of the four-cell matrix its neighbours run. What these tests are about is
+  # the host application's UJS layer and its form handling, and those differ across
+  # Rails generations rather than across Redmine point releases — 5.1 (Rails 6.1) and
+  # 7.0 (Rails 8.1) are the two ends of the span. A browser cell costs minutes, and
+  # four of them buys two more samples of the same two answers.
+  #
+  # `fail-fast: false` (CLAUDE.md §6): with two cells and a version-sensitive subject,
+  # "which end broke" is the whole information content of a red run.
+  # ------------------------------------------------------------------
+  system:
+    name: System tests in a browser (Redmine ${{ matrix.redmine }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { redmine: '5.1-stable', ruby: '3.2' }
+          - { redmine: '7.0-stable', ruby: '3.4' }
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+    env:
+      RAILS_ENV: test
+      # Redmine's own `ApplicationSystemTestCase` reads this. `--no-sandbox` is the
+      # RUNNER's decision and belongs here rather than in a test file: a GitHub runner
+      # needs it, a developer's workstation must not be silently told to drop the
+      # browser sandbox by a file they did not open.
+      GOOGLE_CHROME_OPTS_ARGS: '--headless=new,--no-sandbox,--disable-dev-shm-usage,--disable-gpu'
+
+    steps:
+      - name: Checkout plugin
         uses: actions/checkout@v4
         with:
-          repository: jcatrysse/redmine_reporter
-          token: ${{ secrets.REPORTER_REPO_TOKEN }}
-          path: redmine/plugins/redmine_reporter
+          path: plugin
+
+      - name: Clone Redmine ${{ matrix.redmine }}
+        run: |
+          git clone --depth 1 --branch ${{ matrix.redmine }} \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      # HARD, not a skip. G12's three-state rule is about DECLARED capabilities, and a
+      # browser is declared here by the existence of this job: a runner without one has
+      # not "skipped an undeclared capability", it has failed to provide the single
+      # thing the job is for. `render-smoke` fails the same way for the same reason.
+      - name: Locate a browser
+        run: |
+          for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+              echo "browser: $("$candidate" --version)"
+              exit 0
+            fi
+          done
+          echo "::error::no browser on this runner — the system suite cannot run" >&2
+          exit 1
 
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y build-essential libpq-dev
@@ -309,9 +518,1126 @@ jobs:
           bundle exec rake redmine:plugins:migrate
         working-directory: redmine
 
-      - name: Run plugin functional tests
-        run: bundle exec rake redmine:plugins:test NAME=redmine_reporter_dashboards
+      - name: Run plugin system tests
+        run: bundle exec rake redmine:plugins:test:system NAME=redmine_reporter_dashboards
         working-directory: redmine
+
+      # The screenshots Rails writes on a failing example. Worth more than the log line
+      # on a browser failure, and only uploaded when there is one to look at.
+      - name: Keep the failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-screenshots-${{ matrix.redmine }}
+          path: redmine/tmp/screenshots/
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------------
+  # T-37 / FR-73 — EVERY STARTER, ON EVERY ENGINE IN THE MATRIX.
+  #
+  # *"a starter gallery whose every entry lints clean and renders on every engine in the
+  # matrix, thumbnails generated in CI"*. The lint half is a spec and runs in `rspec` above;
+  # this is the render half, and it needs the one combination no other job has: a DATABASE
+  # WITH DATA IN IT **and** all three engines. `minitest` has the first, `render-smoke` has
+  # the second, and a starter is a Liquid template rendered over real issues into a real PDF —
+  # so it needs both.
+  #
+  # ONE REDMINE BRANCH, and it is the newest. What this job asks is whether a starter's
+  # markup survives three engines, which is a property of the DOCUMENT rather than of Rails;
+  # the four-branch question ("does this boot and run everywhere") is `minitest`'s and is
+  # asked over the same templates by `spec/starter_gallery_spec.rb`.
+  #
+  # THE THUMBNAILS ARE CHECKED, NOT REGENERATED. Regenerating and diffing PNGs would fail on
+  # a font stack, which §9b.5 marks non-deterministic and CLAUDE.md §7 forbids reporting as
+  # PASS/FAIL. `spec/starter_gallery_spec.rb` instead holds the DIGEST of the body each
+  # thumbnail was drawn from, so a starter edited without redrawing its thumbnail is a red
+  # example with a command in its message. That check needs no engine and runs in `rspec`.
+  # ------------------------------------------------------------------
+  starter-gallery:
+    name: Starter gallery (FR-73, every engine)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+      # THE SAME PINNED DIGEST the corpus uses, and basic auth ON: `Gotenberg#preflight`
+      # fails with a named remediation when the service answers without the credential, so a
+      # container without it would be a different engine from the one the matrix describes.
+      gotenberg:
+        image: gotenberg/gotenberg:8@sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+        env:
+          GOTENBERG_API_BASIC_AUTH_USERNAME: rrd
+          GOTENBERG_API_BASIC_AUTH_PASSWORD: s3cret
+        ports:
+          - 3000:3000
+
+    env:
+      RAILS_ENV: test
+      RRD_GOTENBERG_URL: http://127.0.0.1:3000
+      RRD_GOTENBERG_USERNAME: rrd
+      RRD_GOTENBERG_PASSWORD: s3cret
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Redmine 7.0-stable
+        run: |
+          git clone --depth 1 --branch 7.0-stable \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libpq-dev poppler-utils
+
+      # THE COMPATIBILITY ENGINE, from the release .deb — the same build the corpus was
+      # promoted on. `apt install wkhtmltopdf` gives the UNPATCHED-Qt build, which answers
+      # differently about repeating table headers and SVG link annotations; T-38 lost a round
+      # to exactly that and `Render::Capabilities` carries the retraction.
+      - name: Install the compatibility engine
+        run: |
+          url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb"
+          curl -fsSL -o /tmp/wkhtmltox.deb "$url"
+          sudo apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb
+          wkhtmltopdf --version
+
+      # THE SANDBOX STAYS ON — see `render-smoke` for the full argument. The restriction is
+      # lifted for the job rather than the sandbox being disabled for the browser, and those
+      # are not the same trade.
+      - name: Allow the Chromium sandbox to initialise
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || \
+            echo "::notice::no AppArmor userns restriction to lift on this image"
+
+      - name: Locate a browser
+        id: browser
+        run: |
+          for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
+            path="$(command -v "$candidate" || true)"
+            [ -n "$path" ] || continue
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            "$path" --version
+            exit 0
+          done
+          echo "::error::no browser on this runner" >&2
+          exit 1
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: postgresql
+            database: redmine_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+            encoding: unicode
+          EOF
+        working-directory: redmine
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+          working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      # FIXTURES, because a starter rendered over an empty project produces an empty document
+      # and reports it as a pass. Redmine's own fixtures give project 1 seven issues and three
+      # time entries, which is what makes `issue-document` (one document per issue) and the
+      # spent-time starter mean anything.
+      - name: Populate the test database
+        run: |
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+          bundle exec rake redmine:plugins:migrate
+          bundle exec rake db:fixtures:load
+          bundle exec rails runner 'Project.find(1).enable_module!(:reporter_dashboards_reports)'
+        working-directory: redmine
+
+      # EVERY ENGINE IS WARMED, AND THE FIRST VERSION OF THIS STEP WARMED NOTHING.
+      #
+      # A cold engine fails its FIRST render and passes every one after it. Measured twice:
+      # locally a fresh Gotenberg container failed two of five starters and then passed all
+      # five (HANDOVER §3), and this job's own first CI run reported
+      # `issue-document / chromium_cdp FAIL engine/timeout` — the first render of the job, on
+      # the engine that has to start a browser — while the other four chromium renders passed.
+      # 14 of 15, and the one red cell was about the runner rather than about the starter.
+      #
+      # `render:preflight` is the plugin's OWN diagnostic and it exists for exactly this: it
+      # starts every registered engine and draws its probe document. Warming through it rather
+      # than through curl means the warm-up uses the same adapters, the same pool and the same
+      # deadline as the measurement that follows.
+      #
+      # `|| true`, deliberately: its verdicts are `render-smoke`'s to enforce, and a preflight
+      # check failing here must not be reported as a starter that does not render.
+      #
+      # The curl half is kept only to wait for the container's port, and its payload is fixed:
+      # Gotenberg requires the file to be named `index.html` and answered
+      # *"form file 'index.html' is required"* to the first version — a warm-up that 400s is a
+      # warm-up that did not happen, which is §7's "a check that could not run looks exactly
+      # like a check that passed" wearing a different hat.
+      - name: Warm every engine
+        env:
+          CHROME_PATH: ${{ steps.browser.outputs.path }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/health || true)"
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          printf '<html><body>warm-up</body></html>' > /tmp/index.html
+          curl -s -u rrd:s3cret -o /tmp/warm.pdf \
+            -F 'files=@/tmp/index.html;filename=index.html' \
+            http://127.0.0.1:3000/forms/chromium/convert/html
+          head -c 5 /tmp/warm.pdf
+          echo
+          cd "$GITHUB_WORKSPACE/redmine" && bundle exec rake reporter_dashboards:render:preflight || true
+
+      # THE RENDER, all five starters against all three engines. Exit 1 on any failure, and
+      # the report names the starter, the engine and the reason — which is how a red cell here
+      # becomes one command on a developer machine rather than a log to read.
+      - name: Render every starter on every engine
+        env:
+          CHROME_PATH: ${{ steps.browser.outputs.path }}
+          RRD_PROJECT: '1'
+          RRD_ACTOR: admin
+        run: bundle exec rake reporter_dashboards:gallery:verify
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # T-36 — up -> VERSION=0 -> up, per Rails branch. Gate G11's other half.
+  #
+  # `technical-spec.md` §7 rule 4: "The down path is TESTED, not asserted … A plugin that
+  # cannot be uninstalled cleanly cannot honestly be recommended for a trial install, and a
+  # trial install is the whole A/B argument." `implementation-plan.md:2136`: "Failing this
+  # job blocks a release."
+  #
+  # ONE JOB PER RAILS BRANCH, and not because the plugin's migrations differ — they do not.
+  # The MIGRATOR differs: three Rails majors record versions, invert commands and dump
+  # schemas differently, and `ActiveRecord::Migration::CommandRecorder`'s reversible-method
+  # list has changed inside this span. A rollback proven on Rails 7.2 says nothing about
+  # 6.1 or 8.1.
+  #
+  # It runs `script/migrate_updown.sh` and nothing else, so a red cell here is one command
+  # away from being reproduced on a developer machine instead of being read out of YAML.
+  # That script carries the full argument for its two arms, including the FR-69 reading
+  # they implement.
+  #
+  # PostgreSQL only, and the first version of this comment justified that with a sentence
+  # that was false in both of its clauses. What is actually true:
+  #
+  #   * The question this job asks is about the MIGRATOR, and the migrator is what differs
+  #     across the four branches — so the matrix is by Redmine version rather than by engine.
+  #   * `test/unit/reporter_dashboards_schema_test.rb` runs in the `minitest` job, which is
+  #     **PostgreSQL only** (see its `services:` block), and NOT in `adapter`, which runs
+  #     `spec/adapter` and never loads `test/`.
+  #
+  # So the engine-dependent properties — identifier length limits, whether a unique index
+  # refuses a duplicate over a nullable column, `date` versus `datetime` round-tripping — are
+  # **verified on PostgreSQL only** today. That is a real gap and it is written down here
+  # rather than papered over: closing it means either a database axis on this job or moving
+  # those assertions into `spec/adapter`, which already runs on all three engines.
+  # `implementation-plan.md` §Findings records it as owed.
+  # ------------------------------------------------------------------
+  migrate-updown:
+    name: Migrate up/down (Redmine ${{ matrix.redmine }}, ${{ matrix.db.label }})
+    runs-on: ubuntu-latest
+    # A DATABASE AXIS, added 2026-08-09 by curator decision on §Findings S-9.
+    #
+    # G11 asks whether a migration's reverse actually restores the database. Until now it
+    # asked that on FOUR REDMINE VERSIONS and ONE ENGINE — and the properties most likely
+    # to break are the engine-specific ones: identifier length limits, a unique index over
+    # a nullable column, `date` round-tripping. One such defect has already aborted a
+    # migration on PostgreSQL that would have SUCCEEDED on MySQL. A version axis cannot see
+    # any of them.
+    #
+    # NOT THE FULL CROSS-PRODUCT, and the reason is that the two axes answer different
+    # questions: VERSION is about Rails' DDL changing under us, ENGINE is about the
+    # database's own semantics. Every branch keeps PostgreSQL; MySQL and MariaDB are added
+    # on 6.1-stable (current stable) and 7.0-stable (newest Rails, where a DDL change lands
+    # first). Eight cells rather than twelve.
+    #
+    # `sql_type` in the snapshot is ENGINE-NATIVE — `int(11)`/`varchar(255)` on MySQL where
+    # PostgreSQL says `integer`/`character varying`. That is correct and is the point: the
+    # comparison is before-against-after on ONE engine, never across two.
+    #
+    # MEASURED BEFORE IT WAS WIRED rather than pushed and hoped for: `migrate_updown.sh`
+    # was run locally against MariaDB 10.11 and passed BOTH arms. MySQL 8 is CI's first
+    # look, which is the honest state to be in (INV-7).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { redmine: '5.1-stable', ruby: '3.2', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '6.0-stable', ruby: '3.3', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '6.1-stable', ruby: '3.4', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '7.0-stable', ruby: '3.4', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '6.1-stable', ruby: '3.4', db: { label: MySQL 8.0, image: 'mysql:8.0', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '7.0-stable', ruby: '3.4', db: { label: MySQL 8.0, image: 'mysql:8.0', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '6.1-stable', ruby: '3.4', db: { label: MariaDB 11, image: 'mariadb:11', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '7.0-stable', ruby: '3.4', db: { label: MariaDB 11, image: 'mariadb:11', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+
+    services:
+      # One service definition for three engines: each image reads only the variables it
+      # knows and ignores the others. The same shape the `adapter` job uses.
+      db:
+        image: ${{ matrix.db.image }}
+        ports:
+          - ${{ matrix.db.port }}:${{ matrix.db.port }}
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_test
+          MYSQL_ROOT_PASSWORD: redmine
+          MYSQL_DATABASE: redmine_test
+          MYSQL_USER: redmine
+          MYSQL_PASSWORD: redmine
+          MARIADB_ROOT_PASSWORD: redmine
+          MARIADB_DATABASE: redmine_test
+          MARIADB_USER: redmine
+          MARIADB_PASSWORD: redmine
+        options: ${{ matrix.db.options }}
+
+    env:
+      RAILS_ENV: test
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Clone Redmine ${{ matrix.redmine }}
+        run: |
+          git clone --depth 1 --branch ${{ matrix.redmine }} \
+            https://github.com/redmine/redmine.git plugin/redmine
+          mkdir -p plugin/redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ --exclude redmine/ \
+            plugin/ plugin/redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential ${{ matrix.db.packages }}
+
+      - name: Configure test database
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: ${{ matrix.db.adapter }}
+            database: redmine_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+          EOF
+        working-directory: plugin/redmine
+
+      - name: Set up Ruby ${{ matrix.ruby }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: false
+          working-directory: plugin/redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: plugin/redmine
+
+      # Core only. The plugin's own migrations are what the next step exercises, and
+      # running them here would take away the pre-install baseline the 'fresh' arm needs.
+      - name: Migrate Redmine core
+        run: |
+          bundle exec rake db:create
+          bundle exec rake db:migrate
+        working-directory: plugin/redmine
+
+      # THE PLUGIN CHECKOUT, and it needs saying every time — HANDOVER §1 records the
+      # corpus job losing a step to a missing `working-directory`, which failed for the one
+      # reason a step must never fail for: having found nothing to check.
+      - name: up -> VERSION=0 -> up
+        run: ./script/migrate_updown.sh
+        working-directory: plugin
+
+  # ------------------------------------------------------------------
+  # Corpus reference checks — from the PLUGIN CHECKOUT, where git history exists.
+  #
+  # Deliberately not folded into the rspec job: that one runs from inside the Redmine
+  # clone, where the plugin was rsynced without .git, so these examples would skip.
+  # A guard that skips is indistinguishable from a guard that passes, which is exactly
+  # the false assurance gate G7 exists to prevent.
+  # ------------------------------------------------------------------
+  baseline:
+    name: Corpus baseline reference
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the baseline is a commit, and a shallow clone cannot resolve it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      - name: Install rspec
+        run: gem install rspec --no-document
+
+      - name: Verify the baseline commit and the code-identity reference
+        run: rspec -I spec spec/golden --format documentation
+
+      # If these skip, the job is green and has checked nothing. Say so out loud.
+      - name: Refuse a run in which the baseline checks skipped
+        run: |
+          out="$(rspec -I spec spec/golden 2>&1)"
+          echo "$out"
+          if echo "$out" | grep -qE '[1-9][0-9]* pending'; then
+            echo "The baseline checks were PENDING, so nothing was verified." >&2
+            echo "They need git history — see spec/golden/baseline_spec.rb." >&2
+            exit 1
+          fi
+
+  # ------------------------------------------------------------------
+  # The golden aggregation corpus — gate G7's differential, on every engine.
+  #
+  # Two halves, and they run in ONE job on purpose:
+  #
+  #   1. the baseline reference checks, FROM THE PLUGIN CHECKOUT. They need git
+  #      history, and the rsync below excludes .git, so run from inside the Redmine
+  #      clone they would report pending — and a skipped guard is indistinguishable
+  #      from a passing one. This is the same reason the `baseline` job exists; it runs
+  #      here as well so that a green `corpus` job cannot mean "the reference was never
+  #      checked".
+  #   2. the corpus itself: the declared case matrix re-run against a real server and
+  #      compared with spec/golden/aggregation/values.jsonl, with the pinned reference
+  #      date, on PostgreSQL, MySQL and MariaDB.
+  #
+  # It must stay green through every later task. That is the single most important
+  # assertion in the decoupling sequence (technical-spec.md §2.3).
+  # ------------------------------------------------------------------
+  corpus:
+    name: Golden corpus (${{ matrix.db.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db:
+          - label: PostgreSQL 16
+            image: postgres:16
+            port: 5432
+            adapter: postgresql
+            url: postgres://redmine:redmine@127.0.0.1:5432/redmine_adapter_test
+            packages: libpq-dev
+            options: >-
+              --health-cmd pg_isready
+              --health-interval 10s --health-timeout 5s --health-retries 10
+          - label: MySQL 8.0
+            image: mysql:8.0
+            port: 3306
+            adapter: mysql2
+            url: mysql2://redmine:redmine@127.0.0.1:3306/redmine_adapter_test
+            packages: default-libmysqlclient-dev
+            options: >-
+              --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine"
+              --health-interval 10s --health-timeout 5s --health-retries 20
+          - label: MariaDB 11
+            image: mariadb:11
+            port: 3306
+            adapter: mysql2
+            url: mysql2://redmine:redmine@127.0.0.1:3306/redmine_adapter_test
+            packages: default-libmysqlclient-dev
+            options: >-
+              --health-cmd "healthcheck.sh --connect --innodb_initialized"
+              --health-interval 10s --health-timeout 5s --health-retries 20
+
+    services:
+      db:
+        image: ${{ matrix.db.image }}
+        ports:
+          - ${{ matrix.db.port }}:${{ matrix.db.port }}
+        env:
+          POSTGRES_USER: redmine
+          POSTGRES_PASSWORD: redmine
+          POSTGRES_DB: redmine_adapter_test
+          MYSQL_ROOT_PASSWORD: redmine
+          MYSQL_DATABASE: redmine_adapter_test
+          MYSQL_USER: redmine
+          MYSQL_PASSWORD: redmine
+          MARIADB_ROOT_PASSWORD: redmine
+          MARIADB_DATABASE: redmine_adapter_test
+          MARIADB_USER: redmine
+          MARIADB_PASSWORD: redmine
+        options: ${{ matrix.db.options }}
+
+    env:
+      # The date the committed corpus was generated with. Unpinned, the verifier skips
+      # rather than comparing against a fixture that moves daily — see
+      # spec/golden/reference_date.rb.
+      RRD_REFERENCE_DATE: '2025-12-29'
+
+    steps:
+      # Full history: the baseline is a commit, and a shallow clone cannot resolve it.
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      # HALF 1 — from the plugin checkout, where .git exists.
+      - name: Install rspec for the reference checks
+        run: gem install rspec --no-document
+
+      - name: Verify the baseline commit, the case matrix and the overlay ratchet
+        run: rspec -I spec spec/golden --format documentation
+        working-directory: plugin
+
+      # If these skip, the job is green and has checked nothing. Say so out loud.
+      #
+      # working-directory, like the step above it: this job checks the plugin out into
+      # plugin/, so without it rspec runs where there is no spec/ at all — and the
+      # step then fails for the one reason it must never fail for, having found
+      # nothing to check. It did, on the first real CI run, in all three engines.
+      - name: Refuse a run in which the reference checks skipped
+        working-directory: plugin
+        run: |
+          out="$(rspec -I spec spec/golden 2>&1)"
+          echo "$out"
+          if echo "$out" | grep -qE '[1-9][0-9]* pending'; then
+            echo "The corpus reference checks were PENDING, so nothing was verified." >&2
+            echo "They need git history — see spec/golden/baseline_spec.rb." >&2
+            exit 1
+          fi
+
+      # HALF 2 — the corpus against a real engine. One Redmine branch is enough: what
+      # is under test is the kernel's SQL against the server, and the rspec job covers
+      # the Redmine/Ruby spread.
+      - name: Clone Redmine
+        run: |
+          git clone --depth 1 --branch 6.1-stable \
+            https://github.com/redmine/redmine.git redmine
+          mkdir -p redmine/plugins/redmine_reporter_dashboards
+          rsync -a --exclude .git/ plugin/ redmine/plugins/redmine_reporter_dashboards/
+
+      - name: Install client libraries
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.db.packages }}
+
+      - name: Declare the adapter so bundler installs its gem
+        run: |
+          cat > config/database.yml <<EOF
+          test:
+            adapter: ${{ matrix.db.adapter }}
+            database: redmine_adapter_test
+            host: 127.0.0.1
+            username: redmine
+            password: redmine
+          EOF
+        working-directory: redmine
+
+      - name: Install gems
+        run: bundle install --jobs 4
+        working-directory: redmine
+
+      # RRD_CORPUS_WRITE is deliberately absent. The step after this one proves it.
+      - name: Verify the corpus
+        env:
+          RRD_ADAPTER_URL: ${{ matrix.db.url }}
+        run: |
+          bundle exec rspec \
+            -I plugins/redmine_reporter_dashboards/spec \
+               plugins/redmine_reporter_dashboards/spec/adapter/aggregation_corpus_spec.rb \
+            --format documentation | tee /tmp/corpus.log
+          if grep -qE '[1-9][0-9]* pending' /tmp/corpus.log; then
+            echo "The corpus examples were PENDING, so no numbers were compared." >&2
+            echo "That means RRD_REFERENCE_DATE did not reach the run." >&2
+            exit 1
+          fi
+        working-directory: redmine
+
+      # A verification that quietly regenerated what it was verifying would pass for
+      # ever. The corpus is committed; after a verifying run it is unchanged.
+      - name: Refuse a run that rewrote the corpus it was checking
+        run: |
+          if ! git diff --exit-code -- spec/golden; then
+            echo "The corpus job modified spec/golden. It verifies, it does not generate." >&2
+            exit 1
+          fi
+        working-directory: plugin
+
+      # Bit-reproducible across two independent runs (T-01's acceptance list). The
+      # second run is a fresh process with a fresh seed and a re-seeded database.
+      - name: Verify it a second time, independently
+        env:
+          RRD_ADAPTER_URL: ${{ matrix.db.url }}
+        run: |
+          bundle exec rspec \
+            -I plugins/redmine_reporter_dashboards/spec \
+               plugins/redmine_reporter_dashboards/spec/adapter/aggregation_corpus_spec.rb \
+            --format progress
+        working-directory: redmine
+
+  # ------------------------------------------------------------------
+  # Non-test gates. A green suite says nothing about any of these.
+  # ------------------------------------------------------------------
+  gates:
+    name: Gates (no_secrets, zero_reporter, no_thread_local, layer_purity, compat_size, vendor_integrity, no_html_safe, single_parse, migration_reversibility, gotenberg_accepted_cves)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # no_secrets.sh parses the workflow expressions with Ruby. The runner image
+      # happens to ship one, but a gate that depends on that is a gate that erupts on
+      # an image change — and an erupting gate is one nobody trusts.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      # G1 — the fork-PR promise. Fails on any secret but GITHUB_TOKEN.
+      - name: no_secrets
+        run: ./script/gates/no_secrets.sh
+
+      # G8 — layer purity, reporter half. Warn mode: the integration still exists, so
+      # a handful of files legitimately name it and each says why in the allowlist.
+      # What is enforced is the ratchet — an unlisted reference fails.
+      - name: zero_reporter
+        run: ./script/gates/zero_reporter.sh
+
+      # T-07 — no ambient per-thread state outside glue/legacy/. Warn mode: the legacy
+      # glue still needs it, because reporter's liquidize() has no channel to pass an
+      # IssueQuery through. Strict is what 1.0 must pass, when that glue is gone.
+      - name: no_thread_local
+        run: ./script/gates/no_thread_local.sh
+
+      # E3 — the plugin's INTERNAL layering, which is a different question from
+      # zero_reporter above: that one asks whether we still name the base plugin, this
+      # one whether our own layers reach into each other. Warn mode because render/
+      # does not exist until T-10; the job reports an absent layer on its own line
+      # rather than passing quietly over it, and T-10 flips this to strict.
+      # STRICT since T-10: render/ now exists, so an absent layer means the layout
+      # moved and this gate lost its subject rather than having nothing to say.
+      - name: layer_purity
+        run: ./script/gates/layer_purity.sh
+        env:
+          LAYER_PURITY_MODE: strict
+
+      # E4 — version divergence has exactly one home. Fails on a `Rails::VERSION` or
+      # `Redmine::VERSION` outside compat, and prints the compat LOC.
+      - name: compat_size
+        run: ./script/gates/compat_size.sh
+
+      # T-33 / INV-8 — nothing shipped fetches a library over the network, and every vendored
+      # file is the one `THIRD_PARTY.md` records.
+      #
+      # THIS GATE EXISTED FOR MONTHS AND NO JOB CALLED IT. An independent review found it
+      # (R-04): it was correct, it reported two real violations — both shipped examples
+      # fetched Chart.js 2.8 from cdnjs — and it exited 0, because `warn` is its default and
+      # nothing here overrode it. A gate nothing runs is not a gate, and one that reports
+      # violations while exiting zero is worse: its output reads as evidence.
+      #
+      # STRICT, because §6 rejects CDN-with-SRI outright — integrity proves the bytes and does
+      # nothing about the egress, and denying egress is what kills the SSRF value. The two
+      # examples were retired rather than rewritten; `spec/shipped_templates_lint_spec.rb`
+      # asserts they stay gone.
+      - name: vendor_integrity
+        run: ./script/gates/vendor_integrity.sh
+        env:
+          VENDOR_INTEGRITY_MODE: strict
+
+      # T-38 — §9b's "no design language of its own for chrome", enforced. Fails on a
+      # colour, a typeface, a font size, a line height, a custom property or an
+      # @font-face under assets/stylesheets/. The report BODY is where this plugin's
+      # design is spent and is deliberately not scanned: it lives in Ruby
+      # (`ReportStylesheet`) so its palette can be READ from Charts::Palette rather than
+      # restated, which is T-38's single-source clause.
+      #
+      # THE SELF-TEST RUNS FIRST, the way `cve_accepted_diff`'s does two jobs down, and for the
+      # reason this repository keeps relearning: a gate nobody has watched fail is not yet a
+      # gate. This one shipped twice with an arm that detected its condition and exited 0
+      # anyway — once because its reader crashed and a crashed reader looks like a clean file,
+      # once because an `exit` inside a command substitution exits a subshell. Both are cases
+      # in the self-test now, driven by breaking the reader for real.
+      - name: chrome_no_design_tokens
+        run: |
+          ./script/gates/chrome_no_design_tokens_selftest.sh
+          ./script/gates/chrome_no_design_tokens.sh
+
+      # T-27 / INV-9 — template authoring IS code execution, so nothing may mark a
+      # template's output as trusted markup. `technical-spec.md` §4: "No `html_safe`
+      # anywhere", with a budget of two files for `raw(`.
+      #
+      # THE SELF-TEST RUNS FIRST, for the reason written above `chrome_no_design_tokens`
+      # and demonstrated again here: the first version of this gate was negative-tested
+      # interactively and shipped with FOUR holes an independent review then found —
+      # `raw` without parentheses, `<%==`, a search that crashed inside a command
+      # substitution (that exact trap, a third time), and a missing search path that made
+      # a gate certifying INV-9 having read no files at all. Committing the arms is what
+      # stops the fifth.
+      - name: no_html_safe
+        run: |
+          ./script/gates/no_html_safe_selftest.sh
+          ./script/gates/no_html_safe.sh
+
+      # T-17 — one parse entry point, and no globally registered filters. Every limit
+      # the execution policy applies is a property of the CALL SITE (resource limits,
+      # the deadline, :strict, and rethrow_errors, without which Liquid writes its
+      # errors into the document), so a second parse site has none of them — not by
+      # decision, but because those are Liquid's defaults.
+      - name: single_parse
+        run: ./script/gates/single_parse.sh
+
+      # G11, static half — technical-spec.md §7's reversibility rules, parsed rather than
+      # grepped. STRICT by default, unlike its neighbours: the others ratchet down a
+      # pre-existing violation, and this one arrives in the same release as the migrations
+      # it governs, so there is no backlog to be lenient about.
+      #
+      # The OTHER half of G11 is the `migrate-updown` job below, which runs a real
+      # up -> VERSION=0 -> up cycle. Neither replaces the other: this one asks whether a
+      # migration's reverse is DECLARED, that one whether it actually restores the
+      # database. A migration can pass either and fail the other.
+      - name: migration_reversibility
+        run: ./script/gates/migration_reversibility.sh
+
+      # T-34 — the Gotenberg CVE acceptances, checked on EVERY pull request rather than
+      # only in the nightly scan that owns the other half.
+      #
+      # The nightly job compares the accepted list against a real Trivy report, which
+      # needs docker, an image pull and a vulnerability database. This half needs none of
+      # that, and what it catches is the failure the nightly one would notice too late:
+      # a malformed or unbounded acceptance — a date that is not a real day, a reason
+      # that is missing, an expiry so far out that it is permanent. Those are mistakes in
+      # the file, catchable anywhere, and they are HARD here.
+      #
+      # THE EXPIRY ITSELF IS ADVISORY IN THIS JOB, and only in this job. `ci.yml` runs on
+      # `push: branches: ['**']`, so a hard expiry here means that on the morning after a
+      # date passes, every branch in the repository is red over a third party's Chromium
+      # CVE — and the cheapest unblock is a one-character date bump with no
+      # re-examination, which is the "gate becomes furniture" outcome the expiry exists to
+      # prevent. It stays HARD where it is the detector and where whoever sees it can act:
+      # the nightly `gotenberg-cve` scan, and any pull request or push touching the
+      # allowlist, the compose pin or the gate. See --expiry-advisory in the gate script.
+      #
+      # The self-test runs first and is the more important of the two: it proves this gate
+      # can still say no. The mutation harness is committed beside it
+      # (`cve_accepted_diff_mutation.py`) rather than its score being quoted here, because
+      # a number in a comment goes stale — and this one did, three ways, in one commit.
+      - name: gotenberg_accepted_cves
+        run: |
+          ./script/gates/cve_accepted_diff_selftest.sh
+          ./script/gates/cve_accepted_diff.sh --validate-only --expiry-advisory \
+            script/gates/gotenberg_accepted_cves.allowlist
+
+      # THE GATES ABOVE STAY INDIVIDUAL STEPS so a failure names itself in the Actions UI.
+      # `script/gates/release.sh` is the same list at the same modes, in one command, for a
+      # human cutting a release — and the two lists drifting is how a gate stops being run,
+      # which is exactly what happened to `vendor_integrity` above. `--coverage-only` runs no
+      # gate; it asserts that the wrapper accounts for every script under `script/gates/`, so
+      # a gate added here and forgotten there fails at the moment it is added.
+      - name: release wrapper covers every gate
+        run: ./script/gates/release.sh --coverage-only
+
+      # Not a gate, and deliberately not failing the build: the number that has to
+      # reach zero by 1.0, printed where a reviewer sees it move.
+      - name: Report the remaining reporter surface
+        if: always()
+        run: |
+          n="$(./script/gates/zero_reporter.sh | sed -nE 's/.*referencing files=([0-9]+).*/\1/p')"
+          echo "::notice::${n} file(s) still reference redmine_reporter or redmineup. Target at 1.0: 0."
+
+      # E4's other half, in the words the spec uses: "the job PRINTS compat/ LOC as a
+      # PR comment — compatibility debt as a visible number is the only real defence
+      # against the 'temporary adapter ossifies' fate ADR-004 names." No budget is
+      # committed yet; see §Findings F-4, which is the curator's.
+      - name: Report the compatibility debt
+        if: always()
+        run: |
+          n="$(./script/gates/compat_size.sh | sed -nE 's/.*code lines=([0-9]+).*/\1/p')"
+          echo "::notice::compat is ${n} code line(s). Every one is a Redmine version this plugin still bends around."
+
+  # ------------------------------------------------------------------
+  # Render conformance — T-12, gates G9 and G12
+  #
+  # The one job with a browser in it. Everything else in this file deliberately has
+  # none: `rspec` stubs Redmine away and runs on four branches, and putting a Chromium
+  # install in front of the fastest feedback in the project would be paid on every
+  # push for the benefit of one directory.
+  #
+  # What it enforces:
+  #
+  #   G12  the three-state rule. An UNDECLARED capability skips with a reason; a
+  #        DECLARED one that fails is a hard failure. The corpus is what tells those
+  #        apart, and the harness itself is negative-tested — engines that decline,
+  #        engines that lie, engines that return bytes which are not a PDF.
+  #   G9   the support matrix is GENERATED FROM THE RUN and the committed file has to
+  #        match. A hand-written matrix ages into a lie; INV-7 is this project's record
+  #        of exactly that, four minor versions long.
+  #
+  # It runs the harness half on every push (no engine needed, no browser touched) and
+  # the corpus half against whatever adapters are registered. **All three engines are
+  # `verification: corpus` as of 2026-08-11** — `:chromium_cdp` from the start,
+  # `:wkhtmltopdf` on 2026-08-06 and `:gotenberg` last — so all three columns are
+  # measurements and
+  # the matrix no longer carries a "Columns that are not measurements" section at all —
+  # which also means a Gotenberg that will not come up here is a HARD failure rather than
+  # a skip, and this job now depends on the registry serving the pinned digest.
+  # ------------------------------------------------------------------
+  render-smoke:
+    name: Render conformance (G9, G12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: false
+
+      - name: Install rspec and the PDF probes
+        run: |
+          gem install rspec --no-document
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          pdfinfo -v 2>&1 | head -1
+
+      # A MISSING PROBE IS AN ERROR, NOT A SKIP. The harness raises rather than
+      # skipping when pdfinfo/pdftotext/pdftoppm are absent, because a matrix generated
+      # without them still says PASS for every check that never ran. This step is here
+      # so the failure names the package before the suite has to.
+      - name: Assert the probes are present
+        run: |
+          for tool in pdfinfo pdftotext pdftoppm; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool is missing"; exit 1; }
+          done
+
+      # THE SANDBOX STAYS ON. `--no-sandbox` is not set by the adapter and must not be
+      # set here either: a browser rendering attacker-influenced HTML with its sandbox
+      # off is the one configuration this design exists to avoid. Ubuntu 24.04 runners
+      # restrict unprivileged user namespaces through AppArmor, which is what Chromium's
+      # sandbox needs, so the restriction is lifted for the job rather than the sandbox
+      # being disabled for the browser. Those are not the same trade and the difference
+      # is the whole point.
+      - name: Allow the Chromium sandbox to initialise
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || \
+            echo "::notice::no AppArmor userns restriction to lift on this image"
+
+      # THE COMPATIBILITY ENGINE. Its package is gone from Ubuntu 24.04's archive and only
+      # exists as a release .deb, which is what this step installs — the same build the
+      # corpus was promoted on. **It is `verification: corpus` since 2026-08-06**, so its
+      # twenty cells are the contract and a regression in one fails this job; the sentence
+      # that used to be here said the catalogue keeps it at `pending` with no cells, and
+      # that stopped being true on the day of the promotion.
+      #
+      # `continue-on-error` ON THE INSTALL ONLY, AND IT NO LONGER BUYS WHAT IT USED TO.
+      # Since the 2026-08-06 promotion a missing wkhtmltopdf is a HARD corpus failure —
+      # measured by an independent review at 23 red examples with the binary pointed at a
+      # path that does not exist — so a 404 release asset DOES fail this job, further down,
+      # with a message naming the catalogue instead of the download. The flag is kept so the
+      # failure arrives from the corpus with its reason attached rather than from `curl`; it
+      # is not a suppression any more. If the asset host becomes unreliable, the answer is a
+      # mirror or a demotion, not this line.
+      - name: Install the compatibility engine
+        continue-on-error: true
+        run: |
+          url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb"
+          curl -fsSL -o /tmp/wkhtmltox.deb "$url" || exit 0
+          sudo apt-get install -y --no-install-recommends /tmp/wkhtmltox.deb
+          wkhtmltopdf --version
+
+      - name: Locate a browser
+        id: browser
+        run: |
+          for candidate in "$CHROME_PATH" google-chrome-stable google-chrome chromium chromium-browser; do
+            [ -n "$candidate" ] || continue
+            path="$(command -v "$candidate" || true)"
+            [ -n "$path" ] || continue
+            echo "path=$path" >> "$GITHUB_OUTPUT"
+            "$path" --version
+            exit 0
+          done
+          echo "::notice::no browser on this image; the corpus half will report no adapter"
+
+      # THE THIRD LEG — T-34. Two Gotenbergs, and the second one is the point.
+      #
+      # The AUTHENTICATED one comes from `docker-compose.gotenberg.yml`, so this job
+      # exercises the file an operator is told to copy rather than a hand-rolled
+      # `docker run` that happens to look like it: the non-root user, the read-only root
+      # filesystem, the dropped capabilities and the pinned digest are all under test
+      # here, and a compose file that stopped working would fail this step.
+      #
+      # THE OVERRIDE IS DOCUMENTED OPTION 2, not a hole — and option 2 had to be
+      # CORRECTED before this worked. The shipped file has `internal: true` and publishes
+      # nothing, because the safe topology is Redmine on the same network; a GitHub runner
+      # is the "Redmine is not in Docker" case, and the answer is a loopback-only publish.
+      #
+      # What the compose file used to say — keep `internal: true` and just add `ports:` —
+      # DOES NOT WORK, and docker does not say so: it accepts the configuration, starts a
+      # healthy container and binds no port at all (`.NetworkSettings.Ports` is
+      # `map[3000/tcp:[]]`). This job is what found that, by failing on it. The override
+      # therefore drops `internal` as well, which is a real trade and is why
+      # `--chromium-deny-*-ips` in the shipped command list are not decoration.
+      #
+      # SO CI EXERCISES A SLIGHTLY DIFFERENT TOPOLOGY FROM THE SHIPPED DEFAULT, and that
+      # is worth saying rather than hiding: the non-root user, the read-only root
+      # filesystem, the dropped capabilities, the pinned digest and the credential are all
+      # under test here; the network isolation is not, because a runner cannot reach an
+      # isolated network. Option 1 is what an operator should use.
+      #
+      # The UNAUTHENTICATED one is deliberately NOT in the compose file, because that file
+      # is documentation and documenting an unsafe configuration is how it gets copied. It
+      # exists here for one reason: T-34's Accept requires the credential check to be
+      # OBSERVED failing against a real service that really does answer without one. A
+      # security check nobody has watched fail is not a check.
+      - name: Start Gotenberg — the documented one, and an unauthenticated one to fail against
+        id: gotenberg
+        run: |
+          set -euo pipefail
+          cat > /tmp/gotenberg.ci.yml <<'YML'
+          services:
+            gotenberg:
+              ports: ["127.0.0.1:3000:3000"]
+          networks:
+            reporter-render:
+              internal: false
+          YML
+          # EXPORTED, NOT PREFIXED ONTO ONE COMMAND. `VAR=x docker compose up -d` sets the
+          # variables for that invocation only, and EVERY later `docker compose` call
+          # re-parses the file — so the container came up and the next call died with
+          # "required variable GOTENBERG_USERNAME is missing a value". That is what made
+          # this job the only red one in an otherwise green CI run.
+          export GOTENBERG_USERNAME=ci-user
+          export GOTENBERG_PASSWORD="$(openssl rand -hex 16)"
+          # Generated per run, so it is never a literal in this file —
+          # `script/gates/no_secrets.sh` is the rule, and a plausible-looking password in a
+          # workflow is how that rule erodes. Masked before it can reach a log.
+          echo "::add-mask::$GOTENBERG_PASSWORD"
+          docker compose -f docker-compose.gotenberg.yml -f /tmp/gotenberg.ci.yml up -d
+          echo "password=$GOTENBERG_PASSWORD" >> "$GITHUB_OUTPUT"
+
+          # THE SAME DIGEST, so the unauthenticated instance is the same software. A
+          # different tag here would make the security check's subject a different build
+          # from the one the corpus runs against.
+          digest="$(grep -oE 'gotenberg/gotenberg:8@sha256:[0-9a-f]+' docker-compose.gotenberg.yml)"
+          docker run -d --name gotenberg-open -p 127.0.0.1:3001:3000 "$digest" >/dev/null
+
+          for port in 3000 3001; do
+            for _ in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1 && break
+              sleep 2
+            done
+            curl -fsS "http://127.0.0.1:$port/health" >/dev/null \
+              || { echo "::error::Gotenberg on $port never became healthy"; exit 1; }
+          done
+
+          # A CONTROL FOR THE CONTROL. If the "unauthenticated" instance were in fact
+          # refusing, every credential example below would pass for the wrong reason —
+          # so the premise is asserted here rather than assumed. Same for the other
+          # direction: a 401 from the authenticated one proves it is really enforcing.
+          open_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                       http://127.0.0.1:3001/forms/chromium/convert/html)"
+          auth_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                       http://127.0.0.1:3000/forms/chromium/convert/html)"
+          echo "unauthenticated instance answers $open_code; authenticated one answers $auth_code"
+          [ "$open_code" != "401" ] || { echo "::error::the open instance is refusing; the credential check would pass vacuously"; exit 1; }
+          [ "$auth_code" = "401" ] || { echo "::error::the compose file is NOT enforcing its credential"; exit 1; }
+
+      # WHEN GOTENBERG MISBEHAVES, ITS OWN LOG IS THE ONLY THING THAT SAYS WHY, and the
+      # first version of this job did not collect it. The failure it produced was eight
+      # rspec expectations reporting `500 from /forms/chromium/convert/html: Internal
+      # Server Error` — a status, from outside the container, with no cause attached —
+      # while the identical image, the identical compose file and the identical spec run
+      # green on a developer machine. That leaves guessing as the only next step, which is
+      # what this repository has a rule about.
+      #
+      # It runs `if: always()` rather than `if: failure()` on purpose: the healthy log is
+      # what a red one has to be compared against, and nobody has one yet.
+      - name: What Gotenberg itself says
+        if: always()
+        run: |
+          # `docker logs <name>`, NOT `docker compose logs`. Compose re-parses the file and
+          # therefore needs GOTENBERG_USERNAME — which was exported in a DIFFERENT STEP,
+          # and each `run:` block is its own shell. So the first version of this
+          # diagnostic failed with the very interpolation error it was added to look past,
+          # and printed nothing about the container. The plain client needs no variables.
+          echo "::group::gotenberg container log"
+          docker logs --tail 200 redmine_reporter_dashboards-gotenberg-1 2>&1 || true
+          echo "::endgroup::"
+          echo "::group::the unauthenticated instance"
+          docker logs --tail 100 gotenberg-open 2>&1 || true
+          echo "::endgroup::"
+          # CAN GOTENBERG WRITE ITS JOB DIRECTORY? With a read-only root filesystem, a
+          # non-root user and a tmpfs whose mode docker may have reset to 0755, this is
+          # the one question that separates "the hardening is wrong" from "Chromium is
+          # unhappy" — and the symptom of the former is a 500 with no access-log entry.
+          echo "::group::can the container write /tmp"
+          docker exec redmine_reporter_dashboards-gotenberg-1 \
+            sh -c 'id; ls -ld /tmp; touch /tmp/ci-write-probe && echo WRITE-OK || echo WRITE-DENIED' \
+            2>&1 || true
+          echo "::endgroup::"
+          echo "::group::how the container is running"
+          docker inspect redmine_reporter_dashboards-gotenberg-1 \
+            --format 'ReadonlyRootfs={{.HostConfig.ReadonlyRootfs}} User={{.Config.User}} CapDrop={{.HostConfig.CapDrop}} SecurityOpt={{.HostConfig.SecurityOpt}} Tmpfs={{.HostConfig.Tmpfs}}' || true
+          echo "unprivileged_userns_clone=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo unset)"
+          echo "apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo unset)"
+          echo "::endgroup::"
+          # TRIANGULATION, because the previous run left one fact unexplained: the
+          # verbatim conversion answered 500 and GOTENBERG'S OWN LOG HAS NO RECORD OF IT —
+          # only the 401 control probe. A request that does not appear in the access log
+          # of the server that supposedly answered it was answered by something else, or
+          # never arrived. These four vary one dimension at a time.
+          echo "::group::who is actually listening"
+          docker ps --format '{{.Names}}  {{.Image}}  {{.Ports}}' || true
+          ss -ltnp 2>/dev/null | grep -E ':300[01]' || true
+          echo "::endgroup::"
+          echo "::group::four requests, one dimension at a time"
+          printf '%s' '<!DOCTYPE html><html><body><p>CI-DIAGNOSTIC</p></body></html>' > /tmp/diag.html
+          pw='${{ steps.gotenberg.outputs.password }}'
+          echo "password length: ${#pw}"
+          for label in "no-auth-no-body" "auth-no-body" "auth-body" "auth-body-verbose"; do
+            case "$label" in
+              no-auth-no-body) out=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html) ;;
+              auth-no-body)    out=$(curl -sS -o /dev/null -w '%{http_code}' -u "ci-user:$pw" -X POST \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html) ;;
+              auth-body)       out=$(curl -sS -o /tmp/diag.pdf -w '%{http_code}' -u "ci-user:$pw" \
+                                     -F "files=@/tmp/diag.html;filename=index.html" \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html) ;;
+              *)               curl -sS -v -u "ci-user:$pw" \
+                                     -F "files=@/tmp/diag.html;filename=index.html" \
+                                     -o /tmp/diag2.pdf \
+                                     http://127.0.0.1:3000/forms/chromium/convert/html 2>&1 \
+                                     | grep -vE '^\{|Authorization' | tail -25
+                               out=see-above ;;
+            esac
+            echo "  $label -> $out"
+          done
+          echo "first bytes of the auth-body response:"
+          head -c 300 /tmp/diag.pdf | tr -d '\0' || true
+          echo
+          echo "::endgroup::"
+          echo "::group::and what the container logged for all of that"
+          docker logs --tail 30 redmine_reporter_dashboards-gotenberg-1 2>&1 | tail -12 || true
+          echo "::endgroup::"
+
+      # The harness's own tests: the three-state rule, the matrix generator, and the
+      # catalogue's validation. No browser involved, so this half cannot be flaky and
+      # cannot be skipped.
+      - name: Conformance harness (negative-tested)
+        run: rspec spec/conformance/conformance_harness_spec.rb --format documentation
+
+      # The corpus, against every registered adapter. `RRD_CONFORMANCE=1` is the opt-in;
+      # an engine the catalogue calls `verification: corpus` with no adapter behind it
+      # fails here rather than being quietly absent.
+      - name: Engine conformance corpus
+        env:
+          RRD_CONFORMANCE: '1'
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
+        run: rspec spec/conformance --format documentation
+
+      # THE PREFLIGHT'S EXIT-CODE CONTRACT, read off a real process — §Findings E-27
+      # row 11. The rake task documents 0/1/2 as a deploy-step interface and, until this
+      # step, no CI run had ever read one of those codes for real: the rake glue is
+      # unit-tested against a stubbed Preflight, and the command's spec drives the codes
+      # in-process. This drives all three through a process boundary against the two live
+      # Gotenbergs — 0 on the authenticated one, 1 on the open one (the credential check
+      # failing where a deploy step can see it), and 2 twice (a typo, and row 8's
+      # names-nothing selection). The logic is a committed, locally runnable script, not
+      # workflow inlines — E-28 #5 is what happens to logic that lives only here.
+      - name: The preflight exit-code contract, against real services
+        env:
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
+        run: ./script/render_preflight_exit_codes.sh
+
+      # T-15's containment assertions, which need a real browser and assert on the
+      # PROCESS TABLE rather than on a return value. A timeout that answers on time
+      # while the browser keeps burning CPU passes every ordinary test and is the
+      # 504-with-a-burning-worker failure; the only symptom is a host that gets slower
+      # every time somebody exports a broken template.
+      - name: Render-path containment
+        env:
+          RRD_CONFORMANCE: '1'
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
+        run: rspec spec/render --format documentation
+
+      # T-16's FALSIFIER, and it is the only place it can run. `ChartLayout` computes one
+      # plot rectangle for both paths; `SvgRenderer` draws it in Ruby and Chart.js draws
+      # it in a browser from its own font metrics. Whether those two agree is not a
+      # question Ruby can answer, so a Ruby-only run reports it as UNVERIFIED — which is
+      # honest and is not evidence. This step is the evidence.
+      #
+      # It also catches a Chart.js UPGRADE moving a default: the title box and the tick
+      # array are pinned explicitly, and a version that reads either differently shows up
+      # here as a percentage rather than as a chart that quietly sits 18px lower than its
+      # PDF twin.
+      - name: The shared-layout claim, measured in a browser
+        env:
+          # RRD_CONFORMANCE is the opt-in every browser-touching spec now requires: the
+          # falsifier used to run wherever `detect_binary` found anything, which made it
+          # start the runner's own Chromium in the plain `rspec` job and fail there. This
+          # step is where a browser is deliberately installed, so this is where it runs.
+          RRD_CONFORMANCE: '1'
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+        run: rspec -I spec spec/charts/shared_layout_falsifier_spec.rb --format documentation
+
+      # G9. Regenerating and diffing rather than trusting the spec's own comparison,
+      # so the failure output is the diff itself — a reviewer should be able to see
+      # WHICH cell moved without re-running anything.
+      - name: The committed support matrix matches the run
+        env:
+          RRD_CONFORMANCE: '1'
+          RRD_CHROMIUM_BINARY: ${{ steps.browser.outputs.path }}
+          RRD_GOTENBERG_URL: 'http://127.0.0.1:3000'
+          RRD_GOTENBERG_OPEN_URL: 'http://127.0.0.1:3001'
+          RRD_GOTENBERG_USERNAME: ci-user
+          RRD_GOTENBERG_PASSWORD: ${{ steps.gotenberg.outputs.password }}
+        run: |
+          cp docs/engine-support-matrix.md /tmp/committed-matrix.md
+          RRD_MATRIX_WRITE=1 rspec spec/conformance/conformance_spec.rb > /dev/null
+          if ! diff -u /tmp/committed-matrix.md docs/engine-support-matrix.md; then
+            echo "::error::docs/engine-support-matrix.md disagrees with this run. A PR that"
+            echo "::error::changes a capability or a cap must carry the regenerated matrix."
+            # The WHOLE regenerated file, not just the diff. The matrix can only be
+            # generated where every `corpus` engine actually runs, which for
+            # wkhtmltopdf is here and nowhere else — so when it moves, the content a
+            # developer has to commit has to be readable straight out of this log.
+            echo "----- BEGIN REGENERATED MATRIX -----"
+            cat docs/engine-support-matrix.md
+            echo "----- END REGENERATED MATRIX -----"
+            exit 1
+          fi
+          echo "support matrix: OK — the committed file is what this run produced"
 
   # ------------------------------------------------------------------
   # Ruby 2.7 floor

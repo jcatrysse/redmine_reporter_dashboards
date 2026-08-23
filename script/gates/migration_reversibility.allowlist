@@ -1,0 +1,13 @@
+# T-36 — exemptions from the migration reversibility rules.
+#
+# Format: <basename> <rule-id> # reason
+#
+# A line without a reason is REFUSED by the loader, not ignored. An exemption nobody had
+# to justify is how a gate becomes a formality — the same argument
+# `script/gates/zero_reporter.allowlist` makes, and the reason both files carry prose.
+#
+# This list should shrink. It must never grow without an argument in the pull request that
+# adds a line, because every entry is a place where the rule the gate exists to enforce
+# does not hold.
+
+001_create_reporter_dashboards_tables.rb no_conditional_ddl # MEASURED, not waved through. 001 wraps its create_table in `unless table_exists?`, and Rails does not preserve the conditional: `table_exists?` is absent from CommandRecorder::ReversibleAndIrreversibleMethods (identical on Rails 6.1, 7.2 and 8.1), so it is forwarded to the live connection and evaluated at down-time. After a successful up the answer is true, the block is skipped, nothing is recorded and the down is a complete no-op — which is exactly what FR-69 clause 2 requires of this table, and what `script/migrate_updown.sh`'s 'fresh' arm asserts on a real database. Changing 001 now would change what `down` does on every install that has already run it, for no behavioural gain. The rule stands for every NEW migration: reversibility must be declared, not emergent.

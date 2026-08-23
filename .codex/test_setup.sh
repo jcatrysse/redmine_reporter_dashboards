@@ -15,36 +15,11 @@ reporter_required() {
   [ "${CI:-}" = "true" ]
 }
 
-detect_ruby_version() {
-  local version=""
-
-  if [ -f ".ruby-version" ]; then
-    version="$(tr -d '\n' < .ruby-version)"
-  elif [ -f "Gemfile" ]; then
-    local ruby_line=""
-    ruby_line="$(grep -E "^[[:space:]]*ruby " Gemfile | head -n 1 || true)"
-
-    version="$(echo "$ruby_line" | sed -E -n "s/.*ruby[[:space:]]*['\\\"]([0-9]+\\.[0-9]+(\\.[0-9]+)?)[\"'].*$/\\1/p")"
-    if [ -z "$version" ]; then
-      version="$(echo "$ruby_line" | sed -E -n "s/.*~>[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-    fi
-    if [ -z "$version" ]; then
-      local upper=""
-      upper="$(echo "$ruby_line" | sed -E -n "s/.*<[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-      if [ -n "$upper" ]; then
-        local major="${upper%%.*}"
-        local minor="${upper#*.}"
-        minor="${minor%%.*}"
-        if [ "$minor" -gt 0 ]; then
-          minor=$((minor - 1))
-        fi
-        version="${major}.${minor}"
-      fi
-    fi
-  fi
-
-  echo "$version"
-}
+# detect_ruby_version and friends. Shared with the other .codex script rather than
+# duplicated: the version it derives has to agree with ci.yml, and two copies of
+# that reasoning drift.
+# shellcheck source=.codex/ruby_version.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_version.sh"
 
 # Which engine to set up. The plugin supports PostgreSQL and MySQL/MariaDB, and the
 # aggregator has real per-adapter SQL branches, so both sides are worth having
@@ -176,15 +151,22 @@ run_command() {
 run_command bundle install
 
 if [ ! -d "plugins/$REPORTER_PLUGIN_NAME" ]; then
-  echo "WARNING: $REPORTER_PLUGIN_NAME dependency not found at 'plugins/$REPORTER_PLUGIN_NAME'." >&2
   if reporter_required; then
-    echo "ERROR: full Redmine setup requires $REPORTER_PLUGIN_NAME. Provide REPORTER_PLUGIN_PATH before redmine_clone.sh or set REQUIRE_REPORTER_PLUGIN=0 to run standalone specs only." >&2
+    echo "ERROR: REQUIRE_REPORTER_PLUGIN asks for the reporter-present configuration, but" >&2
+    echo "       plugins/$REPORTER_PLUGIN_NAME is not installed. Provide REPORTER_PLUGIN_PATH" >&2
+    echo "       before redmine_clone.sh, or set REQUIRE_REPORTER_PLUGIN=0 to set up standalone." >&2
     exit 1
   fi
-  echo "Skipping Redmine database setup because $REPORTER_PLUGIN_NAME is missing." >&2
-  echo "Standalone specs can still run with ./.codex/test_plugin.sh; minitest will be skipped." >&2
-  exit 0
+  echo "Setting up STANDALONE — no $REPORTER_PLUGIN_NAME, no redmineup gem." >&2
 fi
 
+# The database is prepared either way.
+#
+# This used to `exit 0` before touching the database whenever redmine_reporter was
+# absent, from when the plugin could not boot without it. It can now, and skipping
+# migration left the schema at whatever the last reporter-present run happened to
+# create — so switching Redmine branches produced "5 pending migrations" and the
+# full-app suite could not run standalone at all. Reporter's presence decides which
+# CONFIGURATION is set up, never whether there is a database to set up.
 run_command bundle exec rake db:drop db:create db:migrate RAILS_ENV=test
 run_command bundle exec rake redmine:plugins:migrate RAILS_ENV=test

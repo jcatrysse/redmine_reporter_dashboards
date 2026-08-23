@@ -1,0 +1,81 @@
+{% comment %}
+=====================================================================
+ One document per issue — the smallest useful report
+ ---------------------------------------------------------------------
+ Set the template's OUTPUT to "One document per issue" and its SOURCE to
+ "Issues". Every issue in the selected query then produces one PDF page
+ (or one page per issue in the combined download).
+
+ Inside a per-issue template the variable is `issue`. The sidebar beside
+ the editor lists everything it can print, with a copyable snippet for
+ each accessor — that list is read from the code itself, so it cannot
+ tell you about a field that no longer exists.
+
+ THE THREE CLASSES USED BELOW ARE THIS PLUGIN'S ONLY PUBLIC ONES:
+
+   .rrd-card    a block that is never split across a page break
+   .rrd-number  right-aligned, with figures that line up in a column
+   .rrd-muted   smaller, quieter text
+
+ Everything else is styled by the report stylesheet, which is the same
+ one the HTML preview and the PDF use — so what you see in the preview
+ is what the PDF has, at a different size.
+=====================================================================
+{% endcomment %}
+
+<h1>{{ issue.tracker }} #{{ issue.id }}</h1>
+<p class="rrd-muted">{{ issue.project.name }} · {{ issue.status }} · {{ issue.priority }}</p>
+
+<div class="rrd-card">
+  <table>
+    <tbody>
+      <tr>
+        <th>Author</th>
+        <td>{{ issue.author.name }}</td>
+      </tr>
+      <tr>
+        <th>Assignee</th>
+        {% comment %} An unassigned issue prints an em dash rather than an empty cell, so a
+           reader can tell "nobody" from "the report lost it". {% endcomment %}
+        <td>{% if issue.assignee %}{{ issue.assignee.name }}{% else %}—{% endif %}</td>
+      </tr>
+      <tr>
+        <th>Target version</th>
+        <td>{% if issue.version %}{{ issue.version }}{% else %}—{% endif %}</td>
+      </tr>
+      <tr>
+        <th>Start / due</th>
+        <td>{{ issue.start_date }} → {{ issue.due_date }}</td>
+      </tr>
+      <tr>
+        <th>Estimated</th>
+        <td class="rrd-number">{{ issue.estimated_hours }} h</td>
+      </tr>
+      <tr>
+        {% comment %} `spent_hours` is a BATCH accessor: reading it for every issue in a
+           report costs one query for the whole run rather than one per issue. The sidebar
+           marks the accessors that behave this way. It also shows only the hours the
+           report's own reader is allowed to see. {% endcomment %}
+        <th>Spent</th>
+        <td class="rrd-number">{{ issue.spent_hours }} h</td>
+      </tr>
+      <tr>
+        <th>Done</th>
+        <td class="rrd-number">{{ issue.done_ratio }} %</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>{{ issue.subject }}</h2>
+
+{% comment %} `| escape` is not needed on a value this plugin renders into HTML — every
+   interpolation is escaped already. It IS needed inside a <script>, where `| json` is the
+   filter to use; the linter beside this editor says so if you forget. {% endcomment %}
+<div class="rrd-card">
+  {{ issue.description }}
+</div>
+
+<p class="rrd-muted">
+  <a href="{{ issue.url }}">{{ issue.url }}</a>
+</p>

@@ -21,8 +21,42 @@ module ReporterProjectPagesHelper
 
   # True when the running Redmine renders icons through the SVG sprite system
   # introduced in Redmine 6.0 (IconsHelper#sprite_icon).
+  #
+  # The version test itself lives in Compat, not here: E4 and CLAUDE.md §4 give
+  # version divergence exactly one home, and this method used to be the counter-example
+  # — a bare `Redmine::VERSION::MAJOR >= 6` in a helper. The NAME stays because it is
+  # the seam both icon branches are tested through (`stub(:reporter_dashboard_svg_icons?,
+  # false)`), which is how the 5.1 path is asserted on a machine that cannot run 5.1.
   def reporter_dashboard_svg_icons?
-    Redmine::VERSION::MAJOR >= 6
+    RedmineReporterDashboards::Compat.svg_icons?
+  end
+
+  # ONE icon call for both icon systems, and the reason it exists is a correction:
+  # every view here already carries Redmine 5's CSS icon classes on the link
+  # (`class: 'icon icon-settings'`) and documents that "on Redmine 5 it renders no
+  # <svg>, so the label gives the link a body". That design was right. The belief
+  # underneath it was not — `sprite_icon` does not merely render nothing on Redmine
+  # 5.1, it DOES NOT EXIST there: IconsHelper arrived in 6.0. So every one of those
+  # views raised
+  #
+  #   ActionView::Template::Error: undefined method `sprite_icon'
+  #
+  # on 5.1, which is 27 of the 92 errors the first 5.1 CI run reported (the other 65
+  # were D-2, RedmineReporterDashboards::Compat.base_record). Nobody saw it because the
+  # full-application suite could not run in CI until T-09 removed the private-plugin
+  # secret.
+  #
+  # The label alone is exactly what the views already expect on 5.1: `icon-only` hides
+  # the text and `icon icon-<name>` paints the glyph from the CSS sprite. So no icon
+  # NAME mapping is needed — the class already on each link is the 5.1 icon.
+  #
+  # Not in `compat.rb` with base_record, deliberately: this one needs view context
+  # (`sprite_icon` itself), and the version predicate it branches on already lived
+  # here. One method, one divergence, one place — CLAUDE.md §4.
+  def reporter_dashboard_icon(name, label)
+    return sprite_icon(name, label) if reporter_dashboard_svg_icons?
+
+    label.to_s
   end
 
   # A single move control (link) rendered version-safely. Used both for widget
@@ -36,7 +70,7 @@ module ReporterProjectPagesHelper
     label = l(REPORTER_MOVE_LABELS[direction])
 
     if reporter_dashboard_svg_icons?
-      link_to sprite_icon(REPORTER_MOVE_ICONS[direction], label), url,
+      link_to reporter_dashboard_icon(REPORTER_MOVE_ICONS[direction], label), url,
               method: method, class: 'icon-only reporter-move-control',
               title: label, 'aria-label' => label
     else
@@ -61,7 +95,7 @@ module ReporterProjectPagesHelper
   def render_reporter_project_block(block, tab, project)
     # M1: only spent-time reports require the time-entries permission.
     #     Issue reports use :view_issues, which authorize already enforces.
-    base_block = block.to_s.sub(/__\d+\z/, '')
+    base_block = RedmineReporterDashboards::ProjectPage.base_block_name(block)
     if base_block == 'report_by_spent_time' &&
        !User.current.allowed_to?(:view_time_entries, project, global: true)
       return ''
@@ -72,7 +106,7 @@ module ReporterProjectPagesHelper
       contextual = ''.html_safe
       if manage_reporter_project_page?(project)
         moves = reporter_project_block_move_controls(block, tab, project)
-        close = link_to(sprite_icon('close', l(:button_delete)),
+        close = link_to(reporter_dashboard_icon('close', l(:button_delete)),
                         remove_reporter_project_block_path(project_id: project.id, block: block, tab: tab.id),
                         method: :delete,
                         class: 'icon-only icon-close', title: l(:button_delete))
@@ -147,10 +181,11 @@ module ReporterProjectPagesHelper
   # plugin has never seen raising an exception is a first-class scenario rather than an
   # edge case. Without this, one such widget 500s the whole dashboard for every viewer.
   #
-  # Redmine 7.0 is the concrete instance: redmine_reporter's ReportTemplate cannot be
-  # loaded under Rails 8.1, so both report widgets raise the moment they are rendered.
-  # That is the dependency's problem to fix, but taking the entire page down over it is
-  # ours.
+  # It used to have a second, concrete instance of its own: the two report widgets named
+  # the base plugin's `ReportTemplate`, which cannot be loaded under Rails 8.1, so both
+  # raised the moment they were rendered on Redmine 7.0. T-26a removed that — the report
+  # widgets are this plugin's own now — and the rescue stays for the case it was actually
+  # written for, which is a partial this plugin has never seen.
   #
   # A visible placeholder, not nil: a widget that renders as nothing disappears from the
   # page together with its contextual controls, so nobody can remove it from the layout

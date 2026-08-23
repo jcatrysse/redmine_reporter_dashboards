@@ -1,0 +1,13 @@
+<p><%= l(:text_reporter_schedule_mail_failed_intro, name: @template_name, date: format_date(@occurrence_date)) %></p>
+
+<%# FR-43 / INV-5 — see the text part. No attachment on this path, ever. %>
+<p><%= l(:text_reporter_schedule_mail_failed_recipients) %></p>
+
+<p>
+  <%# E-26 #6 — see the text part: the headline is the only translated sentence here. %>
+  <strong><%= reporter_diagnostic_headline(@diagnostic) %></strong><br />
+  <strong><%= l(:label_reporter_report_diagnostic_code) %>:</strong> <%= @diagnostic.code %><br />
+  <%= @diagnostic.message %>
+</p>
+
+<p style="color:#888;"><%= l(:label_reporter_report_diagnostic_correlation_id) %>: <%= @diagnostic.correlation_id %></p>
