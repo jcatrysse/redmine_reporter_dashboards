@@ -53,7 +53,7 @@ module ReporterDashboards
 
     def index
       @templates = Template.visible(User.current)
-                           .where(project_id: @project.id)
+                           .where(project_id: in_scope_project_ids)
                            .order(:name, :id)
     end
 
@@ -289,7 +289,7 @@ module ReporterDashboards
     def find_preview_base
       return if params[:id].blank?
 
-      @preview_base = Template.where(project_id: @project.id).find_by(id: params[:id])
+      @preview_base = Template.where(project_id: in_scope_project_ids).find_by(id: params[:id])
       render_404 if @preview_base.nil? || !@preview_base.visible?(User.current)
     end
 
@@ -323,8 +323,35 @@ module ReporterDashboards
         .any? { |permission| User.current.allowed_to?(permission, @project) }
     end
 
+    # T-45, §Findings **M-7** — A GLOBAL TEMPLATE IS IN SCOPE HERE, BECAUSE IT ALWAYS WAS
+    # EVERYWHERE ELSE.
+    #
+    # This controller scoped strictly to the project while `WidgetReport.templates_for` —
+    # the picker on the same installation — has always scoped to `[nil, project.id]`. The
+    # consequence was the default outcome of the documented migration rather than an edge
+    # case: reporter's templates are global in the ordinary case (its own UI lived at
+    # `/report_templates` and had no project scope), the importer preserves that correctly,
+    # and the copies then rendered perfectly on a dashboard while **Reports → Templates was
+    # empty and every `…/templates/:id` was a 404** — not editable, previewable, mailable,
+    # schedulable, shareable or exportable. Measured: three imported templates, index empty,
+    # three 404s.
+    #
+    # ONE SPELLING, said once, rather than a third. `Template.visible` already handles
+    # `project_id IS NULL` explicitly in all four of its actor arms, so nothing below this
+    # line needed teaching.
+    #
+    # WHO MAY EDIT ONE NEEDS NO NEW RULE, and this is the part worth not inventing:
+    # `Template#editable_by?` already answers `false` for a project-less template unless the
+    # actor is an administrator, *"because Redmine has no role grant outside a project, so
+    # there is nothing to check a permission against"* (technical-spec.md §4.1). That is
+    # stricter than the `manage_public_…` rule this task was planned with, and better
+    # argued — there is no project against which to hold that permission either.
+    def in_scope_project_ids
+      [nil, @project.id]
+    end
+
     def find_template
-      @template = Template.where(project_id: @project.id).find(params[:id])
+      @template = Template.where(project_id: in_scope_project_ids).find(params[:id])
       # 404 AND NOT 403 FOR AN INVISIBLE TEMPLATE, because 403 confirms it exists.
       # Redmine's own `find_query` renders 403 for an unviewable query and this
       # deliberately differs: a saved query's existence is not the thing being protected,

@@ -455,6 +455,14 @@ migration is three templates that render on a dashboard and 404 everywhere else.
 
 1. **Widen the UI** to the scope the picker already uses, mark global templates in the list, and
    require `manage_public_reporter_dashboards_templates` to edit or delete one.
+
+   **AS IMPLEMENTED THE EDIT RULE NEEDED NO NEW CONDITION AT ALL, AND THE EXISTING ONE IS
+   STRICTER.** `Template#editable_by?` already answers `false` for a project-less template
+   unless the actor is an administrator — *"because Redmine has no role grant outside a
+   project, so there is nothing to check a permission against"* (`technical-spec.md` §4.1).
+   The `manage_public_…` rule this option proposed could not have been checked either, for
+   the same reason. So the change is the scope and the marker; the authorisation was already
+   right. Measured: 200 for a member, 403 on edit, 200 on edit for an administrator.
 2. **Make the importer choose a project** (`RRD_PROJECT=<id>`). Smaller change, but it moves
    somebody's report into a project it was never in — which the importer's own comment refuses,
    for a reason that still holds — and leaves the global scope unreachable for anyone who

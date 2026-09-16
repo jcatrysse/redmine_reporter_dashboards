@@ -134,6 +134,7 @@ ru:
   label_reporter_template_output_combined: "Один документ на весь набор"
   label_reporter_template_orientation_portrait: "Книжная"
   label_reporter_template_orientation_landscape: "Альбомная"
+  label_reporter_template_global: "Глобальный"
   label_reporter_template_disabled: "Отключён"
   label_reporter_template_download_pdf: "Скачать в формате PDF"
   label_reporter_template_download_archive: "Скачать %{count} PDF одним ZIP-архивом"

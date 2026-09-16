@@ -134,6 +134,7 @@ zh:
   label_reporter_template_output_combined: "整个集合一份文档"
   label_reporter_template_orientation_portrait: "纵向"
   label_reporter_template_orientation_landscape: "横向"
+  label_reporter_template_global: "全局"
   label_reporter_template_disabled: "已停用"
   label_reporter_template_download_pdf: "下载为 PDF"
   label_reporter_template_download_archive: "下载 %{count} 个 PDF（ZIP 压缩包）"

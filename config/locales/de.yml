@@ -134,6 +134,7 @@ de:
   label_reporter_template_output_combined: "Ein Dokument für die gesamte Menge"
   label_reporter_template_orientation_portrait: "Hochformat"
   label_reporter_template_orientation_landscape: "Querformat"
+  label_reporter_template_global: "Global"
   label_reporter_template_disabled: "Deaktiviert"
   label_reporter_template_download_pdf: "Als PDF herunterladen"
   label_reporter_template_download_archive: "%{count} PDFs als ZIP herunterladen"

@@ -134,6 +134,7 @@ nl:
   label_reporter_template_output_combined: "Eén document voor de hele set"
   label_reporter_template_orientation_portrait: "Staand"
   label_reporter_template_orientation_landscape: "Liggend"
+  label_reporter_template_global: "Globaal"
   label_reporter_template_disabled: "Uitgeschakeld"
   label_reporter_template_download_pdf: "Downloaden als PDF"
   label_reporter_template_download_archive: "%{count} PDF's downloaden als zip"

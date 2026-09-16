@@ -134,6 +134,7 @@ hu:
   label_reporter_template_output_combined: "Egy dokumentum a teljes halmazhoz"
   label_reporter_template_orientation_portrait: "Álló"
   label_reporter_template_orientation_landscape: "Fekvő"
+  label_reporter_template_global: "Globális"
   label_reporter_template_disabled: "Letiltva"
   label_reporter_template_download_pdf: "Letöltés PDF-ként"
   label_reporter_template_download_archive: "%{count} PDF letöltése ZIP-fájlként"

@@ -414,6 +414,82 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     end
   end
 
+  # ------------------------------------------------- global templates (T-45, §M-7)
+  #
+  # Reporter's templates are global in the ordinary case, the importer preserves that
+  # correctly, and this controller used to scope strictly to the project — so the default
+  # outcome of the documented migration was a set of templates that rendered on a dashboard
+  # and 404ed everywhere else. The widget picker on the same installation has always scoped
+  # to `[nil, project.id]`; these tests hold the two to the same answer.
+
+  def test_the_index_lists_a_global_template_and_marks_it
+    grant(:view_reporter_dashboards_reports)
+    create_template(name: 'This project', visibility: Template::VISIBILITY_PUBLIC)
+    create_template(name: 'Everywhere', project: nil,
+                    visibility: Template::VISIBILITY_PUBLIC)
+
+    get :index, params: { project_id: @project.identifier }
+
+    assert_response :success
+    assert_select 'td', text: /Everywhere/
+    assert_select 'td', text: /This project/
+    # The marker, because the same name otherwise appears in every project's list with no
+    # way to tell one shared report from several identically named ones.
+    assert_select 'span.tag', text: I18n.t(:label_reporter_template_global)
+  end
+
+  def test_a_global_template_can_be_opened_where_it_used_to_404
+    grant(:view_reporter_dashboards_reports)
+    template = create_template(project: nil, visibility: Template::VISIBILITY_PUBLIC)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+  end
+
+  # WHO MAY EDIT ONE NEEDS NO NEW RULE. `Template#editable_by?` answers false for a
+  # project-less template unless the actor is an administrator, because Redmine has no role
+  # grant outside a project and there is nothing to check a permission against. That is
+  # stricter than the `manage_public_…` rule this task was planned with, and better argued.
+  def test_a_global_template_is_admin_only_to_edit_however_many_permissions_are_held
+    grant(:view_reporter_dashboards_reports, :edit_reporter_dashboards_templates,
+          :manage_public_reporter_dashboards_templates)
+    template = create_template(project: nil, visibility: Template::VISIBILITY_PUBLIC)
+
+    get :edit, params: { project_id: @project.identifier, id: template.id }
+    assert_response :forbidden
+
+    login_as(User.find(1))
+    get :edit, params: { project_id: @project.identifier, id: template.id }
+    assert_response :success
+  end
+
+  # THE WIDENING MUST NOT BECOME A WINDOW. Another project's template is still a 404 —
+  # that is what "global OR this project" means, and a scope of `[nil, id]` written as
+  # `where.not(project_id: other)` would pass the two tests above and fail this one.
+  def test_another_projects_template_is_still_not_found
+    grant(:view_reporter_dashboards_reports)
+    other = Project.find(5)
+    other.enable_module!(:reporter_dashboards_reports)
+    template = create_template(project: other, visibility: Template::VISIBILITY_PUBLIC)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :missing
+  end
+
+  # AND VISIBILITY STILL DECIDES. Global does not mean public: a private global template
+  # belongs to its author exactly as a project one does.
+  def test_a_private_global_template_is_not_found_by_somebody_else
+    grant(:view_reporter_dashboards_reports)
+    template = create_template(project: nil, author: @dlopper,
+                               visibility: Template::VISIBILITY_PRIVATE)
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :missing
+  end
+
   # ------------------------------------------------------------------ authoring
 
   def test_add_permission_creates_a_template

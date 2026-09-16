@@ -134,6 +134,7 @@ pl:
   label_reporter_template_output_combined: "Jeden dokument dla całego zbioru"
   label_reporter_template_orientation_portrait: "Pionowa"
   label_reporter_template_orientation_landscape: "Pozioma"
+  label_reporter_template_global: "Globalny"
   label_reporter_template_disabled: "Wyłączony"
   label_reporter_template_download_pdf: "Pobierz jako PDF"
   label_reporter_template_download_archive: "Pobierz %{count} plików PDF jako archiwum ZIP"

@@ -134,6 +134,7 @@ fr:
   label_reporter_template_output_combined: "Un seul document pour tout l'ensemble"
   label_reporter_template_orientation_portrait: "Portrait"
   label_reporter_template_orientation_landscape: "Paysage"
+  label_reporter_template_global: "Global"
   label_reporter_template_disabled: "Désactivé"
   label_reporter_template_download_pdf: "Télécharger en PDF"
   label_reporter_template_download_archive: "Télécharger %{count} PDF dans un zip"

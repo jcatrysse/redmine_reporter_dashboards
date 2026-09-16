@@ -35,6 +35,14 @@
             <% unless template.enabled %>
               <span class="tag"><%= l(:label_reporter_template_disabled) %></span>
             <% end %>
+            <%# T-45 — A GLOBAL TEMPLATE IS LISTED IN EVERY PROJECT, so it says so. Without
+                the marker the same name appears in several projects' lists and a reader
+                has no way to tell one shared report from several identically named ones —
+                and editing it is admin-only, which is a surprise worth signalling before
+                somebody presses Edit rather than after. %>
+            <% if template.project_id.nil? %>
+              <span class="tag"><%= l(:label_reporter_template_global) %></span>
+            <% end %>
           </td>
           <td><%= template.description %></td>
           <td><%= l(:"label_reporter_template_output_#{template.output}") %></td>
