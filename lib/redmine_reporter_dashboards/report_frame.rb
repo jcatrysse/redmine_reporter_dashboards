@@ -117,6 +117,82 @@ module RedmineReporterDashboards
     PAGE_CHROME = 'reporter-report-frame'
     WIDGET_CHROME = 'reporter-report-frame reporter-report-frame--widget'
 
+    # T-44 — THE FRAME MEASURES ITSELF, AND THE COMMENT THAT SAID IT COULD NOT WAS
+    # REASONING FROM THE WRONG MECHANISM (§Findings M-5).
+    #
+    # `_report.html.erb` used to argue: a parent cannot read `contentWindow.document`
+    # across an opaque origin, `allow-same-origin` is the only token that would let it,
+    # that token turns the sandbox into a decoration — therefore the height is CSS. The
+    # first three clauses are all true and the conclusion does not follow.
+    # `postMessage` crosses an opaque origin BY DESIGN, `allow-scripts` is enough to send
+    # one, and the parent authenticates the sender by OBJECT IDENTITY
+    # (`event.source === frame.contentWindow`) rather than by origin — which is exactly the
+    # check an opaque origin is meant to force, since its origin is the string `"null"` and
+    # every sandboxed frame on the page shares it.
+    #
+    # So nothing here relaxes the sandbox. `allow-same-origin` is still absent, the parent
+    # still never reads across the boundary, and what crosses it is one integer.
+    #
+    # `targetOrigin` IS `'*'`, and that is deliberate rather than lazy: a document inside an
+    # opaque origin cannot name its parent's origin — it has no `location` it may read for
+    # one — so a specific target is not available to it. What is disclosed to any listener
+    # is a number of pixels, which is already visible to anybody looking at the page.
+    #
+    # ES5, like `chart_shell.js` and `mermaid_boot.js`, and for the same reason those two
+    # are: this runs inside whatever engine renders the document, and one arrow function
+    # would kill the whole script at parse time on the oldest of them.
+    #
+    # THE CSS SURVIVES AS THE FLOOR AND AS THE NO-JAVASCRIPT ANSWER. A reader with scripts
+    # off, or an engine that never delivers the message, gets `min-height` and
+    # `resize: vertical` exactly as before — which is why this is an enhancement rather
+    # than a replacement.
+    AUTO_HEIGHT_SCRIPT = <<~JS
+      <script>
+      (function () {
+        'use strict';
+        if (!window.parent || window.parent === window) { return; }
+
+        var last = 0;
+
+        function post() {
+          var body = document.body;
+          if (!body) { return; }
+          var height = Math.max(body.scrollHeight, body.offsetHeight);
+          if (height <= 0 || height === last) { return; }
+          last = height;
+          window.parent.postMessage({ rrdFrameHeight: height }, '*');
+        }
+
+        // THE HANDSHAKE, AND IT IS NOT DECORATION — it is what makes the ordering
+        // irrelevant. This document can finish parsing and post its height BEFORE the
+        // parent has installed its listener, and on `/my/page` that is the normal case
+        // rather than a race: the parent's script is included in BODY position there,
+        // because a my-page block renders long after the head was emitted, so it is
+        // guaranteed to arrive after at least one frame has loaded. A one-way post loses
+        // that message and the frame keeps its CSS floor for ever. So the parent asks, and
+        // `last` is reset because the answer is the same number it already sent.
+        window.addEventListener('message', function (event) {
+          if (event.data && event.data.rrdFrameHeightRequest) { last = 0; post(); }
+        });
+
+        function watch() {
+          post();
+          if (typeof ResizeObserver === 'function' && document.body) {
+            new ResizeObserver(post).observe(document.body);
+          }
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', watch);
+        } else {
+          watch();
+        }
+        // A late web font or a chart that draws after load changes the height again.
+        window.addEventListener('load', post);
+      }());
+      </script>
+    JS
+
     class << self
       # The frame element. `title:` is supplied by the caller so each surface can name it
       # in its own words while the security tokens stay here.
@@ -140,8 +216,12 @@ module RedmineReporterDashboards
       #
       # `style-src 'unsafe-inline'` is what makes the inlined stylesheet legal under
       # this policy; a `<link>`ed one would be a fetch `default-src 'none'` denies.
+      # `AUTO_HEIGHT_SCRIPT` is added HERE and not in `ReportDocument`, which is the one
+      # assembler both bindings share: a PDF has no parent to post to, and inlining a
+      # no-op script into every page of every export would be bytes for nothing. The
+      # frame is the surface that has a parent, so the frame is where it belongs.
       def document(body)
-        ReportDocument.wrap(body, head: csp_meta)
+        ReportDocument.wrap(body, head: csp_meta + AUTO_HEIGHT_SCRIPT)
       end
 
       # The policy, as the element that carries it. One method so the string appears

@@ -6,8 +6,8 @@
 # a rendered PNG depends on the font stack and would fail for reasons that are not
 # defects (§9b.5).
 ---
-aggregate-report: 8ea57ca341754b7a632762c672c3397ad3f3f7d44a67aeb28522b9f1bbed83bd
+aggregate-report: 7e741192afb991a8a0de9fa1d101eeeea7294ae87811e114865f88a0f004b3c8
 chart-report: cf3c99fca330086627db60aba454a02191b712cfe857aa51659c4b38fd246825
 issue-document: fceb9797affc32399ca4d05e4c8b17f1ae804cd1e8529f61693e209ebaa99862
 spent-time-report: bab3c0dd4c657634a7de8058ebdf0cdffd759f03ba3f67c5753587ea312855cb
-version-status: 50cfe0860738dccc50d669c3fc1eeeeb85f4f4fccc4c8344c45644b7a18db73c
+version-status: 4eb04beec4ad036f06e6a9df95e8be6ff23bf01ec7abe61a2b71de61c1e61e28

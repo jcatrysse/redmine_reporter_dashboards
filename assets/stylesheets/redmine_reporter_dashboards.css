@@ -64,6 +64,13 @@
    here - see the header. Nothing in this rule paints anything: the document inside the
    frame paints its own background, which comes from `Palette::BACKGROUND` through
    `ReportStylesheet`, so the colour is stated once and in the layer that owns it. */
+/* T-44 - `min-height` IS NOW A FLOOR AND A FALLBACK, not the height.
+   The document inside the frame posts its own content height over `postMessage` and the
+   parent sets an inline `height` (and clears `min-height` on the element, so a short report
+   can shrink below this). With JavaScript off, or before the first message arrives, this is
+   still the whole answer - which is why it stays a `min-height` rather than becoming a
+   `height` nothing would override. `resize: vertical` stays either way: a reader who wants
+   a different size still gets one. */
 .reporter-report-frame {
   width: 100%;
   min-height: 40em;

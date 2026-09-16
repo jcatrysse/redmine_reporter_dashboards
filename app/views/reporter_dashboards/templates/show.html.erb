@@ -1,5 +1,9 @@
 <% content_for :header_tags do %>
   <%= stylesheet_link_tag 'redmine_reporter_dashboards', plugin: 'redmine_reporter_dashboards' %>
+  <%# T-44 — the parent half of the frame's self-measurement lives in this file. Without it
+      the report frame on this page keeps the CSS floor, which is a 40em box around a
+      three-line report. %>
+  <%= javascript_include_tag 'redmine_reporter_dashboards', plugin: 'redmine_reporter_dashboards' %>
 <% end %>
 
 <%#

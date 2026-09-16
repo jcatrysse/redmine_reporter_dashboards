@@ -2182,6 +2182,38 @@ Three things changed visibly and all three are §Findings entries: the charts we
 (**M-1**, **M-10**), the PDF turned portrait (**M-6**), and the widget frame stopped growing
 (**M-5**).
 
+### Running `spec/` from the plugin checkout: point `BUNDLE_GEMFILE` at Redmine's
+
+`spec/spec_helper.rb` calls `require 'bundler/setup'` inside a `begin/rescue`, so what happens
+depends on whether Bundler can resolve the PLUGIN's Gemfile in that directory:
+
+- it **cannot** on a fresh checkout — `Bundler::GemNotFound` is rescued, nothing restricts the
+  load path, and the suite runs against system gems;
+- it **can**, once somebody has `gem install`ed the plugin's gems, and then it restricts the
+  load path to the plugin Gemfile — which names `liquid`, `rspec-rails` and
+  `rails-controller-testing` and nothing else. **`rexml` then stops loading**, and the twelve
+  `golden_svg_spec.rb` "is well-formed XML" examples fail with `LoadError`, which reads exactly
+  like a defect in the SVG renderer and is not one. Installing `rexml` does not help; the load
+  path is the problem, not the gem.
+
+So run it with the Redmine clone's Gemfile:
+
+```bash
+BUNDLE_GEMFILE=<redmine>/Gemfile rspec spec --exclude-pattern 'adapter/**/*_spec.rb'
+```
+
+which is the same resolution `.codex/test_plugin.sh` gets by running inside the clone. Measured
+2026-09-16: 17 failures without it, 0 with it, on an identical tree.
+
+### The starter thumbnails are an artefact, and they live in the CLONE after you regenerate them
+
+`rake reporter_dashboards:gallery:verify RRD_THUMBNAILS=1` writes the PNGs and
+`thumbnails.yml` into whichever tree it runs in — which is the Redmine clone, because
+`redmine_clone.sh` mirrors the plugin INTO it. **Copy them back to the plugin repo**, or the
+next mirror deletes them and `starter_gallery_spec.rb` goes red on the digests again. Editing
+a starter body without redrawing its thumbnail is five red examples, and that is the staleness
+detector doing its job rather than a broken test.
+
 ### Running `spec_liquid` on both majors, locally
 
 `spec_liquid/` is the only place either Liquid major is pinned, and T-42 put the shipped-template

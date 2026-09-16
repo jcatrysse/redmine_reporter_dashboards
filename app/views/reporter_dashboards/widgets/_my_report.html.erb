@@ -59,6 +59,14 @@
 <% end %>
 
 <% if widget.outcome.ok? %>
+  <%# T-44 — THE ASSET GOES IN THE BODY HERE, AND IT HAS TO.
+      `content_for :header_tags` is what every other surface uses, and it does nothing from a
+      my-page block: this partial renders inside `#content`, long after the layout emitted
+      the head. A `script src` in body position is executed where it stands, which is all
+      that is needed. It is the SAME file the dashboard and the template pages include, and
+      it guards itself against being initialised twice, so three report widgets on one page
+      still install one listener. %>
+  <%= javascript_include_tag 'redmine_reporter_dashboards', plugin: 'redmine_reporter_dashboards' %>
   <% widget.outcome.sections.each do |section| %>
     <%= RedmineReporterDashboards::ReportFrame.frame(
           section.body, title: l(:label_reporter_report_frame),

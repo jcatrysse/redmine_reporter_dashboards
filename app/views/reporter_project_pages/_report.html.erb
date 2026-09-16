@@ -9,12 +9,21 @@
 
   The frame is now `RedmineReporterDashboards::ReportFrame` — `srcdoc` under
   `sandbox="allow-scripts"`, i.e. an OPAQUE ORIGIN — which is the same frame the template
-  editor's preview draws and the reason the auto-size script could not survive: a parent
-  cannot read `contentWindow.document` across an opaque origin, and the one token that
-  would let it (`allow-same-origin`) is exactly what turns the sandbox into a decoration.
-  So the height is CSS (`.reporter-report-frame--widget`, with `resize: vertical` so a
-  reader can drag it) rather than measured. That is a deliberate trade and it is the
-  security half that wins.
+  editor's preview draws.
+
+  THIS PARAGRAPH USED TO SAY THE FRAME COULD NOT BE AUTO-SIZED, AND IT WAS REASONING FROM
+  THE WRONG MECHANISM (T-44, Findings M-5). Its argument was: a parent cannot read
+  `contentWindow.document` across an opaque origin; the one token that would let it
+  (`allow-same-origin`) turns the sandbox into a decoration; therefore the height is CSS.
+  All three clauses are true and the conclusion does not follow. `postMessage` crosses an
+  opaque origin by design, `allow-scripts` is enough to send one, and the parent
+  authenticates the sender by OBJECT IDENTITY — `event.source === frame.contentWindow` —
+  rather than by origin, which is the check an opaque origin is supposed to force.
+
+  So the frame measures itself: `ReportFrame::AUTO_HEIGHT_SCRIPT` inside the document posts
+  its content height, `redmine_reporter_dashboards.js` sets it, and nothing reads across the
+  boundary. `allow-same-origin` is still absent. The CSS height survives as the floor and as
+  the answer with JavaScript off, and `resize: vertical` stays.
 
   --- WHY A FAILURE IS A LINE AND NOT THE `_diagnostics` PANEL ---
 
