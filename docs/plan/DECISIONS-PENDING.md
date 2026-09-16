@@ -13,7 +13,10 @@ recommendation everywhere except where I say otherwise", overrode #3 to land in 
 than 1.1, and resolved #1's conditional with *"niemand gebruikt dat nog"* — so #1 is
 option 2, the full withdrawal.
 
-**STATUS 2026-08-14 (later the same day): ALL EIGHT ARE IMPLEMENTED. THE LIST IS CLOSED.**
+**STATUS 2026-08-14 (later the same day): ALL EIGHT ARE IMPLEMENTED.**
+
+**STATUS 2026-09-16: REOPENED — see Part 4.** The first end-to-end installation added five
+items (§Findings M-0). Four were answered the same day; **#16 is open**.
 #1 landed as the withdrawal (option 2). `ZERO_REPORTER_MODE=strict` now passes with **0**
 non-`[permanent]` entries, which was #1's stated destination.
 
@@ -402,3 +405,106 @@ true:**
 **Verified here** (Redmine 7.0-stable, PostgreSQL 16, standalone): see the commit message for
 the numbers. **NOT verified here:** MariaDB, the conformance corpus and the starter gallery —
 no engines and no MariaDB in this container.
+
+---
+
+## Part 4 — reopened 2026-09-16, after the first installation
+
+The list above was closed on 2026-08-14 and stayed closed. These five come from §Findings
+**M-1 … M-11** — the first end-to-end migration rehearsal on a real Redmine. **Four of them were
+put to the curator on 2026-09-16 and answered in the same sitting; they are recorded here with
+their answers so a later session does not re-ask.** The fifth is open.
+
+### 12. `{% chart %}` has no output binding — canvas, or SVG everywhere?
+
+**The situation.** T-16 built two emitters and a collector, and nothing calls either
+(**M-1**). The binding has to be written, and writing it is the moment to confirm which one
+each output gets, because the `srcdoc` CSP refuses external scripts today and that decision
+also settles `{% mermaid %}` in the browser (**M-2**).
+
+**Options.**
+
+1. **Follow T-16 as specified**, and widen the `srcdoc` CSP by exactly one source — the plugin's
+   own asset origin on `script-src`. HTML gets `<canvas>` + Chart.js, PDF gets inline SVG,
+   Mermaid starts drawing in the browser for free, and no spec is amended. The frame stays
+   `sandbox="allow-scripts"` with an opaque origin and the CSP already carries `'unsafe-inline'`
+   (INV-9: authoring *is* code execution), so the author's privilege does not change — the plugin
+   simply regains the ability to serve its own runtime.
+2. **Server-side SVG on both bindings.** No CSP change, no vendored JavaScript in a browser,
+   HTML and PDF identical by construction, drill-through via `<a xlink:href>`. Costs the
+   tooltips and legend-toggling, amends T-16, and leaves Mermaid permanently unavailable in the
+   browser. `04-risks.md` already names this as the rollback if the two layouts ever diverge.
+
+**Recommendation: 1.** **Decision: 1** *(curator, 2026-09-16.)*
+
+### 13. A global template that no screen can open
+
+**The situation.** Reporter's templates are global; the importer preserves that, correctly; the
+templates controller scopes strictly to the project while the widget picker on the same
+installation scopes to `[nil, project.id]` (**M-7**). The default outcome of the documented
+migration is three templates that render on a dashboard and 404 everywhere else.
+
+**Options.**
+
+1. **Widen the UI** to the scope the picker already uses, mark global templates in the list, and
+   require `manage_public_reporter_dashboards_templates` to edit or delete one.
+2. **Make the importer choose a project** (`RRD_PROJECT=<id>`). Smaller change, but it moves
+   somebody's report into a project it was never in — which the importer's own comment refuses,
+   for a reason that still holds — and leaves the global scope unreachable for anyone who
+   acquires one another way.
+3. Both.
+
+**Recommendation: 1.** **Decision: 1** *(curator, 2026-09-16.)*
+
+### 14. Drill-through on a surface with no saved query
+
+**The situation.** `drill: true` emits URLs only when an `IssueQuery` is in context, so a
+dashboard widget has links and the template page, the PDF download, a mailed report and a share
+link do not (**M-9**) — while the `aggregate-report` starter promises the PDF unconditionally.
+
+**Options.**
+
+1. **Build the fallback**: with no query, inherit from an unfiltered query over the report's own
+   project, so the bucket filter still applies and `base_url` is the project issue list.
+2. **Correct the prose** instead, and say that drill-through needs a saved query.
+
+**Recommendation: 1** — a mailed PDF is exactly where a link is worth most, and the scope is
+already known (`Reporting::ReportScope` answers it); only the query to inherit from was missing.
+**Decision: 1** *(curator, 2026-09-16.)*
+
+### 15. The widget frame's fixed height
+
+**The situation.** `_report.html.erb` argues that auto-sizing is impossible across an opaque
+origin. The argument is about the wrong mechanism: `postMessage` crosses it by design, and the
+parent authenticates by object identity rather than by origin (**M-5**).
+
+**Decision: auto-grow** *(curator, 2026-09-16 — "widget iframe zou volgens mij wel moeten auto
+groeien".)* Implemented in T-44 with `postMessage`, no `allow-same-origin`, and the CSS height
+retained as the floor and the no-JavaScript fallback.
+
+### 16. Should the importer be able to publish what it imports? — **OPEN**
+
+**The situation.** `create_copy` sets `VISIBILITY_PRIVATE` and the reason is good: the source
+plugin has no visibility model to translate, so the narrow answer is the safe one. The
+consequence is that after a textbook migration every user except one administrator sees a pair of
+configuration forms where the shared project dashboard used to show a report (**M-8**).
+
+T-46 closes the *documentation* half either way: the run report and `docs/admin-guide.md` will
+state it plainly and name the action that widens it. What is open is whether the operator should
+also be able to say so up front.
+
+**Options.**
+
+1. **Documentation only.** The default stays private; widening stays a per-template decision made
+   in the UI by somebody holding `manage_public_reporter_dashboards_templates`. Nothing new to
+   get wrong, and the permission that governs publication keeps governing it.
+2. **Add `RRD_VISIBILITY=private|roles|public`**, defaulting to `private`. One flag, and a
+   migration of forty templates becomes one command instead of forty clicks. The cost is that a
+   rake task gains the power the permission exists to gate — an operator with shell access has it
+   anyway, but the audit story gets weaker, and `roles` needs role ids the flag cannot express.
+3. Option 2 restricted to `private|public`, dropping the unexpressible middle.
+
+**Recommendation: 1**, with 3 as the fallback if migrating installs turn out to be large enough
+that the clicking is the real cost. The rehearsal had three templates; nobody has reported a
+number that makes 1 painful, and `technical-spec.md` §4.1 put publication behind a permission on
+purpose. **Decision:**

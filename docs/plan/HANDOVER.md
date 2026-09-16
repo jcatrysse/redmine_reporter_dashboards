@@ -2105,6 +2105,98 @@ clones and about forty minutes, not a rewrite.
 
 ---
 
+## 2c. The first end-to-end installation, 2026-09-16 — how it was done and how to redo it
+
+**Read this before starting any Phase 5 task.** It is the only place in the repository that
+records the plugin being *installed* rather than unit-tested, and §Findings **M-0** is its
+summary: nine defects, six of them invisible to the entire suite.
+
+**The single most useful sentence here: six of the nine are wiring or configuration defects,
+and the suite tests neither.** T-16 has ten SVG goldens and a measured layout falsifier, and
+`{% chart %}` draws nothing anywhere. T-37 measured five starters × three engines at 15 of 15,
+and two of those starters do not parse on Liquid 4.0.4. Every one of those measurements is still
+correct. They measure a unit, or a rendering engine, and the defect is between two units, or on
+an axis no job varies. **Do not read a green suite as coverage of anything Phase 5 is about.**
+
+### What was built
+
+Redmine 5.1-stable (upstream clone), **Ruby 3.2.6** (Redmine 5.1's Gemfile is
+`>= 2.7.0, < 3.3.0`, so the container's default 3.3.6 is out of range and bundler refuses),
+PostgreSQL 16 on a unix-domain socket, `redmine_reporter` 2.0.5 in `plugins/`, this plugin at
+`main` (`eddb8fa`) first and then swapped to `517f79e`. Seed: 3 projects, 380 issues, 751 time
+entries, 5 versions, 2 numeric issue custom fields for the cost columns the example dashboard
+wants, 4 non-admin users. Both `examples/*.liquid` loaded as reporter templates; two dashboard
+tabs built **through the UI**, not through the database, so the widget controls were exercised
+on the way in.
+
+### The three environment facts that cost time
+
+1. **Ruby 3.2, not the container default.** `/opt/ruby-3.2.6/bin` exists in the cloud image.
+   Redmine 5.1 will not bundle on 3.3.
+2. **Redmine 5.1 has no server gem outside its `test` group.** `bundle install --without test`
+   leaves neither `puma` nor a Rack handler puma 8 can register, so `bin/rails server` answers
+   `Could not find server ""`. A one-line `Gemfile.local` with `webrick` and
+   `bin/rails server -u webrick` is the smallest way in. Do **not** add `puma` there — the
+   `test` group already declares it and bundler refuses two requirements for one gem.
+3. **THE PDF ENGINE REFUSES TO RUN AS ROOT, AND THAT IS THE ADAPTER DOING ITS JOB.**
+   `chromium_cdp.rb` deliberately passes no `--no-sandbox` — *"so Chromium itself enforces 'not
+   as root'"* — so `render:preflight` fails with `CdpError: the browser exited while we were
+   waiting for it` in a container whose shell is root. Create an unprivileged user, `chown` the
+   Redmine tree, and run the server and every rake task as that user. Preflight then passes all
+   eight checks. **A session that reads this failure as a defect will "fix" a control.**
+   (`RRD_CHROMIUM_BINARY` is honoured, and `PLAYWRIGHT_BROWSERS_PATH` is the last place looked,
+   which is how the cloud image's Chromium is found at all.)
+
+### The migration, in the order that works
+
+The order is forced and the first step is the one an operator gets wrong:
+
+1. **Upgrade this plugin first.** `main`'s `init.rb` still `raise`s when `redmine_reporter` is
+   absent, so reporter cannot come out before the new version goes in.
+2. `bundle install` — the new `liquid` dependency — then `rake redmine:plugins:migrate`, which
+   runs 002…010. **Migration 001 is byte-identical between the two versions**, so
+   `reporter_project_tabs` and every existing dashboard layout survive untouched.
+3. `rake reporter_dashboards:migrate_from_reporter:plan`, then `RRD_DRY_RUN=1 …:run`, then
+   `…:run`. The run repointed all three dashboard widgets (S-29's mechanism, working).
+4. **Only now remove `redmine_reporter`, and only the directory.**
+   `rake redmine:plugins:migrate NAME=redmine_reporter VERSION=0` drops `report_templates` and
+   `report_schedules` — the importer's only source. §7's "the `VERSION=0` footgun" is real and
+   this is what it looks like from the operator's side.
+5. Enable the **Reports** project module and grant the fourteen permissions; neither is implied
+   by the upgrade.
+
+After step 4 the boot log reads
+`[reporter_dashboards] ready — … no other plugin and no vendor gem required`, which is the line
+T-05 left behind and it is worth checking for: it is the cheapest proof the standalone path is
+the one running.
+
+### What the numbers did
+
+**Identical, and that is the good news of the whole rehearsal.** The version-status dashboard
+read 320 issues / 3438.0 estimated hours / 2269.0 spent / €1199055 before the migration and the
+same four figures after it, in the browser and in the PDF. The aggregation kernel came through
+the port intact on real data, which is what T-01's whole apparatus exists to protect and which
+no corpus run can say about a production-shaped database.
+
+Three things changed visibly and all three are §Findings entries: the charts went blank
+(**M-1**, **M-10**), the PDF turned portrait (**M-6**), and the widget frame stopped growing
+(**M-5**).
+
+### How to redo it
+
+The rehearsal was driven with Playwright against the cloud image's Chromium
+(`/opt/pw-browsers/chromium-*/chrome-linux/chrome`, `--no-sandbox` for the *test* browser, which
+is not the render engine and not the control described above). Two notes for whoever automates
+it in T-50:
+
+- **A full-page screenshot of a page containing a sandboxed `srcdoc` iframe captures the frame
+  as blank.** The content is there — `frame.evaluate` reads it, an element screenshot shows it —
+  but `fullPage: true` does not composite it. Use a viewport screenshot after scrolling, or shoot
+  the element. A session that trusts the full-page image will report a working widget as empty.
+- The legacy example templates fetch Chart.js from `cdnjs`, which the sandbox has no egress for.
+  Fulfil that one request from a local copy through `context.route` rather than opening egress,
+  and stub nothing else — the point is to measure the plugin, not the network.
+
 ## 3. Environment quirks (cloud sessions)
 
 - **`LANG` AND `LC_ALL` ARE UNSET, SO `Encoding.default_external` IS US-ASCII — AND THAT

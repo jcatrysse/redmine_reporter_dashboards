@@ -108,12 +108,237 @@ reference but `GITHUB_TOKEN`, and the full-app suite runs standalone on all four
 The plan contradicted itself on this: §Findings D-2 already described T-09 in the past tense. Both
 now agree, and the correction is recorded rather than quietly applied, because a status line that
 was wrong for a whole phase is the kind of thing that gets believed twice.
+| **T-41** | **open** — the `{% chart %}` output binding, and the `srcdoc` CSP that lets the plugin ship its own runtime. §Findings **M-1**, **M-2** |
+| **T-42** | **open** — every shipped template parses on Liquid 4 *and* 5, with the axis in CI. §Findings **M-3** |
+| **T-43** | **open** — the my-page ERB comment leak, and the gate that stops the next one. §Findings **M-4** |
+| **T-44** | **open** — the widget frame measures itself over `postMessage`. §Findings **M-5** |
+| **T-45** | **open** — a global template is reachable in the templates UI. §Findings **M-7** |
+| **T-46** | **open** — the import carries `orientation`/`description` and states that copies are private. §Findings **M-6**, **M-8** |
+| **T-47** | **open** — drill-through without a saved query. §Findings **M-9** |
+| **T-48** | **open** — a refused external asset degrades on the HTML binding too. §Findings **M-10** |
+| **T-49** | **open** — `schedules:run` stops warning about the run it just did. §Findings **M-11** |
+| **T-50** | **open** — the install-and-look job: the verification axis M-0 is about |
+
 
 **What is genuinely still owed for INV-7** is smaller and is F-5: one dated fork-PR run per release.
 A workflow cannot fork itself without reintroducing the very credential G1 removes, so that proof is
 a human artefact, and the grep is what keeps it true between artefacts.
 
 ## Findings — what the work has turned up, and who owns the fix
+
+**M-0 · THE FIRST END-TO-END MIGRATION REHEARSAL ON A REAL REDMINE FOUND NINE DEFECTS, AND
+SIX OF THEM ARE INVISIBLE TO THIS REPOSITORY'S ENTIRE SUITE.** 2026-09-16. Not a review, not a
+spec reading: a Redmine 5.1-stable checkout on PostgreSQL 16, `redmine_reporter` 2.0.5 beside it,
+this plugin at `main` first and at `517f79e` after, 380 issues and 751 time entries, both
+`examples/*.liquid` loaded as reporter templates, two dashboards built **through the UI**, the
+documented migration run in the documented order, and then every screen of the result walked with
+a real browser.
+
+**What the suite cannot see is the point of this entry.** T-16 has ten SVG goldens and a
+falsifier that measured its layout claim at 1.17%; T-35 measured Mermaid end to end on two
+engines; T-37 measured five starters × three engines at 15 of 15. All green, all still green —
+and `{% chart %}` draws nothing in any browser and nothing in any PDF, two of the five starters
+refuse to parse on the Liquid this project's own Gemfile admits, and the my-page widget prints
+thirty lines of its own source comment at the top of `/my/page`. Each of those is a **wiring**
+defect between two layers that are each individually tested, or a defect on a **configuration
+axis** (Liquid 4.0.4, Redmine's real view stack) that no job varies. That is the shape to carry
+forward: this repository tests its units with unusual rigour and has, until today, never once
+installed itself.
+
+The rehearsal's own record — commands, screenshots and PDFs — is in `HANDOVER.md` §5.
+
+---
+
+**M-1 · `{% chart %}` HAS NO OUTPUT BINDING. THE TAG RECORDS A SPEC AND EMITS A PLACEHOLDER,
+AND NOTHING EVER READS THE COLLECTOR.** 2026-09-16. The single largest defect in the release:
+the feature the README leads with produces an empty `<div>` everywhere.
+
+T-16's §Status row describes the design exactly and it is the right design — *"`{% chart %}`
+**emits no markup** — a placeholder and a `ChartSpec`, and the output binding decides"*. Both
+emitters exist, are unit-tested and are good code. **Neither has a caller.**
+
+    rg -n 'ChartjsEmitter' app lib          # → chart_tag.rb comment, charts.rb comment. No call.
+    rg -n 'SvgRenderer'   app lib           # → comments, plus report_stylesheet.rb reading a font constant.
+    rg -n 'chart_boot'    app lib           # → comments only. The script is never served to a document.
+    grep -n 'def ' lib/.../charts/collector.rb   # to_h, [], any?, length, javascript_required? — no external caller
+
+`RenderContext` is built with `output: :html | :pdf` and `report_run.rb:381` documents that this
+is what decides canvas-versus-SVG. Nothing downstream of the render consults
+`render_context.charts`. Measured on the rehearsal install: the starter `chart-report`, saved
+unmodified, renders as three `<div class="rrd-chart-placeholder" data-rd-chart="…"></div>` —
+**no `refused` attribute, so the spec was recorded successfully** — with zero `<canvas>`, zero
+`<svg>` and zero `<script>` in the HTML binding, and three empty card strips in a
+`chromium_cdp`-rendered PDF that reports no degradation at all.
+
+It is a wiring gap, not a design failure, and that is why it is one task rather than a phase.
+
+**M-2 · THE `srcdoc` CSP REFUSES EVERY SCRIPT THE PLUGIN ITSELF SHIPS, SO `{% mermaid %}` WORKS
+IN A PDF AND IS RAW TEXT IN EVERY BROWSER.** 2026-09-16, and it is M-1's sibling rather than a
+separate bug.
+
+`report_frame.rb:58` sets `script-src 'unsafe-inline'` with `default-src 'none'`.
+`mermaid_tag.rb:350` emits `<script src="/plugin_assets/redmine_reporter_dashboards/javascripts/
+vendor/mermaid.min.js">` plus its boot script. On the PDF binding `AssetBinding` inlines both and
+the diagram draws — measured, a correct vector flowchart in a `chromium_cdp` PDF. On the HTML
+binding the browser refuses both, `data-rd-mermaid-state` is never set, and the reader sees the
+Mermaid source as literal text. The dashboard widget, the template page and the editor preview
+are all that binding.
+
+T-38 already found and fixed the *stylesheet* half of this ("THE CHROME STYLESHEET'S MERMAID
+RULES WERE DEAD CSS"). The script half survived it.
+
+**The CSP change this needs is smaller than it looks and the argument is worth writing down
+once.** The frame is `sandbox="allow-scripts"` — an opaque origin — and the CSP **already**
+carries `'unsafe-inline'`, because INV-9 says authoring is code execution and an author may
+write `<script>` directly. So the frame already executes arbitrary author JavaScript in an
+origin that is isolated from the viewer's session, which is the property the sandbox exists for.
+Adding the plugin's own asset origin to `script-src` lets the frame fetch *this repository's
+vendored bundles* and changes nothing else about what an author can reach. It is not a widening
+of the author's privilege; it is the plugin regaining the ability to ship its own runtime.
+
+**M-3 · TWO OF THE FIVE SHIPPED STARTERS DO NOT PARSE ON LIQUID 4, WHICH IS THE LIQUID A
+MIGRATING INSTALL HAS.** 2026-09-16. `aggregate-report` and `version-status`, saved unmodified
+from the gallery, both render as *"this template has a syntax error and was not rendered"*.
+Reproduced outside the plugin, on Liquid 4.0.4:
+
+    aggregate-report: Liquid::SyntaxError: 'endcomment' is not a valid delimiter for for tags. use endfor
+    version-status:   Liquid::SyntaxError: Syntax Error in 'for loop' - Valid syntax: for [item] in [collection]
+
+The cause is in the starters, not in Liquid: both header comments contain a literal
+`{% for issue in issues %}` as *prose about* the idiom they replace. Liquid 4's `Comment` is a
+`Block` that still tokenises its body for nested block tags, so the `{% for %}` inside the
+comment opens a block that then meets `{% endcomment %}`. Liquid 5 stopped parsing comment
+bodies, which is why every measurement to date said 15 of 15.
+
+    for f in starters/*.liquid; do … done   # aggregate-report: ['for']; version-status: ['for','for']
+                                            # the other three: clean
+
+**This is a configuration axis, not a file.** `Gemfile` admits `liquid >= 4.0, < 6.0`
+deliberately — *"an install that already has reporter has 4.x and must not be forced to
+upgrade"* — and `.github/workflows/ci.yml` resolves whatever the lockfile gives it. A fix that
+edits two starters and leaves the axis unvaried buys one release. T-42's deliverable is the
+gate, and the starters are what it catches first.
+
+**M-4 · `my/blocks/_report_by_issues.erb` PRINTS THIRTY LINES OF ITS OWN HEADER COMMENT ON
+`/my/page`, BECAUSE THE COMMENT CONTAINS `<%= render %>`.** 2026-09-16. Line 29:
+
+    guarded body are the `<%= render %>` calls, and `render` builds its result before
+
+That `%>` closes the `<%#` at line 1. Everything after it is template text, so the widget renders
+the rest of the comment — "`--- WHAT IS DIFFERENT FROM THE PROJECT DASHBOARD ---`", the
+`include_all_helpers` paragraph, and a trailing literal `%>` — above the report, to every user
+who adds the block. Screenshotted.
+
+A scan of `app/views/**/*.erb` for an `<%#` whose body contains `<%` finds **exactly one**
+occurrence, which is why this is a two-character fix with a gate rather than a sweep. The gate is
+the deliverable: this repository writes very long view comments on purpose, and the next one that
+quotes an ERB tag will do the same thing.
+
+**M-5 · THE WIDGET FRAME CAN MEASURE ITSELF AFTER ALL, AND THE COMMENT SAYING IT CANNOT IS
+REASONING FROM THE WRONG MECHANISM.** 2026-09-16, curator decision the same day.
+
+`_report.html.erb`'s header argues that auto-sizing died with the dependency: *"a parent cannot
+read `contentWindow.document` across an opaque origin, and the one token that would let it
+(`allow-same-origin`) is exactly what turns the sandbox into a decoration. So the height is CSS
+… That is a deliberate trade and it is the security half that wins."*
+
+The first half is correct and the conclusion does not follow. `postMessage` crosses an opaque
+origin by design; `allow-scripts` is enough to send one; and the parent authenticates the sender
+by object identity (`event.source === frame.contentWindow`) rather than by origin, which is
+exactly the check an opaque origin is supposed to force. The child measures itself and posts; the
+parent sets the height. **No `allow-same-origin`, no reading across the boundary, nothing the
+sandbox forbids.** Measured on the rehearsal install: the frame sat at a fixed 244 px with the
+report scrolling inside it, against the previous release where the same widget grew to its
+content.
+
+The CSS stays as the floor and as the fallback when no message arrives, and `resize: vertical`
+stays.
+
+**M-6 · THE IMPORTER CARRIES FIVE COLUMNS, AND `orientation` IS NOT ONE OF THEM, SO A LANDSCAPE
+DASHBOARD MIGRATES AS PORTRAIT.** 2026-09-16. `import/runner.rb` reads
+`REQUIRED_COLUMNS = %w[id type content]` plus `OPTIONAL_COLUMNS = %w[name project_id]`, and
+`create_copy` builds the `Template` from those. Reporter stores `orientation` as its enum's
+integer; measured on the rehearsal database, `report_templates#2` is `1` (landscape) and its copy
+is `'portrait'`. `description` is dropped the same way.
+
+The example dashboard is a six-tile KPI row and three side-by-side charts designed for landscape.
+The imported copy is correct in every number and wrong in every column width. `import:status`
+reports *"Every template is imported and matches its source"*, because it compares the body
+digest — which is true and is not what the reader takes from it.
+
+**M-7 · A GLOBAL REPORTER TEMPLATE IMPORTS AS A GLOBAL TEMPLATE, AND THE TEMPLATES UI CANNOT
+SHOW ONE.** 2026-09-16. `templates_controller.rb:55` and `:327`:
+
+    @templates = Template.visible(User.current).where(project_id: @project.id)
+    @template  = Template.where(project_id: @project.id).find(params[:id])
+
+`WidgetReport.templates_for` — the picker on the very same installation — scopes
+`where(project_id: [nil, project.id])`. So after a migration the dashboard widget renders the
+imported report perfectly while **Reports → Templates is empty and every `…/templates/:id` is a
+404**: not editable, not previewable, not mailable, not schedulable, not shareable, not
+exportable. Measured: three imported templates, `project_id NULL`, index empty, three 404s.
+
+Reporter's own templates are global in the ordinary case — its UI lived at `/report_templates`
+and had no project scope — so this is the default outcome of the documented migration, not an
+edge case. The importer is right to preserve `project_id` (its own comment argues that, and the
+argument holds). The UI is what is inconsistent with the picker.
+
+**M-8 · IMPORTED TEMPLATES ARE PRIVATE TO THE ADMINISTRATOR WHO RAN THE IMPORT, WHICH IS
+DELIBERATE, UNDOCUMENTED, AND VISIBLE TO EVERY OTHER USER AS A BROKEN DASHBOARD.** 2026-09-16.
+
+`create_copy` sets `visibility: Template::VISIBILITY_PRIVATE` with a good reason — *"The source
+plugin has its own visibility vocabulary and this one does not know how to translate it, so the
+safe answer is the narrow one"*. Correct, and nothing says so where the operator looks.
+`docs/admin-guide.md` §Migrating lists `plan`, `run`, `status` and nothing else; the run report
+prints `created 3` and `Every template is imported and matches its source`.
+
+Measured as a second user with `view_reporter_dashboards_reports` on the project: both report
+widgets on the shared project dashboard fall back to their **settings form** — a query picker and
+a template picker — because `WidgetReport` resolves through `Template.visible(actor)` and finds
+nothing. The dashboard the migration was supposed to preserve is, for everyone except one
+administrator, a pair of configuration forms they can change.
+
+The fix is a sentence and a printed line, not a behaviour change.
+
+**M-9 · `drill: true` IS SILENT ON EVERY SURFACE THAT HAS NO SAVED QUERY, WHICH IS EVERY SURFACE
+EXCEPT A DASHBOARD WIDGET.** 2026-09-16. `liquid_aggregate_tag.rb#drill_builder` returns `nil`
+when `resolve_query(context)` finds no `IssueQuery`, and `apply_drill` then sets
+`drill_available = false` and emits no `url` on any bucket. Measured, same template, same data:
+
+    dashboard widget (query_id 8)  → drill_available true,  every bucket a filtered issue-list URL
+    template page / PDF / mail / share link (no query) → drill_available false, base_url empty, every url nil
+
+The `aggregate-report` starter tells its reader *"`drill: true` puts a URL on every bucket … It
+works in the PDF as well — those are real link annotations, not blue text"*, and F-23 proves the
+annotations survive the engine. Both true; the URLs are simply never built on the path a PDF
+download takes.
+
+A report with no saved query is not a report with no scope — `Reporting::ReportScope` already
+answers "this project's visible issues". The missing piece is an `IssueQuery` to inherit from,
+and an unfiltered project query is the honest one.
+
+**M-10 · AN ASSET THE POLICY REFUSES IS INVISIBLE IN THE HTML BINDING, SO A MIGRATED TEMPLATE
+LOSES ITS CHARTS WITH NOTHING ON THE PAGE.** 2026-09-16. The rehearsal's two carried-over
+templates load Chart.js 2.8 from `cdnjs.cloudflare.com`, which the `:bundled` policy is right to
+refuse. In a PDF the refusal is a degradation and `_degradations` prints it. In the HTML binding
+the browser refuses the `<script>` against the `srcdoc` CSP, which is a **browser-side** event
+the server never learns about, so `templates/show` renders a complete-looking report with three
+empty chart boxes and no notice anywhere.
+
+`migrate_from_reporter:plan` predicts this precisely and by line number, which is the mitigation
+working as designed. It is also the only place it is ever said: an operator who runs the import
+without reading the plan gets no second chance.
+
+**M-11 · `schedules:run` PRINTS THE "NOTHING IS CALLING THE SCHEDULER" ADVISORY IN THE OUTPUT OF
+A SUCCESSFUL RUN.** 2026-09-16, cosmetic and one line. Measured:
+
+    1 schedule(s) considered, 0 incomplete, 1 occurrence(s) claimed, 0 already claimed, 1 delivered, 0 failed
+      * At least one schedule is active and has never been reached by a run. …it looks like nothing is calling it.
+
+`schedules:status` immediately afterwards reports `last attempt: 2026-09-16 04:28:01 UTC` and
+`no warnings`, so the advisory is reading state captured before the run it is appended to.
+
+---
 
 **S-30 · DELETING `glue/legacy/scope_resolution.rb` IS NOT A DELETION — IT IS "REBUILD THE
 AGGREGATE TAG'S SPEC HARNESS", AND THE MEASUREMENT IS 166 OF 249.** 2026-08-12. The curator
@@ -4903,6 +5128,232 @@ not — because an extraction broken by a newer Ruby, or by a construct it never
    `test/functional/reporter_project_{pages,tabs}_controller_test.rb`, which grant and withhold these
    permissions and assert 200/403. Those were **not run for T-40** — no Redmine checkout in the
    container — so CI is their first execution against the loop.
+
+### Phase 5 — what the first installation found *(ships 0.9.0; closes M-1 … M-11)*
+
+**This phase exists because the plugin had never been installed.** Every task below closes a
+§Findings `M-n` and every one of them was found by running the documented migration on a real
+Redmine 5.1 and then walking the result in a browser — not by a review and not by a spec reading.
+Six of the nine defects are invisible to the whole suite (M-0 says why), so **the deliverable of
+this phase is as much the missing verification axis as the fixes**: a job that installs the
+plugin, renders a report through a real view stack, and looks at what came out.
+
+**Ordering.** T-41 first — it carries the CSP change that T-45 would otherwise duplicate, and it
+is the only task here with design in it. T-43, T-47 and T-49 are independent and small enough to
+land in any order. T-44…T-46 are the migration path and want to land together, because an
+operator meets all three in one sitting.
+
+**Nothing in this phase touches the frozen kernel.** `Baseline::KERNEL_FILES` covers
+`aggregation/query_aggregator.rb` and `aggregation/drill_through.rb`; T-47 changes
+`lib/sql_aggregation/liquid_aggregate_tag.rb`, which is not in that map, so G7 is untouched and
+no `kernel_exception.rb` entry is owed. **Check that with the file, not with this sentence.**
+
+---
+
+**T-41 · THE `{% chart %}` OUTPUT BINDING — the feature the README leads with, connected.**
+*(deps: none — T-16 and T-38 both landed; closes **M-1** and **M-2**)*
+*Touches:* `lib/redmine_reporter_dashboards/reporting/report_run.rb`,
+`lib/redmine_reporter_dashboards/report_document.rb`, `report_frame.rb`,
+`liquid/render_context.rb`, `assets/javascripts/chart_boot.js`,
+`charts/{chartjs_emitter,svg_renderer}.rb` (callers only), `render/asset_binding.rb`.
+
+*Accept:* after a render completes, every `<div class="rrd-chart-placeholder" data-rd-chart="id">`
+is **replaced** by the emitter the binding selects — `ChartjsEmitter` (a `<canvas>` plus a
+`<script type="application/json" data-rd-chart-config>` block, FR-19's escaping, and
+`chart_boot.js`) on `:html`, `SvgRenderer`'s inline `<svg>` with `<a xlink:href>` per element on
+`:pdf`. A placeholder carrying `data-rd-chart-refused` is left alone and keeps its labelled
+fallback. **The substitution is one step in one place** — the assembler, not each surface; four
+surfaces (widget, my-page, template page, preview) must not each learn how to do this.
+
+The `srcdoc` CSP gains the plugin's asset origin on `script-src` **and nothing else** — no
+`'self'` (an opaque origin's `'self'` is nothing), no `img-src` change, `default-src 'none'`
+unchanged. M-2 carries the argument; **restate it in the code at the CSP**, because the next
+reader will otherwise correctly ask why a sandbox is being widened.
+
+*Tests:* a rendered HTML body contains one `<canvas>` and one config block per non-refused
+chart and **zero** `rrd-chart-placeholder` elements; the same template on `:pdf` contains one
+`<svg class="rrd-chart">` and zero `<canvas>`; a refused chart keeps its placeholder and its
+degradation; the config block survives a label containing `</script>`, a quote and a backslash
+(FR-19, and it is a regression test for the class of defect §5's table names); a chart with
+`drill: true` emits `<a xlink:href>` in the PDF and a clickable region in the HTML. **Plus the
+one that would have caught this:** a render-level assertion that `RenderContext#charts` is read
+— a spec that fails if the collector has no consumer, which is the exact hole T-16 left.
+
+*And the axis:* `{% mermaid %}` in the HTML binding draws, asserted in a real browser rather than
+by grepping for a `<script>` tag. M-2 is only closed by a measurement.
+
+---
+
+**T-42 · EVERY SHIPPED TEMPLATE PARSES ON BOTH LIQUID MAJORS, AND A GATE SAYS SO.**
+*(deps: none; closes **M-3**)*
+*Touches:* `starters/aggregate-report.liquid`, `starters/version-status.liquid`,
+`spec/starter_gallery_spec.rb` or a new `spec/starters/parse_spec.rb`, `.github/workflows/ci.yml`.
+
+*Accept:* `Liquid::Template.parse` succeeds for every file in `starters/` and every file in
+`examples/` **on Liquid 4.0.4 and on the newest 5.x**, asserted in CI as a matrix leg rather than
+inherited from whatever the lockfile resolved. The two starters are corrected by rewriting the
+prose, not by deleting the explanation: `{% for issue in issues %}` inside a comment becomes
+text a Liquid 4 tokeniser does not see as a tag.
+
+*Tests:* the parse spec, with a **planted failure** — a fixture starter containing a block tag
+inside a comment — proving the spec fails when it should, because a parse assertion over a
+directory that resolves to zero files passes vacuously (T-37's own `/redmine/` glob defect, one
+task earlier). The gate reports the Liquid version it ran against in its output.
+
+*Note for whoever takes it:* this is not "fix two files". The fix is thirty seconds; the axis is
+the task. `Gemfile` admits `>= 4.0, < 6.0` for a stated reason and nothing has ever varied it.
+
+---
+
+**T-43 · AN ERB COMMENT CANNOT LEAK, AND A GATE ENFORCES IT.**
+*(deps: none; closes **M-4**)*
+*Touches:* `app/views/my/blocks/_report_by_issues.erb`, `script/gates/erb_comment_integrity.sh`,
+`.github/workflows/ci.yml`.
+
+*Accept:* no `<%#` block under `app/views/` contains a `<%` before its closing `%>`. The gate
+walks the files rather than grepping a pattern that a multi-line comment defeats, fails with the
+file, the line and the offending inner tag, and — per T-38's lesson about a gate that reported OK
+while reading nothing — **an absent subject is a hard failure** and it ships with a self-test
+that breaks the reader for real.
+
+*Tests:* the self-test's planted violations; plus a view-level assertion that rendering the
+my-page block emits neither `WHAT IS DIFFERENT FROM THE PROJECT DASHBOARD` nor a bare `%>`.
+
+---
+
+**T-44 · THE WIDGET FRAME MEASURES ITSELF.** *(deps: T-41 for the CSP note only; closes **M-5**)*
+*Touches:* `report_frame.rb`, `app/views/reporter_project_pages/_report.html.erb`,
+`app/views/reporter_dashboards/widgets/_my_report.html.erb`,
+`assets/javascripts/redmine_reporter_dashboards.js`,
+`assets/stylesheets/redmine_reporter_dashboards.css`.
+
+*Accept:* the document inside the frame posts its content height to its parent
+(`ResizeObserver` on `<body>`, plus one post at `load`); the parent accepts a message **only**
+when `event.source === frame.contentWindow`, ignores the origin entirely (it is `null` by
+construction), clamps the value to a sane maximum, and sets the height. No `allow-same-origin`,
+anywhere, ever — and a test asserts the token is absent. The CSS `min-height` stays as the floor
+and as the no-message fallback, and `resize: vertical` stays.
+
+**Rewrite the header comment in `_report.html.erb` in the same commit.** It currently argues that
+this is impossible; leaving it would leave the file arguing against its own code.
+
+*Tests:* a browser test that a tall report grows the frame and a short one does not stretch it;
+a message from a *different* frame is ignored; a hostile payload (`height: "9e99"`, an object, a
+negative) changes nothing; with JavaScript disabled the CSS height still applies.
+
+---
+
+**T-45 · A GLOBAL TEMPLATE IS REACHABLE.** *(deps: none; closes **M-7**)*
+*Touches:* `app/controllers/reporter_dashboards/templates_controller.rb`,
+`app/views/reporter_dashboards/templates/index.html.erb`, `template.rb` (predicates only),
+`config/locales/*.yml`.
+
+*Accept:* `index` and `find_template` scope `project_id: [nil, @project.id]`, which is what
+`WidgetReport.templates_for` has always done — **one scope, stated once**, rather than a third
+spelling. A global template is marked as such in the list. Reading it, previewing it, exporting
+it, mailing it, scheduling it and sharing it need the permissions they already need; **editing or
+deleting one additionally requires `manage_public_reporter_dashboards_templates`**, because a
+template visible from every project is not one project's to change.
+
+*Tests:* the index lists a global template and a project one and marks which is which; a member
+with `edit_reporter_dashboards_templates` but not `manage_public_…` gets 403 on `PATCH` and 200
+on `GET`; `#document`, `#export`, mail and share all resolve a global template; the
+project-scoped template of *another* project is still a 404 (the widening must not become a
+window).
+
+---
+
+**T-46 · THE MIGRATION CARRIES WHAT IT CLAIMS TO CARRY, AND SAYS WHAT IT DOES NOT.**
+*(deps: none; closes **M-6** and **M-8**)*
+*Touches:* `lib/redmine_reporter_dashboards/import/runner.rb`, `import/import_report.rb`,
+`docs/admin-guide.md`, `config/locales/*.yml` if any string reaches a page.
+
+*Accept:* `orientation` and `description` are carried. Reporter stores `orientation` as its
+enum's **integer**; the mapping is a closed two-entry map with an explicit fallback to
+`'portrait'` for anything else, and the fallback is reported as a note rather than applied
+silently. A source row whose column is absent — reporter's schema is not in this repository and
+`Survey` already introspects rather than assumes — is a note, not a failure.
+
+The run report states, in its own section rather than in a footnote, that **every copy is private
+to the actor who ran the import** and names the one action that widens it. `docs/admin-guide.md`
+§Migrating gains the same as a fourth step, because an operator who reads only the guide currently
+finishes the migration with a dashboard that is broken for everybody else.
+
+*Tests:* a landscape source imports as landscape and a portrait one as portrait; an unknown
+integer falls back **and** produces the note; a source table without an `orientation` column
+imports cleanly with a note; the report's text contains the visibility statement (asserted on the
+string, so deleting it fails); `import:status` still reports `unchanged` for a template whose
+orientation was carried, i.e. the digest comparison is unaffected.
+
+---
+
+**T-47 · DRILL-THROUGH WITHOUT A SAVED QUERY.** *(deps: none; closes **M-9**)*
+*Touches:* `lib/sql_aggregation/liquid_aggregate_tag.rb` (`#drill_builder` only),
+`docs/template-authoring.md`, `starters/aggregate-report.liquid` if its wording needs it.
+
+*Accept:* when no `IssueQuery` resolves, the builder is constructed from an **unfiltered query
+over the report's own project** rather than returning `nil`, so `base_url` is the project issue
+list and every bucket carries its dimension filter. `drill_available` becomes true on the template
+page, the PDF download, a mailed report and a share link. Where there is no project either, the
+present behaviour stands: `drill_available = false`, one log line, counts unaffected.
+
+**G7 is not touched** — `DrillThrough` (frozen) is constructed, not modified, and
+`liquid_aggregate_tag.rb` is not in `Baseline::KERNEL_FILES`. Verify against the file before
+starting; if that has changed, this task needs a `kernel_exception.rb` entry and a curator
+reading, not a workaround.
+
+*Tests:* the four surfaces above each produce a bucket URL for the same template and data; the
+URL a widget produces (inheriting a real query's filters, columns and sort) is **unchanged** by
+this task — a regression test, because the fallback must not reach the path that already works;
+a template rendered with no project produces no URLs and logs once; the PDF carries `/URI`
+annotations for them (F-23's probe, reused).
+
+---
+
+**T-48 · A REFUSED ASSET IS VISIBLE IN THE HTML BINDING TOO.** *(deps: T-41; closes **M-10**)*
+*Touches:* `render/asset_binding.rb` or the resolver it calls, `report_run.rb`,
+`app/views/reporter_dashboards/templates/_degradations.html.erb`, `config/locales/*.yml`.
+
+*Accept:* a `<script src>`, `<link rel=stylesheet>` or `<img src>` naming a host the asset policy
+will not fetch produces a degradation on **every** binding, not only where the engine reports one.
+The scan is server-side and happens before the body reaches a browser, so the HTML binding no
+longer depends on a CSP violation the server never hears about. The degradation **names the host**
+— an operator whose chart vanished needs to know it was `cdnjs.cloudflare.com` and not their own
+template.
+
+*Tests:* a body referencing an external script degrades identically on `:html` and `:pdf`; a body
+referencing only the plugin's own assets does not degrade; the message contains the host; a
+template with no external reference produces no degradation at all (no false positive on an
+inline `<script>`, which is the common case and is allowed).
+
+---
+
+**T-49 · `schedules:run` DOES NOT WARN ABOUT THE RUN IT JUST DID.** *(deps: none; closes **M-11**)*
+*Touches:* the rake task and whatever it shares with `schedules:status`.
+
+*Accept:* the advisory is evaluated against the state **after** the run, so a successful delivery
+does not print "it looks like nothing is calling it". `schedules:status` is unchanged — it was
+right both times.
+
+*Tests:* a run that delivers prints no advisory; a run with an enabled schedule that has never
+been reached and delivers nothing still prints it.
+
+---
+
+**T-50 · THE INSTALL-AND-LOOK JOB — the axis M-0 is about.** *(deps: T-41…T-49 landed)*
+*Touches:* `.github/workflows/ci.yml`, `script/` , `docs/plan/HANDOVER.md`.
+
+*Accept:* one job, on one Redmine branch, that does what the rehearsal did and no more: install
+the plugin into a real Redmine, migrate, seed a small fixture project, render **each shipped
+starter** through the real controller on both bindings, and assert on the result — a chart is a
+`<canvas>` in HTML and an `<svg>` in the PDF, a diagram is drawn, no view emits a stray `%>`, the
+my-page block and the project dashboard both render a report. It is one job because M-0's lesson
+is that *never installing* is the gap; it is deliberately **not** a matrix, per §3's rule that the
+job count is additive and not multiplicative.
+
+*Explicitly out of scope:* a perceptual diff (advisory, §7), and anything that would need a second
+Redmine branch. If this job cannot be made to run in CI's time budget, **say so and stop** — a
+documented manual rehearsal per release is an honest fallback and a flaky job is not.
 
 ## 2. Sequencing
 
