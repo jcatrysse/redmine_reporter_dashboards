@@ -132,3 +132,14 @@
     <div class="box"><%= reporter_report_frame(section) %></div>
   <% end %>
 <% end %>
+
+<%# T-48, Findings M-10 — THE FINDINGS, BELOW THE REPORT, FOR SOMEBODY WHO CAN ACT ON THEM.
+    `@lint` is set only when the viewer may edit this template (see the controller's
+    `lint_for_editors`), so this is nil for everybody else and renders nothing.
+
+    It is BELOW the report rather than above it: the report is what the page is for, and a
+    panel between the heading and the document would push it off the screen for the common
+    case, which is a clean template with nothing to say. %>
+<% if @lint %>
+  <%= render partial: 'lint', locals: { analysis: @lint } %>
+<% end %>

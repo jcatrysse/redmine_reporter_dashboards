@@ -414,6 +414,61 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     end
   end
 
+  # ------------------------------------------- findings on the show page (T-48, §M-10)
+
+  # THE HALF M-10 SAID WAS MISSING AND WHICH ALREADY WORKED, pinned here because the
+  # finding claimed otherwise and a later reader deserves the measurement rather than the
+  # claim: a MARKUP reference to a third-party asset is refused loudly, by URL, on the HTML
+  # binding. Nothing was added for this; it is a regression guard on a control that exists.
+  def test_a_markup_reference_to_a_third_party_asset_is_refused_and_names_the_url
+    grant(:view_reporter_dashboards_reports)
+    template = create_template(
+      visibility: Template::VISIBILITY_PUBLIC,
+      content: '<script src="https://cdnjs.example/chart.js"></script><p>x</p>'
+    )
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_includes response.body, 'https://cdnjs.example/chart.js'
+    assert_includes response.body, 'asset_unresolved'
+  end
+
+  # AND THE HALF THAT WAS GENUINELY MISSING. The legacy templates build their script tag at
+  # RUNTIME — `document.createElement("script")` — which no server-side scan can see, and
+  # `DocumentScanner` refuses to read script bodies for a stated reason. So the signal that
+  # reaches the reader is the linter's, which already had the rule and had only ever been
+  # shown in the editor.
+  def test_the_show_page_carries_the_linter_findings_for_somebody_who_may_edit
+    grant(:view_reporter_dashboards_reports, :edit_reporter_dashboards_templates)
+    template = create_template(
+      visibility: Template::VISIBILITY_PUBLIC,
+      content: '<p>x</p><script>window.GEO_CHARTJS_SRC = "https://cdnjs.example/c.js";</script>'
+    )
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_select '#reporter-template-lint'
+    assert_includes response.body, 'chartjs_src_global'
+  end
+
+  # GATED ON EDITING, NOT ON VIEWING. A finding is authoring feedback: somebody reading
+  # another person's report cannot act on "line 3 loads Chart.js through a global", and
+  # rows of it are noise they scroll past. Same argument `_report.html.erb` makes for
+  # showing a dashboard reader the headline rather than the diagnostics panel.
+  def test_a_reader_who_cannot_edit_is_not_shown_the_findings
+    grant(:view_reporter_dashboards_reports)
+    template = create_template(
+      author: @dlopper, visibility: Template::VISIBILITY_PUBLIC,
+      content: '<p>x</p><script>window.GEO_CHARTJS_SRC = "https://cdnjs.example/c.js";</script>'
+    )
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+
+    assert_response :success
+    assert_select '#reporter-template-lint', 0
+  end
+
   # ------------------------------------------------- global templates (T-45, §M-7)
   #
   # Reporter's templates are global in the ordinary case, the importer preserves that

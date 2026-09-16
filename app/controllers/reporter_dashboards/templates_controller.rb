@@ -59,6 +59,9 @@ module ReporterDashboards
 
     def show
       run
+      # T-48, §Findings **M-10** — THE FINDINGS REACH THE PAGE THE REPORT IS ON, for the
+      # one reader who can act on them. See `lint_for_editors`.
+      lint_for_editors
       render :show, status: outcome_status
     end
 
@@ -479,6 +482,39 @@ module ReporterDashboards
     #
     # `@template.content.to_s` because a brand-new template's content is nil and a body of
     # nil is a template with no findings rather than a missing panel.
+    # T-48, §Findings **M-10** — ON THE SHOW PAGE, AND ONLY FOR SOMEBODY WHO MAY EDIT.
+    #
+    # M-10 asked for a server-side scan that would make a refused external asset visible on
+    # the HTML binding. **Measuring it showed the premise was wrong twice over**, so what
+    # landed is smaller and is the half that is real:
+    #
+    #   * A MARKUP reference already IS reported, loudly and by URL — a template carrying
+    #     `<script src="https://cdnjs…">` renders as *"This report was not produced: a file
+    #     it refers to could not be included"* naming the URL, with code `asset_unresolved`.
+    #     Measured on a real install. There was nothing to add there.
+    #   * The legacy templates are silent for a different reason: they build the script AT
+    #     RUNTIME — `document.createElement("script"); s.src = …` — and no server-side scan
+    #     can see that. `Assets::DocumentScanner` deliberately does not read `<script>`
+    #     bodies, with a stated reason (*"a URL inside a `<script>` BODY is not a
+    #     subresource. A scanner that rewrites it corrupts the script"*), and adding one
+    #     would be undoing a control rather than adding one — CLAUDE.md §11.4.
+    #
+    # What IS missing is a reader-facing signal, and the linter already has the rule
+    # (`handshake.chartjs_src_global`) and the panel. They were only ever shown in the
+    # editor, so somebody opening a migrated template saw a complete-looking report with
+    # empty chart boxes and nothing said anywhere.
+    #
+    # GATED ON `editable_by?` RATHER THAN ON VIEWING, and that is the whole design of it: a
+    # finding is authoring feedback. The person reading somebody else's report cannot act on
+    # "line 73 loads Chart.js through a global", and eight rows of it is noise they have to
+    # scroll past — the same argument `_report.html.erb` makes for showing a dashboard reader
+    # the headline instead of the diagnostics panel.
+    def lint_for_editors
+      return unless @template.editable_by?(User.current)
+
+      lint_editor
+    end
+
     def lint_editor
       @lint = TemplateLinter.analyse(@template.content.to_s)
     end

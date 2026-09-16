@@ -115,7 +115,7 @@ was wrong for a whole phase is the kind of thing that gets believed twice.
 | **T-45** | **done** — `index`, `find_template` and `find_preview_base` scope to `[nil, project.id]`, which is the spelling `WidgetReport.templates_for` has always used, plus a `Global` marker in twelve locales. **THE EDIT RULE NEEDED NO NEW CONDITION**: `Template#editable_by?` already answers false for a project-less template unless the actor is an administrator, because there is no project to hold a permission against — stricter than the `manage_public_…` rule this task was planned with, and the same reason that rule could not have been checked either. Measured in a browser: listed and marked, 200 for a member, 403 on edit, 200 on edit for an administrator. Five tests including the two that bound it — another project's template is still a 404, and a private global one is still not found by somebody else. 119 runs, 350 assertions, 0 failures. §Findings **M-7** |
 | **T-46** | **done** — `orientation` and `description` on `OPTIONAL_COLUMNS`, a closed integer→name map with a reported default, a Visibility section in the run report and a fourth step plus a carried/not-carried table in `docs/admin-guide.md`. Measured end to end on the rehearsal install: source `orientation=1` now imports as `landscape` and its PDF comes out **841.92 × 595.92 pts** where it was portrait, and the run prints the visibility section. Six tests, including the two that keep it honest — a source schema with NO orientation column imports cleanly and says nothing, and a run that creates nothing prints no visibility advice. 46 runs, 206 assertions, 0 failures. §Findings **M-6**, **M-8** |
 | **T-47** | **done** — `RenderContext` gains `project` (carried, never inferred from a relation), `ReportRun` derives it as `query&.project || template.project`, and `#drill_builder` falls back to an unfiltered query over it. **G7 untouched**: `DrillThrough` is constructed and not modified, and `liquid_aggregate_tag.rb` is not in `KERNEL_FILES` — checked against the file. Measured: the template page and its PDF now carry bucket URLs and **12 real `/URI` annotations** where both had none, and the widget's URL is byte-identical before and after, which is the regression that mattered. `filters = {}` rather than the default, because inheriting `status_id: open` would send a click on "Closed: 46" to a list of open issues. §Findings **M-9** |
-| **T-48** | **open** — a refused external asset degrades on the HTML binding too. §Findings **M-10** |
+| **T-48** | **done, and two thirds of the finding was refuted** — a markup reference to a third-party asset was ALREADY refused by URL on the HTML binding (measured, now a regression test), and the legacy templates are silent because they build the script at runtime, which no server-side scan can see and which `DocumentScanner` refuses to read for a stated reason. So the proposed scan is not built. What landed is the reader-facing half with existing machinery: the linter's findings appear on the template's own page, gated on `editable_by?` because a finding is authoring feedback. Measured: the migrated dashboard's page now carries 48 errors and 6 warnings, including the rules that explain its empty charts. 122 runs, 360 assertions, 0 failures. §Findings **M-10** (corrected) |
 | **T-49** | **done, and the finding was half wrong** — the heartbeat is read before the tick for a measured reason `RunCommand#call` already carries, so the reordering M-11 first proposed is refused. What landed is one additional line after the warning, printed only when the tick CLAIMED an occurrence: *"This run is that invocation."* Two tests, including the negative — a tick that reached nothing must not claim to be the answer. 23 runs, 83 assertions, 0 failures. §Findings **M-11** (corrected) |
 | **T-50** | **open** — the install-and-look job: the verification axis M-0 is about |
 
@@ -338,17 +338,37 @@ A report with no saved query is not a report with no scope — `Reporting::Repor
 answers "this project's visible issues". The missing piece is an `IssueQuery` to inherit from,
 and an unfiltered project query is the honest one.
 
-**M-10 · AN ASSET THE POLICY REFUSES IS INVISIBLE IN THE HTML BINDING, SO A MIGRATED TEMPLATE
-LOSES ITS CHARTS WITH NOTHING ON THE PAGE.** 2026-09-16. The rehearsal's two carried-over
-templates load Chart.js 2.8 from `cdnjs.cloudflare.com`, which the `:bundled` policy is right to
-refuse. In a PDF the refusal is a degradation and `_degradations` prints it. In the HTML binding
-the browser refuses the `<script>` against the `srcdoc` CSP, which is a **browser-side** event
-the server never learns about, so `templates/show` renders a complete-looking report with three
-empty chart boxes and no notice anywhere.
+**M-10 · A MIGRATED TEMPLATE LOSES ITS CHARTS WITH NOTHING ON THE PAGE — AND THE MECHANISM
+IS NOT THE ONE THIS ENTRY FIRST NAMED.** 2026-09-16, corrected the same day by measurement.
 
-`migrate_from_reporter:plan` predicts this precisely and by line number, which is the mitigation
-working as designed. It is also the only place it is ever said: an operator who runs the import
-without reading the plan gets no second chance.
+The observation stands: the two carried-over templates load Chart.js 2.8 from
+`cdnjs.cloudflare.com`, the `:bundled` policy is right to refuse it, and `templates/show`
+rendered a complete-looking report with three empty chart boxes and no notice anywhere.
+
+**The diagnosis was wrong twice over, and both corrections matter more than the original.**
+
+First, a MARKUP reference is already reported, loudly and by URL. A template carrying
+`<script src="https://cdnjs…">` renders as *"This report was not produced: a file it refers
+to could not be included"*, naming the URL, with code `asset_unresolved` — measured on a real
+install, and now a regression test. So "the HTML binding says nothing about a refused asset"
+was simply false.
+
+Second, the legacy templates are silent for a different reason: they do not reference the
+script in markup at all. They BUILD it at runtime —
+
+    var s = document.createElement("script"); s.src = window.GEO_CHARTJS_SRC;
+
+— and no server-side scan can see that. `Assets::DocumentScanner` deliberately does not read
+`<script>` bodies, with its own stated reason (*"a URL inside a `<script>` BODY is not a
+subresource. A scanner that rewrites it corrupts the script"*). **So this entry's proposed
+fix — scan for it server-side — would have undone a control rather than added one**
+(CLAUDE.md §11.4), and could not have worked regardless.
+
+What is genuinely missing is a reader-facing signal, and the machinery for it already
+exists: `TemplateLinter` has the rule (`handshake.chartjs_src_global`, and four more that
+explain the same template's empty charts), and `_lint.html.erb` is the panel. They had only
+ever been shown in the editor. `migrate_from_reporter:plan` prints the same findings, which
+is the mitigation working as designed, and is the only place it was ever said.
 
 **M-11 · `schedules:run` PRINTS THE "NOTHING IS CALLING THE SCHEDULER" ADVISORY IN THE OUTPUT OF
 A SUCCESSFUL RUN — AND THE OBVIOUS FIX IS THE ONE THE CODE ALREADY REFUSES.** 2026-09-16.
