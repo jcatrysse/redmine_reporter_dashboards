@@ -147,8 +147,36 @@ class ReporterDashboardsAuthoringSystemTest < ReporterDashboardsSystemTestCase
   # suite must mean the same thing on a runner whose default locale is not English —
   # CLAUDE.md §6. `name: 'preview'` is the attribute `_editor.html.erb` sets and the one the
   # controller reads.
+  # THE CLICK NAVIGATES, AND CAPYBARA DOES NOT WAIT FOR A NAVIGATION.
+  #
+  # This helper used to be the `find(...).click` alone, and the three tests that use it were
+  # the flakiest thing in the repository: over four CI matrix legs they failed on one or two
+  # legs per run, a different leg each time, with two symptoms that are the same defect seen
+  # from two sides.
+  #
+  #   StaleElementReferenceError from `assert_text`
+  #   "expected to find visible css ... Also found <<ERROR>>" from `assert_selector`
+  #
+  # `<<ERROR>>` is Capybara failing to DESCRIBE an element because it went stale while being
+  # described. Both say the assertion ran against the document that was current when it
+  # started and the browser replaced that document underneath it.
+  #
+  # It is a race the assertions cannot win on their own, and the reason is that the form
+  # POSTs to itself: EVERY landmark those tests look for — `#reporter-template-form`, and the
+  # body text, which is in the `<textarea>` they just typed into — is ALREADY TRUE of the edit
+  # page they are leaving. A retrying finder does not help when the wrong page satisfies it.
+  #
+  # So the wait belongs here, once, on something that is true of the preview result and of
+  # nothing else: the report frame. The edit page has no `iframe.reporter-report-frame`; the
+  # preview page renders one per section (`templates/preview.html.erb:114`). Waiting for it
+  # is waiting for the new document, and every assertion after it is about the page the test
+  # means.
+  #
+  # NOT a `sleep`, and not a longer `default_max_wait_time`: both would make the tests slower
+  # without making them right, because the failing runs were not slow — they were early.
   def click_on_preview
     find('#reporter-template-form input[name="preview"]').click
+    assert_selector 'iframe.reporter-report-frame'
   end
 
   # The saving button is the one WITHOUT `name="preview"`, which is `commit` — Rails' default
