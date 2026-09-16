@@ -108,6 +108,35 @@ module RedmineReporterDashboards
 
         # FR-44, from the status taken BEFORE the tick — see `#call`.
         Heartbeat.warnings(heartbeat_before).each { |warning| line("  * #{warning}") }
+        line("  * #{FIRST_INVOCATION_NOTE}") if first_invocation?(summary, heartbeat_before)
+      end
+
+      # T-49, §Findings **M-11** — AND THE FINDING WAS HALF WRONG, WHICH IS WHY THIS IS A
+      # LINE RATHER THAN A REORDERING.
+      #
+      # What was reported: `schedules:run` prints *"it looks like nothing is calling it"* in
+      # the output of a run that had just delivered, while `schedules:status` immediately
+      # afterwards says `no warnings`. True, and the conclusion drawn from it — read the
+      # heartbeat after the tick — is exactly the ordering `#call`'s comment refuses, with a
+      # measurement behind the refusal: the tick sets `last_attempted_at` and refreshes
+      # `next_run_on`, destroying both signals, so a status taken afterwards always says
+      # everything is fine and the operator who ran this BECAUSE nothing was arriving learns
+      # nothing. CLAUDE.md §11.4 — argue with the finding, not around the control.
+      #
+      # What is genuinely wrong is one clause of one sentence, in one situation: on the very
+      # first tick of a correctly configured cron entry, "nothing is calling it" is being
+      # said BY the thing calling it. So the warning stays exactly as it is — it is right for
+      # `schedules:status`, and right here whenever this tick did nothing — and a second line
+      # follows it when this run is itself the answer.
+      FIRST_INVOCATION_NOTE =
+        'This run is that invocation. If it came from cron, nothing further is needed and '         'the warning above will not appear again.'
+
+      # Deliberately `claimed` rather than `succeeded`: a tick that claimed an occurrence and
+      # then failed to deliver it HAS reached the schedule, which is what the warning above is
+      # about. Failures are reported on their own lines and need no help from here.
+      def first_invocation?(summary, heartbeat_before)
+        heartbeat_before.respond_to?(:never_run?) && heartbeat_before.never_run? &&
+          summary.respond_to?(:claimed) && summary.claimed.to_i.positive?
       end
 
       def line(text)

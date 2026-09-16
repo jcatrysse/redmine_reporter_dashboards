@@ -58,6 +58,29 @@ class ReporterDashboardsScheduleCommandTest < ActiveSupport::TestCase
     assert_match(/1 schedule\(s\) considered/, @out.string)
   end
 
+  # T-49, §Findings M-11 — THE FIRST TICK MUST NOT TELL ITS OWN CALLER THAT NOBODY IS
+  # CALLING. The heartbeat is deliberately read BEFORE the tick (see `RunCommand#call`, and
+  # the measurement behind it), so a first successful run prints the never-reached warning —
+  # which is right for `schedules:status` and reads as a contradiction here, one line under
+  # "1 delivered". The warning is unchanged; a second line says this run is the answer.
+  def test_the_first_successful_tick_says_that_it_is_itself_the_invocation
+    build_schedule
+
+    assert_equal 0, run_command
+    assert_match(/never been reached by a run/, @out.string,
+                 'the warning itself stays: it is what an operator running this by hand came for')
+    assert_match(/This run is that invocation/, @out.string)
+  end
+
+  # AND IT MUST NOT SAY IT WHEN IT IS NOT TRUE. A tick that reached nothing has not answered
+  # the warning, and saying it had would turn a real diagnostic into noise.
+  def test_a_tick_that_claims_nothing_does_not_claim_to_be_the_invocation
+    build_schedule(start_date: NOW.to_date + 30)
+
+    assert_equal 0, run_command
+    refute_match(/This run is that invocation/, @out.string)
+  end
+
   def test_a_failing_schedule_exits_one
     # FR-41: "one failing schedule does not prevent later schedules from delivering; the
     # run exits non-zero." This is the second half, which is the half cron reads.

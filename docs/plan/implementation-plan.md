@@ -116,7 +116,7 @@ was wrong for a whole phase is the kind of thing that gets believed twice.
 | **T-46** | **open** — the import carries `orientation`/`description` and states that copies are private. §Findings **M-6**, **M-8** |
 | **T-47** | **open** — drill-through without a saved query. §Findings **M-9** |
 | **T-48** | **open** — a refused external asset degrades on the HTML binding too. §Findings **M-10** |
-| **T-49** | **open** — `schedules:run` stops warning about the run it just did. §Findings **M-11** |
+| **T-49** | **done, and the finding was half wrong** — the heartbeat is read before the tick for a measured reason `RunCommand#call` already carries, so the reordering M-11 first proposed is refused. What landed is one additional line after the warning, printed only when the tick CLAIMED an occurrence: *"This run is that invocation."* Two tests, including the negative — a tick that reached nothing must not claim to be the answer. 23 runs, 83 assertions, 0 failures. §Findings **M-11** (corrected) |
 | **T-50** | **open** — the install-and-look job: the verification axis M-0 is about |
 
 
@@ -351,13 +351,26 @@ working as designed. It is also the only place it is ever said: an operator who 
 without reading the plan gets no second chance.
 
 **M-11 · `schedules:run` PRINTS THE "NOTHING IS CALLING THE SCHEDULER" ADVISORY IN THE OUTPUT OF
-A SUCCESSFUL RUN.** 2026-09-16, cosmetic and one line. Measured:
+A SUCCESSFUL RUN — AND THE OBVIOUS FIX IS THE ONE THE CODE ALREADY REFUSES.** 2026-09-16.
+Measured:
 
     1 schedule(s) considered, 0 incomplete, 1 occurrence(s) claimed, 0 already claimed, 1 delivered, 0 failed
       * At least one schedule is active and has never been reached by a run. …it looks like nothing is calling it.
 
 `schedules:status` immediately afterwards reports `last attempt: 2026-09-16 04:28:01 UTC` and
 `no warnings`, so the advisory is reading state captured before the run it is appended to.
+
+**THAT LAST SENTENCE IS TRUE AND IT IS NOT A DEFECT.** `RunCommand#call` reads the heartbeat
+before the tick on purpose, with a measurement behind it: the tick sets `last_attempted_at` and
+refreshes `next_run_on`, destroying both signals `Heartbeat` derives from, so a status taken
+afterwards always says everything is fine — and the operator who ran this BY HAND, precisely
+because nothing was arriving, learns nothing. Reordering it would make the diagnostic useless in
+the only situation anybody reads it. CLAUDE.md §11.4, and this entry originally proposed the
+reordering.
+
+What is actually wrong is one clause, in one situation: on the first tick of a correctly
+configured cron entry, *"it looks like nothing is calling it"* is being said by the thing calling
+it. So the warning stays and a second line follows it when this run is itself the answer.
 
 ---
 
