@@ -2718,9 +2718,36 @@ declaration, no matrix cell.
 
 ## 4b. What the next session should start with
 
-**T-27 AND S-30 BOTH LANDED ON 2026-08-13.** Every numbered task is done and the T-26
-remainder is closed. What is left is **T-03's twelve render performance cells, which the
-curator said to leave** — so unless the curator says otherwise, there is no queued work.
+**2026-09-16: T-50 IS THE ONE OPEN TASK, AND #16 IS THE ONE OPEN DECISION.** Phase 5
+(T-41…T-49) landed that day, from the first end-to-end installation — §2c has the rehearsal,
+§Findings **M-0…M-11** have the defects and `implementation-plan.md` §Status has what each
+task did. Start there, not here.
+
+**Three of the eleven findings were WRONG OR HALF WRONG, and every one of them was corrected
+by measuring rather than by reading.** That is the pattern to expect from anything M-numbered:
+
+- **M-2** blamed a missing host source in the CSP. The browser never sees a
+  `/plugin_assets/…` URL at all — the asset binding has already embedded it as a `data:` URI —
+  so the policy was refusing its own binding and the fix was `data:`, not a host.
+- **M-10** asked for a server-side scan of refused assets. A markup reference was ALREADY
+  refused by URL; the legacy templates are silent because they build the script at runtime,
+  which no scan can see and which `DocumentScanner` refuses to read on purpose. The scan was
+  not built.
+- **M-11** proposed reading the scheduler heartbeat after the tick. `RunCommand#call` refuses
+  that with a measurement already in its comment. One extra line landed instead.
+
+**T-50 is the axis M-0 is actually about**: one CI job that installs the plugin and looks at
+what it renders. Six of the nine defects were invisible to a suite of 2 944 DB-less examples
+and 1 086 minitest runs, because they are WIRING between tested units or live on a
+configuration axis no job varies. Read T-50's `Accept:` before designing anything — it is
+deliberately one job, not a matrix, and its own out-of-scope clause matters.
+
+**Decision #16** (may the importer publish what it imports) is in
+`DECISIONS-PENDING.md` Part 4, with a recommendation. It blocks nothing.
+
+**Before Phase 5, this section read:** every numbered task is done and the T-26 remainder is
+closed; what is left is **T-03's twelve render performance cells, which the curator said to
+leave**. That is still true of T-00…T-40.
 
 **WHAT S-30 DID NOT SETTLE IS NOW SETTLED — curator decision #1, implemented 2026-08-14.**
 S-30's safety argument was *"after T-26a every render constructs a RenderContext"*. True of
