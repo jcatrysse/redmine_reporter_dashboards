@@ -35,7 +35,12 @@ require_relative '../lib/redmine_reporter_dashboards/liquid/tags/mermaid_tag'
 #
 # `mermaid` is the exception and uses the real class, because it is the one BLOCK tag the
 # plugin ships and `{% mermaid %}…{% endmermaid %}` only parses if the parser is told so.
-RSpec.describe 'every shipped template' do
+#
+# NAMESPACED, because a constant assigned inside `RSpec.describe` lands on `Object` — and
+# `PLUGIN_ROOT`, `SHIPPED`, `BLOCK_TAGS` and `StandInTag` were all exactly that until an
+# independent review pointed at them. `spec/frame_auto_height_spec.rb` carries the header
+# about this trap; this file is another that has to obey it.
+module ShippedTemplateParseSupport
   PLUGIN_ROOT = File.expand_path('..', __dir__)
 
   # Both directories ship, and an author copies from either: `starters/` is offered on the
@@ -59,37 +64,71 @@ RSpec.describe 'every shipped template' do
     constants = source.scan(/^\s*(\w*TAG\w*(?:NAME|ALIAS))\s*=\s*'([^']+)'/).to_h { |k, v| [k, v] }
     constants.values.sort
   end
+end
 
-  before do
-    self.class.plugin_tag_names.each do |name|
+RSpec.describe 'every shipped template' do
+  # THE REGISTRY IS PROCESS-WIDE AND IS PUT BACK, which is the difference between a spec and
+  # a spec that breaks the four files after it.
+  #
+  # `Liquid::Template.register_tag` writes one global table. `spec_liquid` runs as a single
+  # rspec process under `config.order = :random`, so without this `after` every file that
+  # loaded later saw `sql_aggregate`, `version_rollup` and `chart` as `StandInTag` — and in
+  # `template_renderer_spec.rb`'s `:strict` examples, whether a tag is KNOWN is the thing
+  # being asserted. The other four files in this directory avoid the problem by registering
+  # under `rrd_spec_`-prefixed names; this one cannot, because the names are exactly what is
+  # on trial. So it snapshots and restores instead. CLAUDE.md §6: never depend on another
+  # test having run, or on the order they run in. Found by an independent review.
+  # `Liquid::Template.tags` IS NOT A HASH. It is a `TagRegistry` on both majors, with
+  # `[]`, `[]=`, `delete` and `each` and nothing else — measured on 4.0.4 and 5.5.1, after a
+  # first version of this hook called `.dup` and `.replace` on it and died with a
+  # `NoMethodError` in the `ensure`, which turned one restore into four red examples. So the
+  # snapshot is per NAME: what each name mapped to before, `nil` included, and `delete` is
+  # what puts a name that did not exist back to not existing.
+  around do |example|
+    touched = ShippedTemplateParseSupport.plugin_tag_names
+    before = touched.to_h { |name| [name, Liquid::Template.tags[name]] }
+
+    touched.each do |name|
       next if name == 'mermaid'
 
-      Liquid::Template.register_tag(name, StandInTag)
+      Liquid::Template.register_tag(name, ShippedTemplateParseSupport::StandInTag)
     end
     Liquid::Template.register_tag(
       'mermaid', RedmineReporterDashboards::Liquid::Tags::MermaidTag
     )
+
+    begin
+      example.run
+    ensure
+      before.each do |name, previous|
+        if previous
+          Liquid::Template.register_tag(name, previous)
+        else
+          Liquid::Template.tags.delete(name)
+        end
+      end
+    end
   end
 
   # A NON-EMPTY SUBJECT IS AN ASSERTION, not an assumption. T-37 shipped a spec whose glob
   # resolved to nothing and whose emptiness assertion therefore passed vacuously for a whole
   # release; the same shape here would report "every shipped template parses" about none.
   it 'is a real set of files, and the tag names come from the plugin rather than this file' do
-    expect(SHIPPED.count { |path| path.include?('/starters/') }).to eq(5)
-    expect(SHIPPED.length).to be >= 5
+    expect(ShippedTemplateParseSupport::SHIPPED.count { |path| path.include?('/starters/') }).to eq(5)
+    expect(ShippedTemplateParseSupport::SHIPPED.length).to be >= 5
 
-    names = self.class.plugin_tag_names
+    names = ShippedTemplateParseSupport.plugin_tag_names
     expect(names).to include('sql_aggregate', 'version_rollup', 'chart', 'mermaid')
     expect(names.length).to be >= 5
   end
 
   it "parses on Liquid #{Liquid::VERSION}" do
-    failures = SHIPPED.filter_map do |path|
+    failures = ShippedTemplateParseSupport::SHIPPED.filter_map do |path|
       begin
         Liquid::Template.parse(File.read(path, encoding: 'UTF-8'))
         nil
       rescue Liquid::SyntaxError => e
-        "#{path.sub("#{PLUGIN_ROOT}/", '')}: #{e.message}"
+        "#{path.sub("#{ShippedTemplateParseSupport::PLUGIN_ROOT}/", '')}: #{e.message}"
       end
     end
 
@@ -118,12 +157,12 @@ RSpec.describe 'every shipped template' do
   # a comment inside them — CLAUDE.md §5's "a control specified as mechanical and implemented
   # as a comment". This one holds on BOTH majors, which is the point: it is the portable rule.
   it 'writes no block tag inside a comment, on either major' do
-    offenders = SHIPPED.flat_map do |path|
+    offenders = ShippedTemplateParseSupport::SHIPPED.flat_map do |path|
       body = File.read(path, encoding: 'UTF-8')
       body.scan(/\{%\s*comment\s*%\}(.*?)\{%\s*endcomment\s*%\}/m)
           .flat_map { |(inner)| inner.scan(/\{%-?\s*(\w+)/).flatten }
-          .select { |tag| BLOCK_TAGS.include?(tag) }
-          .map { |tag| "#{path.sub("#{PLUGIN_ROOT}/", '')}: {% #{tag} %}" }
+          .select { |tag| ShippedTemplateParseSupport::BLOCK_TAGS.include?(tag) }
+          .map { |tag| "#{path.sub("#{ShippedTemplateParseSupport::PLUGIN_ROOT}/", '')}: {% #{tag} %}" }
     end
 
     expect(offenders).to be_empty, -> { offenders.join("\n  ") }

@@ -392,6 +392,19 @@ decision belongs to. The run's own output says the same thing and counts them.
 An orientation this importer does not recognise becomes portrait and is reported as a note
 rather than applied quietly.
 
+**If you migrated before this was fixed, re-run `import:run`.** Early copies came through
+portrait with no description whatever the source said, and the run reported them as
+`unchanged` because it compared only the body. A re-run now compares the presentation as
+well and corrects it: the template's content and its version history are untouched, and the
+run's output names each template it corrected.
+
+One limit worth knowing, because it is the other side of that: **description and orientation
+are not change-tracked, so a re-run overwrites whatever you set here.** The body is
+protected — a copy you have edited is reported as diverged and left alone, and is only
+overwritten if you ask for it with `RRD_REWRITE=1` — but the presentation is taken from the
+source every time. If you want a report to print landscape and its source says portrait,
+change the source, or stop re-running the import for that template.
+
 ### One thing that will not work
 
 **This plugin's tags do not resolve inside a template that `redmine_reporter` renders.** Tag

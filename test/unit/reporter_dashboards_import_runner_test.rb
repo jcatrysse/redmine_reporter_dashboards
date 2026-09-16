@@ -95,6 +95,13 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
     Runner.call(actor: @admin, **options)
   end
 
+  # `{status => count}` over the run's outcomes. `Result` has no per-status reader and a
+  # test that asserted on `outcomes.first.status` would pass for a run that did three other
+  # things as well.
+  def statuses(result)
+    result.outcomes.group_by(&:status).transform_values(&:length)
+  end
+
   # ------------------------------------------------- what the copy carries (T-46, M-6)
 
   # THE DEFECT, AS A REGRESSION TEST. The example dashboard this was found on is a six-tile
@@ -145,6 +152,59 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
     assert_equal 'portrait', copy.orientation
     assert_nil copy.description
     refute_match(/orientation/, result.notes.join(' '))
+  end
+
+  # THE INSTALLATIONS THE FIX HAD TO REACH AND DID NOT, which is the whole point of a
+  # RE-RUN. Everybody who migrated did so before `create_copy` carried these columns, so
+  # every copy in existence has the wrong orientation — and `refresh_copy` returned
+  # `:unchanged` on a matching body digest before it assigned anything at all. Found by an
+  # independent review.
+  def test_a_re_run_corrects_an_orientation_an_earlier_import_got_wrong
+    create_source_tables_with_presentation
+    source_id = seed_source_with_presentation(orientation: 1, description: 'Board pack')
+
+    run_import
+    copy = Template.find_by(source_template_id: source_id)
+    # The state an installation that migrated before T-46 is actually in: right content,
+    # right digest, wrong presentation.
+    copy.update_columns(orientation: 'portrait', description: nil)
+
+    result = run_import
+
+    copy.reload
+    assert_equal 'landscape', copy.orientation
+    assert_equal 'Board pack', copy.description
+    assert_equal 1, statuses(result)[:updated]
+    assert_match(/kept its content and took the source's/, result.notes.join(' '))
+  end
+
+  # AND A RUN THAT REALLY HAS NOTHING TO DO STILL SAYS SO. The comparison has to be on the
+  # VALUES rather than on "did we look", or every status run would report every template as
+  # updated and the word would stop meaning anything.
+  def test_a_re_run_with_nothing_to_correct_is_still_unchanged
+    create_source_tables_with_presentation
+    seed_source_with_presentation(orientation: 1, description: 'Board pack')
+
+    run_import
+    result = run_import
+
+    assert_equal 1, statuses(result)[:unchanged]
+    assert_nil statuses(result)[:updated]
+  end
+
+  # A DRY RUN WRITES NOTHING, on this path as on every other.
+  def test_a_dry_run_reports_the_metadata_correction_without_making_it
+    create_source_tables_with_presentation
+    source_id = seed_source_with_presentation(orientation: 1)
+
+    run_import
+    copy = Template.find_by(source_template_id: source_id)
+    copy.update_columns(orientation: 'portrait')
+
+    result = run_import(dry_run: true)
+
+    assert_equal 1, statuses(result)[:updated]
+    assert_equal 'portrait', copy.reload.orientation
   end
 
   # ------------------------------------------------------------------ copy, forward-only

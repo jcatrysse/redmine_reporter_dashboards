@@ -5412,6 +5412,30 @@ job count is additive and not multiplicative.
 Redmine branch. If this job cannot be made to run in CI's time budget, **say so and stop** — a
 documented manual rehearsal per release is an honest fallback and a flaky job is not.
 
+### Phase 5b — what the independent review of Phase 5 found *(ships 0.9.0)*
+
+The Phase 5 work was reviewed by a fresh subagent over `517f79e..HEAD` and **rejected**: 3
+blockers, 5 majors, 6 minors. Every finding is recorded here with its disposition, including the
+three that measurement contradicted, because a review whose wrong findings are quietly dropped
+reads afterwards as a review that found only what was fixed.
+
+| # | Finding | Disposition |
+|---|---|---|
+| **R-1** | `erb_comment_integrity` passed two working reproductions of M-4. Rule B was a heuristic — "a real terminator is last on its line" — and this repository wraps view prose at ~95 characters, so a leak one line-wrap away from the sentence explaining M-4 read as deliberate; a single-line comment was exempt outright | **Fixed.** The heuristic is gone. The reader now runs ERB's own two-state machine and flags any `%>` reached in template text. Both reproductions are committed as self-test cases, plus the `<%%` escape, whose handling was **measured** against Erubi rather than assumed — `<%%= v %>` consumes through its `%>`, so an escape opens a tag like any other |
+| **R-2** | `Template.visible`'s `EXISTS` matches a global template for a holder of a named role anywhere; `Template#visible?` answered a flat `false` for every project-less template. T-45 made the index use the scope, so the divergence became a listed-then-404 disclosure | **Fixed.** The predicate now answers the scope's reading, and a second divergence was found while fixing it: the scope's `OR author_id = ?` arm applies to every visibility and the predicate answered it only for `private` — invisible on a project template because the permission gate refuses both, reachable on a global one because there is no gate. The agreement matrix gained four global rows and the archived-project case |
+| **R-3** | `with_pdf` bound the charts for the renderer and returned the **unbound** sections, so the editor's own preview — `call(pdf: true)` then `render @outcome.sections` — still showed M-1's empty `<div>`. Guarded only by a grep over the method's own source | **Fixed.** The bind is hoisted above `resolve_engine`, so the failure returns carry it too (a no-engine install still displays those sections). Three behavioural examples in `report_run_spec.rb`, one per return path |
+| **R-4** | `refresh_copy` wrote neither `description` nor `orientation`, and returned `:unchanged` on a matching body digest before reaching any assignment — so the fix never reached the installations M-6 was measured on, which is all of them | **Fixed.** Content and metadata are compared independently; a run may change only the second. `docs/admin-guide.md` gained the re-run instruction and states the limit: metadata is not change-tracked, so a local edit to it is overwritten |
+| **R-5** | The height protocol had no convergence bound. The child's `last` memo is one step and does not damp a two-cycle, which two media queries in a report's own CSS produce; `MAX_HEIGHT` bounds the value, not the rate | **Fixed.** Twenty writes per frame, spent only by a write that changes something. The node harness gained the oscillating sequence and the "same height twice costs nothing" case |
+| **R-6** | The drill fallback builds an `IssueQuery` per tag per document, so a per-record export would pay `documents × tags` where it paid none — FR-48 / G6 | **Refuted by measurement, and pinned.** A per-record job renders with `scope: nil`, so `{% sql_aggregate %}` cannot resolve a relation and returns before `apply_drill` is ever reached. Measured on PostgreSQL: a per-record run costs the same query count for two documents as for six. `test/unit/reporter_dashboards_drill_query_count_test.rb` is that measurement, kept because the day per-record jobs get a scope the finding becomes correct |
+| **R-7** | `binding_spec.rb` claimed `spec/reporting/` covered the binding end to end. It covered nothing of the sort | **Fixed.** The false clause is gone and the examples it promised now exist — they are R-3's |
+| **R-8** | `shipped_template_parse_spec.rb` wrote the process-wide Liquid tag registry with no teardown, so every later file in `spec_liquid` saw stand-ins where it expected real tags | **Fixed** with a per-name snapshot and restore. `Liquid::Template.tags` is a `TagRegistry`, not a Hash — `dup`/`replace` raise on both majors, measured |
+| **R-9**, **R-12b** | `B`, `CH`, `POLICY`, `PLUGIN_ROOT`, `SHIPPED`, `BLOCK_TAGS`, `StandInTag` all assigned inside `RSpec.describe`, hence on `Object` | **Fixed** — named support modules or methods, the shape `frame_auto_height_spec.rb` already used |
+| **R-10** | Two lost `\` line continuations left a 169- and a 142-character line whose output was accidentally correct | **Fixed** |
+| **R-11** | `report_frame.rb` said *"no `default-src`"* about a policy beginning `default-src 'none'`; and `data:` on `script-src` did add one capability, because CSP 3 resolves a worker through `worker-src → child-src → script-src` | **Fixed.** The sentence is corrected and the chain is closed with `worker-src 'none'; child-src 'none'` |
+| **R-12** | `frame_auto_height_spec.rb` required node with no reasoned skip | **Fixed** — a skip carrying its reason, per G12's three-state rule |
+| **R-13** | T-48's lint panel is gated on `editable_by?`, which is administrator-only for a global template — so on a migrated install it reaches one person | **Recorded, not changed.** `DECISIONS-PENDING.md` #17, recommending a one-line degradation summary for every viewer and the full panel for editors |
+| **R-14** | `Collector`'s duplicate-id control sees tags; the binding substitutes on markup, so a hand-written placeholder beside a real `{% chart %}` produced two canvases with one id | **Fixed.** The binding binds the first occurrence of an id and leaves the rest, logging why |
+
 ## 2. Sequencing
 
 ```mermaid

@@ -523,3 +523,33 @@ also be able to say so up front.
 that the clicking is the real cost. The rehearsal had three templates; nobody has reported a
 number that makes 1 painful, and `technical-spec.md` §4.1 put publication behind a permission on
 purpose. **Decision:**
+
+### 17. Who should see a template's lint findings? — **OPEN**
+
+**The situation.** T-48 puts the lint panel on the template's own show page, gated on
+`#editable_by?`. An independent review pointed out what that means on the installations M-10 is
+about: `#editable_by?` is **administrator-only for a project-less template**, imported templates
+are global in the ordinary case, so on a migrated install the findings reach the administrator
+who ran the import and nobody else. The problem M-10 names — *"somebody opening a migrated
+template saw a complete-looking report with empty chart boxes and nothing said anywhere"* — is
+answered for one person per installation.
+
+Not a defect: every stated behaviour is the intended one and the tests assert it. But the stated
+design does not deliver what the stated problem asks for, and that is worth a decision rather
+than a silent gap.
+
+**Options.**
+
+1. **Leave it.** Findings are authoring feedback; a reader who cannot edit a template cannot act
+   on them, and a panel of rule ids above somebody's dashboard is noise. The administrator who
+   migrated is the person who can fix it.
+2. **Show the panel to anyone holding an authoring permission in the project**, editable or not.
+   Wider, and it tells a template author that the global report they are copying from has
+   problems. It also shows template internals to somebody with no say over that template.
+3. **Show a one-line summary to every viewer** ("2 of 3 charts on this report could not be
+   drawn") and the full panel to editors. Answers the reader's actual question without publishing
+   rule ids.
+
+**Recommendation: 3**, because the reader's complaint was never "I want the lint output", it was
+"nothing said anything". A degradation line is already computed for the run; this is choosing to
+show it. **Decision:**

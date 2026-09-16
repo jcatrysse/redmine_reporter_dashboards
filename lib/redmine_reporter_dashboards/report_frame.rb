@@ -72,10 +72,28 @@ module RedmineReporterDashboards
     # rewritten the same way, and a refused stylesheet is a report that silently loses its
     # layout.
     #
-    # What is still absent is what matters: no `'self'`, no host, no `connect-src`,
-    # no `default-src`. An opaque origin's `'self'` is nothing, and a host source would
-    # let a template pull code from anywhere that host serves — which IS a widening, and
-    # is not needed, because the binding has already embedded everything the document uses.
+    # What is still absent is what matters: no `'self'` and no host source anywhere, and no
+    # `connect-src`, so `default-src 'none'` still denies every fetch this policy does not
+    # name. An opaque origin's `'self'` is nothing, and a host source would let a template
+    # pull code from anywhere that host serves — which IS a widening, and is not needed,
+    # because the binding has already embedded everything the document uses.
+    #
+    # An earlier version of this paragraph said *"no `default-src`"*, which is the opposite
+    # of the line below it, and an independent review was right to call it the worst kind of
+    # comment: a false statement about a security-bearing directive is what the next reader
+    # checks instead of the policy.
+    #
+    # --- `worker-src 'none'; child-src 'none'`, AND THE REVIEW FOUND THE REASON ---
+    #
+    # `data:` on `script-src` does add one capability that `'unsafe-inline'` does not, and
+    # it is not the main thread: CSP 3's fallback chain for a worker is
+    # `worker-src → child-src → script-src`, so with neither of the first two present,
+    # `new Worker('data:text/javascript,…')` became permitted where `default-src 'none'`
+    # had denied it. The delta is background CPU rather than disclosure — a worker inherits
+    # the sandbox and this policy, so it has no network either — but "it does not add the
+    # capability" was very slightly wrong, and the honest fix is to stop the chain rather
+    # than to reword the claim. Both are named because `child-src` is what an engine
+    # implementing CSP 2 reads, and this document is parsed by whatever draws it.
     #
     # This is delivered as a `<meta>` rather than a response header, which is a deviation
     # from §4's wording and is reported rather than absorbed (CLAUDE.md §11.3): the
@@ -84,7 +102,7 @@ module RedmineReporterDashboards
     # the second case is the "two ways of doing one thing" §6 forbids.
     CONTENT_SECURITY_POLICY =
       "default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; " \
-      "script-src 'unsafe-inline' data:"
+      "script-src 'unsafe-inline' data:; worker-src 'none'; child-src 'none'"
 
     # THE TWO SURFACES, SAID ONCE — T-38.
     #

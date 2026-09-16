@@ -545,6 +545,47 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_response :missing
   end
 
+  # AND THE VISIBILITY T-45's FIRST VERSION SKIPPED, which is the one where the scope and
+  # the predicate disagreed. `Template.visible`'s `EXISTS` matches a global template for a
+  # holder of a named role in ANY non-archived project, through its
+  # `templates.project_id IS NULL` disjunct; `Template#visible?` answered a flat `false` for
+  # every project-less template. The index uses the scope and `#show` uses both, so the
+  # result was a listed template whose page 404s — the disclosure shape the agreement matrix
+  # exists to prevent, missed because the T-45 tests covered global+PUBLIC and
+  # global+PRIVATE and not global+ROLES. Found by an independent review.
+  #
+  # AUTHORED BY `@dlopper`, so the scope's `OR author_id = ?` arm cannot be what makes this
+  # pass.
+  def test_a_global_roles_template_is_listed_and_opens_for_a_holder_of_that_role
+    grant(:view_reporter_dashboards_reports)
+    template = create_template(name: 'Everywhere', project: nil, author: @dlopper,
+                               visibility: Template::VISIBILITY_ROLES, roles: [@role])
+
+    get :index, params: { project_id: @project.identifier }
+    assert_response :success
+    assert_select 'td', text: /Everywhere/
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+    assert_response :success
+  end
+
+  # THE OTHER HALF, because "they agree" is also satisfied by both answering no. A user
+  # holding none of the named roles must see it neither in the list nor on its page.
+  def test_a_global_roles_template_is_neither_listed_nor_opened_without_the_role
+    grant(:view_reporter_dashboards_reports)
+    other_role = Role.create!(name: 'Auditors',
+                              permissions: [:view_reporter_dashboards_reports])
+    template = create_template(name: 'Everywhere', project: nil, author: @dlopper,
+                               visibility: Template::VISIBILITY_ROLES, roles: [other_role])
+
+    get :index, params: { project_id: @project.identifier }
+    assert_response :success
+    assert_select 'td', text: /Everywhere/, count: 0
+
+    get :show, params: { project_id: @project.identifier, id: template.id }
+    assert_response :missing
+  end
+
   # ------------------------------------------------------------------ authoring
 
   def test_add_permission_creates_a_template

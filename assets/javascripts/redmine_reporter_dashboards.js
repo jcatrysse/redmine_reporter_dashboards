@@ -45,11 +45,40 @@
   //     report gets to control.
   //   * NOTHING IS READ ACROSS THE BOUNDARY. The parent never touches
   //     `contentWindow.document`; that is what it cannot do, and it does not need to.
+  //   * THE NUMBER OF WRITES PER FRAME IS BOUNDED. See MAX_WRITES.
   //
   // `min-height` is cleared on the element at the same time, because the CSS floor is the
   // no-message fallback and a measured frame must be able to SHRINK below it. With scripts
   // off, or if no message ever arrives, the stylesheet answers exactly as it did before.
   var MAX_HEIGHT = 20000;
+
+  // THE CONVERGENCE BOUND, AND THE CLAMP ABOVE IS NOT ONE.
+  //
+  // This is a feedback loop by construction: the child observes `document.body` and posts
+  // when it resizes, the parent writes the value to the frame's height, and writing the
+  // height changes the child's viewport — which can change `body.scrollHeight` again. The
+  // child's `last` memo damps a value that repeats, and a memo of one step does not damp a
+  // CYCLE. Two media queries in a report's own CSS produce one:
+  //
+  //     @media (max-height: 500px) { .x { height: 2000px } }
+  //     @media (min-height: 501px) { .x { height:  100px } }
+  //
+  // 2000 → 100 → 2000 → …, neither value equal to the one before it, at ResizeObserver
+  // frequency, on every viewer's machine, for as long as the dashboard is open. MAX_HEIGHT
+  // bounds the VALUE and does nothing about the RATE — it only terminates the case that
+  // grows monotonically. Found by an independent review; the T-44 spec tested hostile
+  // VALUES and not a hostile SEQUENCE, which is the shape a live layout actually produces.
+  //
+  // So each frame gets a budget. Twenty is far more than any convergent document needs —
+  // the three surfaces this was measured on settle in one write, and a late web font or a
+  // chart drawing after load costs one more — and a document that has not settled in twenty
+  // is not going to. The budget is spent only by a write that CHANGES something, so a frame
+  // re-answering the parent's request with the height it already has costs nothing.
+  //
+  // The counter lives on the element rather than in a `Map` keyed by frame, because a frame
+  // removed from the DOM has to take its counter with it, and because `Map` is not ES5.
+  var MAX_WRITES = 20;
+  var WRITES_ATTRIBUTE = 'data-rrd-height-writes';
 
   // INCLUDED FROM MORE THAN ONE PLACE, SO IT GUARDS ITSELF. The project dashboard puts this
   // file in `header_tags`; a my-page block cannot — its partial renders inside `#content`,
@@ -74,6 +103,24 @@
     }
   }
 
+  // One write, budgeted. Separate from the listener so the budget is visible beside the
+  // thing it bounds rather than buried in a loop.
+  function applyHeight(frame, height) {
+    var wanted = Math.min(Math.ceil(height), MAX_HEIGHT) + 'px';
+    if (frame.style.height === wanted) {
+      return;
+    }
+
+    var writes = parseInt(frame.getAttribute(WRITES_ATTRIBUTE), 10) || 0;
+    if (writes >= MAX_WRITES) {
+      return;
+    }
+    frame.setAttribute(WRITES_ATTRIBUTE, writes + 1);
+
+    frame.style.minHeight = '0';
+    frame.style.height = wanted;
+  }
+
   function initReportFrameAutoHeight() {
     if (!window.addEventListener || window.rrdFrameAutoHeightReady) {
       return;
@@ -94,8 +141,7 @@
       var frames = reportFrames();
       for (var index = 0; index < frames.length; index += 1) {
         if (frames[index].contentWindow === event.source) {
-          frames[index].style.minHeight = '0';
-          frames[index].style.height = Math.min(Math.ceil(height), MAX_HEIGHT) + 'px';
+          applyHeight(frames[index], height);
           return;
         }
       }

@@ -19,10 +19,14 @@ require_relative '../lib/redmine_reporter_dashboards/report_frame'
 # more importantly — the four it must never grow. A CSP is one string, and a string is
 # what a later session widens by one word without anybody noticing.
 RSpec.describe RedmineReporterDashboards::ReportFrame do
-  POLICY = RedmineReporterDashboards::ReportFrame::CONTENT_SECURITY_POLICY
+  # A METHOD AND NOT A CONSTANT: a constant assigned inside `RSpec.describe` lands on
+  # `Object`, and `POLICY` is about as general a name as could be put there.
+  def policy
+    RedmineReporterDashboards::ReportFrame::CONTENT_SECURITY_POLICY
+  end
 
   def directive(name)
-    POLICY.split(';').map(&:strip).find { |part| part.start_with?("#{name} ") }.to_s
+    policy.split(';').map(&:strip).find { |part| part.start_with?("#{name} ") }.to_s
   end
 
   it 'permits the two forms the asset binding can produce, on both executable types' do
@@ -39,12 +43,22 @@ RSpec.describe RedmineReporterDashboards::ReportFrame do
   # not: it would let a template pull code from wherever that host serves, and it is not
   # needed, because the binding has already embedded everything the document uses.
   it 'permits no origin, no host and no network at all' do
-    expect(POLICY).to start_with("default-src 'none'")
-    expect(POLICY).not_to include("'self'")
-    expect(POLICY).not_to include('http')
-    expect(POLICY).not_to include('*')
-    expect(POLICY).not_to include('connect-src')
-    expect(POLICY).not_to include("'unsafe-eval'")
+    expect(policy).to start_with("default-src 'none'")
+    expect(policy).not_to include("'self'")
+    expect(policy).not_to include('http')
+    expect(policy).not_to include('*')
+    expect(policy).not_to include('connect-src')
+    expect(policy).not_to include("'unsafe-eval'")
+  end
+
+  # THE FALLBACK CHAIN, CLOSED. CSP 3 resolves a worker through
+  # `worker-src → child-src → script-src`, so `data:` on `script-src` silently made
+  # `new Worker('data:text/javascript,…')` legal — the one capability the `data:` widening
+  # genuinely added, found by an independent review. `child-src` is named too because it is
+  # what a CSP 2 engine reads, and this document is parsed by whatever draws it.
+  it 'stops a worker inheriting script-src through the fallback chain' do
+    expect(directive('worker-src')).to eq("worker-src 'none'")
+    expect(directive('child-src')).to eq("child-src 'none'")
   end
 
   # The one token that turns the sandbox into a decoration. Asserted here rather than
@@ -57,7 +71,7 @@ RSpec.describe RedmineReporterDashboards::ReportFrame do
     document = described_class.document('<p>hello</p>')
 
     expect(document).to include('http-equiv="Content-Security-Policy"')
-    expect(document).to include(POLICY)
+    expect(document).to include(policy)
     expect(document).to include('<p>hello</p>')
   end
 end

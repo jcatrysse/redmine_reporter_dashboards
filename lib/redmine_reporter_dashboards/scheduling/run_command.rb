@@ -129,7 +129,8 @@ module RedmineReporterDashboards
       # `schedules:status`, and right here whenever this tick did nothing — and a second line
       # follows it when this run is itself the answer.
       FIRST_INVOCATION_NOTE =
-        'This run is that invocation. If it came from cron, nothing further is needed and '         'the warning above will not appear again.'
+        'This run is that invocation. If it came from cron, nothing further is needed and ' \
+        'the warning above will not appear again.'
 
       # Deliberately `claimed` rather than `succeeded`: a tick that claimed an occurrence and
       # then failed to deliver it HAS reached the schedule, which is what the warning above is

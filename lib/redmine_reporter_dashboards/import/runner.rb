@@ -356,7 +356,8 @@ module RedmineReporterDashboards
           existing = Template.find_by(source_template_id: source_id)
           return create_copy(row, name, mapped, content, actor, dry_run, notes) if existing.nil?
 
-          refresh_copy(existing, name, mapped, content, dry_run, notes, actor, rewrite)
+          refresh_copy(existing, name, mapped, content, dry_run, notes, actor, rewrite,
+                       row)
         end
 
         def create_copy(row, name, mapped, content, actor, dry_run, notes = [])
@@ -366,10 +367,9 @@ module RedmineReporterDashboards
                      "#{Template::MAX_STRING} characters and was shortened."
           end
           template = Template.new(
+            **source_metadata(row, notes),
             name: name.to_s[0, Template::MAX_STRING],
             content: content,
-            description: row['description'].to_s[0, Template::MAX_STRING].presence,
-            orientation: orientation_for(row, notes),
             project_id: row['project_id'],
             author_id: actor.id,
             source: mapped['source'],
@@ -409,19 +409,86 @@ module RedmineReporterDashboards
           mapped = ORIENTATIONS[raw.to_s.strip.downcase]
           return mapped if mapped
 
-          notes << "source ##{row['id']} has orientation #{raw.inspect}, which is not one "                    "this importer knows; the copy is #{DEFAULT_ORIENTATION}."
+          notes << "source ##{row['id']} has orientation #{raw.inspect}, which is not one " \
+                   "this importer knows; the copy is #{DEFAULT_ORIENTATION}."
           DEFAULT_ORIENTATION
         end
 
+        # THE COLUMNS THAT ARE NEITHER CONTENT NOR IDENTITY, in one place because both
+        # `create_copy` and `refresh_copy` need exactly the same answer and two spellings of
+        # it is how the refresh came to carry neither.
+        def source_metadata(row, notes)
+          {
+            description: row['description'].to_s[0, Template::MAX_STRING].presence,
+            orientation: orientation_for(row, notes)
+          }
+        end
+
+        # CONTENT IS CURRENT AND SOMETHING ELSE MOVED. Reported as `:updated` rather than as
+        # a fifth status: from the operator's side a template that now prints landscape has
+        # been updated, and a new word in the summary would need a new row in the report, a
+        # new locale key and a new thing to explain for a case that reads identically.
+        def metadata_only_refresh(existing, metadata, dry_run, notes)
+          # ONLY THE COLUMNS THAT ACTUALLY MOVED are named. A note listing every column the
+          # importer looked at would say "description and orientation" on a run that changed
+          # one of them, which is the kind of output an operator learns to stop reading.
+          moved = metadata.reject { |attribute, value| existing.public_send(attribute) == value }
+          notes << "template #{existing.id} (#{existing.name}) kept its content and took " \
+                   "the source's #{moved.keys.join(' and ')}."
+
+          unless dry_run
+            metadata.each { |attribute, value| existing.public_send(:"#{attribute}=", value) }
+            unless existing.save
+              return Outcome.new(source_id: existing.source_template_id,
+                                 name: existing.name, status: :skipped,
+                                 template_id: existing.id,
+                                 reason: existing.errors.full_messages.join(', '))
+            end
+          end
+
+          Outcome.new(source_id: existing.source_template_id, name: existing.name,
+                      status: :updated, template_id: existing.id)
+        end
+
         # THE FOUR-WAY DECISION. See the class comment; the case that matters is the last.
+        #
+        # --- METADATA IS REFRESHED TOO, AND THE FIRST VERSION OF T-46 DID NOT ---
+        #
+        # `create_copy` was taught to carry `description` and `orientation`; this method was
+        # not, and worse, it returned `:unchanged` on a matching content digest before
+        # reaching any assignment. So the operator whose already-imported LANDSCAPE dashboard
+        # had come through portrait — the measured case T-46 opens with, and the only
+        # installation shape that actually exists in the wild, since everybody who migrated
+        # did so before the fix — re-ran `import:run`, was told "unchanged", and still had a
+        # portrait report. `RRD_REWRITE=1` did not help either: it gates the CONTENT
+        # overwrite and nothing else. An independent review found it.
+        #
+        # So the digest decides CONTENT, and metadata is compared on its own. The two are
+        # independent and a run may change only the second.
+        #
+        # **What is deliberately not done: metadata is not divergence-tracked.** There is no
+        # `source_digest` for it, so a local edit to a copy's orientation or description is
+        # overwritten by the next run. That is the right default — the importer is the
+        # source of truth for a copy it made, and the field an author actually edits is the
+        # content, which IS protected — but it is a real limit and the admin guide says so.
+        # A copy whose CONTENT has diverged is left alone whole, metadata included, until
+        # the operator resolves the divergence.
         def refresh_copy(existing, name, mapped, content, dry_run, notes, actor = nil,
-                         rewrite = false)
+                         rewrite = false, row = {})
           source_digest = digest(content)
           local_digest = digest(existing.content)
+          metadata = source_metadata(row, notes)
+          content_current = existing.source_digest == source_digest &&
+                            local_digest == source_digest
 
-          if existing.source_digest == source_digest && local_digest == source_digest
-            return Outcome.new(source_id: existing.source_template_id, name: existing.name,
-                               status: :unchanged, template_id: existing.id)
+          if content_current
+            if metadata.all? { |attribute, value| existing.public_send(attribute) == value }
+              return Outcome.new(source_id: existing.source_template_id,
+                                 name: existing.name, status: :unchanged,
+                                 template_id: existing.id)
+            end
+
+            return metadata_only_refresh(existing, metadata, dry_run, notes)
           end
 
           # THE COPY WAS EDITED HERE. Whether or not the source also moved, overwriting
@@ -455,6 +522,7 @@ module RedmineReporterDashboards
           existing.source = mapped['source']
           existing.output = mapped['output']
           existing.source_digest = source_digest
+          metadata.each { |attribute, value| existing.public_send(:"#{attribute}=", value) }
 
           if existing.save
             Outcome.new(source_id: existing.source_template_id, name: existing.name,

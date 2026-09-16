@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Gate — T-43, §Findings M-4. The rule and the reasons are in
-# `erb_comment_integrity.rb`, which is Ruby because the check walks a SPAN between `<%#`
-# and the `%>` that closes it, and a span is not something grep can see: M-4's opener was
-# on line 1 and its offending tag on line 29.
+# `erb_comment_integrity.rb`, which is Ruby because the check runs ERB's own two-state
+# machine over the file — template text, inside a tag — and STATE is not something grep can
+# see: M-4's opener was on line 1 and its offending delimiter on line 29.
 #
 # This wrapper exists for one reason and it is T-38's lesson: a reader that fails to LOAD
 # prints nothing and exits non-zero, and a wrapper that read that as "no findings" would

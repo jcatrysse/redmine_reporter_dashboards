@@ -485,6 +485,24 @@ module RedmineReporterDashboards
       # never be used and both of which would be torn down separately — and, worse, a
       # capability answer that came from a different object than the one that draws.
       def with_pdf(sections, total, started)
+        # BOUND ONCE, AT THE TOP, AND EVERY RETURN BELOW USES THE RESULT.
+        #
+        # The first version of T-41 bound the charts for the renderer and then handed the
+        # caller the UNBOUND sections back. An independent review found it:
+        # `TemplatesController#preview` calls `call(pdf: true)` and `preview.html.erb`
+        # renders `@outcome.sections` inside a frame, so the author's own preview — the one
+        # surface whose entire purpose is to show what the chart looks like — displayed the
+        # raw placeholder `<div>`, which is M-1's exact symptom. Only a grep over this
+        # file's source guarded it, and a source-text assertion cannot see a bound value
+        # being discarded.
+        #
+        # It is hoisted ABOVE `resolve_engine` rather than merely assigned to a local,
+        # because the failure returns are displayed too: an installation with no PDF engine
+        # gets a diagnostic AND the sections, and those sections are read by a human. The
+        # `:pdf` binding is correct on both surfaces — it emits inline SVG where the spec
+        # supports it and the same Chart.js markup as the HTML binding where it does not.
+        sections = bind_charts(sections, output: :pdf)
+
         adapter = resolve_engine
         if adapter.nil?
           # NOT SILENT, and not a success either. §9b.2: a preview that only proves the
@@ -495,7 +513,7 @@ module RedmineReporterDashboards
         end
 
         engine = adapter.new
-        bound = bind_assets(bind_charts(sections, output: :pdf), engine)
+        bound = bind_assets(sections, engine)
         if bound.failure
           # NO ENGINE HAS RUN. `from_asset_refusal` and not `from_render_failure` for
           # exactly that reason — see `Diagnostic::ORIGINS`.

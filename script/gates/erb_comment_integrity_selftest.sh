@@ -11,6 +11,12 @@ set -euo pipefail
 # So: real files in a temp tree, including M-4's exact shape, plus the two
 # could-not-check cases — an absent directory and a directory with no `.erb` in it — each
 # of which must answer 2 rather than 0.
+#
+# TWO OF THE CASES BELOW (`wrapped` and `oneline_closer`) ARE AN INDEPENDENT REVIEW'S
+# WORKING REPRODUCTIONS against version 2 of this gate, which reported OK for both and was
+# then confirmed by running ERB over them. They are committed as cases rather than
+# described in a comment for the reason this whole file exists: a rule nobody has seen say
+# NO is a rule that might not be able to.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE="$ROOT/script/gates/erb_comment_integrity.sh"
@@ -95,6 +101,29 @@ ERB
 mkdir -p "$WORK/inline"
 printf '<%%# a short note %%><p>x</p>\n' > "$WORK/inline/_inline.html.erb"
 
+# --- the review's first reproduction: the accidental closer lands at a LINE END, so
+# version 2's "a real terminator is last on its line" heuristic called it deliberate.
+# This repository wraps view prose at about 95 characters, which puts every long comment
+# one wrap away from this shape. ---
+mkdir -p "$WORK/wrapped"
+cat > "$WORK/wrapped/_wrapped.html.erb" <<'ERB'
+<%#
+  A long header comment. ERB ends a comment at the first closing delimiter %>
+  and everything from here on is printed to the page as template text, which is
+  exactly M-4. This line is leaked. %>
+ERB
+
+# --- the review's second reproduction: a ONE-LINE comment that quotes a closer. Version 2
+# had to exempt single-line comments to stay usable, and the exemption was the hole. ---
+mkdir -p "$WORK/oneline_closer"
+printf '<%%# a one-line note that quotes a closer %%> and this trails out %%>\n' \
+  > "$WORK/oneline_closer/_oneline.html.erb"
+
+# --- and the escape, which must NOT be a finding: `<%%` is a literal `<%`, not an opener,
+# and a view that documents ERB syntax is allowed to say so. ---
+mkdir -p "$WORK/escaped"
+printf '<p>write <%%%%= value %%%%> to print it</p>\n' > "$WORK/escaped/_escaped.html.erb"
+
 echo "erb_comment_integrity_selftest:"
 run_case "a clean view is a pass"                    0 "tmp/erb_comment_integrity_selftest/clean"
 run_case "M-4's shape is caught"                     1 "tmp/erb_comment_integrity_selftest/dirty"
@@ -104,6 +133,9 @@ run_case "a directory with no .erb cannot pass"      2 "tmp/erb_comment_integrit
 run_case "an absent directory cannot pass"           2 "tmp/erb_comment_integrity_selftest/nope"
 run_case "a quoted CLOSING delimiter is caught"      1 "tmp/erb_comment_integrity_selftest/closer"
 run_case "a one-line comment with markup after it is fine" 0 "tmp/erb_comment_integrity_selftest/inline"
+run_case "a closer at a line END is caught (review case 1)" 1 "tmp/erb_comment_integrity_selftest/wrapped"
+run_case "a one-line comment quoting a closer is caught (review case 2)" 1 "tmp/erb_comment_integrity_selftest/oneline_closer"
+run_case "an ESCAPED opener is not a finding"      0 "tmp/erb_comment_integrity_selftest/escaped"
 
 # --- and the reader itself broken for real, which is the arm T-38 says to drive ---
 BROKEN="$ROOT/tmp/erb_comment_integrity_selftest/broken_reader.rb"
@@ -124,4 +156,4 @@ if [ "$FAILURES" != "0" ]; then
   exit 1
 fi
 
-echo "erb_comment_integrity_selftest: OK — 9 cases, both rules and both self-protection arms driven."
+echo "erb_comment_integrity_selftest: OK — 12 cases, the state walk, the escape and both self-protection arms driven."

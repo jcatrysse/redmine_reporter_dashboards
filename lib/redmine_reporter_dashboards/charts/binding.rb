@@ -90,18 +90,42 @@ module RedmineReporterDashboards
 
           binding_output = output.to_sym == :pdf ? :pdf : :html
           javascript = false
+          # THE COLLECTOR'S DUPLICATE-ID CONTROL, COMPLETED HERE.
+          #
+          # `Collector#record` refuses a second `{% chart %}` naming an id it already has,
+          # because `chart_boot.js` would build the second chart into the first's canvas and
+          # the reader would see one chart where the template says two. It can only see
+          # what the TAG records, and this module substitutes on MARKUP — so an author who
+          # hand-wrote `<div class="rrd-chart-placeholder" data-rd-chart="x"></div>` beside
+          # `{% chart id: "x" %}` got two emissions of the same canvas id and the exact
+          # outcome the control forbids. Self-inflicted and harmless to anyone else, but a
+          # control with a hole is worse than none, because it is what the next reader
+          # relies on. Found by an independent review.
+          #
+          # The FIRST occurrence binds; every later one is left as it was and logged, which
+          # is what this module already does with an id the collector does not know.
+          seen = {}
 
           bound = text.gsub(PLACEHOLDER) do
             match = Regexp.last_match
             next match[0] if match[:refused]
 
-            spec = collector[match[:id]]
+            id = match[:id]
+            if seen[id]
+              log(logger, "[chart] placeholder #{id.inspect} appears more than once in this " \
+                          'document; only the first was bound, because two canvases with ' \
+                          'one id draw one chart')
+              next match[0]
+            end
+
+            spec = collector[id]
             if spec.nil?
-              log(logger, "[chart] no recorded chart for placeholder #{match[:id].inspect}; " \
+              log(logger, "[chart] no recorded chart for placeholder #{id.inspect}; " \
                           'left as it was')
               next match[0]
             end
 
+            seen[id] = true
             markup, used_javascript = emit(spec, binding_output)
             javascript ||= used_javascript
             markup

@@ -16,12 +16,30 @@ require_relative '../../lib/redmine_reporter_dashboards/charts'
 #
 # (2) is the last example in the file and it is a source-level assertion, deliberately —
 # see its own comment.
-RSpec.describe RedmineReporterDashboards::Charts::Binding do
+#
+# NAMESPACED, because a constant assigned inside `RSpec.describe` lands on `Object` — and
+# `B` and `CH` were exactly that until an independent review pointed at them, in a suite of
+# 2 900 examples running under `config.order = :random`. The trap has a header in
+# `spec/frame_auto_height_spec.rb` and three other files in this tree; this file is now the
+# fifth to obey it rather than the first to re-learn it.
+module ChartBindingSpecSupport
   B = RedmineReporterDashboards::Charts::Binding
   CH = RedmineReporterDashboards::Charts
+end
+
+RSpec.describe RedmineReporterDashboards::Charts::Binding do
+  # METHODS, not constants. A constant here would land on `Object` all the same; a method
+  # is scoped to the example group and reads identically at the call sites.
+  def binder
+    ChartBindingSpecSupport::B
+  end
+
+  def charts
+    ChartBindingSpecSupport::CH
+  end
 
   def spec_for(id: 'st', type: :bar, **overrides)
-    CH::ChartSpec.new(**{ id: id, type: type,
+    charts::ChartSpec.new(**{ id: id, type: type,
                           categories: %w[New Assigned Closed],
                           series: [{ label: 'Issues', values: [12, 7, 43] }] }.merge(overrides))
   end
@@ -35,7 +53,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
   end
 
   def collector_with(*specs)
-    collector = CH::Collector.new
+    collector = charts::Collector.new
     specs.each { |one| collector.record(one) }
     collector
   end
@@ -45,7 +63,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
   describe 'the HTML binding' do
     it 'replaces every placeholder with a canvas and its data block' do
       body = "<h1>R</h1>\n#{placeholder('st')}\n<p>after</p>"
-      result = B.apply(body, collector_with(spec_for), output: :html)
+      result = binder.apply(body, collector_with(spec_for), output: :html)
 
       expect(result.body).not_to include('rrd-chart-placeholder')
       expect(result.body.scan('<canvas').length).to eq(1)
@@ -57,7 +75,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
 
     it 'emits the three scripts once, in the order they have to run in' do
       body = "#{placeholder('a')}#{placeholder('b')}"
-      result = B.apply(body, collector_with(spec_for(id: 'a'), spec_for(id: 'b')),
+      result = binder.apply(body, collector_with(spec_for(id: 'a'), spec_for(id: 'b')),
                        output: :html)
 
       expect(result).to be_javascript
@@ -77,7 +95,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
       hostile = %(Bad</script><script>alert(1)</script> "quoted" back\\slash)
       spec = spec_for(categories: [hostile, 'Ok'],
                       series: [{ label: 'Issues', values: [1, 2] }])
-      result = B.apply(placeholder('st'), collector_with(spec), output: :html)
+      result = binder.apply(placeholder('st'), collector_with(spec), output: :html)
 
       block = result.body[/<script type="application\/json"[^>]*>(.*?)<\/script>/m, 1]
       expect(block).not_to be_nil
@@ -90,7 +108,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
 
   describe 'the PDF binding' do
     it 'draws a supported family as inline SVG and needs no JavaScript' do
-      result = B.apply(placeholder('st'), collector_with(spec_for), output: :pdf)
+      result = binder.apply(placeholder('st'), collector_with(spec_for), output: :pdf)
 
       expect(result.body).to include('<svg')
       expect(result.body).not_to include('<canvas')
@@ -103,7 +121,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
     # exists to say "this one cannot be SVG". The binding is the only place that answer is
     # ever acted on, so the fallback belongs here rather than in a comment.
     it 'falls back to Chart.js for a type it cannot draw, and then owes the scripts' do
-      result = B.apply(placeholder('st'), collector_with(spec_for(type: :radar)),
+      result = binder.apply(placeholder('st'), collector_with(spec_for(type: :radar)),
                        output: :pdf)
 
       expect(result.body).to include('<canvas')
@@ -113,7 +131,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
 
     it 'draws one SVG and one canvas when a document holds both kinds' do
       collector = collector_with(spec_for(id: 'ok'), spec_for(id: 'odd', type: :radar))
-      result = B.apply("#{placeholder('ok')}#{placeholder('odd')}", collector, output: :pdf)
+      result = binder.apply("#{placeholder('ok')}#{placeholder('odd')}", collector, output: :pdf)
 
       expect(result.body.scan('<canvas').length).to eq(1)
       expect(result.body.scan('<svg').length).to eq(1)
@@ -128,7 +146,7 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
     # author never wrote. The collector already carries the degradation saying why.
     it 'leaves a refused placeholder exactly as the tag emitted it' do
       body = placeholder('st', refused: 'invalid')
-      expect(B.apply(body, collector_with(spec_for), output: :html).body).to eq(body)
+      expect(binder.apply(body, collector_with(spec_for), output: :html).body).to eq(body)
     end
 
     it 'leaves a placeholder whose id was never recorded, and says so once' do
@@ -136,23 +154,45 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
       expect(logger).to receive(:warn).once.with(/no recorded chart.*"ghost"/)
 
       body = placeholder('ghost')
-      result = B.apply(body, collector_with(spec_for), output: :html, logger: logger)
+      result = binder.apply(body, collector_with(spec_for), output: :html, logger: logger)
       expect(result.body).to eq(body)
       expect(result).not_to be_javascript
     end
 
     it 'returns the body untouched for an empty or absent collector' do
       body = "<p>no charts here</p>#{placeholder('st')}"
-      expect(B.apply(body, CH::Collector.new, output: :html).body).to eq(body)
-      expect(B.apply(body, nil, output: :html).body).to eq(body)
+      expect(binder.apply(body, charts::Collector.new, output: :html).body).to eq(body)
+      expect(binder.apply(body, nil, output: :html).body).to eq(body)
     end
 
     # A caller's typo must not cost the document. `:pdf` is the only value that changes
     # the answer; everything else is the HTML binding.
     it 'treats an unknown output as HTML rather than refusing' do
-      result = B.apply(placeholder('st'), collector_with(spec_for), output: :postscript)
+      result = binder.apply(placeholder('st'), collector_with(spec_for), output: :postscript)
       expect(result.body).to include('<canvas')
     end
+  end
+
+  # THE DUPLICATE-ID CONTROL, ON THE SURFACE THE COLLECTOR CANNOT SEE.
+  #
+  # `Collector#record` refuses a second `{% chart %}` with an id it already holds. It sees
+  # tags, and this module sees markup, so an author who hand-writes the placeholder beside
+  # a real tag defeats it. Found by an independent review.
+  it 'binds the first placeholder for an id and leaves a repeat of it alone' do
+    body = "#{placeholder('st')}#{placeholder('st')}"
+
+    result = binder.apply(body, collector_with(spec_for), output: :html)
+
+    expect(result.body.scan('<canvas').length).to eq(1)
+    expect(result.body).to include(placeholder('st'))
+  end
+
+  it 'says so in the log, because a silent half-binding is what confused the reader' do
+    logger = double('logger')
+    expect(logger).to receive(:warn).once.with(/appears more than once/)
+
+    binder.apply("#{placeholder('st')}#{placeholder('st')}",
+                 collector_with(spec_for), output: :html, logger: logger)
   end
 
   # ------------------------------------------------------------------ the missing caller
@@ -164,9 +204,18 @@ RSpec.describe RedmineReporterDashboards::Charts::Binding do
   # when the call is deleted is worth more than a green suite that never noticed the call
   # was absent for an entire release.
   #
-  # `spec/reporting/` covers what the binding then produces end to end; this covers only
-  # that the two binding sites exist and that they pass DIFFERENT outputs — one site
-  # passing `:html` twice is the other way to get M-1 back.
+  # THE SENTENCE THAT USED TO BE HERE WAS FALSE, and an independent review was right to
+  # call it the worst kind of comment: it said *"`spec/reporting/` covers what the binding
+  # then produces end to end"* when `spec/reporting/` contained no chart coverage at all.
+  # That is a claim a later reader checks INSTEAD of checking the code — the same defect
+  # `template.rb` writes a paragraph about over a security-bearing query — and it is how
+  # the next finding stayed invisible: `with_pdf` bound the sections and then returned the
+  # UNBOUND ones, so the editor's own preview still showed the placeholder.
+  #
+  # The end-to-end examples now exist and are named here so the claim can be checked:
+  # `spec/reporting/report_run_spec.rb`, *"returns sections whose charts are bound"* — one
+  # per output, plus the no-engine failure return. This example keeps only the WIRING
+  # claim, which has no behavioural expression in this DB-less file.
   it 'is called from both of ReportRun\'s binding sites, with both outputs' do
     source = File.read(
       File.expand_path('../../lib/redmine_reporter_dashboards/reporting/report_run.rb', __dir__)

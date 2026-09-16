@@ -305,6 +305,18 @@ module RedmineReporterDashboards
       return false if user.nil?
       return true if user.admin?
       return false unless project.nil? || user.allowed_to?(VIEW_PERMISSION, project)
+      # THE SCOPE'S `OR templates.author_id = ?` ARM, SAID HERE TOO.
+      #
+      # It applies to every visibility over there, and this predicate used to answer it
+      # only inside the PRIVATE branch. On a PROJECT template that could not diverge: the
+      # scope's author arm sits inside `Project.allowed_to_condition`, which is the same
+      # gate the line above is, so an author who lost the view permission was refused by
+      # both. A GLOBAL template has no such gate — `.visible` lets `project_id IS NULL`
+      # through unconditionally — so the arm became reachable the moment T-45 started
+      # listing global templates, and the author of a global ROLES template naming a role
+      # they do not hold was listed-but-404'd. Measured by the agreement matrix once it
+      # had a global row.
+      return true if authored_by?(user)
 
       case visibility
       when VISIBILITY_PUBLIC
@@ -318,7 +330,30 @@ module RedmineReporterDashboards
         # declares a 2.7 floor, and `.codex/check_ruby_floor.sh` is a CI job — so copying
         # core's line verbatim was a real regression on the two oldest supported Rubies.
         # Same answer, same cost at these list sizes.
-        project ? (user.roles_for_project(project) & roles).any? : false
+        #
+        # --- AND THE GLOBAL CASE, WHICH USED TO ANSWER `false` FOR EVERYBODY ---
+        #
+        # This line read `project ? … : false`, so a PROJECT-LESS template restricted to
+        # roles was visible to nobody but an administrator — while the scope above matched
+        # it for any holder of one of those roles in any non-archived project, through the
+        # `templates.project_id IS NULL` disjunct in its `EXISTS`. Two implementations of
+        # one rule, disagreeing, which is the exact thing the agreement matrix exists to
+        # catch and did not, because the matrix had no global + ROLES row.
+        #
+        # Before T-45 the divergence could not bite: `#index` filtered on the project id, so
+        # a global template was never listed. T-45 made the index use the scope, and the
+        # result was a disclosure — a member holding the named role anywhere saw the
+        # template's name, description, output and orientation in the list and got a 404 on
+        # its page. An independent review found it.
+        #
+        # THE SCOPE'S READING IS THE ONE KEPT, for two reasons. It is what a global template
+        # restricted to roles can usefully mean at all — there is no project to hold a role
+        # in, so "holds this role somewhere" is the only non-empty answer — and it is what
+        # the import advice walks an operator into: `import/import_report.rb` tells them to
+        # open each imported template and set *visible to these roles only*, and imported
+        # templates are global in the ordinary case. The alternative reading, "a global
+        # roles template is nobody's", would make that instruction a trap.
+        project ? (user.roles_for_project(project) & roles).any? : global_roles_match?(user)
       else
         # `authored_by?` AND NOT `author_id == user.id`, because the second one matches
         # for the ANONYMOUS user. `User.anonymous` is a real row with a real id, so a
@@ -344,6 +379,35 @@ module RedmineReporterDashboards
     # against a template with a different author.
     def authored_by?(user)
       !user.nil? && user.logged? && author_id == user.id
+    end
+
+    # THE PREDICATE HALF OF THE SCOPE'S `templates.project_id IS NULL` DISJUNCT.
+    #
+    # Written to mirror that `EXISTS` line for line, because the whole defect this fixes was
+    # two implementations of one rule drifting apart:
+    #
+    #   the `EXISTS` subquery                    this method
+    #   `m.user_id = ?`                          `user.memberships`
+    #   `p.status <> Project::STATUS_ARCHIVED`   the `status` guard below
+    #   `tr.template_id = templates.id`          `named` — the roles this template names
+    #
+    # `preload` and not `includes`: there is no condition on the joined tables, so a join
+    # would be two extra tables in one query for no filtering, and `member.roles` would
+    # still be loaded per row. This costs two queries regardless of how many memberships the
+    # actor has, which is the property FR-48 asks for — a controller may call this per row
+    # of a list.
+    def global_roles_match?(user)
+      return false unless user.logged?
+
+      named = roles.map(&:id)
+      return false if named.empty?
+
+      user.memberships.preload(:roles, :project).any? do |member|
+        project = member.project
+        next false if project.nil? || project.status == ::Project::STATUS_ARCHIVED
+
+        member.roles.any? { |role| named.include?(role.id) }
+      end
     end
 
     def editable_by?(user)

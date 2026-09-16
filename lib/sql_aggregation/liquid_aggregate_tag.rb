@@ -483,6 +483,25 @@ module SqlAggregation
     #
     # NOT A VISIBILITY DECISION. The URL points at Redmine's own issue list, which applies
     # the viewer's own visibility when they open it; this query is never executed here.
+    #
+    # --- NOT MEMOISED, AND THAT WAS MEASURED RATHER THAN ASSUMED (G6/FR-48) ---
+    #
+    # An independent review reported this as a per-tag, per-document cost that would make a
+    # 4 000-issue per-record export pay thousands of `IssueQuery` constructions where it
+    # previously paid none. The code reads exactly that way and the path is not reachable: a
+    # per-record job renders with `scope: nil` — `ReportRun#render_context` passes
+    # `job.record ? nil : scope_for_render` — so `{% sql_aggregate %}` cannot resolve a
+    # relation there, logs "could not resolve an AR scope", and returns before `apply_drill`
+    # is ever called. Measured on Redmine 5.1 with PostgreSQL: a per-record run costs the
+    # same number of queries for two documents as for six.
+    #
+    # `test/unit/reporter_dashboards_drill_query_count_test.rb` is that measurement, kept as
+    # a test rather than as this paragraph, because the day somebody gives per-record jobs a
+    # scope the finding becomes correct and the file is what will say so.
+    #
+    # `IssueQuery.new` issues no statement of its own in any case; the expensive part of
+    # drill-through is `DrillThrough#copy`'s `available_filters`, which is memoised on the
+    # builder and is paid identically by the saved-query path.
     def project_query(context)
       project = RedmineReporterDashboards::Liquid::RenderContext.from(context)&.project
       return nil if project.nil?

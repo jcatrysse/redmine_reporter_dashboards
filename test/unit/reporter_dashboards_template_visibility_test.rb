@@ -47,6 +47,18 @@ class ReporterDashboardsTemplateVisibilityTest < ActiveSupport::TestCase
     record
   end
 
+  # A PROJECT-LESS TEMPLATE. Imported templates are global in the ordinary case — the base
+  # plugin's `report_templates` has no project column — so this is not an exotic row, it is
+  # what a migrated installation is mostly made of.
+  def global_template(visibility, author: @author, roles: [])
+    record = Template.new(project: nil, author: author,
+                          name: "g#{visibility}-#{roles.map(&:id).join('-')}-#{author.id}",
+                          content: 'x', visibility: visibility)
+    record.roles = roles
+    record.save!
+    record
+  end
+
   # ------------------------------------------------------------------ the two answers agree
 
   # THIS EXAMPLE FOUND A REAL DISAGREEMENT ON ITS FIRST RUN, which is the reason it is
@@ -63,7 +75,20 @@ class ReporterDashboardsTemplateVisibilityTest < ActiveSupport::TestCase
       roles_mine: template(Template::VISIBILITY_ROLES, author: @colleague,
                            roles: [@member_role]),
       roles_theirs: template(Template::VISIBILITY_ROLES, author: @colleague,
-                             roles: [@other_role])
+                             roles: [@other_role]),
+      # THE FOUR ROWS THE MATRIX WAS MISSING, and `global_roles_mine` is the one that
+      # mattered: the scope's `EXISTS` matches a global template for any holder of a named
+      # role in any non-archived project, and the predicate answered a flat `false` for
+      # every project-less template. T-45 then made `#index` use the scope, so a member
+      # holding that role anywhere saw the template listed and got a 404 on its page. Found
+      # by an independent review; the matrix could not see it because it had no global row
+      # at all.
+      global_private_own: global_template(Template::VISIBILITY_PRIVATE, author: @author),
+      global_public: global_template(Template::VISIBILITY_PUBLIC, author: @colleague),
+      global_roles_mine: global_template(Template::VISIBILITY_ROLES, author: @colleague,
+                                         roles: [@member_role]),
+      global_roles_theirs: global_template(Template::VISIBILITY_ROLES, author: @colleague,
+                                           roles: [@other_role])
     }
     actors = { author: @author, colleague: @colleague, outsider: @outsider,
                admin: @admin, anonymous: @anonymous }
@@ -78,6 +103,40 @@ class ReporterDashboardsTemplateVisibilityTest < ActiveSupport::TestCase
                      "#{record.visible?(actor)}"
       end
     end
+  end
+
+  # AND THE AGREEMENT STATED AS A BEHAVIOUR, because a matrix that agrees on "no" for
+  # everybody would also pass. This pins WHICH answer the two implementations agree on.
+  def test_a_global_roles_template_is_visible_to_a_holder_of_that_role_anywhere
+    # AUTHORED BY SOMEBODY ELSE deliberately: the scope matches an author whatever the
+    # visibility, so a template authored by the actor would pass this for the wrong reason.
+    # `@author` holds `@member_role` in projects 1 and 5; `@colleague` holds only role 2;
+    # `@outsider` holds no membership at all.
+    record = global_template(Template::VISIBILITY_ROLES, author: @colleague,
+                             roles: [@member_role])
+
+    assert record.visible?(@author), 'a holder of the named role sees it'
+    assert_include record, Template.visible(@author)
+
+    assert_not record.visible?(@outsider), 'somebody holding no named role does not'
+    assert_not_include record, Template.visible(@outsider)
+  end
+
+  # THE ARCHIVED-PROJECT GUARD, on the global path. The scope's `EXISTS` joins `projects`
+  # and excludes archived ones; the predicate has to as well, or the two diverge again for
+  # exactly one actor.
+  def test_a_role_held_only_in_an_archived_project_does_not_carry_a_global_template
+    record = global_template(Template::VISIBILITY_ROLES, author: @colleague,
+                             roles: [@member_role])
+    assert record.visible?(@author)
+
+    @author.memberships.map(&:project).uniq.each do |project|
+      project.update_columns(status: Project::STATUS_ARCHIVED)
+    end
+    @author.reload
+
+    assert_not record.visible?(@author)
+    assert_not_include record, Template.visible(@author)
   end
 
   def test_an_administrator_sees_every_template_in_the_project

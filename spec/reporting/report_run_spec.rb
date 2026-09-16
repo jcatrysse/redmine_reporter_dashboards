@@ -114,6 +114,32 @@ module ReportRunSpecSupport
     end
   end
 
+  # A RENDERER THAT REALLY RECORDS A CHART, which is what makes the binding examples
+  # behavioural rather than textual.
+  #
+  # `ChartTag` emits a placeholder and appends a `ChartSpec` to `RenderContext#charts`;
+  # `ReportRun` copies that collector onto the `Section`, and the binding reads it. The
+  # collector is built by `ReportRun` itself and handed to the renderer, so a stand-in
+  # renderer can fill it exactly as the tag does — no Liquid, no Rails, and the production
+  # wiring under test.
+  class ChartingRenderer
+    ID = 'live'
+
+    def render(_source, **kwargs)
+      collector = kwargs[:render_context].charts
+      collector.record(
+        RedmineReporterDashboards::Charts::ChartSpec.new(
+          id: ID, type: :bar, categories: %w[New Closed],
+          series: [{ label: 'Issues', values: [2, 5] }]
+        )
+      )
+      TR::Document.new(
+        body: %(<div class="rrd-chart-placeholder" data-rd-chart="#{ID}"></div>),
+        duration_ms: 1, output_class: :report
+      )
+    end
+  end
+
   # An ENGINE ADAPTER stand-in. The real `Render::Renderer` wraps it, so capability
   # negotiation and INV-5's `%PDF-`…`%%EOF` post-condition both really run — which is
   # deliberate: this file is about the branch around the adapter, and a fake that
@@ -1247,6 +1273,64 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
       expect(outcome).to be_ok
       expect(outcome.sections.first.body).to eq('<h1>Report</h1>')
       expect(outcome.sections.first.body).not_to include('<!DOCTYPE')
+    end
+
+    # T-41, AND THE EXAMPLES AN INDEPENDENT REVIEW ASKED FOR BY NAME.
+    #
+    # `spec/charts/binding_spec.rb` proves the binding turns a placeholder into markup, and
+    # a source-level assertion proves `ReportRun` calls it. Neither can see the defect the
+    # first version of T-41 actually had: `with_pdf` bound the sections for the renderer
+    # and returned the UNBOUND ones, so `TemplatesController#preview` — which calls
+    # `call(pdf: true)` and then renders `@outcome.sections` — still showed the raw
+    # `<div>`. A grep over source text cannot see a value being discarded; this can.
+    #
+    # BOTH OUTPUTS, because the two bindings are two call sites and one of them being
+    # right is how the defect survived in the first place.
+    it 'returns sections whose charts are bound, on the HTML path' do
+      # THE PLUGIN'S OWN ASSET ROOT IS CONFIGURED HERE, because the HTML binding emits
+      # `<script src="/plugin_assets/…">` for the three Chart.js files and the resolver
+      # must be able to reach them. Production configures exactly this root; a resolver
+      # with none refuses all three, which is a real answer to a different question.
+      outcome = run(
+        scope: ReportRunSpecSupport::FakeScope.new(1),
+        renderer: ReportRunSpecSupport::ChartingRenderer.new,
+        asset_resolver: ReportRunSpecSupport.resolver(
+          roots: { '/plugin_assets/redmine_reporter_dashboards' =>
+                     File.expand_path('../../assets', __dir__) },
+          origin: ReportRunSpecSupport.origin
+        )
+      ).call
+
+      expect(outcome).to be_ok
+      expect(outcome.sections.first.body).not_to include('rrd-chart-placeholder')
+      expect(outcome.sections.first.body).to include('<canvas')
+    end
+
+    it 'returns sections whose charts are bound, on the PDF path the preview uses' do
+      ReportRunSpecSupport::FakeAdapter.behaviour = lambda do |_request|
+        RedmineReporterDashboards::Render::Success.new(
+          bytes: ReportRunSpecSupport::PDF_BYTES, engine: 'fake', engine_version: '1.0'
+        )
+      end
+      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                    engine: ReportRunSpecSupport::FakeAdapter,
+                    renderer: ReportRunSpecSupport::ChartingRenderer.new).call(pdf: true)
+
+      expect(outcome).to be_ok
+      expect(outcome.sections.first.body).not_to include('rrd-chart-placeholder')
+    end
+
+    # AND WHEN THERE IS NO ENGINE AT ALL, which is the ordinary state of the installation
+    # this was measured on. `#preview` still renders `@outcome.sections` beside the
+    # diagnostic, so the failure return has to carry bound sections too — which is why the
+    # bind is hoisted above `resolve_engine` rather than merely assigned to a local.
+    it 'binds the charts even when the run fails for want of an engine' do
+      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
+                    engine: nil,
+                    renderer: ReportRunSpecSupport::ChartingRenderer.new).call(pdf: true)
+
+      expect(outcome).not_to be_ok
+      expect(outcome.sections.first.body).not_to include('rrd-chart-placeholder')
     end
 
     # The stylesheet adds bytes to every document, and `MAX_RUN_ASSET_BYTES` is measured
