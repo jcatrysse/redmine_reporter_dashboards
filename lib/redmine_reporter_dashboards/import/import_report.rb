@@ -47,6 +47,7 @@ module RedmineReporterDashboards
           lines.concat(summary_lines(result))
           lines.concat(detail_lines(result))
           lines.concat(widget_lines(result))
+          lines.concat(visibility_lines(result))
           lines.concat(note_lines(result))
           lines.concat(verdict_lines(result))
 
@@ -81,6 +82,41 @@ module RedmineReporterDashboards
           end
           lines << '' if unknown.any?
           lines
+        end
+
+        # T-46, §Findings **M-8** — THE COPIES ARE PRIVATE, AND UNTIL NOW NOTHING SAID SO
+        # ANYWHERE THE OPERATOR LOOKS.
+        #
+        # `Runner#create_copy` sets `VISIBILITY_PRIVATE` deliberately and the reason is good:
+        # the source plugin has its own visibility vocabulary, this one does not know how to
+        # translate it, and the safe answer is the narrow one. Widening is what
+        # `manage_public_reporter_dashboards_templates` exists to govern.
+        #
+        # The consequence is not narrow at all, and it was measured on a textbook migration:
+        # every user except the administrator who ran the import sees the shared project
+        # dashboard's report widgets fall back to their SETTINGS FORM — a query picker and a
+        # template picker — because `WidgetReport` resolves through `Template.visible(actor)`
+        # and finds nothing. The dashboard the migration was supposed to preserve becomes a
+        # pair of configuration forms that anybody with the manage permission can change.
+        #
+        # Its own section rather than a note, because a note is what a reader skims. It is
+        # printed only when something was actually created: on a re-run that changed nothing
+        # it would be advice about a decision already taken.
+        def visibility_lines(result)
+          created = result.outcomes.count { |outcome| outcome.status == :created }
+          return [] if created.zero?
+
+          ['Visibility',
+           format('  %-28s %d', 'private to you', created),
+           '',
+           '  Every copy is visible to you alone. Nobody else sees them in Reports →',
+           '  Templates, and a report widget on a shared project dashboard shows its',
+           '  settings form rather than the report to every other user.',
+           '',
+           '  Open each template, set Visible to "to these roles only" or "to any users",',
+           '  and save. That needs manage_public_reporter_dashboards_templates, which is',
+           '  the permission this decision belongs to.',
+           '']
         end
 
         def summary_lines(result)

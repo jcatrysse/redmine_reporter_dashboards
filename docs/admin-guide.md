@@ -367,6 +367,31 @@ bundle exec rake reporter_dashboards:migrate_from_reporter:run RAILS_ENV=product
 `reporter_dashboards:migrate_from_reporter:status` afterwards reports which imported
 templates have drifted from their source.
 
+### Then widen the visibility, or the dashboards stay broken for everybody else
+
+**Every copy is private to the administrator who ran the import.** That is deliberate — the
+other plugin has its own visibility vocabulary and this one will not guess at a translation —
+and it is the step most easily missed, because nothing looks wrong to the person who ran it.
+
+To every other user, a report widget on a shared project dashboard shows its **settings form**
+instead of the report: the widget resolves the template through that viewer's visible scope and
+finds nothing. The templates are also absent from their **Reports → Templates** list.
+
+So, per imported template: open it, set **Visible** to *to these roles only* or *to any users*,
+and save. That needs `manage_public_reporter_dashboards_templates`, which is the permission this
+decision belongs to. The run's own output says the same thing and counts them.
+
+### What is carried, and what is not
+
+| Carried | Not carried |
+|---|---|
+| Name, description, body | Schedules — recreate them under **Reports → Schedules** |
+| Project, or global if it was global | Visibility — see above |
+| Page orientation | The other plugin's own PDF settings, which have no counterpart here |
+
+An orientation this importer does not recognise becomes portrait and is reported as a note
+rather than applied quietly.
+
 ### One thing that will not work
 
 **This plugin's tags do not resolve inside a template that `redmine_reporter` renders.** Tag

@@ -90,7 +90,32 @@ module RedmineReporterDashboards
       # exercise; without it there is nothing to copy and the run reports that rather than
       # importing a set of empty templates.
       REQUIRED_COLUMNS = %w[id type content].freeze
-      OPTIONAL_COLUMNS = %w[name project_id].freeze
+
+      # T-46, §Findings **M-6** — `orientation` AND `description` WERE NOT ON THIS LIST, SO A
+      # LANDSCAPE DASHBOARD MIGRATED AS PORTRAIT.
+      #
+      # Measured on a real migration: `report_templates#2` is `1` (landscape) and its copy was
+      # `'portrait'`. The template in question is a six-tile KPI row and three side-by-side
+      # charts designed for landscape — correct in every number and wrong in every column
+      # width — and `import:status` reported *"Every template is imported and matches its
+      # source"*, because it compares the BODY digest, which is true and is not what a reader
+      # takes from it.
+      #
+      # OPTIONAL, like the two that were already here, because the source schema is not in
+      # this repository: `Survey` introspects rather than assumes, and a column that is absent
+      # is a note rather than a failure.
+      OPTIONAL_COLUMNS = %w[name project_id orientation description].freeze
+
+      # The source stores its orientation as its enum's INTEGER, and this is a closed map for
+      # the same reason the type map is: a value that is not in it is reported and defaulted
+      # rather than guessed at or passed through to a validation failure. Both spellings are
+      # accepted because a schema this repository cannot see may hold either.
+      ORIENTATIONS = {
+        '0' => 'portrait', '1' => 'landscape',
+        'portrait' => 'portrait', 'landscape' => 'landscape'
+      }.freeze
+
+      DEFAULT_ORIENTATION = 'portrait'
 
       class << self
         # `actor` OWNS EVERY IMPORTED TEMPLATE, and it is a required argument for the same
@@ -343,6 +368,8 @@ module RedmineReporterDashboards
           template = Template.new(
             name: name.to_s[0, Template::MAX_STRING],
             content: content,
+            description: row['description'].to_s[0, Template::MAX_STRING].presence,
+            orientation: orientation_for(row, notes),
             project_id: row['project_id'],
             author_id: actor.id,
             source: mapped['source'],
@@ -365,6 +392,25 @@ module RedmineReporterDashboards
             Outcome.new(source_id: source_id, name: name, status: :skipped,
                         reason: template.errors.full_messages.join(', '))
           end
+        end
+
+        # A value outside the map is DEFAULTED AND REPORTED, never applied silently. An
+        # operator whose landscape dashboard came through portrait should be able to read why
+        # from the run's own output rather than from the rendered PDF.
+        #
+        # An ABSENT column answers nil and is not a note: `read_source` intersects
+        # `OPTIONAL_COLUMNS` with what the table actually has, so nil here means the source
+        # schema has no orientation at all — which is a fact about that schema and not about
+        # this row, and saying it once per template would bury the run's real output.
+        def orientation_for(row, notes)
+          raw = row['orientation']
+          return DEFAULT_ORIENTATION if raw.nil?
+
+          mapped = ORIENTATIONS[raw.to_s.strip.downcase]
+          return mapped if mapped
+
+          notes << "source ##{row['id']} has orientation #{raw.inspect}, which is not one "                    "this importer knows; the copy is #{DEFAULT_ORIENTATION}."
+          DEFAULT_ORIENTATION
         end
 
         # THE FOUR-WAY DECISION. See the class comment; the case that matters is the last.

@@ -62,8 +62,89 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
     connection.select_value('SELECT MAX(id) FROM report_templates')
   end
 
+  # T-46, §Findings M-6 — A SOURCE TABLE THAT HAS THE TWO COLUMNS THE DEFAULT ONE LACKS.
+  #
+  # The stand-in above is deliberately minimal, and that minimality is itself a case: a
+  # schema without `orientation` must import cleanly and quietly, because `Survey`
+  # introspects rather than assumes and this repository does not contain the real schema.
+  # These tests need the other case, so they build it.
+  def create_source_tables_with_presentation
+    drop_source_tables
+    connection.create_table(:report_templates) do |t|
+      t.string :type
+      t.string :name
+      t.integer :project_id
+      t.text :content
+      t.integer :orientation
+      t.string :description
+    end
+  end
+
+  def seed_source_with_presentation(orientation:, description: nil, name: 'Weekly')
+    connection.insert(
+      'INSERT INTO report_templates (type, name, project_id, content, orientation, ' \
+      'description) VALUES (' \
+      "#{connection.quote('IssueListReportTemplate')}, #{connection.quote(name)}, " \
+      "#{connection.quote(@project.id)}, #{connection.quote('<p>hi</p>')}, " \
+      "#{connection.quote(orientation)}, #{connection.quote(description)})"
+    )
+    connection.select_value('SELECT MAX(id) FROM report_templates')
+  end
+
   def run_import(**options)
     Runner.call(actor: @admin, **options)
+  end
+
+  # ------------------------------------------------- what the copy carries (T-46, M-6)
+
+  # THE DEFECT, AS A REGRESSION TEST. The example dashboard this was found on is a six-tile
+  # KPI row and three side-by-side charts designed for landscape: correct in every number
+  # and wrong in every column width, while `import:status` reported "matches its source"
+  # because it compares the body digest.
+  def test_a_landscape_source_imports_as_landscape
+    create_source_tables_with_presentation
+    source_id = seed_source_with_presentation(orientation: 1, description: 'Board pack')
+
+    run_import
+
+    copy = Template.find_by(source_template_id: source_id)
+    assert_equal 'landscape', copy.orientation
+    assert_equal 'Board pack', copy.description
+  end
+
+  def test_a_portrait_source_imports_as_portrait
+    create_source_tables_with_presentation
+    source_id = seed_source_with_presentation(orientation: 0)
+
+    run_import
+
+    assert_equal 'portrait', Template.find_by(source_template_id: source_id).orientation
+  end
+
+  # DEFAULTED AND REPORTED, never applied silently: an operator whose landscape dashboard
+  # came through portrait should read why in the run's output, not in the rendered PDF.
+  def test_an_orientation_this_importer_does_not_know_defaults_and_says_so
+    create_source_tables_with_presentation
+    source_id = seed_source_with_presentation(orientation: 7)
+
+    result = run_import
+
+    assert_equal 'portrait', Template.find_by(source_template_id: source_id).orientation
+    assert_match(/orientation .*7.*not one this importer knows/, result.notes.join(' '))
+  end
+
+  # AND THE MINIMAL SCHEMA IS A CASE, not a gap. A source with no orientation column at all
+  # imports cleanly and says nothing about it: that is a fact about that schema, and a note
+  # per template would bury the run's real output.
+  def test_a_source_without_the_columns_imports_cleanly_and_quietly
+    source_id = seed_source
+
+    result = run_import
+
+    copy = Template.find_by(source_template_id: source_id)
+    assert_equal 'portrait', copy.orientation
+    assert_nil copy.description
+    refute_match(/orientation/, result.notes.join(' '))
   end
 
   # ------------------------------------------------------------------ copy, forward-only
@@ -556,6 +637,38 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
     printed = RedmineReporterDashboards::Import::ImportReport.render(result)
     assert_includes printed, 'COULD NOT BE MAPPED'
     assert_includes printed, 'widget report_by_issues: stored template 999999'
+  end
+
+  # T-46, §Findings M-8 — THE RUN SAYS THE COPIES ARE PRIVATE.
+  #
+  # `create_copy` sets VISIBILITY_PRIVATE deliberately and the reason is good: the source
+  # plugin has its own visibility vocabulary and this one will not guess at a translation.
+  # What was missing is that nothing said so anywhere the operator looks, and the
+  # consequence is not small — every other user sees a shared project dashboard's report
+  # widgets fall back to their settings form, because the widget resolves the template
+  # through THAT viewer's visible scope and finds nothing.
+  #
+  # Asserted on the printed string rather than on a flag, so deleting the section fails.
+  def test_the_run_says_the_copies_are_private_and_how_to_widen_them
+    seed_source
+
+    printed = RedmineReporterDashboards::Import::ImportReport.render(run_import)
+
+    assert_includes printed, 'Visibility'
+    assert_includes printed, 'private to you'
+    assert_includes printed, 'manage_public_reporter_dashboards_templates'
+    assert_includes printed, 'settings form'
+  end
+
+  # AND NOT WHEN THERE IS NOTHING TO SAY IT ABOUT. On a re-run that created nothing it would
+  # be advice about a decision already taken, which is how a section stops being read.
+  def test_a_run_that_creates_nothing_says_nothing_about_visibility
+    seed_source
+    run_import
+
+    printed = RedmineReporterDashboards::Import::ImportReport.render(run_import)
+
+    refute_includes printed, 'private to you'
   end
 
   # Only the two report widgets' settings are this module's business. A `news` widget that
