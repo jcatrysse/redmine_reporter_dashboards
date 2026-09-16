@@ -172,11 +172,26 @@ class ReporterDashboardsAuthoringSystemTest < ReporterDashboardsSystemTestCase
   # is waiting for the new document, and every assertion after it is about the page the test
   # means.
   #
-  # NOT a `sleep`, and not a longer `default_max_wait_time`: both would make the tests slower
-  # without making them right, because the failing runs were not slow — they were early.
+  # AND THE WAIT IS EXPLICIT, WHICH THE FIRST VERSION OF THIS HELPER GOT WRONG.
+  #
+  # That version added the same `assert_selector` with Capybara's DEFAULT two seconds, and
+  # its commit message said the failing runs "were not slow, they were early". The next CI
+  # run refuted that in one line: `expected to find css "iframe.reporter-report-frame" but
+  # there were no matches`. Two seconds had passed and the browser was still on the edit
+  # page, so the POST itself had not come back — which is slow, not early.
+  #
+  # Two seconds is simply the wrong order of magnitude for this request. `#preview` runs
+  # `ReportRun#call(pdf: true)`, and on a job that has a browser installed that is a REAL
+  # PDF render: an engine process, a document, and bytes back. The other tests in this file
+  # click Save, which is an INSERT and a redirect, and they have never flaked.
+  #
+  # So the number is named here with its reason rather than raised globally. A longer wait
+  # costs nothing when the page is fast — `assert_selector` returns the moment the element
+  # appears — and `default_max_wait_time` stays at two seconds for every other assertion in
+  # the suite, which is where a real regression should still show up quickly.
   def click_on_preview
     find('#reporter-template-form input[name="preview"]').click
-    assert_selector 'iframe.reporter-report-frame'
+    assert_selector 'iframe.reporter-report-frame', wait: 30
   end
 
   # The saving button is the one WITHOUT `name="preview"`, which is `commit` — Rails' default
