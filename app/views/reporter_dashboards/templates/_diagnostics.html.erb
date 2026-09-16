@@ -1,0 +1,70 @@
+<%#
+  FR-58 — the diagnostics view. *"What failed, the template, the Liquid line where
+  applicable, engine and version, duration and a correlation id."*
+
+  --- WHY THIS IS A PANEL AND NOT A DOCUMENT ---
+
+  INV-5, and §7b.3's opening sentence: in the base plugin the exception message IS the PDF
+  bytes, so a recipient gets a file named `.pdf` that is not one. Here a failure is an HTML
+  panel with an HTTP status on the response and no bytes sent at all.
+
+  --- WHAT IS DELIBERATELY NOT PRINTED ---
+
+  `Diagnostic#detail` — the raw exception text. §7b.3: the old failure leaked SQL
+  fragments, role ids and project ids to whoever the report reached. `Diagnostic#to_h`
+  cannot carry it either, so no future serialiser picks it up by accident.
+
+  AND IT IS NOT IN THE APPLICATION LOG, which this comment claimed until a review measured
+  it (§Findings E-33): nothing writes `Diagnostic#detail` anywhere. Its only readers are the
+  two delivery `restamp` sites, so today it is diagnostic data carried on the object and
+  printed by nobody. That is worth knowing before writing a remedy into it, which one commit
+  did — the log lines an operator actually gets come from the component that found the fault,
+  not from this field.
+%>
+<div class="flash error" id="reporter-report-diagnostic">
+  <p><strong><%= reporter_diagnostic_headline(diagnostic) %></strong></p>
+  <p><%= diagnostic.message %></p>
+</div>
+
+<table class="list">
+  <tbody>
+    <%# FR-58 NAMES THE TEMPLATE FIRST, and until T-30 this panel did not.
+        The page around it does carry a heading — but a preview's subject is an UNSAVED
+        copy of what is in the editor, so the heading and the thing that failed are not
+        always the same object, and the panel is also what a future serialiser reads. %>
+    <% if diagnostic.template_name.present? %>
+      <tr>
+        <th><%= l(:label_reporter_template) %></th>
+        <td><%= diagnostic.template_name %></td>
+      </tr>
+    <% end %>
+    <tr>
+      <th><%= l(:label_reporter_report_diagnostic_code) %></th>
+      <td><%= diagnostic.code %></td>
+    </tr>
+    <% if diagnostic.line %>
+      <tr>
+        <th><%= l(:label_reporter_report_diagnostic_line) %></th>
+        <td><%= diagnostic.line %></td>
+      </tr>
+    <% end %>
+    <% if diagnostic.engine %>
+      <tr>
+        <th><%= l(:label_reporter_preflight_engine_version) %></th>
+        <td><%= diagnostic.engine %> <%= diagnostic.engine_version %></td>
+      </tr>
+    <% end %>
+    <% if diagnostic.duration_ms %>
+      <tr>
+        <th><%= l(:label_reporter_preflight_duration) %></th>
+        <td><%= diagnostic.duration_ms %> ms</td>
+      </tr>
+    <% end %>
+    <tr>
+      <th><%= l(:label_reporter_report_diagnostic_correlation_id) %></th>
+      <%# The one value a reader is asked to quote in a bug report, so it is selectable
+          text rather than part of a sentence. %>
+      <td><code><%= diagnostic.correlation_id %></code></td>
+    </tr>
+  </tbody>
+</table>

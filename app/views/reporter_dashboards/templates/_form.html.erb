@@ -1,0 +1,104 @@
+<%#
+  T-23 — the template editor. Shared by new and edit.
+
+  --- WHAT IS NOT ON THIS FORM, AND WHY ---
+
+  `source`. T-22 built the column (`issues | time_entries`, FR-60) because §7 rule 6
+  requires a column in the same migration as its table, and T-31 is the task that gives
+  `time_entries` a scope to resolve through. Offering the choice now would be a picker
+  whose second value cannot render — the plugin promising something it does not do, which
+  is the failure this whole dossier is about. The column keeps its value through import
+  and export; only the picker waits.
+
+  `visibility` is here but only for somebody holding `manage_public_…`. Without it the
+  controller forces PRIVATE, so showing a disabled select would be showing a decision the
+  reader cannot make; a line saying what will happen is more use than a greyed-out box.
+%>
+<%= error_messages_for 'template' %>
+
+<div class="box tabular">
+  <p>
+    <%= f.text_field :name, size: 60, required: true, maxlength: 255 %>
+  </p>
+  <p>
+    <%= f.text_field :description, size: 60, maxlength: 255 %>
+  </p>
+  <p>
+    <%# T-31 — WHICH TABLE this template reports on. `source` and `output` are two
+        ORTHOGONAL axes and §7's table says so in as many words: the base plugin's three
+        template types conflated them, so it could not express "one document per time
+        entry". Two selects, and every combination is valid. %>
+    <%= f.select :source, reporter_template_source_options,
+                 {}, label: :label_reporter_template_source %>
+    <em class="info"><%= l(:text_reporter_template_source_info) %></em>
+  </p>
+  <p>
+    <%= f.select :output, reporter_template_output_options %>
+    <em class="info"><%= l(:text_reporter_template_output_info) %></em>
+  </p>
+  <p>
+    <%= f.select :page_size, RedmineReporterDashboards::Template::PAGE_SIZES %>
+  </p>
+  <p>
+    <%= f.select :orientation, reporter_template_orientation_options %>
+  </p>
+  <p>
+    <%= f.text_field :margins, size: 20, maxlength: 15 %>
+    <em class="info"><%= l(:text_reporter_template_margins_info) %></em>
+  </p>
+  <p>
+    <%= f.check_box :enabled %>
+  </p>
+  <%# T-30 / FR-59 — default off, and the checkbox is not drawn at all on an install whose
+      schema predates migration 008 (§7 rule 5). A control for a column that is not there
+      would save nothing and report success, which is the silent wrong answer this project
+      keeps deleting. `label:` is passed explicitly rather than relying on the builder's
+      `field_<attr>` convention, because the plugin's keys are namespaced. %>
+  <% if RedmineReporterDashboards::Template.failure_document_supported? %>
+    <p>
+      <%= f.check_box :failure_document,
+                      label: :label_reporter_template_failure_document %>
+      <em class="info"><%= l(:text_reporter_template_failure_document_info) %></em>
+    </p>
+  <% end %>
+
+  <% if @template.visibility_editable_by?(User.current) %>
+    <p>
+      <label><%= l(:field_visible) %></label>
+      <% reporter_template_visibility_options.each do |label, value| %>
+        <label class="block">
+          <%= f.radio_button :visibility, value %> <%= label %>
+        </label>
+      <% end %>
+      <span id="reporter-template-roles">
+        <% reporter_template_role_options.each do |role| %>
+          <label class="block">
+            <%= check_box_tag 'template[role_ids][]', role.id,
+                              @template.roles.to_a.include?(role), id: nil %>
+            <%= role.name %>
+          </label>
+        <% end %>
+        <%# The hidden field is what lets "all roles unticked" reach the server. Without
+            it the parameter is absent and `Array(nil)` keeps the previous list, so
+            clearing every role would silently do nothing. %>
+        <%= hidden_field_tag 'template[role_ids][]', '', id: nil %>
+      </span>
+    </p>
+  <% else %>
+    <p>
+      <label><%= l(:field_visible) %></label>
+      <span><%= l(:label_visibility_private) %></span>
+      <em class="info"><%= l(:text_reporter_template_visibility_private_only) %></em>
+    </p>
+  <% end %>
+</div>
+
+<div class="box tabular">
+  <p>
+    <%= f.text_area :content, rows: 20, cols: 100, class: 'wiki-edit' %>
+  </p>
+  <%# INV-9 SAID IN THE PLACE THE PRIVILEGE IS EXERCISED. §4.1 labels the permission
+      "executes server-side code"; the roles screen is where an administrator grants it
+      and this is where an author uses it, and both should say the same thing. %>
+  <p><em class="info"><%= l(:text_reporter_template_content_executes) %></em></p>
+</div>

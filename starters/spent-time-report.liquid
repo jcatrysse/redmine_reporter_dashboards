@@ -1,0 +1,104 @@
+{% comment %}
+=====================================================================
+ Spent time — the same tag, pointed at the other table
+ ---------------------------------------------------------------------
+ Set the template's SOURCE to "Spent time" and its OUTPUT to "One
+ document for the whole set". The report then resolves through a
+ spent-time query rather than an issue query, and the variable is
+ `time_entries` instead of `issues`.
+
+ `{% sql_aggregate %}` sums HOURS here rather than counting issues, and
+ that is the default rather than something you ask for: `bucket.count`
+ carries the measure, which is hours on this source and a count of issues
+ on the other. A template written against one source therefore reads the
+ other, which is the point of there being one tag.
+
+ THREE THINGS THIS SOURCE DOES DIFFERENTLY, and each is refused VISIBLY
+ rather than ignored — a refusal appears under the preview as a "reduced"
+ note naming the reason:
+
+   * `from:` is not used. The scope comes from the template's source and
+     the saved query on the page; use `query_id:` to point at a saved
+     SPENT-TIME query.
+   * `measure:` takes `hours` (the default) or `count`. There is no
+     `of:` — the field is decided by the source.
+   * there are no drill-through URLs and no custom-field dimensions, and
+     no period series either: a time entry is not opened and closed, so a
+     `{% sql_aggregate %}` with no `group_by` is refused here.
+
+ The dimensions on the entry itself are `activity`, `user`, `project` and
+ `issue`; `tracker`, `status`, `version` and `category` need the entry
+ joined to its issue, which a saved spent-time query provides.
+
+ ONE OF THOSE FOUR CANNOT BE NAMED TODAY. A tag parameter that is a bare
+ word is resolved as a Liquid variable, and `user` and `project` are
+ ALWAYS variables in a report — so `group_by: user` asks for
+ `group_by: "Redmine Admin"` and the page says so. Quoting does not help:
+ the quotes are stripped before the lookup. It is a defect in the tag
+ rather than in this starter, it is reported, and until it is fixed the
+ two dimensions below are the ones to use.
+
+ YOU SEE THE HOURS YOUR ROLE LETS YOU SEE. If a role may only read its
+ own time entries, the report says so above the numbers rather than
+ quietly reporting one person's timesheet as the project's total.
+=====================================================================
+{% endcomment %}
+
+{% sql_aggregate group_by: activity, assign_to: by_activity %}
+{% sql_aggregate group_by: issue, sort: count, limit: 15, assign_to: by_issue %}
+
+<h1>Spent time — {{ project.name }}</h1>
+<p class="rrd-muted">{{ by_activity.total }} hours in scope</p>
+
+<div class="rrd-card">
+  {% chart id: activity, from: by_activity, title: "Hours by activity", y_title: "Hours" %}
+</div>
+
+<div class="rrd-card">
+  <h2>By activity</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Activity</th>
+        <th class="rrd-number">Hours</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for bucket in by_activity.buckets %}
+        <tr>
+          <td>{{ bucket.label }}</td>
+          <td class="rrd-number">{{ bucket.count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>Total</th>
+        <th class="rrd-number">{{ by_activity.total }}</th>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<div class="rrd-card">
+  <h2>Where the hours went</h2>
+  {% comment %} An issue you may not see is named `#42` and nothing else — the hours are yours
+     to count, the subject is not yours to read. That is Redmine's own rule in its spent-time
+     report and this axis follows it rather than inventing a second one. {% endcomment %}
+  <table>
+    <thead>
+      <tr>
+        <th>Issue</th>
+        <th class="rrd-number">Hours</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for bucket in by_issue.buckets %}
+        <tr>
+          <td>{{ bucket.label }}</td>
+          <td class="rrd-number">{{ bucket.count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,59 @@
+      labels = age_bucket_labels(bounds)
+      today  = current_date
+      # One boundary VALUE per bound, computed ONCE. The CASE and the per-bucket
+      # conditions below describe the same buckets and must not be able to drift
+      # apart, and `days.days.ago` reads the clock on every call.
+      at = bounds.map { |days| field == 'due' ? today - days : days.days.ago }
+
+      fragments = ["CASE WHEN #{column} IS NULL THEN NULL"]
+      binds     = []
+      at.each_with_index do |boundary, index|
+        fragments << "WHEN #{column} >= ? THEN ?"
+        binds << boundary << labels[index]
+      end
+      fragments << 'ELSE ? END'
+      binds << labels.last
+
+      filter_field = AGE_FILTER_FIELDS[field]
+
+      Dimension.new(
+        name: name,
+        sql: Arel.sql(ActiveRecord::Base.sanitize_sql_array([fragments.join(' '), *binds])),
+        fixed_keys: labels,
+        bucket_conditions: age_bucket_conditions(column, at),
+        empty_label: empty_label.nil? ? DEFAULT_EMPTY_LABEL : empty_label.to_s,
+        filter_field: filter_field,
+        filter_for: ->(raws) { age_bucket_filter(filter_field, labels, bounds, today, raws) }
+      )
+    end
+    private_class_method :age_dimension
+
+    # The same buckets the CASE above describes, as one self-contained condition each,
+    # in `[nil, *labels]` order — the order `dimension_totals` reads them back in. At
+    # most MAX_AGE_BUCKETS + 2 = 26 of them, which is one query, not a growing number.
+    #
+    # The CASE assigns a row to its FIRST matching branch. These are evaluated
+    # independently, so every bucket but the newest also carries the preceding
+    # boundary as an EXCLUSIVE upper limit: `at` runs from the most recent boundary to
+    # the oldest, so bucket i is [at[i], at[i - 1]).
+    def self.age_bucket_conditions(column, at)
+      conditions = ["#{column} IS NULL"]
+      at.each_with_index do |boundary, index|
+        conditions <<
+          if index.zero?
+            ActiveRecord::Base.sanitize_sql_array(["#{column} >= ?", boundary])
+          else
+            ActiveRecord::Base.sanitize_sql_array(["#{column} >= ? AND #{column} < ?",
+                                                   boundary, at[index - 1]])
+          end
+      end
+      # The CASE's ELSE branch: older than every boundary. NULL is excluded explicitly
+      # rather than left to three-valued logic, so the condition says what the branch
+      # it replaces says — the CASE tests IS NULL first and never reaches ELSE with one.
+      conditions << ActiveRecord::Base.sanitize_sql_array(["#{column} IS NOT NULL AND " \
+                                                           "#{column} < ?", at.last])
+      conditions
+    end
+    private_class_method :age_bucket_conditions
+
+    def self.normalize_age_buckets(value)

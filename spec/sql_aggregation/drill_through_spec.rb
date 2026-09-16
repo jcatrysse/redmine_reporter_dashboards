@@ -16,7 +16,7 @@ unless defined?(Rails)
   end
 end
 
-require_relative '../../lib/sql_aggregation/drill_through'
+require_relative '../../lib/redmine_reporter_dashboards/aggregation/drill_through'
 
 # Redmine's SortCriteria, reduced to what Query#as_params calls on it.
 class SortCriteriaStub

@@ -1,0 +1,116 @@
+<%= error_messages_for 'schedule' %>
+
+<div class="box tabular">
+  <%#
+    THE TEMPLATE PICKER LISTS WHAT THIS ACTOR CAN SEE, and the controller re-resolves the
+    id against the same scope. Two halves of one rule: a picker that offered more than the
+    controller accepts would be a form that fails confusingly, and a controller that
+    accepted more than the picker offers would be a disclosure hole reached through a
+    hand-made request — somebody else's PRIVATE template, mailed to a list of your choosing.
+  %>
+  <p>
+    <label for="schedule_template_id"><%= l(:field_redmine_reporter_dashboards_schedule_template) %>
+      <span class="required">*</span></label>
+    <%= select_tag 'schedule[template_id]',
+                   options_from_collection_for_select(
+                     RedmineReporterDashboards::Template.visible(User.current)
+                                                        .where(project_id: @project.id)
+                                                        .order(:name, :id),
+                     :id, :name, @schedule.template_id
+                   ),
+                   include_blank: true %>
+  </p>
+
+  <p>
+    <label for="schedule_query_id"><%= l(:field_redmine_reporter_dashboards_schedule_query) %></label>
+    <%= select_tag 'schedule[query_id]',
+                   options_from_collection_for_select(
+                     IssueQuery.visible(User.current).where(project_id: [nil, @project.id])
+                               .order(:name, :id),
+                     :id, :name, @schedule.query_id
+                   ),
+                   include_blank: true %>
+    <em class="info"><%= l(:text_reporter_schedule_query_info) %></em>
+  </p>
+
+  <p>
+    <%= f.select :repeat,
+                 RedmineReporterDashboards::Schedule::REPEATS.map { |r|
+                   [l(:"label_reporter_schedule_repeat_#{r}"), r]
+                 },
+                 include_blank: true %>
+  </p>
+
+  <p><%= f.date_field :start_date, size: 10 %></p>
+  <p>
+    <%= f.date_field :end_date, size: 10 %>
+    <em class="info"><%= l(:text_reporter_schedule_end_date_info) %></em>
+  </p>
+
+  <p>
+    <%= f.text_field :email_subject, size: 60, maxlength: 255 %>
+    <em class="info"><%= l(:text_reporter_schedule_subject_info) %></em>
+  </p>
+
+  <p>
+    <%= f.text_field :timezone, size: 30, maxlength: 255 %>
+    <em class="info"><%= l(:text_reporter_schedule_timezone_info) %></em>
+  </p>
+
+  <%#
+    FR-45 AT THE POINT THE DECISION IS MADE. This is the field that decides whose numbers
+    every recipient reads, so it says so here rather than only in the mail — an author
+    choosing "a specific user" is choosing to send that person's view of the data to
+    everybody on the list, and that is worth one sentence at the moment they pick it.
+  %>
+  <p>
+    <%= f.select :render_as,
+                 RedmineReporterDashboards::Schedule::RENDER_AS.map { |value|
+                   [l(:"label_reporter_schedule_render_as_#{value}"), value]
+                 } %>
+  </p>
+  <%#
+    THE OBJECT, NOT THE ID. `principals_options_for_select` matches with
+    `option_value_selected?(element, selected) || element.id.to_s == selected`
+    (application_helper.rb:694) — and `render_as_user_id` is an INTEGER, so `"3" == 3` is
+    false and nothing was ever marked selected. The browser showed the blank option, and
+    pressing Save without touching anything posted an empty id: every schedule using the
+    policy FR-45 exists for was uneditable until somebody re-picked the identity by hand, on
+    the one field where a mis-click changes whose data is mailed. The template and recipient
+    selects use different helpers and did pre-select, so the page looked right.
+  %>
+  <p>
+    <%= f.select :render_as_user_id,
+                 principals_options_for_select(reporter_schedule_assignable_identities(@project),
+                                               @schedule.render_as_user),
+                 include_blank: true %>
+    <em class="info"><%= l(:text_reporter_schedule_render_as_info) %></em>
+  </p>
+
+  <%#
+    REDMINE USERS ONLY, AND ONLY THIS PROJECT'S. §7's row for the recipients table:
+    "`user_id` only — no free-text to/cc/bcc/from, which is the exfiltration-and-
+    spoofing-relay finding." There is no text field here because there is no column behind
+    one; the controller additionally intersects the ids with this list, so a hand-made
+    request cannot address somebody with no business in the project.
+  %>
+  <p>
+    <label><%= l(:label_reporter_schedule_recipients) %></label>
+    <%#
+      THE HIDDEN FIELD IS LOAD-BEARING. A multi-select with nothing chosen sends no key at
+      all, and the controller now distinguishes "not requested" from "cleared" — without
+      this, emptying the list would be indistinguishable from a partial update and would
+      silently keep the old recipients.
+    %>
+    <%= hidden_field_tag 'schedule[recipient_user_ids][]', '', id: nil %>
+    <%= select_tag 'schedule[recipient_user_ids][]',
+                   options_from_collection_for_select(@project.users.active.sorted, :id,
+                                                      :name, reporter_selected_recipient_ids),
+                   multiple: true, size: 8, id: 'schedule_recipient_user_ids' %>
+  </p>
+
+  <p>
+    <%= f.check_box :enabled %>
+    <em class="info"><%= l(:text_reporter_schedule_enabled_info) %></em>
+  </p>
+</div>

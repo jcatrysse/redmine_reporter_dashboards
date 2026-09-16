@@ -16,7 +16,27 @@ else
   (
     cd "$REDMINE_DIR"
     git fetch --depth 1 origin "$REDMINE_VERSION:refs/remotes/origin/$REDMINE_VERSION"
-    git checkout -B "$REDMINE_VERSION" "origin/$REDMINE_VERSION"
+
+    # test_setup.sh appends a test-only gem to Redmine's OWN Gemfile, so after one
+    # setup run this checkout is dirty and a plain `git checkout -B` refuses to switch
+    # branches. That failure is quiet in the worst way: the tree stays on the previous
+    # Redmine version while every step afterwards reports its results as though it had
+    # moved — a suite that says "Redmine 7.0" while running 6.1.
+    #
+    # The modification is this tooling's own and test_setup.sh re-applies it, so it is
+    # discarded deliberately, and said out loud rather than forced silently.
+    if ! git diff --quiet; then
+      echo "NOTE: discarding local modifications in $REDMINE_DIR before switching to $REDMINE_VERSION:" >&2
+      git diff --name-only | sed 's/^/        /' >&2
+    fi
+
+    git checkout -f -B "$REDMINE_VERSION" "origin/$REDMINE_VERSION"
+
+    actual="$(git rev-parse --abbrev-ref HEAD)"
+    if [ "$actual" != "$REDMINE_VERSION" ]; then
+      echo "ERROR: expected to be on $REDMINE_VERSION but HEAD is $actual." >&2
+      exit 1
+    fi
   )
 fi
 

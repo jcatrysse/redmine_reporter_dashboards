@@ -1,0 +1,199 @@
+# frozen_string_literal: true
+
+require_relative '../render/failure'
+require_relative '../liquid/template_renderer'
+
+module RedmineReporterDashboards
+  module Reporting
+    # FR-58's diagnostics view, as data — *"what failed, the template, the Liquid line
+    # where applicable, engine and version, duration and a correlation id"*.
+    #
+    # --- WHY A THIRD TYPE RATHER THAN REUSING EITHER FAILURE CLASS ---
+    #
+    # There are two failure vocabularies on this path and they are deliberately separate.
+    # `Liquid::TemplateRenderer::Failure` knows about syntax errors and Liquid line
+    # numbers and nothing about engines; `Render::Failure` knows about engine crashes and
+    # readiness timeouts and nothing about templates. `TemplateRenderer`'s own comment
+    # says why they must not be merged: *"a caller that cannot tell them apart will
+    # report 'the PDF engine failed' to an author whose template has a typo in it"*.
+    #
+    # But the VIEW has to render one panel, and a view that branches on two classes is a
+    # view that renders half of one of them. So the branch happens exactly once, here, and
+    # what comes out is the closed set of fields FR-58 enumerates. `origin` is kept —
+    # `:template` or `:engine` — because the panel's heading and its "what to do next"
+    # line are the one thing that genuinely differs, and losing it would put the
+    # confusion back.
+    class Diagnostic
+      # F-16 added `:assets`, and it is a fourth origin rather than a reuse of `:engine`
+      # for the reason `:batch` is not one either: NO ENGINE RAN. An asset refusal happens
+      # while the request is still being built, so telling the reader "the PDF engine
+      # failed" would send them to check a binary that was never started, and the remedy —
+      # fix the reference, or widen `asset_policy` — is not on that page. Same class,
+      # different origin, and the origin is what the panel's heading reads.
+      ORIGINS = %i[template engine batch assets].freeze
+
+      # ONE MAP, READ BY BOTH THINGS THAT RENDER A DIAGNOSTIC. `FailureDocument` carried
+      # one copy and `TemplatesHelper#reporter_diagnostic_headline` carried another as a
+      # `case` whose `else` branch meant "engine" — so a fourth origin would have been
+      # headlined *"the PDF engine failed"* on the interactive panel and correctly
+      # elsewhere, which is worse than either being wrong on its own. A closed set read
+      # through an `else` is not closed.
+      #
+      # `spec/reporting/diagnostic_spec.rb` asserts these keys are exactly `ORIGINS`, so
+      # adding an origin without a label fails a test rather than printing a wrong sentence.
+      ORIGIN_LABEL_KEYS = {
+        template: :label_reporter_report_failed_template,
+        engine: :label_reporter_report_failed_engine,
+        batch: :label_reporter_report_refused,
+        assets: :label_reporter_report_failed_assets
+      }.freeze
+
+      # THE CODE SET IS CLOSED TOO, AND IT WAS NOT. `FailureDocument`'s whole safety
+      # argument is that `code` "is a vocabulary rather than text" — but this constructor
+      # accepted any symbol at all while `Render::Failure` and
+      # `Liquid::TemplateRenderer::Failure` both raise on an unknown one, and four call
+      # sites build a `Diagnostic` directly. No leak today; the guard the design leans on
+      # simply was not here. Found by the independent review of T-30.
+      #
+      # It is the UNION of the two failure vocabularies plus the four this plugin's
+      # application layer adds, read from the two classes rather than retyped, so a code
+      # added to either of them is a code this accepts without anybody remembering to.
+      # THIS LIST WAS THREE ENTRIES SHORT OF REALITY ON ITS FIRST RUN, and the full-app
+      # suite found six of the missing ones in one go — `partial_delivery`,
+      # `attachments_too_large`, `no_recipients`, `schedule_unusable`, `scope_unavailable`
+      # and `template_missing`, all minted by T-25's delivery path. A closed set that is
+      # wrong is worse than no set, because it turns a working install into an
+      # `ArgumentError`; `spec/reporting/diagnostic_spec.rb` therefore GREPS the tree for
+      # every `code:` literal handed to a Diagnostic and fails if one is not here, rather
+      # than trusting the next author to remember.
+      # `archive_not_available` WAS HERE AND IS GONE, deliberately rather than by tidying.
+      # It was the 501 a multi-document export answered with; T-29 built the archive
+      # (§Findings E-6's third bullet, ~~S-12~~), so no code path can mint it and its nine
+      # locale strings said "not available in this version", which stopped being true in
+      # the same commit. A refusal code nothing can emit is dead vocabulary; one whose
+      # SENTENCE is false is worse, because the first person to see it will believe it.
+      # The inventory check in `spec/reporting/diagnostic_spec.rb` reads the tree for
+      # `code:` literals and is one-directional, so it would not have caught either.
+      APPLICATION_CODES = %i[
+        unsupported_source no_documents
+        partial_delivery attachments_too_large no_recipients
+        schedule_unusable scope_unavailable template_missing
+        diagnostics_truncated
+      ].freeze
+
+      def self.codes
+        @codes ||= (::RedmineReporterDashboards::Render::Failure::CODES +
+                    ::RedmineReporterDashboards::Liquid::TemplateRenderer::FAILURE_CODES +
+                    APPLICATION_CODES).uniq.freeze
+      end
+
+      attr_reader :origin, :code, :message, :line, :engine, :engine_version,
+                  :duration_ms, :correlation_id, :detail, :template_name
+
+      # `template_name` is FR-58's first noun — *"what failed, **the template**, the Liquid
+      # line where applicable, …"* — and it was the one field of that list this class did
+      # not carry (T-30). It is deliberately the NAME rather than the record: a diagnostic
+      # is serialised into a mail, a failure document and a log line, and none of those may
+      # hold something that can be dereferenced into a visibility decision later.
+      #
+      # It defaults to nil rather than being required because two of the three factories
+      # below are handed a failure by a layer that has never heard of a template, and a
+      # required argument there would be filled in with `''` at every call site — which is
+      # a field that is present and empty, the shape §Findings keeps recording as worse
+      # than an absent one.
+      def initialize(origin:, code:, message:, correlation_id:, line: nil, engine: nil,
+                     engine_version: nil, duration_ms: nil, detail: nil,
+                     template_name: nil)
+        unless ORIGINS.include?(origin)
+          raise ArgumentError, "#{origin.inspect} is not a diagnostic origin"
+        end
+        unless self.class.codes.include?(code)
+          raise ArgumentError, "#{code.inspect} is not a diagnostic code"
+        end
+
+        @origin = origin
+        @code = code
+        @message = message.to_s.freeze
+        @template_name = template_name&.to_s&.freeze
+        @line = line
+        @engine = engine
+        @engine_version = engine_version
+        @duration_ms = duration_ms
+        @correlation_id = correlation_id.to_s.freeze
+        @detail = detail
+        freeze
+      end
+
+      # `detail` is DELIBERATELY ABSENT from this Hash and present on the object.
+      #
+      # §7b.3: the failure the base plugin shipped leaked SQL fragments, role ids and
+      # project ids to whoever the report reached, because the exception message *was* the
+      # document. `detail` is the raw exception text; it belongs in the log and in an
+      # administrator's view, and it must not travel anywhere a report travels. Any caller
+      # that serialises a diagnostic — a mail, a failure PDF (T-30), an API — gets this
+      # Hash, and this Hash cannot carry it.
+      def to_h
+        { 'origin' => origin.to_s, 'code' => code.to_s, 'message' => message,
+          'template' => template_name,
+          'line' => line, 'engine' => engine, 'engine_version' => engine_version,
+          'duration_ms' => duration_ms, 'correlation_id' => correlation_id }.freeze
+      end
+
+      class << self
+        def from_template_failure(failure, correlation_id: nil, template_name: nil)
+          new(origin: :template,
+              code: failure.code,
+              message: failure.message,
+              template_name: template_name,
+              line: failure.line,
+              duration_ms: failure.duration_ms,
+              detail: failure.detail,
+              correlation_id: failure.correlation_id || correlation_id)
+        end
+
+        def from_render_failure(failure, template_name: nil)
+          new(origin: :engine,
+              code: failure.code,
+              message: failure.message,
+              template_name: template_name,
+              engine: failure.engine,
+              engine_version: failure.engine_version,
+              duration_ms: failure.duration_ms,
+              detail: failure.detail,
+              correlation_id: failure.correlation_id)
+        end
+
+        # A batch refusal is a `Render::Failure` too — `BatchGuard#cap_refusal` builds
+        # one — but it is not an engine failure and must not be presented as one: nothing
+        # was drawn, no engine was started, and the remedy is "select fewer", not "check
+        # the engine". Same class, different origin, and the origin is what the panel
+        # reads.
+        def from_batch_refusal(failure, template_name: nil)
+          new(origin: :batch,
+              code: failure.code,
+              message: failure.message,
+              template_name: template_name,
+              duration_ms: failure.duration_ms,
+              detail: failure.detail,
+              correlation_id: failure.correlation_id)
+        end
+
+        # F-16. `Render::AssetBinding` answers a `Failure(:asset_unresolved)` when a
+        # document references something the policy and the disk between them cannot
+        # supply. No engine has been started at that point, so `engine` and
+        # `engine_version` are deliberately NOT carried even though the binding was told
+        # which adapter was resolved: stamping a version onto a failure that engine had no
+        # part in is the same lie `from_batch_refusal` avoids, and `FailureDocument` prints
+        # both fields.
+        def from_asset_refusal(failure, template_name: nil)
+          new(origin: :assets,
+              code: failure.code,
+              message: failure.message,
+              template_name: template_name,
+              detail: failure.detail,
+              correlation_id: failure.correlation_id)
+        end
+      end
+    end
+  end
+end

@@ -13,3 +13,9 @@ vendor/bundle/
 # Coverage / test artefacts
 coverage/
 tmp/
+
+# A lockfile for the PLUGIN Gemfile is a local artefact, and a harmful one: with it present
+# `spec_helper`s `bundler/setup` succeeds and restricts the load path to the plugin Gemfile,
+# which has no rexml — twelve golden_svg examples then fail with a LoadError that reads like a
+# renderer defect. See docs/plan/HANDOVER §2c. Resolution comes from the Redmine clone.
+Gemfile.lock

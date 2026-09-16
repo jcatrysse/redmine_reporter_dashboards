@@ -9,6 +9,23 @@ require 'rspec/core'
 require 'rspec/expectations'
 require 'rspec/mocks'
 
+# SET THE ENCODING, DO NOT INHERIT IT — CLAUDE.md §6, the same rule as timezone and
+# random seed, applied to the one axis nobody had applied it to.
+#
+# MEASURED 2026-08-10: with no `LANG` in the environment Ruby's `default_external` is
+# **US-ASCII**, and `spec/aggregation/time_entry_aggregator_source_spec.rb` then dies with
+# `ArgumentError: invalid byte sequence in US-ASCII` on line 212 — 3 failures — because it
+# reads the aggregator's own source and this project writes em dashes in its comments. The
+# same hazard sits under a dozen other specs that read plugin source or a fixture.
+#
+# It is green in CI and red on a developer machine, which is the wrong way round and the
+# exact shape §6 exists to prevent: GitHub runners export a UTF-8 locale, so CI can never
+# catch it. Setting it here rather than passing `encoding:` at each of the eighteen read
+# sites is deliberate — the property wanted is "this suite does not depend on the ambient
+# locale", and that is one statement, not eighteen.
+Encoding.default_external = Encoding::UTF_8
+Encoding.default_internal = Encoding::UTF_8
+
 # NOTE: the plugin's main lib (lib/redmine_reporter_dashboards.rb) is intentionally
 # NOT required here. It loads project_page.rb, which references Redmine::I18n at
 # load time — unavailable in a bare RSpec run. The SQL aggregation specs are pure unit

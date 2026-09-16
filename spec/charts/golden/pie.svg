@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="rrd-chart-pie-title rrd-chart-pie-desc" font-family="Helvetica, Arial, sans-serif" class="rrd-chart">
+<rect x="0" y="0" width="640" height="360" fill="#FFFFFF"/>
+<title id="rrd-chart-pie-title">Time by activity</title>
+<desc id="rrd-chart-pie-desc">pie chart. 4 categories: Development, Design, Support, Meetings. Hours: 120, 45, 78, 33</desc>
+<text x="12" y="26" font-size="14" font-weight="bold" fill="#333333">Time by activity</text>
+<path d="M 198.5 189.5 L 198.5 31.0 A 158.5 158.5 0 0 1 261.65 334.88 Z" fill="#0072B2" stroke="#FFFFFF" stroke-width="1" data-rd-category="0"><title>Development: 120 (43.5%)</title></path>
+<path d="M 198.5 189.5 L 261.65 334.88 A 158.5 158.5 0 0 1 107.1 318.99 Z" fill="#E69F00" stroke="#FFFFFF" stroke-width="1" data-rd-category="1"><title>Design: 45 (16.3%)</title></path>
+<path d="M 198.5 189.5 L 107.1 318.99 A 158.5 158.5 0 0 1 90.32 73.66 Z" fill="#009E73" stroke="#FFFFFF" stroke-width="1" data-rd-category="2"><title>Support: 78 (28.3%)</title></path>
+<path d="M 198.5 189.5 L 90.32 73.66 A 158.5 158.5 0 0 1 198.5 31.0 Z" fill="#CC79A7" stroke="#FFFFFF" stroke-width="1" data-rd-category="3"><title>Meetings: 33 (12.0%)</title></path>
+<rect x="12" y="32" width="10" height="10" fill="#0072B2" stroke="#005280" stroke-width="1"/>
+<text x="28" y="42" font-size="11" fill="#333333">Development</text>
+<rect x="108.55" y="32" width="10" height="10" fill="#E69F00" stroke="#A67200" stroke-width="1"/>
+<text x="124.55" y="42" font-size="11" fill="#333333">Design</text>
+<rect x="174.85" y="32" width="10" height="10" fill="#009E73" stroke="#007253" stroke-width="1"/>
+<text x="190.85" y="42" font-size="11" fill="#333333">Support</text>
+<rect x="247.2" y="32" width="10" height="10" fill="#CC79A7" stroke="#935778" stroke-width="1"/>
+<text x="263.2" y="42" font-size="11" fill="#333333">Meetings</text>
+</svg>

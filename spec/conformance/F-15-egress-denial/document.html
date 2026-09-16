@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-15</title>
+<script>window.__rdOptions = { clientTimeoutMs: 3000 };</script>
+@@CHART_SHELL@@
+<link rel="stylesheet" href="@@EGRESS_URL@@/style.css">
+</head><body>
+<h1>EGRESS-MARKER</h1>
+<img src="@@EGRESS_URL@@/pixel.png" alt="">
+<script>
+  /* The page holds itself open through the readiness protocol rather than through a
+     sleep, so the engine genuinely waits for the requests to be ATTEMPTED. A fixture
+     that printed before the attempts were made would assert nothing at all — the
+     listener would be empty for the wrong reason, which is the most dangerous way for
+     a security check to pass. */
+  (function () {
+    window.__rd.begin();
+    /* Both spellings, because an engine can deny one API and not the other. Errors are
+       swallowed on purpose: whether the PAGE noticed is not the question this fixture
+       asks — the harness's own socket is. */
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '@@EGRESS_URL@@/xhr', true);
+      xhr.send();
+    } catch (e) { /* denied is the expected outcome */ }
+    try {
+      if (window.fetch) { window.fetch('@@EGRESS_URL@@/fetch').catch(function () {}); }
+    } catch (e) { /* as above */ }
+    setTimeout(function () { window.__rd.end(); }, 900);
+  }());
+</script>
+</body></html>

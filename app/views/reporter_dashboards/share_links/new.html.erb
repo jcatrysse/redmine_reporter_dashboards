@@ -1,0 +1,84 @@
+<%#
+  T-28 increment 3 — the form that makes a link.
+
+  --- WHAT THIS FORM DELIBERATELY CANNOT EXPRESS ---
+
+  There is no "never expires" and no way to leave the expiry blank: `expires_at` is NOT NULL
+  in the schema and bounded in the model, because §7b.1's whole indictment of the base
+  plugin starts with a token that never expires. A form that could ask for one would mean
+  the rule lived in a validation rather than in the design.
+
+  Redmine's own chrome only — `box tabular`, `p`, `.info`, `.warning`.
+%>
+<h2><%= l(:label_reporter_share_link_new) %></h2>
+
+<p><%= link_to @template.name, project_reporter_template_path(@project, @template) %></p>
+
+<%#
+  SAID BEFORE THE FORM, NOT AFTER IT. What a share link actually does is the thing people
+  get wrong about it, and by the time somebody has filled in an expiry they have already
+  decided. Two sentences: the report is frozen now, as you; and whoever holds the URL sees
+  it without signing in to anything.
+%>
+<div class="info">
+  <p><%= l(:text_reporter_share_link_what_it_does) %></p>
+</div>
+
+<%= form_tag(project_reporter_template_share_links_path(@project, @template), method: :post) do %>
+  <div class="box tabular">
+    <p>
+      <label for="purpose"><%= l(:field_reporter_share_link_purpose) %></label>
+      <%= text_field_tag 'purpose', params[:purpose], size: 60, maxlength: 255 %>
+      <em class="info"><%= l(:text_reporter_share_link_purpose_info) %></em>
+    </p>
+
+    <p>
+      <label for="expires_in_days"><%= l(:field_reporter_share_link_expires_in_days) %></label>
+      <%= number_field_tag 'expires_in_days',
+                           params[:expires_in_days] || ReporterDashboards::ShareLinksController::DEFAULT_EXPIRY_DAYS,
+                           min: 1,
+                           max: ReporterDashboards::ShareLinksController::MAX_EXPIRY_DAYS %>
+      <em class="info"><%= l(:text_reporter_share_link_expires_info,
+                             max: ReporterDashboards::ShareLinksController::MAX_EXPIRY_DAYS) %></em>
+    </p>
+
+    <p>
+      <label for="max_uses"><%= l(:field_reporter_share_link_max_uses) %></label>
+      <%= number_field_tag 'max_uses', params[:max_uses], min: 1 %>
+      <em class="info"><%= l(:text_reporter_share_link_max_uses_info) %></em>
+    </p>
+
+    <%#
+      THE PUBLIC TICKBOX IS OFFERED ONLY TO SOMEBODY WHO HOLDS THE SECOND PERMISSION, and
+      the controller checks it again per request — the form is not the check. FR-62 makes
+      public links off by default, and T-28's `Accept:` makes them a SECOND decision rather
+      than a stronger version of the first, so it is a separate field with its own warning
+      rather than a dropdown of "visibility".
+    %>
+    <% if User.current.allowed_to?(:publish_reporter_dashboards_reports, @project) %>
+      <p>
+        <label for="public_link"><%= l(:field_reporter_share_link_public) %></label>
+        <%= check_box_tag 'public_link', '1', params[:public_link].present? %>
+        <em class="info"><%= l(:text_reporter_share_link_public_info) %></em>
+      </p>
+    <% end %>
+  </div>
+
+  <%#
+    THE WARNING IS UNCONDITIONAL, because it is true of every link on this form and not only
+    of a public one: whoever holds the URL sees the report. Showing it only next to the
+    public tickbox would imply a private link is safe to forward, which is the exact
+    misunderstanding this page exists to prevent.
+  %>
+  <div class="warning">
+    <p><%= l(:text_reporter_share_link_warning) %></p>
+  </div>
+
+  <p>
+    <%= submit_tag l(:button_reporter_share_link_create) %>
+    <%= link_to l(:button_cancel),
+                project_reporter_template_share_links_path(@project, @template) %>
+  </p>
+<% end %>
+
+<% html_title l(:label_reporter_share_link_new) %>

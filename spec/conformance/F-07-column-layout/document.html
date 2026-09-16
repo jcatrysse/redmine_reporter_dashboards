@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-07</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  /* A table, deliberately. See the fixture's header: this used to be `display:flex`,
+     which is the thing the two engines actually disagree about — and the disagreement
+     turned out to be unsayable in a closed capability vocabulary. */
+  table.row { width: 100%; height: 60mm; border-collapse: collapse; table-layout: fixed; }
+  td { width: 50%; vertical-align: top; }
+  .left { background: #cc0000; }
+  .right { background: #007a00; }
+</style>
+</head><body>
+<table class="row"><tr><td class="left">LEFT</td><td class="right">RIGHT</td></tr></table>
+<p>COLUMN-MARKER</p>
+</body></html>

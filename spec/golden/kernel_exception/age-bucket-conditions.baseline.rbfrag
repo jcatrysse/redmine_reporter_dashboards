@@ -1,0 +1,26 @@
+      labels = age_bucket_labels(bounds)
+      today  = current_date
+
+      fragments = ["CASE WHEN #{column} IS NULL THEN NULL"]
+      binds     = []
+      bounds.each_with_index do |days, index|
+        fragments << "WHEN #{column} >= ? THEN ?"
+        binds << (field == 'due' ? today - days : days.days.ago) << labels[index]
+      end
+      fragments << 'ELSE ? END'
+      binds << labels.last
+
+      filter_field = AGE_FILTER_FIELDS[field]
+
+      Dimension.new(
+        name: name,
+        sql: Arel.sql(ActiveRecord::Base.sanitize_sql_array([fragments.join(' '), *binds])),
+        fixed_keys: labels,
+        empty_label: empty_label.nil? ? DEFAULT_EMPTY_LABEL : empty_label.to_s,
+        filter_field: filter_field,
+        filter_for: ->(raws) { age_bucket_filter(filter_field, labels, bounds, today, raws) }
+      )
+    end
+    private_class_method :age_dimension
+
+    def self.normalize_age_buckets(value)

@@ -15,7 +15,7 @@ unless defined?(Rails)
   end
 end
 
-require_relative '../../lib/sql_aggregation/query_aggregator'
+require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 
 # Chainable scope stub for version_rollup. Every chain ends in count/sum/minimum/
 # maximum; the terminal looks up a canned result by a label derived from the

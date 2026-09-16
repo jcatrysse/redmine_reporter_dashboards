@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="rrd-chart-stack-title rrd-chart-stack-desc" font-family="Helvetica, Arial, sans-serif" class="rrd-chart">
+<rect x="0" y="0" width="640" height="360" fill="#FFFFFF"/>
+<title id="rrd-chart-stack-title">Issues by status and quarter</title>
+<desc id="rrd-chart-stack-desc">stacked_bar chart. 4 categories: Q1, Q2, Q3, Q4. Open: 12, 18, 9, 22. Closed: 30, 25, 41, 19</desc>
+<text x="12" y="26" font-size="14" font-weight="bold" fill="#333333">Issues by status and quarter</text>
+<line x1="33" y1="304.0" x2="628" y2="304.0" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="249.4" x2="628" y2="249.4" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="194.8" x2="628" y2="194.8" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="140.2" x2="628" y2="140.2" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="85.6" x2="628" y2="85.6" stroke="#DDDDDD" stroke-width="1"/>
+<line x1="33" y1="31.0" x2="628" y2="31.0" stroke="#DDDDDD" stroke-width="1"/>
+<rect x="50.85" y="238.48" width="113.05" height="65.52" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="0"><title>Open — Q1: 12</title></rect>
+<rect x="50.85" y="74.68" width="113.05" height="163.8" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="0"><title>Closed — Q1: 30</title></rect>
+<rect x="199.6" y="205.72" width="113.05" height="98.28" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="1"><title>Open — Q2: 18</title></rect>
+<rect x="199.6" y="69.22" width="113.05" height="136.5" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="1"><title>Closed — Q2: 25</title></rect>
+<rect x="348.35" y="254.86" width="113.05" height="49.14" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="2"><title>Open — Q3: 9</title></rect>
+<rect x="348.35" y="31.0" width="113.05" height="223.86" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="2"><title>Closed — Q3: 41</title></rect>
+<rect x="497.1" y="183.88" width="113.05" height="120.12" fill="#0072B2" stroke="#005280" stroke-width="1" data-rd-series="0" data-rd-category="3"><title>Open — Q4: 22</title></rect>
+<rect x="497.1" y="80.14" width="113.05" height="103.74" fill="#E69F00" stroke="#A67200" stroke-width="1" data-rd-series="1" data-rd-category="3"><title>Closed — Q4: 19</title></rect>
+<line x1="33" y1="304.0" x2="628" y2="304.0" stroke="#767676" stroke-width="1"/>
+<line x1="33" y1="31" x2="33" y2="304" stroke="#767676" stroke-width="1"/>
+<text x="107.38" y="319" text-anchor="middle" font-size="11" fill="#333333">Q1</text>
+<text x="256.13" y="319" text-anchor="middle" font-size="11" fill="#333333">Q2</text>
+<text x="404.88" y="319" text-anchor="middle" font-size="11" fill="#333333">Q3</text>
+<text x="553.63" y="319" text-anchor="middle" font-size="11" fill="#333333">Q4</text>
+<text x="25" y="307.67" text-anchor="end" font-size="11" fill="#666666">0</text>
+<text x="25" y="253.07" text-anchor="end" font-size="11" fill="#666666">10</text>
+<text x="25" y="198.47" text-anchor="end" font-size="11" fill="#666666">20</text>
+<text x="25" y="143.87" text-anchor="end" font-size="11" fill="#666666">30</text>
+<text x="25" y="89.27" text-anchor="end" font-size="11" fill="#666666">40</text>
+<text x="25" y="34.67" text-anchor="end" font-size="11" fill="#666666">50</text>
+<rect x="12" y="328" width="10" height="10" fill="#0072B2" stroke="#005280" stroke-width="1"/>
+<text x="28" y="338" font-size="11" fill="#333333">Open</text>
+<rect x="66.2" y="328" width="10" height="10" fill="#E69F00" stroke="#A67200" stroke-width="1"/>
+<text x="82.2" y="338" font-size="11" fill="#333333">Closed</text>
+</svg>

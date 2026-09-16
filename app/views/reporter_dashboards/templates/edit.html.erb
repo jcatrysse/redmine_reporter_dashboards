@@ -1,0 +1,13 @@
+<div class="contextual">
+  <%= link_to reporter_dashboard_icon('download', l(:label_reporter_template_export)),
+              export_project_reporter_template_path(@project, @template),
+              class: 'icon icon-download' %>
+</div>
+
+<h2><%= l(:label_reporter_template) %>: <%= @template.name %></h2>
+
+<%= render partial: 'editor',
+           locals: { url: project_reporter_template_path(@project, @template),
+                     method: :patch,
+                     preview_url: preview_project_reporter_template_path(@project, @template),
+                     submit_label: l(:button_save) } %>

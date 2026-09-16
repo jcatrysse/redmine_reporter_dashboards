@@ -1,0 +1,66 @@
+<%#
+  T-37 / FR-72 — THE DROP REFERENCE, IN THE SIDEBAR, GENERATED AT RUNTIME.
+
+  §9b.1 clause 2: *"the reference sidebar is **rendered from it at runtime**: every drop,
+  every accessor, its type, whether it is a batch accessor, and a copyable `{{ … }}`
+  snippet. Consequence worth stating plainly: documentation drift for the drop layer becomes
+  structurally impossible, and the alternative — a hand-written wiki page — is exactly the
+  artefact that is stale in every Redmine plugin."*
+
+  "At runtime" is literal: `DropReference.sections` asks each drop class what a template can
+  reach (`Liquid::Drop.invokable_methods`) on this request. A drop that loses an accessor
+  loses it here in the same deploy, with nobody editing a view — and the same generator
+  writes `docs/drop-reference.md`, which `script/gates/drop_reference_parity.sh` holds equal
+  to a fresh generation in both directions.
+
+  --- `<details>` AND NOT A SEARCH BOX ---
+
+  Fifteen drops and 127 accessors do not fit in a Redmine sidebar open, and a filter would
+  need JavaScript — which the editor deliberately does not depend on ([OQ-M], and the
+  `<textarea>` above). `<details>`/`<summary>` is HTML, works closed on every browser this
+  plugin supports, and the first section is open because it is the one an author wants.
+
+  --- WHY THE SNIPPET IS THE LINK TEXT AND THERE IS NO COPY BUTTON ---
+
+  A copy button is a JavaScript dependency for something a browser already does with a
+  double-click. The snippet is `<code>` so it selects as one word.
+%>
+<h3><%= l(:label_reporter_drop_reference) %></h3>
+
+<p><em class="info"><%= l(:text_reporter_drop_reference_info) %></em></p>
+
+<% RedmineReporterDashboards::Liquid::DropReference.sections.each_with_index do |section, index| %>
+  <details class="reporter-drop-reference" <%= 'open' if index.zero? %>>
+    <summary><%= section.variable %></summary>
+    <%# `reached_from` and `note` are English by construction — they name Liquid constructs
+        (`{% for %}`, `issue.custom_field_values[42]`) and drop class names, which are not
+        translated anywhere in this plugin. The LABELS around them are keys. Same split as
+        the linter's rule messages one panel up. %>
+    <p class="reporter-drop-reference-note"><%= section.reached_from %></p>
+    <% if section.note %>
+      <p class="reporter-drop-reference-note"><%= section.note %></p>
+    <% end %>
+    <ul class="reporter-drop-reference-list">
+      <% section.accessors.each do |accessor| %>
+        <li>
+          <code><%= accessor.snippet(section.variable) %></code>
+          <span class="reporter-drop-reference-type">
+            <%= accessor.of ? "#{accessor.type} (#{accessor.of})" : accessor.type %>
+            <%# THE ONE PIECE OF METADATA AN AUTHOR CANNOT GUESS: reading this in a
+                `{% for %}` costs no extra query, because §3.4's batch registry loaded it
+                for the whole page. Its absence is not marked — a badge on 121 of 127 rows
+                is noise, and the useful signal is the exception. %>
+            <% if accessor.batch? %>
+              <span class="reporter-drop-reference-batch"
+                    title="<%= l(:text_reporter_drop_reference_batch) %>"><%=
+                l(:label_reporter_drop_reference_batch) %></span>
+            <% end %>
+          </span>
+          <% if accessor.note %>
+            <span class="reporter-drop-reference-note"><%= accessor.note %></span>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  </details>
+<% end %>

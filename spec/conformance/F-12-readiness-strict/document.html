@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-11</title></head><body>
+<h1>NEVER-SIGNALS</h1>
+<script>
+  /* Deliberately NOT the shell: this is a page whose readiness component is broken or
+     absent. `ready` never becomes true, `data-rd-ready` is never set, and
+     `window.status` is never touched — so every one of the three signals stays silent
+     and the engine's timeout is the only thing left. */
+  window.__rd = { ready: false, pending: 1, degraded: [] };
+</script>
+<table><tr><td>TABLE-ROW-7</td><td>content that does not depend on the signal</td></tr></table>
+</body></html>

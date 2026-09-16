@@ -1,0 +1,53 @@
+<%#
+  T-26a increment 3 — the my-page report widget's settings form, and its empty state.
+
+  Replaces the base plugin's `my/_report_settings.html.erb`, which this plugin does not
+  ship and which cannot be relied on: it is the partial whose absence made a my-page block
+  return 404 AND vanish with its own close button (§Findings E-39).
+
+  It also fixes two things that partial got wrong. Its heading was
+  `queries.first.is_a?(IssueQuery)`, which raises on an empty picker — exactly the state a
+  fresh install is in. And its template picker was `IssueListReportTemplate.all`: every
+  report template in the instance, offered to every user, because that model has no
+  visibility rule to filter by. `report_templates` here comes from
+  `WidgetReport.templates_for(project: nil, …)`, i.e. `Template.visible(actor)` — the role
+  permission per project plus the template's own private/roles/public visibility.
+
+  POSTS TO CORE'S `my_page_path`, which is the only write path a my-page block has. Core's
+  `MyController#update_page` stores `settings.to_unsafe_hash` with NO validation of any
+  kind, and that is not something this plugin can change — so every value is validated
+  where it is READ instead (`Template.visible`, `IssueQuery.visible(user)`), never here.
+%>
+<h3>
+  <%= l(report_type == :issues ? :label_reporter_widget_report_by_issues
+                              : :label_reporter_widget_report_by_spent_time) %>
+</h3>
+
+<div id="<%= block %>-settings">
+  <% if report_templates.empty? %>
+    <%# The dead end an author meets first: an empty dropdown and a Save button, with
+        nothing saying why. Same sentence as the project dashboard's empty state — one
+        wording for one situation. %>
+    <p class="nodata"><%= l(:text_reporter_widget_no_templates) %></p>
+  <% else %>
+    <%= form_tag(my_page_path, remote: true) do %>
+      <div class="box report-settings">
+        <p>
+          <label>
+            <%= l(:label_query) %>
+            <%= select_tag "settings[#{block}][query_id]",
+                           content_tag('option') + options_from_collection_for_select(queries, :id, :name, settings[:query_id]) %>
+          </label>
+          <label>
+            <%= l(:label_reporter_report_template) %>
+            <%= select_tag "settings[#{block}][report_template_id]",
+                           content_tag('option') + options_from_collection_for_select(report_templates, :id, :name, settings[:report_template_id]) %>
+          </label>
+        </p>
+      </div>
+      <p>
+        <%= submit_tag l(:button_save) %>
+      </p>
+    <% end %>
+  <% end %>
+</div>

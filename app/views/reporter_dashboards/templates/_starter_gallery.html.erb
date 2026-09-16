@@ -1,0 +1,50 @@
+<%#
+  T-37 / FR-73 — THE STARTER GALLERY, on the New template page.
+
+  §9b.1 clause 3: *"Start from an example, never from empty. New template offers a starter
+  gallery … each with a one-line description and a thumbnail rendered by the plugin itself in
+  CI, so the thumbnail cannot show something the code no longer produces. This is the single
+  largest onboarding lever available."*
+
+  --- IT IS FIVE LINKS, AND THAT IS THE WHOLE MECHANISM ---
+
+  Each entry is a GET to this same page with `?starter=<id>`, so the gallery needs no
+  JavaScript, is bookmarkable, and the prefilled body arrives through the ordinary editor —
+  lint panel and all. An author's first sight of the lint panel is therefore a starter
+  reporting zero findings, which is what a clean template is supposed to look like.
+
+  --- THE THUMBNAIL IS OPTIONAL AND ITS ABSENCE IS VISIBLE ---
+
+  A thumbnail is a PNG of the real render, produced by
+  `rake reporter_dashboards:gallery:verify RRD_THUMBNAILS=1`. An installation that has one
+  gets it; one that does not gets the name and the description, which are the two things that
+  actually decide which starter to pick. What it never gets is a broken-image icon — the file
+  is checked for rather than assumed, because `image_tag` on a missing asset is a silent hole
+  in the page on Redmine 5.1 and a raise on 7.0 (Propshaft).
+%>
+<div class="box" id="reporter-starter-gallery">
+  <h3><%= l(:label_reporter_starter_gallery) %></h3>
+  <p><em class="info"><%= l(:text_reporter_starter_gallery_info) %></em></p>
+
+  <ul class="reporter-starter-list">
+    <% RedmineReporterDashboards::StarterGallery.entries.each do |entry| %>
+      <li class="reporter-starter">
+        <%= link_to new_project_reporter_template_path(@project, starter: entry.id),
+                    class: 'reporter-starter-link' do %>
+          <% if RedmineReporterDashboards::StarterGallery.thumbnail?(entry) %>
+            <%# `alt` is the starter's NAME and not "thumbnail of …": the name is beside it in
+                the same link, so a screen reader would read it twice. An empty alt would be
+                the alternative and it would be wrong — this image is the link's only
+                content on a narrow screen. %>
+            <%= image_tag "starters/#{entry.thumbnail_file}",
+                          plugin: 'redmine_reporter_dashboards',
+                          alt: l(entry.name_key),
+                          class: 'reporter-starter-thumbnail' %>
+          <% end %>
+          <strong><%= l(entry.name_key) %></strong>
+        <% end %>
+        <span class="reporter-starter-description"><%= l(entry.description_key) %></span>
+      </li>
+    <% end %>
+  </ul>
+</div>

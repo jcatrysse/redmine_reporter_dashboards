@@ -1,25 +1,48 @@
+<%#
+  The report widget's own settings form, and its empty state.
+
+  `report_templates` is a LOCAL, handed in by whichever block partial rendered this, and
+  since T-26a it comes from `WidgetReport.templates_for` — the same scope
+  `WidgetReport.template_for` resolves against. One definition, so this form cannot offer
+  a template the widget then refuses to render, which is the bug the base-plugin version's
+  own comment described.
+
+  THE EMPTY PICKER NEEDED A SENTENCE. With no usable template the two selects rendered as
+  a blank dropdown and a Save button — a dead end with nothing saying why, and the two
+  likeliest reasons (nobody has written a report template here yet; the project does not
+  have the reports module enabled) are both things the reader can act on. The WHOLE form is
+  replaced, the query select included: a query narrows a report that has to exist first, so
+  offering it alone would be a control with nothing to apply to. (This comment said the
+  query select was "still shown" while line 22 hid it and the test asserted zero selects —
+  caught by the independent review of T-26a.)
+%>
 <h3>
-  <%= report_type == :issues ? l(:report_by_issues) : l(:report_by_spent_time) %>
+  <%= l(report_type == :issues ? :label_reporter_widget_report_by_issues
+                              : :label_reporter_widget_report_by_spent_time) %>
 </h3>
 
 <div id="<%= block %>-settings">
-  <%= form_tag(project_reporter_page_path(project, tab: tab.id), method: :patch, remote: true) do %>
-    <div class="box report-settings">
+  <% if report_templates.empty? %>
+    <p class="nodata"><%= l(:text_reporter_widget_no_templates) %></p>
+  <% else %>
+    <%= form_tag(project_reporter_page_path(project, tab: tab.id), method: :patch, remote: true) do %>
+      <div class="box report-settings">
+        <p>
+          <label>
+            <%= l(:label_query) %>
+            <%= select_tag "settings[#{block}][query_id]",
+                           content_tag('option') + options_from_collection_for_select(queries, :id, :name, settings[:query_id]) %>
+          </label>
+          <label>
+            <%= l(:label_reporter_report_template) %>
+            <%= select_tag "settings[#{block}][report_template_id]",
+                           content_tag('option') + options_from_collection_for_select(report_templates, :id, :name, settings[:report_template_id]) %>
+          </label>
+        </p>
+      </div>
       <p>
-        <label>
-          <%= l(:label_query) %>
-          <%= select_tag "settings[#{block}][query_id]",
-                         content_tag('option') + options_from_collection_for_select(queries, :id, :name, settings[:query_id]) %>
-        </label>
-        <label>
-          <%= l(:label_reporter_report_template) %>
-          <%= select_tag "settings[#{block}][report_template_id]",
-                         content_tag('option') + options_from_collection_for_select(report_templates, :id, :name, settings[:report_template_id]) %>
-        </label>
+        <%= submit_tag l(:button_save) %>
       </p>
-    </div>
-    <p>
-      <%= submit_tag l(:button_save) %>
-    </p>
+    <% end %>
   <% end %>
 </div>

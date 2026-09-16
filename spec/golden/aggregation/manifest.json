@@ -1,0 +1,9 @@
+{
+  "baseline_commit": "eddb8fa17c9c47e28044b41345c6533ec7898f5d",
+  "reference_date": "2025-12-29",
+  "time_zone": "UTC",
+  "generated_on": "PostgreSQL",
+  "record_count": 176,
+  "digest": "71585515d4b6fab2aa10929fc8b3d900007984d31be46613ec441d2ea6b10532",
+  "cases": "b277fb5767c0cf816caf01df615b6a85c5aeb2d41b676426e13b03bedff4dde5"
+}

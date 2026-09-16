@@ -13,7 +13,7 @@
     <% end %>
   <% end %>
   <% if User.current.allowed_to?(:manage_reporter_project_tabs, @project) %>
-    <%= link_to sprite_icon('settings', l(:label_settings)),
+    <%= link_to reporter_dashboard_icon('settings', l(:label_settings)),
                 '#reporter-dashboard-settings',
                 id: 'reporter-dashboard-settings-toggle',
                 class: 'icon-only icon-settings' %>

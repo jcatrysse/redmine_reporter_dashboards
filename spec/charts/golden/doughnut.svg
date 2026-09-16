@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="640" height="360" viewBox="0 0 640 360" role="img" aria-labelledby="rrd-chart-doughnut-title rrd-chart-doughnut-desc" font-family="Helvetica, Arial, sans-serif" class="rrd-chart">
+<rect x="0" y="0" width="640" height="360" fill="#FFFFFF"/>
+<title id="rrd-chart-doughnut-title">Storage</title>
+<desc id="rrd-chart-doughnut-desc">pie chart. 2 categories: Used, Free. GB: 340, 160</desc>
+<text x="12" y="26" font-size="14" font-weight="bold" fill="#333333">Storage</text>
+<path d="M 198.5 31.0 A 158.5 158.5 0 1 1 55.08 256.99 L 119.62 226.62 A 87.18 87.18 0 1 0 198.5 102.32 Z" fill="#0072B2" stroke="#FFFFFF" stroke-width="1" data-rd-category="0"><title>Used: 340 (68.0%)</title></path>
+<path d="M 55.08 256.99 A 158.5 158.5 0 0 1 198.5 31.0 L 198.5 102.32 A 87.18 87.18 0 0 0 119.62 226.62 Z" fill="#E69F00" stroke="#FFFFFF" stroke-width="1" data-rd-category="1"><title>Free: 160 (32.0%)</title></path>
+<rect x="12" y="32" width="10" height="10" fill="#0072B2" stroke="#005280" stroke-width="1"/>
+<text x="28" y="42" font-size="11" fill="#333333">Used</text>
+<rect x="66.2" y="32" width="10" height="10" fill="#E69F00" stroke="#A67200" stroke-width="1"/>
+<text x="82.2" y="42" font-size="11" fill="#333333">Free</text>
+</svg>

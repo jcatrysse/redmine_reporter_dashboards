@@ -235,6 +235,320 @@ else
     end
 
     # ----------------------------------------------------------------
+    # DEFECT D-1 — the age dimension past MariaDB's column-label limit — FIXED
+    #
+    # Found on 2026-08-05 by the golden corpus (T-01) on MariaDB 10.11, confirmed by
+    # the first CI run on MariaDB 11, and MEASURED ABSENT on MySQL 8.0.46.
+    #
+    # The age dimension groups on a generated CASE. ActiveRecord's grouped `.count`
+    # derived a result-column ALIAS from the expression's own text and looked each key
+    # up by it, and MariaDB truncates a returned column label at 256 characters:
+    # measured with this shape, 261 characters still works and 262 does not. Past it
+    # the lookup missed, every group key came back nil, and the entire result collapsed
+    # into the "(none)" bucket with a total taken from whichever group the server
+    # returned last — so an issue vanished from the count as well.
+    #
+    # FOUR boundaries cross the limit, and DEFAULT_AGE_BUCKETS is [30, 60, 90, 180], so
+    # this was the DEFAULT on MariaDB, in production. Every example above uses three
+    # boundaries or fewer, which is the only reason CI had been green.
+    #
+    # The fix keeps the GROUP BY and changes how it is READ: `SELECT <expr>,
+    # COUNT(DISTINCT issues.id) ... GROUP BY <expr>`, taken back BY POSITION, so no
+    # alias exists for the two ends to disagree about. Shortening the CASE would only
+    # have moved the cliff — on PostgreSQL the alias is already truncated (limit 63)
+    # and the answer is correct, because AR asks for the same truncated name it sent.
+    #
+    # The MariaDB branch that used to live here is gone, and its absence is the point:
+    # ONE expectation now holds on all three engines. What this container cannot do is
+    # run MariaDB, so the `adapter (MariaDB 11)` CI cell is the measurement.
+    # ----------------------------------------------------------------
+
+    describe 'the age dimension with the DEFAULT boundaries (defect D-1)' do
+      subject(:buckets) { described_class.dimension_breakdown(main, group_by: 'age')['buckets'] }
+
+      it 'buckets by age on every engine, MariaDB included' do
+        labelled = buckets.map { |bucket| [bucket['label'], bucket['count']] }
+
+        expect(labelled).to eq([['0-30', 1], ['31-60', 0], ['61-90', 0], ['91-180', 3],
+                                ['>180', 0]])
+        # And the total: 4, every issue accounted for. Under D-1 MariaDB answered 3 —
+        # the collapse did not merely mislabel the buckets, it lost an issue.
+        expect(described_class.dimension_breakdown(main, group_by: 'age')['total']).to eq(4)
+      end
+
+      # Was "the boundary of the defect": three boundaries stayed under the limit and
+      # were correct everywhere, which is what made the cause a measured fact rather
+      # than a comment. Kept, because the fix must not have moved the cliff either.
+      it 'is correct at three boundaries on every engine' do
+        result = described_class.dimension_breakdown(main, group_by: 'age',
+                                                           age_buckets: [30, 60, 90])
+
+        expect(result['buckets'].map { |b| [b['label'], b['count']] })
+          .to eq([['0-30', 1], ['31-60', 0], ['61-90', 0], ['>90', 3]])
+      end
+
+      # AT the cap, where the CASE is 1 506 characters — nearly six times the limit
+      # that broke it. Nothing about the fix scales with the boundary count, and this
+      # is what says so on the engine that could not survive it before.
+      it 'is correct at the 24-boundary cap, where the CASE is 1 506 characters' do
+        bounds = (1..described_class::MAX_AGE_BUCKETS).map { |n| n * 30 }
+        result = described_class.dimension_breakdown(main, group_by: 'age', age_buckets: bounds)
+
+        expect(result['buckets'].length).to eq(described_class::MAX_AGE_BUCKETS + 1)
+        expect(result['buckets'].sum { |b| b['count'] }).to eq(4)
+        expect(result['total']).to eq(4)
+      end
+
+      # The fix itself, as a property of the STATEMENT rather than of the numbers —
+      # the numbers were already right on this engine before it. Two halves: the
+      # SELECT carries no alias for the group expression (so nothing can truncate
+      # one), and the GROUP BY is still there (so the server does the same work it
+      # always did — one conditional aggregate per bucket would also have removed the
+      # alias, and is dramatically slower on MariaDB).
+      # ----------------------------------------------------------------
+      # D-1's SECOND HALF — grouped sum / avg / distinct (curator decision #2)
+      #
+      # WHY THESE EXIST: THE MariaDB CELL WAS GREEN AND COULD NOT HAVE CONFIRMED THE FIX.
+      #
+      # T-08 fixed the COUNTED axis and left `measure:` exposed; decision #2 (`2c22c74`,
+      # 2026-08-14) fixed the three grouped calculations by plucking them positionally.
+      # That commit added examples only under `spec/sql_aggregation/`, which is DB-LESS —
+      # a stub `ScopeStub#grouped_pluck_rows` cannot exhibit a column-label truncation,
+      # because there is no server to truncate one.
+      #
+      # And nothing in the adapter suite or the golden corpus reached the shape either:
+      # EVERY `measure:` case in both groups by `status`, `tracker` or `priority`, whose
+      # expressions are a few dozen characters. Every `age` case is a plain COUNT. So the
+      # `adapter (MariaDB 11)` cell — 254 examples, 0 failures at `b87b08c` — was green
+      # without once running a grouped aggregate over an expression past 256 characters.
+      # Green, and silent about the release blocker it was the only thing able to answer.
+      #
+      # MEASURED, so the examples cannot go vacuous: the default age axis emits ONE grouped
+      # statement whose group expression is **333 characters** with `SUM(issues.estimated_hours)`
+      # beside it. 333 > 256, which is the whole point — and the first example below asserts
+      # that rather than trusting this comment, because `MAX_AGE_BUCKETS` or the CASE's
+      # spelling could change and quietly move the shape back under the limit.
+      #
+      # WHAT D-1 DID TO THIS SHAPE, i.e. what these examples separate: the label read missed,
+      # every group key came back nil, the buckets collapsed into one unlabelled row and the
+      # figure was the last group's value wearing the total's name. So `'91-180' => 14.0`
+      # fails under the defect — the 14.0 lands nowhere near that label.
+      #
+      # THE FIXTURE'S THREE ESTIMATED ISSUES SHARE ONE AGE BUCKET (all 101-105 days old), and
+      # three candidate boundary sets were tried before writing this: none splits them. So one
+      # bucket carries the whole 14.0 and the other four are 0.0. That is weaker than a split
+      # would have been, which is why the statement-shape example is here too — it holds on
+      # every engine and catches a regression on PostgreSQL, before the MariaDB cell is needed.
+      #
+      # --- WHICH OF THESE ACTUALLY DISCRIMINATE, MEASURED RATHER THAN HOPED --------------
+      #
+      # The pre-decision-#2 code was restored (`measure_groups` back to the label-keyed
+      # `raw_measure` read) and this file re-run on PostgreSQL 16. Result: **1 failure of 69**,
+      # and it was `selects the group expression with no alias`.
+      #
+      # The three VALUE examples passed against the defect. That is not a flaw in them — it is
+      # D-1: PostgreSQL truncates the alias at 63 characters on BOTH ends, so it asks for the
+      # name it sent and answers correctly whichever way the result is read. The defect is the
+      # two ends DISAGREEING about the truncation, which only MariaDB does. So:
+      #
+      #   * `selects the group expression with no alias` is the engine-independent guard, and
+      #     it is proven to bite — it is what a local run can defend.
+      #   * the three value examples can only discriminate on **MariaDB**, and that is exactly
+      #     why they are here: before them, no test anywhere ran a grouped aggregate over a
+      #     >256-character expression on that engine, so the `adapter (MariaDB 11)` cell was
+      #     green while being silent about the release blocker it existed to answer.
+      #
+      # Do not "strengthen" the value examples by making them assert something PostgreSQL can
+      # see. There is nothing to see there. Read the MariaDB cell.
+      # ----------------------------------------------------------------
+      describe 'a grouped MEASURE over the same long axis (defect D-1, second half)' do
+        it 'is actually past the 256-character limit, or these examples prove nothing' do
+          sql = []
+          subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
+            sql << payload[:sql]
+          end
+          begin
+            described_class.dimension_breakdown(main, group_by: 'age',
+                                                      measure: 'sum', of: 'estimated_hours')
+          ensure
+            ActiveSupport::Notifications.unsubscribe(subscriber)
+          end
+
+          grouped = sql.select { |statement| statement.match?(/GROUP BY/i) }
+          expect(grouped.length).to eq(1)
+          group_expr = grouped.first[/GROUP BY (.+?)(?: ORDER BY| LIMIT|\z)/mi, 1]
+          expect(group_expr.to_s.length).to be > 256
+        end
+
+        it 'sums a core numeric column per age bucket, on every engine' do
+          result = described_class.dimension_breakdown(main, group_by: 'age',
+                                                            measure: 'sum', of: 'estimated_hours')
+
+          expect(result['buckets'].map { |b| [b['label'], b['count']] })
+            .to eq([['0-30', 0.0], ['31-60', 0.0], ['61-90', 0.0], ['91-180', 14.0],
+                    ['>180', 0.0]])
+          # The same 14.0 the `status` axis reports for this measure, which is a SHORT
+          # expression and was never exposed to D-1 — so the two agree only if the long
+          # axis was read correctly.
+          expect(result['total']).to eq(14.0)
+        end
+
+        it 'averages per age bucket, on every engine' do
+          result = described_class.dimension_breakdown(main, group_by: 'age',
+                                                            measure: 'avg', of: 'estimated_hours')
+
+          expect(result['buckets'].map { |b| [b['label'], b['count']] })
+            .to eq([['0-30', 0.0], ['31-60', 0.0], ['61-90', 0.0], ['91-180', 4.67],
+                    ['>180', 0.0]])
+          expect(result['total']).to eq(4.67)
+        end
+
+        it 'counts distinct references per age bucket, on every engine' do
+          result = described_class.dimension_breakdown(main, group_by: 'age',
+                                                            measure: 'distinct', of: 'assignee')
+
+          expect(result['buckets'].map { |b| [b['label'], b['count']] })
+            .to eq([['0-30', 0], ['31-60', 0], ['61-90', 0], ['91-180', 2], ['>180', 0]])
+          expect(result['total']).to eq(2)
+        end
+
+        # AT THE 24-BOUNDARY CAP, where the CASE is nearly six times the limit. The counted
+        # axis already has this example; a measure scales no differently, and this is what
+        # says so on the engine that could not survive it before.
+        it 'is correct at the 24-boundary cap' do
+          bounds = (1..described_class::MAX_AGE_BUCKETS).map { |n| n * 30 }
+          result = described_class.dimension_breakdown(main, group_by: 'age',
+                                                            age_buckets: bounds,
+                                                            measure: 'sum',
+                                                            of: 'estimated_hours')
+
+          expect(result['buckets'].length).to eq(described_class::MAX_AGE_BUCKETS + 1)
+          expect(result['buckets'].sum { |b| b['count'].to_f }).to eq(14.0)
+          expect(result['total']).to eq(14.0)
+          # One bucket holds it all, and it is NAMED — under D-1 the name is what was lost.
+          nonzero = result['buckets'].reject { |b| b['count'].to_f.zero? }
+          expect(nonzero.map { |b| [b['label'], b['count']] }).to eq([['91-120', 14.0]])
+        end
+
+        # THE FIX AS A PROPERTY OF THE STATEMENT, the way the counted axis asserts it one
+        # describe block up. Engine-independent, so a regression shows on PostgreSQL rather
+        # than waiting for the MariaDB cell — and it is the half no value assertion can see,
+        # because the values are right on PostgreSQL either way.
+        it 'selects the group expression with no alias, and still groups' do
+          sql = []
+          subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
+            sql << payload[:sql]
+          end
+          begin
+            described_class.dimension_breakdown(main, group_by: 'age',
+                                                      measure: 'sum', of: 'estimated_hours')
+          ensure
+            ActiveSupport::Notifications.unsubscribe(subscriber)
+          end
+
+          grouped = sql.select { |statement| statement.match?(/GROUP BY/i) }
+          expect(grouped.length).to eq(1)
+          expect(grouped.first).to match(/SUM\(issues\.estimated_hours\)/i)
+          expect(grouped.first).not_to match(/END AS /i),
+                                       'the group expression carries an alias again — that ' \
+                                       'alias is what MariaDB truncates, and D-1 is back for ' \
+                                       'the grouped calculations'
+        end
+      end
+
+      it 'selects the group expression with no alias, and still groups' do
+        sql = []
+        subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
+          sql << payload[:sql]
+        end
+        begin
+          described_class.dimension_breakdown(main, group_by: 'age')
+        ensure
+          ActiveSupport::Notifications.unsubscribe(subscriber)
+        end
+
+        grouped = sql.select { |statement| statement.match?(/GROUP BY/i) }
+        expect(grouped.length).to eq(1)
+        expect(grouped.first).to match(/COUNT\(DISTINCT issues\.id\)/i)
+        expect(grouped.first).not_to match(/END AS /i),
+                                     'the group expression carries an alias again — that alias is ' \
+                                     'what MariaDB truncates, and defect D-1 is back'
+      end
+    end
+
+    # ----------------------------------------------------------------
+    # Per-actor visibility — the harness's four actors, at value level
+    #
+    # INV-1 says the actor is explicit; INV-2 says a value the actor may not see is
+    # hidden without losing the issue. Both are asserted here at the level the
+    # aggregator actually decides them, and frozen for every entry point by the
+    # golden corpus.
+    # ----------------------------------------------------------------
+
+    describe 'the role-restricted custom field' do
+      def salary_dimension(actor)
+        H.as_actor(actor) do
+          described_class.dimension_breakdown(main, group_by: "cf_#{H::CF_SALARY}")
+        end
+      end
+
+      it 'answers with its values for an actor entitled in the issues\' project' do
+        expect(salary_dimension(:manager)['buckets'].map { |b| [b['label'], b['count']] })
+          .to eq([['1000.5', 1], ['2000.25', 1], ['(none)', 2]])
+      end
+
+      it 'is refused outright to actors holding no entitled role anywhere' do
+        expect(salary_dimension(:developer)).to be_nil
+        expect(salary_dimension(:reporter)).to be_nil
+      end
+
+      # The INV-2 case: the field resolves, the values do not, and the issues stay.
+      it 'hides the values but keeps the issues for an actor entitled elsewhere' do
+        expect(salary_dimension(:auditor)['buckets'].map { |b| [b['label'], b['count']] })
+          .to eq([['(none)', 4]])
+      end
+
+      it 'shows that same actor the values in the project where the role is held' do
+        result = H.as_actor(:auditor) do
+          described_class.dimension_breakdown(H.base_scope.where(project_id: H::PROJECT_WIDE),
+                                              group_by: "cf_#{H::CF_SALARY}", sort: 'label')
+        end
+
+        expect(result['buckets'].map { |b| b['label'] }).to eq(['10.25', '20.25', '30.25',
+                                                                '40.25', '(none)'])
+      end
+
+      it 'restores User.current afterwards, so one case cannot move the next one' do
+        before_actor = ::User.current
+        H.as_actor(:reporter) { described_class.flags(main) }
+
+        expect(::User.current).to eq(before_actor)
+      end
+    end
+
+    describe 'visible spent time' do
+      def spent_total(actor)
+        H.as_actor(actor) do
+          described_class.dimension_breakdown(reported, group_by: 'status',
+                                                        measure: 'sum', of: 'spent_hours')['total']
+        end
+      end
+
+      it 'is summed where the actor holds an entitled role' do
+        expect(spent_total(:manager)).to eq(7.0)
+        expect(spent_total(:developer)).to eq(7.0)
+      end
+
+      it 'is zero where no entitled role is held at all' do
+        expect(spent_total(:reporter)).to eq(0.0)
+      end
+
+      it 'is zero where the entitled role is held in another project' do
+        expect(spent_total(:auditor)).to eq(0.0)
+      end
+    end
+
+    # ----------------------------------------------------------------
     # Measures — the numeric CAST and the two visibility-aware joins
     # ----------------------------------------------------------------
 

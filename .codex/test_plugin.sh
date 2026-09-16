@@ -10,6 +10,20 @@ REPORTER_PLUGIN_NAME="${REPORTER_PLUGIN_NAME:-redmine_reporter}"
 # installs gems `without development`, so that environment cannot even load.
 export RAILS_ENV="${RAILS_ENV:-test}"
 
+# A UTF-8 LOCALE, BECAUSE THE DEFAULT IN A CLOUD CONTAINER IS US-ASCII AND THAT FAILS
+# EXAMPLES THAT ARE NOT BROKEN. With LANG and LC_ALL unset, Ruby's
+# Encoding.default_external is US-ASCII, and every spec that hands a non-ASCII string to
+# JSON.parse dies with `Encoding::InvalidByteSequenceError: "\xE2" on US-ASCII` --
+# spec_liquid/escaping_regression_spec.rb's U+2028/U+2029 payloads are the three that do.
+# It reads as a lost byte in the code under test and is a property of the shell. GitHub
+# runners set LANG=C.UTF-8, so CI cannot see it and a green CI cell is no protection: the
+# same three failures were written up once as a `json` gem regression before anybody looked
+# at the locale (HANDOVER §3).
+#
+# Only when unset, so an operator who deliberately runs under another locale still gets it.
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+
 reporter_required() {
   case "${REQUIRE_REPORTER_PLUGIN:-}" in
     1|true|TRUE|yes|YES) return 0 ;;
@@ -19,36 +33,11 @@ reporter_required() {
   [ "${CI:-}" = "true" ]
 }
 
-detect_ruby_version() {
-  local version=""
-
-  if [ -f ".ruby-version" ]; then
-    version="$(tr -d '\n' < .ruby-version)"
-  elif [ -f "Gemfile" ]; then
-    local ruby_line=""
-    ruby_line="$(grep -E "^[[:space:]]*ruby " Gemfile | head -n 1 || true)"
-
-    version="$(echo "$ruby_line" | sed -E -n "s/.*ruby[[:space:]]*['\\\"]([0-9]+\\.[0-9]+(\\.[0-9]+)?)[\"'].*$/\\1/p")"
-    if [ -z "$version" ]; then
-      version="$(echo "$ruby_line" | sed -E -n "s/.*~>[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-    fi
-    if [ -z "$version" ]; then
-      local upper=""
-      upper="$(echo "$ruby_line" | sed -E -n "s/.*<[[:space:]]*([0-9]+\\.[0-9]+(\\.[0-9]+)?).*/\\1/p")"
-      if [ -n "$upper" ]; then
-        local major="${upper%%.*}"
-        local minor="${upper#*.}"
-        minor="${minor%%.*}"
-        if [ "$minor" -gt 0 ]; then
-          minor=$((minor - 1))
-        fi
-        version="${major}.${minor}"
-      fi
-    fi
-  fi
-
-  echo "$version"
-}
+# detect_ruby_version and friends. Shared with the other .codex script rather than
+# duplicated: the version it derives has to agree with ci.yml, and two copies of
+# that reasoning drift.
+# shellcheck source=.codex/ruby_version.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ruby_version.sh"
 
 cd "$REDMINE_DIR"
 mkdir -p tmp/test-results
@@ -98,6 +87,18 @@ if [ -d "$SPEC_DIR" ]; then
       echo "Running the adapter execution specs against $RRD_ADAPTER_URL" >&2
       RRD_ADAPTER_URL="$RRD_ADAPTER_URL" \
         run_command bundle exec rspec -I "$SPEC_DIR" "$SPEC_DIR/adapter" --format progress
+
+      # The golden corpus, in its OWN process and with the reference date pinned. Both
+      # matter: the pin freezes the fixture and the clock together (spec/golden/
+      # reference_date.rb), and the run above deliberately leaves it unset so the
+      # execution specs keep their relative-to-today fixture. Unpinned the corpus
+      # examples skip, which is why they are run again here rather than left to the
+      # invocation above.
+      echo "Verifying the golden aggregation corpus (pinned to ${RRD_REFERENCE_DATE:-2025-12-29})" >&2
+      RRD_ADAPTER_URL="$RRD_ADAPTER_URL" \
+      RRD_REFERENCE_DATE="${RRD_REFERENCE_DATE:-2025-12-29}" \
+        run_command bundle exec rspec -I "$SPEC_DIR" \
+                    "$SPEC_DIR/adapter/aggregation_corpus_spec.rb" --format progress
     else
       echo "WARNING: skipping the adapter execution specs — no RRD_ADAPTER_URL." >&2
       echo "         Run ./.codex/test_setup.sh (optionally with RRD_DB=mysql or mariadb)," >&2
@@ -107,16 +108,54 @@ if [ -d "$SPEC_DIR" ]; then
 fi
 
 if [ -d "$TEST_DIR" ]; then
-  if [ -d "plugins/$REPORTER_PLUGIN_NAME" ]; then
-    run_command bundle exec rake redmine:plugins:test NAME="$PLUGIN_NAME"
-    ran_tests=true
-  elif reporter_required; then
-    echo "ERROR: $REPORTER_PLUGIN_NAME dependency not found; full plugin tests cannot boot Redmine." >&2
-    echo "       Provide REPORTER_PLUGIN_PATH before redmine_clone.sh, or set REQUIRE_REPORTER_PLUGIN=0 to run standalone specs only." >&2
+  # The full-app tests used to be SKIPPED when redmine_reporter was absent, because
+  # the plugin could not boot without it. It can now, and the standalone
+  # configuration is the one most worth running: a suite that only ever runs WITH
+  # reporter present cannot notice the dependency coming back.
+  #
+  # So absence no longer skips anything. REQUIRE_REPORTER_PLUGIN now means only
+  # "fail if the reporter-present configuration was asked for and is not there",
+  # which is what CI uses to tell a missing checkout from a deliberate standalone run.
+  if [ ! -d "plugins/$REPORTER_PLUGIN_NAME" ] && reporter_required; then
+    echo "ERROR: REQUIRE_REPORTER_PLUGIN asks for the reporter-present configuration, but" >&2
+    echo "       plugins/$REPORTER_PLUGIN_NAME is not installed. Provide REPORTER_PLUGIN_PATH" >&2
+    echo "       before redmine_clone.sh, or set REQUIRE_REPORTER_PLUGIN=0 to run standalone." >&2
     exit 1
+  fi
+
+  if [ -d "plugins/$REPORTER_PLUGIN_NAME" ]; then
+    echo "Running the full-app tests WITH $REPORTER_PLUGIN_NAME present." >&2
   else
-    echo "WARNING: skipping minitest plugin tests because $REPORTER_PLUGIN_NAME is not installed." >&2
-    echo "         Standalone RSpec specs were run; set REQUIRE_REPORTER_PLUGIN=1 to enforce full tests." >&2
+    echo "Running the full-app tests STANDALONE — no $REPORTER_PLUGIN_NAME, no redmineup gem." >&2
+  fi
+
+  # THE THREE BROWSERLESS SUITES, NAMED. `redmine:plugins:test` also globs `test/system/**`,
+  # which needs Chrome and a driver — so running it here would make "the plugin's suite" fail
+  # on a workstation that has neither, for a reason that has nothing to do with the change
+  # being tested. The system suite is opt-in below, and CI gives it a job of its own.
+  run_command bundle exec rake redmine:plugins:test:units NAME="$PLUGIN_NAME"
+  run_command bundle exec rake redmine:plugins:test:functionals NAME="$PLUGIN_NAME"
+  run_command bundle exec rake redmine:plugins:test:integration NAME="$PLUGIN_NAME"
+  ran_tests=true
+
+  # OPT-IN, AND IT SAYS SO WHEN IT DOES NOT RUN. A suite that quietly does not run is the
+  # thing this repository keeps a skip inventory to prevent (G10), so the else branch prints
+  # what would have been run and what to set — rather than the run simply being smaller.
+  #
+  # `RRD_CHROME_PATH` is read by `test/system_test_case.rb` and exists because chromedriver
+  # searches a few fixed locations: a container holding Chrome for Testing in a cache fails
+  # every example with `unknown error: cannot find Chrome binary`, which reads like a broken
+  # suite rather than an unconfigured one.
+  if [ "${RRD_SYSTEM_TESTS:-0}" = "1" ]; then
+    : "${GOOGLE_CHROME_OPTS_ARGS:=--headless=new,--no-sandbox,--disable-dev-shm-usage,--disable-gpu}"
+    export GOOGLE_CHROME_OPTS_ARGS
+    echo "Running the system tests with GOOGLE_CHROME_OPTS_ARGS=$GOOGLE_CHROME_OPTS_ARGS" >&2
+    run_command bundle exec rake redmine:plugins:test:system NAME="$PLUGIN_NAME"
+  else
+    echo "SKIPPED: the browser suite (test/system). It needs Chrome and a matching" >&2
+    echo "         chromedriver. Set RRD_SYSTEM_TESTS=1 to run it, and RRD_CHROME_PATH" >&2
+    echo "         if the browser is not where chromedriver looks. CI runs it on" >&2
+    echo "         5.1-stable and 7.0-stable in the 'system' job either way." >&2
   fi
 fi
 

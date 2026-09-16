@@ -1,0 +1,171 @@
+<%#
+  T-14 — the render preflight, for an administrator.
+
+  Redmine's own chrome only: `.box`, `table.list`, `p.buttons`, the core icon classes.
+  CLAUDE.md §4 forbids plugin-local design tokens here, and this page has none: it is
+  meant to look like the rest of the admin area, not like a plugin's idea of one.
+
+  THE EMPTY STATE IS THE DEFAULT STATE. Landing here runs nothing — see the controller
+  on why `run` is a POST — so the first thing an administrator reads is what the button
+  is about to do and how long it takes.
+%>
+<h2><%= l(:label_reporter_preflight) %></h2>
+
+<div class="box">
+  <p><%= l(:text_reporter_preflight_intro) %></p>
+  <p><em><%= l(:text_reporter_preflight_takes_a_moment) %></em></p>
+</div>
+
+<%#
+  T-27 — WHO HOLDS CODE EXECUTION OVER REPORT TEMPLATES (INV-9).
+
+  ABOVE the engine section on purpose. This is the only surface in the plugin that
+  answers "did an upgrade, or Redmine's own default data, hand somebody the right to
+  run server-side code", and a section below a table an administrator has to press a
+  button to fill is a section nobody reads.
+
+  It renders on the GET, so landing here is enough. The empty state is a SENTENCE and
+  not a blank table: "no role holds one" is the good answer and has to be legible as
+  one, or an empty region reads as a page that failed to load.
+%>
+<h3><%= l(:label_reporter_authoring_audit) %></h3>
+
+<div class="box">
+  <p><%= l(:text_reporter_authoring_audit_intro) %></p>
+
+  <% if @authoring_audit.empty? %>
+    <p class="nodata"><%= l(:text_reporter_authoring_audit_none) %></p>
+  <% else %>
+    <table class="list">
+      <thead>
+        <tr>
+          <th><%= l(:label_reporter_authoring_audit_role) %></th>
+          <th><%= l(:label_reporter_authoring_audit_base) %></th>
+          <th><%= l(:label_reporter_authoring_audit_own) %></th>
+          <th><%= l(:label_reporter_authoring_audit_verdict) %></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @authoring_audit.each do |row| %>
+          <tr>
+            <td>
+              <%#
+                The icon is emitted only for the row that IS a finding. The first version
+                rendered `<span class="">` on every other row — empty markup carrying an
+                empty class, which is the kind of thing that later gets a CSS rule hung
+                on it. `row.builtin?` decides both the icon and the note, once.
+              %>
+              <% if row.builtin? %>
+                <span class="<%= reporter_authoring_audit_row_class(row) %>"></span>
+              <% end %>
+              <%= row.role_name %>
+              <% if row.builtin? %>
+                <span class="nodata"><%= l(:text_reporter_authoring_audit_builtin) %></span>
+              <% end %>
+            </td>
+            <td><%= reporter_authoring_audit_permissions(row.base) %></td>
+            <td><%= reporter_authoring_audit_permissions(row.own) %></td>
+            <td><%= reporter_authoring_audit_verdict(row) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</div>
+
+<%= form_tag(run_reporter_preflight_path, method: :post) do %>
+  <%#
+    THE ENGINE SELECTOR — §Findings E-27 row 6. Without it, an engine that needs a
+    service (`:gotenberg`) could not be diagnosed from this page at all: the default set
+    defers it, and the deferral's remediation names a rake variable — an instruction the
+    one reader this page exists for cannot follow. Naming an engine is the decision that
+    runs its real checks, credential included, exactly as `RRD_ENGINE=<id>` does.
+
+    The options come off the registry, never off input, and the blank option is the
+    default set — the same engines the button ran before the selector existed.
+  %>
+  <p>
+    <label for="engine"><%= l(:label_reporter_preflight_engine) %></label>
+    <%= select_tag :engine,
+                   options_for_select(reporter_preflight_engine_options, params[:engine].to_s) %>
+  </p>
+  <p class="buttons">
+    <%= submit_tag l(:button_reporter_preflight_run), name: nil %>
+  </p>
+<% end %>
+
+<% if @reports %>
+  <% if @reports.empty? %>
+    <%#
+      Not a blank page. "No engine is registered" is a real answer and the most
+      alarming one — it means nothing can render at all — so it says so rather than
+      leaving an administrator to conclude the page is broken.
+    %>
+    <p class="nodata"><%= l(:text_reporter_preflight_no_engine) %></p>
+  <% end %>
+
+  <% @reports.each do |report| %>
+    <h3>
+      <%= report.engine_id %>
+      <span class="icon <%= report.ok? ? 'icon-ok' : 'icon-error' %>"></span>
+    </h3>
+
+    <p>
+      <%= reporter_preflight_summary(report) %>
+      <span class="nodata">
+        <%= l(:label_reporter_preflight_engine_version) %>:
+        <%= report.engine_version %>,
+        <%= l(:label_reporter_preflight_duration) %>:
+        <%= reporter_preflight_duration(report.duration_ms) %>
+      </span>
+    </p>
+
+    <table class="list">
+      <thead>
+        <tr>
+          <th><%= l(:label_reporter_preflight_state) %></th>
+          <th><%= l(:label_reporter_preflight_check) %></th>
+          <th><%= l(:label_reporter_preflight_detail) %></th>
+          <th><%= l(:label_reporter_preflight_duration) %></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% report.checks.each do |check| %>
+          <tr>
+            <td>
+              <span class="<%= reporter_preflight_state_class(check.state) %>"></span>
+              <%= reporter_preflight_state_label(check.state) %>
+            </td>
+            <td><%= reporter_preflight_check_label(check) %></td>
+            <%#
+              `detail` carries an engine's message, an exception's text and a URL — all
+              of it from outside this plugin. ERB escapes it here, and nothing on this
+              page is marked as trusted markup (INV-9, and the gate that counts the
+              exceptions to it).
+            %>
+            <td><%= check.detail %></td>
+            <td><%= reporter_preflight_duration(check.duration_ms) %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+
+  <%#
+    THE ARTEFACT, WHERE THE PERSON WITHOUT A SHELL CAN REACH IT.
+
+    The Accept list wants structured JSON "so it is asserted on rather than
+    log-scraped", and `RRD_FORMAT=json` gives the rake user exactly that. This page
+    exists for the administrator who has no shell — so without this block, the one
+    user it was built for is the one user who cannot paste the report into an issue.
+  %>
+  <% if @reports.any? %>
+    <fieldset class="collapsible collapsed">
+      <legend onclick="toggleFieldset(this);"><%= l(:label_reporter_preflight_json) %></legend>
+      <div style="display: none;">
+        <p><%= l(:text_reporter_preflight_json) %></p>
+        <pre><%= JSON.pretty_generate(@reports.map(&:to_h)) %></pre>
+      </div>
+    </fieldset>
+  <% end %>
+<% end %>

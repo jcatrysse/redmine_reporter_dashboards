@@ -1,0 +1,325 @@
+<%#
+  T-33 — the asset policy, for an administrator (technical-spec.md §5.1, FR-64).
+
+  Redmine's own chrome only: `p`, `label`, `em.info`, `.warning`. CLAUDE.md §4 forbids
+  plugin-local design tokens in chrome, and this partial has none — Redmine renders it inside
+  its own settings `<form>` AND inside its own `<div class="box tabular settings">`, so there
+  is no form tag, no submit button and no box of our own here.
+
+  --- THE ONE THING THIS PAGE MUST NOT DO IS LOOK LIKE IT WORKED WHEN IT DID NOT ---
+
+  §5.1 makes an empty allowlist collapse `:redmine` and `:external` back to `:bundled`,
+  so misconfiguration fails closed. That is the right behaviour and an invisible one: an
+  administrator who selects "external" and saves would otherwise see the dropdown they
+  chose and conclude egress is on. `Policy#collapsed?` is why the warning below exists,
+  and `Policy#dropped` is why the second one does — a value that was silently clamped is
+  a value somebody will later swear they set.
+%>
+<%
+  # THE `settings` LOCAL, not `Setting.plugin_…`. Redmine's settings controller renders this
+  # partial with `locals: { settings: …, plugin: @plugin }`, and that local is what the
+  # administrator just posted. Reading the stored value instead would show them the saved
+  # settings after a save that did not take, which is the one moment they need to see their own
+  # input.
+  #
+  # `local_assigns[:settings]` rather than `defined?(settings)`: `defined?` on a bare name in a
+  # view answers "method" as readily as "local-variable", so a helper named `settings` on any
+  # Redmine branch — present or added later — would silently be called instead. `local_assigns`
+  # asks the only question that is actually being asked.
+  raw = local_assigns[:settings] || RedmineReporterDashboards.plugin_settings
+  policy = RedmineReporterDashboards::Assets::Policy.from_settings(raw)
+
+  # THE RAW ALLOWLIST IS WHAT GOES BACK IN THE TEXTAREA, not `policy.allowlist`. Showing the
+  # normalised list would silently delete the operator's rejected line — they would reload,
+  # see a tidy list, and never connect it to the warning below. The warning names what was
+  # dropped; the field still holds what they typed, so they can fix it.
+  raw_allowlist = raw['asset_allowlist'] || raw[:asset_allowlist] || policy.allowlist.join("\n")
+
+  # T-32 — the ad-hoc mail policy, built from the same posted Hash and for the same reason.
+  # FR-27 — built from the POSTED hash for the same reason `policy` is: after a save that
+  # dropped a value, an administrator has to see what they sent rather than what was stored.
+  engine_pref = RedmineReporterDashboards::Render::EnginePreference.from_settings(raw)
+
+  mail_policy = RedmineReporterDashboards::Reporting::MailPolicy.from_settings(raw)
+  raw_domains = raw['mail_external_domains'] || raw[:mail_external_domains] ||
+                mail_policy.domains.join("\n")
+%>
+<%# NO WRAPPER AROUND THE WHOLE PARTIAL. Redmine already renders it inside
+    `<div class="box tabular settings">` (`app/views/settings/plugin.html.erb`, identical on
+    5.1 through master), so wrapping everything in a second box draws a redundant bordered
+    panel inset inside the first, with doubled padding on all four sides.
+
+    A `fieldset.box` per SECTION is a different thing and is Redmine's own settings idiom —
+    core uses it in `_issues`, `_notifications`, `_projects` and `_authentication`. The one
+    difference, worth knowing: core places those fieldsets as siblings AFTER the settings
+    div, which a plugin partial cannot do, so ours nest one level deeper. %>
+  <p>
+    <label for="settings_asset_policy"><%= l(:label_reporter_asset_policy) %></label>
+    <%= select_tag('settings[asset_policy]',
+                   options_for_select(
+                     RedmineReporterDashboards::Assets::Policy::MODES.map { |mode|
+                       [l(:"label_reporter_asset_policy_#{mode}"), mode.to_s]
+                     },
+                     policy.mode.to_s
+                   ),
+                   id: 'settings_asset_policy') %>
+    <em class="info"><%= l(:text_reporter_asset_policy_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_asset_allowlist"><%= l(:label_reporter_asset_allowlist) %></label>
+    <%= text_area_tag('settings[asset_allowlist]', raw_allowlist,
+                      rows: 4, cols: 40, id: 'settings_asset_allowlist') %>
+    <em class="info"><%= l(:text_reporter_asset_allowlist_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_inline_max_bytes"><%= l(:label_reporter_asset_inline_max_bytes) %></label>
+    <%= text_field_tag('settings[inline_max_bytes]', policy.inline_max_bytes,
+                       size: 12, id: 'settings_inline_max_bytes') %>
+    <em class="info"><%= l(:text_reporter_asset_inline_max_bytes_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_asset_max_bytes"><%= l(:label_reporter_asset_max_bytes) %></label>
+    <%= text_field_tag('settings[asset_max_bytes]', policy.asset_max_bytes,
+                       size: 12, id: 'settings_asset_max_bytes') %>
+    <em class="info"><%= l(:text_reporter_asset_max_bytes_info) %></em>
+  </p>
+
+<%# --- §5.2 clause 4 / §9b.3 — WHICH ENGINE THIS INSTALLATION USES ---------------------
+
+    Until this fieldset existed, the only way to reach `:gotenberg` was a template's
+    `engine_hint`, and there is no form field for that either: the documented route was to
+    EXPORT a template, add a line and import it again (§Findings E-27 row 2). The engine is
+    a property of the deployment, so it belongs here.
+
+    NO HELPER, AND THAT IS NOT AN OVERSIGHT. Redmine sets `include_all_helpers = false`
+    (`config/application.rb`), and this partial is rendered by Redmine's OWN
+    `SettingsController` — which sees its own helper and `ApplicationHelper`, and nothing
+    this plugin could add. A `reporter_engine_options` helper would resolve in a controller
+    test and 500 on the real page, which is HANDOVER §1's `sprite_icon` entry exactly. So
+    the options are built here, off the same object the render path reads.
+
+    THE OPTIONS COME OFF THE REGISTRY, NEVER OFF INPUT, and the ids are deliberately NOT
+    translated: they are the same tokens `RRD_ENGINE=` takes, the preflight page's selector
+    offers and the report headings print. A localised alias would be a second name for a
+    thing that has exactly one name everywhere else.
+
+    A TABLE, NOT A LIST, and a UX review is why. §9b.3 asks for "an engine comparison table
+    generated from capabilities.yml"; the first version was a `<ul>` whose field names were
+    lowercase labels joined to values with punctuation written in the MARKUP — which
+    rendered as `… over CDP. benötigt einen Dienst: Nein.` in German (a sentence beginning
+    lowercase), put ASCII colons and stops inside Chinese text, dropped a full stop before
+    the next field in every locale, and hung ~180px left of its own introduction because
+    `.tabular p` indents a paragraph and a bare `<ul>` gets no indent. `table.list` is
+    Redmine's own chrome, needs no CSS of ours, and puts every field name in a `<th>` where
+    a capitalised noun phrase is correct and nothing is glued together.
+%>
+<fieldset class="box">
+  <legend><%= l(:label_reporter_render_settings) %></legend>
+
+  <p>
+    <label for="settings_render_engine"><%= l(:label_reporter_render_engine) %></label>
+    <%= select_tag('settings[render_engine]',
+                   options_for_select(
+                     [[(if engine_pref.default_id
+                          l(:label_reporter_render_engine_default, engine: engine_pref.default_id)
+                        else
+                          l(:label_reporter_render_engine_no_default)
+                        end),
+                       RedmineReporterDashboards::Render::EnginePreference::NO_PREFERENCE]] +
+                       engine_pref.offers.map { |offer| [offer.id, offer.id] },
+                     engine_pref.selected_id.to_s
+                   ),
+                   id: 'settings_render_engine') %>
+    <em class="info"><%= l(:text_reporter_render_engine_info) %></em>
+  </p>
+
+<% unless engine_pref.catalogue_readable? %>
+  <%# THE DEGRADED STATE, SAID OUT LOUD. `EnginePreference` survives an unreadable
+      catalogue on purpose — an operator's explicit choice must keep rendering — and the
+      first version of this view then printed the sentence below promising a comparison,
+      followed by three bare ids and NO service warning, because `needs_service?` cannot
+      know. That is the "looks like it worked when it did not" failure the asset half of
+      this page already guards against, and `catalogue_readable?` existed for it and was
+      not called. Measured by a UX review. %>
+  <div class="warning"><%= l(:text_reporter_render_engine_catalogue_unreadable) %></div>
+<% end %>
+
+<% if engine_pref.offers.empty? %>
+  <%# An empty registry is a real answer and the most alarming one — nothing can render at
+      all. The preflight page says so rather than drawing a blank; so does this. %>
+  <p class="nodata"><%= l(:text_reporter_render_engine_none) %></p>
+<% else %>
+  <p><em class="info"><%= l(:text_reporter_render_engine_comparison) %></em></p>
+  <%# ONE ROW PER ENGINE, GENERATED — §5.2 clause 4's own list: "what it needs installed,
+      whether it needs a service, whether it can render offline, and which capabilities it
+      lacks". The trade sentence is in the first cell because clause 4 says "states the
+      trade in one line per engine" and it is the only text here that helps somebody
+      decide; the first version carried it on the `Offer` and rendered it nowhere.
+
+      `install`, the label and the trade are the CATALOGUE's own English text and are not
+      translated, for the same reason `Check#detail` is not on the preflight page
+      (`ReporterPreflightHelper`'s note): they are values reported by configuration rather
+      than sentences this product wrote, and nine copies of a sentence that must not drift
+      from the file it is generated from is how the file stops being the single source.
+      Every field name, every yes and no, and every marker IS keyed —
+      `general_text_Yes`/`No` are Redmine's own. §Findings E-29 records the cost of that
+      trade as a UX pass measured it, and the alternative it recommends.
+
+      A `—` where an engine is not in the catalogue, never a guess: an adapter another
+      plugin registered is offered by id and described as undescribed. %>
+  <table class="list">
+    <thead>
+      <tr>
+        <th><%= l(:label_reporter_render_engine) %></th>
+        <th><%= l(:label_reporter_render_engine_needs_service) %></th>
+        <th><%= l(:label_reporter_render_engine_renders_offline) %></th>
+        <th><%= l(:label_reporter_render_engine_assets) %></th>
+        <th><%= l(:label_reporter_render_engine_install) %></th>
+        <th><%= l(:label_reporter_render_engine_lacks) %></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% engine_pref.offers.each do |offer| %>
+        <tr>
+          <td>
+            <strong><%= offer.id %></strong>
+            <% if offer.deprecated %>
+              <em>(<%= l(:label_reporter_render_engine_deprecated) %>)</em>
+            <% end %>
+            <%# OUTSIDE `if offer.known`, deliberately: an engine the catalogue cannot
+                describe is not a verified one, and the first version suppressed this
+                marker in exactly the state where nothing had been verified (INV-7
+                inverted). %>
+            <% unless offer.verification == 'corpus' %>
+              <em>(<%= l(:label_reporter_render_engine_unverified) %>)</em>
+            <% end %>
+            <% if offer.known %>
+              <br /><%= offer.label %>
+              <br /><em class="info"><%= offer.trade %></em>
+            <% else %>
+              <br /><em><%= l(:label_reporter_render_engine_undescribed) %></em>
+            <% end %>
+          </td>
+          <td><%= offer.known ? l(offer.needs_service ? :general_text_Yes : :general_text_No) : '—' %></td>
+          <td><%= offer.known ? l(offer.renders_offline ? :general_text_Yes : :general_text_No) : '—' %></td>
+          <td><%= offer.asset_models.any? ? offer.asset_models.join(', ') : '—' %></td>
+          <td><%= offer.known ? offer.install : '—' %></td>
+          <td>
+            <% if offer.missing_capabilities.any? %>
+              <%= offer.missing_capabilities.map { |capability| ":#{capability}" }.join(', ') %>
+            <% else %>
+              —
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+  <% if engine_pref.needs_service? %>
+    <%# THE CHOICE, SAID OUT LOUD. T-34's rule is that an engine needing a service is never
+        chosen FOR an operator; the other half of that rule is that an operator who chooses
+        one deliberately is told what they have taken on, where they took it on. The
+        credential deliberately is NOT a field on this page — the README says why and so
+        does this sentence. %>
+    <div class="warning">
+      <%= l(:text_reporter_render_engine_service_warning,
+            engine: engine_pref.effective_id, preflight: l(:label_reporter_preflight)) %>
+    </div>
+  <% end %>
+
+  <% if engine_pref.dropped? %>
+    <%# A REFUSED VALUE IS NOT A VALUE IN USE, and the dropdown showing the default would
+        otherwise read as "your choice took effect". Redmine stores whatever was posted and
+        hands it back on the next GET, which is why this warning correctly reappears until
+        the field is corrected. Same sentence as the asset and mail halves of this page use,
+        deliberately: one page, one way of saying it. §Findings E-29 records that a dropped
+        REASON cannot be localised today, and what that needs. %>
+    <div class="warning">
+      <p><%= l(:text_reporter_asset_settings_dropped) %></p>
+      <ul>
+        <% engine_pref.dropped.each do |entry| %>
+          <li><%= "#{entry[:key]}: #{entry[:value].inspect} — #{entry[:reason]}" %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+</fieldset>
+
+<%# T-32 / FR-61 — ad-hoc report mail. A second fieldset legend rather than four more rows
+    on the asset one: these govern who this installation will put a report in front of,
+    which is a different question from where a document's images come from, and an
+    administrator scanning the page should not have to read the labels to tell them apart. %>
+<fieldset class="box">
+  <legend><%= l(:label_reporter_adhoc_mail_settings) %></legend>
+
+  <p>
+    <label for="settings_mail_external_addresses"><%= l(:label_reporter_mail_external_addresses) %></label>
+    <%# THE HIDDEN FIELD IS NOT DECORATION. An unchecked checkbox posts NOTHING, so without
+        it there is no way to express "turn this off" — the setting would keep its previous
+        value and an administrator who unticked the box and saved would still be permitting
+        external addresses. `check_box_tag` does not add one, unlike the form-builder helper. %>
+    <%= hidden_field_tag('settings[mail_external_addresses]', '0', id: nil) %>
+    <%= check_box_tag('settings[mail_external_addresses]', '1', mail_policy.external_enabled,
+                      id: 'settings_mail_external_addresses') %>
+    <em class="info"><%= l(:text_reporter_mail_external_addresses_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_mail_external_domains"><%= l(:label_reporter_mail_external_domains) %></label>
+    <%= text_area_tag('settings[mail_external_domains]', raw_domains,
+                      rows: 4, cols: 40, id: 'settings_mail_external_domains') %>
+    <em class="info"><%= l(:text_reporter_mail_external_domains_info) %></em>
+  </p>
+
+  <p>
+    <label for="settings_mail_rate_limit"><%= l(:label_reporter_mail_rate_limit) %></label>
+    <%= text_field_tag('settings[mail_rate_limit]', mail_policy.rate_limit,
+                       size: 6, id: 'settings_mail_rate_limit') %>
+    <%= text_field_tag('settings[mail_rate_window_minutes]', mail_policy.rate_window_minutes,
+                       size: 6, id: 'settings_mail_rate_window_minutes') %>
+    <em class="info"><%= l(:text_reporter_mail_rate_limit_info) %></em>
+  </p>
+
+<% if mail_policy.collapsed? %>
+  <%# THE COLLAPSE, SAID OUT LOUD. An administrator who ticked the box and saved an empty
+      allowlist has configured nothing, and the page they are looking at would otherwise
+      show a ticked box — which is the "looks like it worked when it did not" failure the
+      asset half of this partial already guards against. %>
+  <div class="warning">
+    <%= l(:text_reporter_mail_external_collapsed) %>
+  </div>
+<% end %>
+
+<% if mail_policy.dropped.any? %>
+  <div class="warning">
+    <p><%= l(:text_reporter_asset_settings_dropped) %></p>
+    <ul>
+      <% mail_policy.dropped.each do |entry| %>
+        <li><%= "#{entry[:key]}: #{entry[:value].inspect} — #{entry[:reason]}" %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+</fieldset>
+
+<% if policy.collapsed? %>
+  <div class="warning">
+    <%= l(:text_reporter_asset_policy_collapsed, mode: l(:"label_reporter_asset_policy_#{policy.mode}")) %>
+  </div>
+<% end %>
+
+<% if policy.dropped.any? %>
+  <div class="warning">
+    <p><%= l(:text_reporter_asset_settings_dropped) %></p>
+    <ul>
+      <% policy.dropped.each do |entry| %>
+        <li><%= "#{entry[:key]}: #{entry[:value].inspect} — #{entry[:reason]}" %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>

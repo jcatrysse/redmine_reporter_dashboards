@@ -1,0 +1,11 @@
+    #   fixed_keys   — every expected raw key, in display order (period, age)
+    #   project_join — true when the join fragment references the projects table
+    #   filter_field — IssueQuery filter name for drill-through ('cf_92',
+    #                  'status_id', 'created_on'); nil when the dimension cannot
+    #                  be expressed as an issue-list filter at all
+    #   filter_for   — ->(raw_keys) { {'field','operator','values'} | nil }, given
+    #                  one raw key for a normal bucket and every collapsed raw key
+    #                  for the Other bucket
+    Dimension = Struct.new(:name, :sql, :join, :project_join, :scope_filter, :label_map,
+                           :fallback_label, :order_map, :fixed_keys, :field_name, :multi_value,
+                           :empty_label, :filter_field, :filter_for, keyword_init: true)

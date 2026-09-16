@@ -1,0 +1,95 @@
+<%#
+  T-37 / FR-71 — THE FINDINGS PANEL, BESIDE THE EDITOR AND NOT IN A GUTTER.
+
+  --- WHY THERE IS NO GUTTER, AND WHY THAT IS SETTLED RATHER THAN A COMPROMISE ---
+
+  `technical-spec.md` §9b.1 originally asked for a vendored CodeMirror 6 with the findings
+  marked in its gutter. `[OQ-M]` was measured on 2026-08-12 and the answer is NO: there is
+  no pre-built CodeMirror 6 bundle to vendor — `codemirror@6.0.2` is a meta-package whose
+  `dist/index.js` is a 4 737-byte re-export shim importing seven bare specifiers, so one
+  usable file needs a bundler, which §6 forbids, and the result would be OUR artefact and
+  could not pass `THIRD_PARTY.md`'s three-independent-origin byte check. The curator took
+  the fallback the same day: a plain `<textarea>` plus this panel.
+
+  So the position is spelled in words — `line:column` — because that is the only way a
+  panel can point at a place in a `<textarea>`. `Finding#column` exists for this view.
+
+  --- IT WORKS WITH JAVASCRIPT OFF BY CONSTRUCTION, NOT BY DEGRADING ---
+
+  Linting happens on the server, on the body the request carried, and this is ERB. There is
+  no enhanced version of this panel to fall back FROM, which is the difference between "it
+  degrades" and "it does not depend on the browser at all".
+
+  --- WHAT IS TRANSLATED AND WHAT IS NOT ---
+
+  The same split `_diagnostics.html.erb` makes, for the same reason: the labels are locale
+  keys, and a finding's `message` is written where the rule is — in `TemplateLinter`, which
+  has no I18n and must not grow one (`layer_purity.sh` keeps Rails out of `lib/`). The
+  message carries the numbers and the replacement name that make it actionable; a
+  translated half-sentence with the identifier removed would be worse in every language.
+
+  `analysis` is a `TemplateLinter::Analysis`. It is never nil: every action that renders
+  the editor sets it, and a body of `nil` analyses to an empty finding list rather than to
+  a missing panel.
+%>
+<div class="box" id="reporter-template-lint">
+  <h3><%= l(:label_reporter_template_lint) %></h3>
+
+  <% if analysis.findings.empty? %>
+    <%# THE CLEAN STATE IS SAID OUT LOUD. An empty panel is indistinguishable from a panel
+        that failed to run, and the author has just been told this template executes
+        server-side code — "nothing found" is the sentence they are looking for. %>
+    <p class="nodata" id="reporter-template-lint-clean">
+      <%= l(:text_reporter_template_lint_clean) %>
+    </p>
+  <% else %>
+    <p><%= reporter_lint_summary(analysis) %></p>
+
+    <table class="list">
+      <thead>
+        <tr>
+          <th><%= l(:label_reporter_lint_severity) %></th>
+          <th><%= l(:label_reporter_lint_position) %></th>
+          <th><%= l(:label_reporter_lint_rule) %></th>
+          <th><%= l(:label_reporter_lint_message) %></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% reporter_lint_findings(analysis).each do |finding| %>
+          <tr class="reporter-lint-<%= reporter_lint_severity_class(finding) %>">
+            <td><%= reporter_lint_severity_label(finding) %></td>
+            <%# The position is the actionable value, so it is selectable text of its own
+                rather than part of a sentence — the same treatment the diagnostics panel
+                gives a correlation id. %>
+            <td><code><%= finding.position %></code></td>
+            <td><code><%= finding.rule %></code></td>
+            <td>
+              <%= finding.message %>
+              <% if finding.count > 1 %>
+                <em class="info"><%= l(:text_reporter_lint_repeated, count: finding.count) %></em>
+              <% end %>
+              <% if finding.excerpt.present? %>
+                <%# The author's own line, bounded by EXCERPT_LIMIT in the linter, so a
+                    minified 40 KB line cannot become the page. %>
+                <div><code class="reporter-lint-excerpt"><%= finding.excerpt %></code></div>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+
+    <% if reporter_lint_undisplayed(analysis).positive? %>
+      <%# BOUNDED, AND THE BOUND IS STATED. The counts above are complete; this list is
+          not, and saying so is the difference between a bound and a lie. %>
+      <p class="warning">
+        <%= l(:text_reporter_template_lint_more, count: reporter_lint_undisplayed(analysis)) %>
+      </p>
+    <% end %>
+  <% end %>
+
+  <%# WHERE THE SAME ANSWER COMES FROM ON A SERVER. FR-71's clause is that the panel and
+      the rake task are one linter, and naming the task here is how an operator finds the
+      other half — `test/functional/…_lint_parity_test.rb` is what keeps the two identical. %>
+  <p><em class="info"><%= l(:text_reporter_template_lint_rake) %></em></p>
+</div>

@@ -7,7 +7,14 @@ require_relative '../spec_helper'
 
 Time.zone ||= 'UTC'
 
-unless defined?(ActiveRecord)
+# PER-CONSTANT, NOT `unless defined?(ActiveRecord)`. MEASURED: T-31 added a DB-less spec
+# that defines only `ActiveRecord::StatementInvalid`, and on the seeds where it loaded first
+# the coarse guard here saw `ActiveRecord` already defined and skipped — leaving
+# `RecordNotFound` undefined and this file red for a reason nothing in its own diff showed.
+# A guard over a namespace cannot stand in for a guard over what is inside it.
+module ActiveRecord; end unless defined?(ActiveRecord)
+
+unless defined?(ActiveRecord::RecordNotFound)
   module ActiveRecord
     class RecordNotFound < StandardError; end
   end
@@ -53,7 +60,7 @@ unless defined?(Rails)
   end
 end
 
-require_relative '../../lib/sql_aggregation/query_aggregator'
+require_relative '../../lib/redmine_reporter_dashboards/aggregation/query_aggregator'
 
 # Chainable AR scope stub.
 #
@@ -146,8 +153,21 @@ class ScopeStub
 
   # Conditional-aggregate rows: {[matcher, ...] => [v1, v2]} is overkill, so the
   # fixture is a lambda over the expression list, or a flat Array reused per call.
+  # What `.group` was given. The kernel reads a counted axis positionally now
+  # (defect D-1), and it asks the relation which expressions it grouped on.
+  def group_values
+    @group_fields
+  end
+
+  # A GROUPED pluck IS the counted axis: since defect D-1's fix the kernel reads its
+  # groups as `SELECT <group expr>, COUNT(...) ... GROUP BY <same>`, by POSITION,
+  # rather than through ActiveRecord's alias-keyed `.count`. The fixtures stay keyed
+  # by group value — that is what a database returns — and this turns them into the
+  # rows a positional read gets back.
   def pluck(*expressions)
     @pluck_expressions.concat(expressions)
+    return grouped_pluck_rows(expressions.last) if @grouped
+
     answer = @pluck_rows.respond_to?(:call) ? @pluck_rows.call(expressions) : @pluck_rows
     row    = Array(answer).first(expressions.length)
     row += [0] * (expressions.length - row.length) if row.length < expressions.length
@@ -211,6 +231,52 @@ class ScopeStub
   end
 
   private
+
+  # {group value => count} as the rows a positional read gets back: the group values
+  # first, in the order they were grouped, then the count.
+  # A GROUPED PLUCK NOW CARRIES ITS AGGREGATE, and this stub has to read it.
+  #
+  # Since the second half of defect D-1 (curator decision #2, 2026-08-13) the kernel
+  # reads `sum`, `avg` and `distinct` positionally too, not just counts — so a grouped
+  # `pluck` is no longer always the counted axis. The last expression says which
+  # aggregate was asked for, and the fixture to answer from follows from it. Reading the
+  # fixture by aggregate rather than always answering counts is what stopped two
+  # examples ("sums a core numeric column per bucket", "rounds to two decimals in Ruby")
+  # from measuring the count fixture and reporting a plausible wrong number.
+  def grouped_pluck_rows(aggregate = nil)
+    fixture = grouped_fixture_for(aggregate)
+    fixture.map do |key, value|
+      (@group_fields.length == 1 ? [key] : key.dup) + [value]
+    end
+  end
+
+  # `COUNT(DISTINCT issues.id)` is the counted axis; anything else is a measure and its
+  # values come from the measure fixtures. Matched on the aggregate function rather than
+  # on the column, because the column is whatever the example chose.
+  def grouped_fixture_for(aggregate)
+    text = aggregate.to_s
+    return grouped_count if text.empty? || text.include?('COUNT(DISTINCT issues.id')
+
+    # `COUNT(DISTINCT <something else>)` is the `distinct` measure. This stub has never
+    # had a fixture of its own for it — it answered through the count path — so it keeps
+    # doing that, and only `sum`/`avg` read their own fixtures.
+    fixture = case text
+              when /\ASUM\(/ then @sums
+              when /\AAVG\(/ then @averages
+              end
+    resolved = answer_for_grouped(fixture, text)
+    resolved.is_a?(Hash) ? resolved : grouped_count
+  end
+
+  # The same fixture shapes `answer` accepts — keyed by expression, by `:any`, or bare —
+  # but always resolved to the per-group Hash, because a grouped read has one.
+  def answer_for_grouped(fixture, expression)
+    return nil if fixture.nil?
+    return fixture unless fixture.is_a?(Hash)
+
+    inner = fixture.key?(expression) ? fixture[expression] : fixture[:any]
+    inner.is_a?(Hash) ? inner : fixture
+  end
 
   # A fixture keys on the aggregate expression, on :any, or is the bare value. A
   # grouped call answers the per-group Hash; an ungrouped one (the `total`) answers
@@ -1344,9 +1410,12 @@ RSpec.describe SqlAggregation::QueryAggregator do
         expect(result['truncated']).to be(false)
       end
 
+      # Same claim as before defect D-1's fix, different accessor: the counted axis is
+      # read positionally now, so the COUNT rides in the pluck rather than in `.count`.
       it 'counts DISTINCT issues.id' do
         result
-        expect(scope.count_columns).to eq(['DISTINCT issues.id'])
+        expect(scope.pluck_expressions.last).to eq('COUNT(DISTINCT issues.id)')
+        expect(scope.count_columns).to be_empty
       end
 
       it 'LEFT OUTER JOINs custom_values on the issue' do
@@ -1817,7 +1886,8 @@ RSpec.describe SqlAggregation::QueryAggregator do
 
       it 'counts DISTINCT issues.id' do
         described_class.dimension_breakdown(scope, group_by: 'assignee')
-        expect(scope.count_columns).to eq(['DISTINCT issues.id'])
+        expect(scope.pluck_expressions.last).to eq('COUNT(DISTINCT issues.id)')
+        expect(scope.count_columns).to be_empty
       end
 
       it 'adds no join at all — a core column needs neither custom_values nor projects' do
@@ -2031,6 +2101,40 @@ RSpec.describe SqlAggregation::QueryAggregator do
       end
 
       subject(:result) { described_class.dimension_breakdown(scope, group_by: 'age') }
+
+      # ----------------------------------------------------------------
+      # DEFECT D-1, at the MECHANISM rather than at the numbers.
+      #
+      # The age dimension is the one whose group expression is unavoidably a long
+      # CASE. ActiveRecord's grouped `.count` derives a result-column ALIAS from that
+      # expression's text and looks each key up by it; MariaDB truncates a returned
+      # column label at 256 characters, so past four boundaries every key came back
+      # nil and the axis collapsed into `(none)`.
+      #
+      # No assertion about the NUMBERS can see this — on a stub, and on PostgreSQL,
+      # the alias-keyed read answers correctly too. Only an assertion about HOW the
+      # answer is fetched can, which is why these come first.
+      # ----------------------------------------------------------------
+
+      it 'reads its groups positionally, never through a column alias' do
+        result
+
+        expect(scope.count_columns).to be_empty
+        expect(scope.pluck_expressions.first)
+          .to start_with('CASE WHEN issues.created_on IS NULL THEN NULL')
+        expect(scope.pluck_expressions.last).to eq('COUNT(DISTINCT issues.id)')
+      end
+
+      # The GROUP BY is deliberately KEPT: one conditional aggregate per bucket would
+      # also remove the alias, and was measured dramatically slower on MariaDB — the
+      # engine the defect is on. Same statement, same work, read differently.
+      it 'still groups, in a single query' do
+        result
+
+        expect(scope.group_expressions.length).to eq(1)
+        # One call, two columns. A second read would record four.
+        expect(scope.pluck_expressions.length).to eq(2)
+      end
 
       it 'returns the default buckets in ascending age order' do
         expect(result['buckets'].map { |b| b['label'] }).to eq(
@@ -2252,7 +2356,7 @@ RSpec.describe SqlAggregation::QueryAggregator do
 
         it 'still counts distinct issues, not rows' do
           described_class.dimension_breakdown(scope, group_by: 'cf_92')
-          expect(scope.count_columns).to include('DISTINCT issues.id')
+          expect(scope.pluck_expressions).to include('COUNT(DISTINCT issues.id)')
         end
 
         it 'keeps total as the sum of the buckets, so a multi-value field still exceeds it' do
@@ -3306,6 +3410,66 @@ RSpec.describe SqlAggregation::QueryAggregator do
         r = described_class.flags(scope)
         expect(r['open']).to eq(6)
         expect(r['closed']).to eq(0)
+      end
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # T-21 — the fail-closed branches, as unit tests
+  #
+  # INV-3: when a visibility condition cannot be CONSTRUCTED, the answer fails closed.
+  # These branches are unreachable through the public surface — they only fire when
+  # Redmine's own visibility API raises or answers with nothing — so they are exercised
+  # directly. A security branch that no test can reach is a comment.
+  #
+  # Note the deliberate ASYMMETRY between the two, which is not a bug and is pinned here
+  # so nobody "fixes" it: an EMPTY condition from a custom field legitimately means "no
+  # restriction, everyone may see this", so it becomes 1=1. An empty condition from
+  # TimeEntry never legitimately means that, so it becomes 1=0. An EXCEPTION means the
+  # same thing in both cases — we do not know — and both fail closed.
+  # ------------------------------------------------------------------
+
+  describe 'fail-closed visibility conditions' do
+    describe '.visibility_condition (custom fields)' do
+      it 'is 1=1 for a field that has no visibility API at all' do
+        expect(described_class.send(:visibility_condition, Object.new)).to eq('1=1')
+      end
+
+      it 'is 1=1 for a field whose condition is empty — no restriction means everyone' do
+        field = double(visibility_by_project_condition: '   ')
+        expect(described_class.send(:visibility_condition, field)).to eq('1=1')
+      end
+
+      it 'passes a real condition through untouched' do
+        field = double(visibility_by_project_condition: 'projects.id IN (1,2)')
+        expect(described_class.send(:visibility_condition, field)).to eq('projects.id IN (1,2)')
+      end
+
+      it 'FAILS CLOSED to 1=0 when building the condition raises' do
+        field = double(id: 92)
+        allow(field).to receive(:visibility_by_project_condition).and_raise(RuntimeError, 'boom')
+
+        expect(Rails.logger).to receive(:warn).with(/hiding its values/)
+        expect(described_class.send(:visibility_condition, field)).to eq('1=0')
+      end
+
+      # The log line matters as much as the return value: a silently hidden field looks
+      # exactly like a field with no values, and an operator needs to be able to tell.
+      it 'says so in the log rather than hiding the field silently' do
+        field = double(id: 92)
+        allow(field).to receive(:visibility_by_project_condition).and_raise(RuntimeError, 'boom')
+
+        expect(Rails.logger).to receive(:warn).with(/custom field #92.*RuntimeError: boom/)
+        described_class.send(:visibility_condition, field)
+      end
+    end
+
+    describe '.time_entry_visibility_condition' do
+      # In this DB-less suite TimeEntry is not defined at all, which IS the first branch:
+      # no TimeEntry class means no way to ask, which means report no spent time.
+      it 'is 1=0 when TimeEntry is not available to ask' do
+        expect(defined?(TimeEntry)).to be_nil
+        expect(described_class.send(:time_entry_visibility_condition)).to eq('1=0')
       end
     end
   end

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>F-09</title></head><body>
+<h1>READINESS-CHARTS</h1>
+<script>window.__rdOptions = { clientTimeoutMs: 8000 };</script>
+@@CHART_SHELL@@
+<p id="c1">chart 1 pending</p>
+<p id="c2">chart 2 pending</p>
+<p id="c3">chart 3 pending</p>
+<script>
+  /* Stands in for {% chart %}: begin() inline, end() when the draw finishes. The author
+     never writes either call — that is T-11's rule, and the reason this fixture puts
+     them in the shell's own idiom rather than in the markup. */
+  (function () {
+    function chart(id, ms) {
+      window.__rd.begin();
+      setTimeout(function () {
+        document.getElementById(id).textContent = 'CHART-DONE-' + id.substring(1);
+        window.__rd.end();
+      }, ms);
+    }
+    chart('c1', 600); chart('c2', 600); chart('c3', 600);
+  }());
+</script>
+<p id="state">RD-STATE pending</p>
+<script>
+  /* The readiness state, MIRRORED into the DOM so the PDF can be asked what the page
+     believed. Nothing here participates in the protocol — the shell owns it.
+
+     Driven by a MutationObserver on `data-rd-ready` and not by the interval alone, and
+     that is not a refinement. The shell sets `ready`, the attribute and `window.status`
+     in one synchronous step, so an interval-only mirror is still showing the previous
+     state when the engine's very next poll sees ready and prints. F-08 failed exactly
+     that way: a chart-free document printed at 42 ms carrying `ready=false`, which is
+     the mirror being stale rather than the protocol being wrong. An observer callback
+     is a microtask and runs before any CDP evaluation can observe the change, so this
+     is an ordering guarantee rather than a shorter race. */
+  (function () {
+    var el = document.getElementById('state');
+    function mirror() {
+      var rd = window.__rd;
+      el.textContent = 'RD-STATE ready=' + rd.ready + ' pending=' + rd.pending +
+        ' degraded=[' + rd.degraded.join(',') + ']';
+    }
+    if (window.MutationObserver) {
+      new MutationObserver(mirror).observe(document.documentElement,
+        { attributes: true, attributeFilter: ['data-rd-ready'] });
+    }
+    setInterval(mirror, 25);
+    mirror();
+  }());
+</script>
+</body></html>
