@@ -4,6 +4,7 @@ require 'securerandom'
 
 require_relative 'diagnostic'
 require_relative 'attachment_mapper'
+require_relative '../charts'
 require_relative '../report_document'
 require_relative '../liquid/render_context'
 require_relative '../liquid/template_renderer'
@@ -139,7 +140,14 @@ module RedmineReporterDashboards
       Job = Struct.new(:record, :correlation_id, :label, keyword_init: true)
 
       # A rendered HTML body, before any engine has seen it.
-      Section = Struct.new(:job, :body, :duration_ms, keyword_init: true)
+      #
+      # `charts` is the render's `Charts::Collector` and it travels with the body because
+      # the BINDING happens later than the render (T-41). `{% chart %}` leaves a
+      # placeholder and records a spec; which markup that placeholder becomes depends on
+      # whether this run ends in `html_only` or in `with_pdf`, and that is not known while
+      # Liquid is running. Re-rendering per output would double every query the template
+      # makes, so the specs ride along instead.
+      Section = Struct.new(:job, :body, :duration_ms, :charts, keyword_init: true)
 
       # What a run answers. One shape whether it succeeded, failed or was refused, so a
       # view never has to ask "which of these three objects am I holding".
@@ -365,7 +373,8 @@ module RedmineReporterDashboards
                                           correlation_id: job.correlation_id)
         return result if result.failure?
 
-        Section.new(job: job, body: result.body, duration_ms: result.duration_ms)
+        Section.new(job: job, body: result.body, duration_ms: result.duration_ms,
+                    charts: context.charts)
       end
 
       # ONE renderer for the whole run, not one per document. `TemplateRenderer` holds an
@@ -468,7 +477,7 @@ module RedmineReporterDashboards
         end
 
         engine = adapter.new
-        bound = bind_assets(sections, engine)
+        bound = bind_assets(bind_charts(sections, output: :pdf), engine)
         if bound.failure
           # NO ENGINE HAS RUN. `from_asset_refusal` and not `from_render_failure` for
           # exactly that reason — see `Diagnostic::ORIGINS`.
@@ -555,6 +564,30 @@ module RedmineReporterDashboards
         end
 
         BoundRequests.new(requests: requests, degradations: degradations, failure: nil)
+      end
+
+      # T-41 — THE OUTPUT BINDING, at the only two places that know which output this is.
+      #
+      # §Findings **M-1**: `Charts::ChartjsEmitter` and `Charts::SvgRenderer` were both
+      # built, unit-tested and given ten goldens by T-16, and neither ever acquired a
+      # caller — so `{% chart %}` produced an empty `<div>` in every browser and blank
+      # space in every PDF, with nothing failing anywhere. These two lines are that caller.
+      #
+      # It runs BEFORE asset binding, and that ordering is forced rather than tidy: the
+      # Chart.js path emits `<script src="/plugin_assets/…">` for the vendored library and
+      # the two boot scripts, and `Assets::Resolver` is what turns those into a
+      # self-contained document. Binding charts afterwards would hand the engine — and the
+      # sandboxed frame, which has no network at all — three references nothing embeds.
+      def bind_charts(sections, output:)
+        sections.map do |section|
+          result = ::RedmineReporterDashboards::Charts::Binding.apply(
+            section.body, section.charts, output: output, logger: logger
+          )
+          next section if result.body.equal?(section.body)
+
+          Section.new(job: section.job, body: result.body,
+                      duration_ms: section.duration_ms, charts: section.charts)
+        end
       end
 
       # T-38 — THE BODY BECOMES A DOCUMENT HERE, and this is the PDF binding's half of
@@ -894,7 +927,7 @@ module RedmineReporterDashboards
       # `[:asset_inline]` is not a guess about a browser's capabilities: it is the only
       # model the CSP permits, and it is what makes the sentence above true.
       def html_only(sections, total, started)
-        bound = bind_html_assets(sections)
+        bound = bind_html_assets(bind_charts(sections, output: :html))
         if bound.failure
           return failed(Diagnostic.from_asset_refusal(bound.failure,
                                                       template_name: template.name),
@@ -937,7 +970,7 @@ module RedmineReporterDashboards
           end
 
           resolved << Section.new(job: section.job, body: resolution.body,
-                                  duration_ms: section.duration_ms)
+                                  duration_ms: section.duration_ms, charts: section.charts)
           degradations.concat(
             ::RedmineReporterDashboards::Render::AssetBinding.degradations(resolution)
           )

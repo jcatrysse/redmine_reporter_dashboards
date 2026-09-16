@@ -424,18 +424,25 @@ also settles `{% mermaid %}` in the browser (**M-2**).
 
 **Options.**
 
-1. **Follow T-16 as specified**, and widen the `srcdoc` CSP by exactly one source — the plugin's
-   own asset origin on `script-src`. HTML gets `<canvas>` + Chart.js, PDF gets inline SVG,
-   Mermaid starts drawing in the browser for free, and no spec is amended. The frame stays
-   `sandbox="allow-scripts"` with an opaque origin and the CSP already carries `'unsafe-inline'`
-   (INV-9: authoring *is* code execution), so the author's privilege does not change — the plugin
-   simply regains the ability to serve its own runtime.
+1. **Follow T-16 as specified**, and widen the `srcdoc` CSP by exactly one source. HTML gets
+   `<canvas>` + Chart.js, PDF gets inline SVG, Mermaid starts drawing in the browser for free,
+   and no spec is amended. The frame stays `sandbox="allow-scripts"` with an opaque origin and
+   the CSP already carries `'unsafe-inline'` (INV-9: authoring *is* code execution), so the
+   author's privilege does not change.
+
+   **AS IMPLEMENTED THE SOURCE IS NARROWER THAN THIS OPTION PROMISED, AND IT SHOULD BE.** The
+   option was written expecting to add the plugin's asset ORIGIN. Measuring the srcdoc showed
+   the browser never sees a `/plugin_assets/…` URL at all — `Assets::Resolver` has already
+   embedded it, as a `data:` URI whenever the file is too large to restructure — so the source
+   that was actually needed is `data:` on `script-src` and `style-src`. No host, no `'self'`,
+   no `connect-src`. §Findings **M-2** carries the measurement and the correction.
 2. **Server-side SVG on both bindings.** No CSP change, no vendored JavaScript in a browser,
    HTML and PDF identical by construction, drill-through via `<a xlink:href>`. Costs the
    tooltips and legend-toggling, amends T-16, and leaves Mermaid permanently unavailable in the
    browser. `04-risks.md` already names this as the rollback if the two layouts ever diverge.
 
-**Recommendation: 1.** **Decision: 1** *(curator, 2026-09-16.)*
+**Recommendation: 1.** **Decision: 1** *(curator, 2026-09-16; landed the same day, with the
+narrower source the measurement asked for.)*
 
 ### 13. A global template that no screen can open
 

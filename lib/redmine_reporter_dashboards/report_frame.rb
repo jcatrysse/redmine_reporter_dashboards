@@ -44,9 +44,38 @@ module RedmineReporterDashboards
     # the API as them. It is written here once, next to the reason.
     SANDBOX = 'allow-scripts'
 
-    # `default-src 'none'` with three deliberate holes: `data:` images so a chart or an
-    # inlined asset renders, and inline style/script so a template's own presentation and
-    # the chart bootstrap run. No `connect-src`, so nothing in a report can call home.
+    # `default-src 'none'` with deliberate holes, and no `connect-src`, so nothing in a
+    # report can call home.
+    #
+    # --- `data:` ON SCRIPT AND STYLE, AND THIS POLICY REFUSED ITS OWN ASSET BINDING
+    #     WITHOUT IT (T-41, §Findings M-2, MEASURED 2026-09-16) ---
+    #
+    # `Assets::Resolver` embeds every subresource a report references. It has two ways to
+    # do that: RESTRUCTURE the element — `<script src=…>` becomes `<script>…</script>` —
+    # or, when it cannot, rewrite the attribute to a `data:` URI. It cannot restructure a
+    # file above `inline_max_bytes`, and Mermaid is 3.5 MB, so every `{% mermaid %}`
+    # document reached this frame carrying
+    # `<script src="data:text/javascript;base64,…">` — which `script-src 'unsafe-inline'`
+    # does not permit. The browser refused the plugin's own vendored library and the
+    # reader saw the diagram's SOURCE as text, while the same document rendered correctly
+    # as a PDF, where no CSP is involved. The srcdoc was 4.7 MB of refused script.
+    #
+    # So this is not a widening of what a template may do; it is this policy agreeing with
+    # the binding that feeds it. The author's privilege is unchanged, and saying why is the
+    # point of this paragraph: `'unsafe-inline'` is ALREADY here, because INV-9 makes
+    # template authoring a code-execution privilege by design, and the frame is an opaque
+    # origin with no `allow-same-origin`, so script that runs here cannot reach the
+    # viewer's session whatever URL it arrived under. `data:` adds a second spelling of a
+    # capability an author already has — it does not add the capability.
+    #
+    # `style-src` gets it for the identical reason: a stylesheet above the threshold is
+    # rewritten the same way, and a refused stylesheet is a report that silently loses its
+    # layout.
+    #
+    # What is still absent is what matters: no `'self'`, no host, no `connect-src`,
+    # no `default-src`. An opaque origin's `'self'` is nothing, and a host source would
+    # let a template pull code from anywhere that host serves — which IS a widening, and
+    # is not needed, because the binding has already embedded everything the document uses.
     #
     # This is delivered as a `<meta>` rather than a response header, which is a deviation
     # from §4's wording and is reported rather than absorbed (CLAUDE.md §11.3): the
@@ -54,8 +83,8 @@ module RedmineReporterDashboards
     # has to serve both a saved report and an unsaved preview, and a second mechanism for
     # the second case is the "two ways of doing one thing" §6 forbids.
     CONTENT_SECURITY_POLICY =
-      "default-src 'none'; img-src data:; style-src 'unsafe-inline'; " \
-      "script-src 'unsafe-inline'"
+      "default-src 'none'; img-src data:; style-src 'unsafe-inline' data:; " \
+      "script-src 'unsafe-inline' data:"
 
     # THE TWO SURFACES, SAID ONCE — T-38.
     #

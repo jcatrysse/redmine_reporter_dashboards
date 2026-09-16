@@ -108,7 +108,7 @@ reference but `GITHUB_TOKEN`, and the full-app suite runs standalone on all four
 The plan contradicted itself on this: §Findings D-2 already described T-09 in the past tense. Both
 now agree, and the correction is recorded rather than quietly applied, because a status line that
 was wrong for a whole phase is the kind of thing that gets believed twice.
-| **T-41** | **open** — the `{% chart %}` output binding, and the `srcdoc` CSP that lets the plugin ship its own runtime. §Findings **M-1**, **M-2** |
+| **T-41** | **done** — `charts/binding.rb` plus the two call sites in `ReportRun`, and `data:` on the frame's `script-src`/`style-src`. **The CSP half's diagnosis changed under measurement**: the browser never sees a `/plugin_assets/…` URL, because `Assets::Resolver` has already embedded the subresource — as a `data:` URI whenever it is too large to restructure — so the policy was refusing its own asset binding, and the source needed is `data:` rather than a host. §Findings **M-1**, **M-2** (corrected). Measured on a real install: 3 canvases drawn in the browser where there were 3 empty `<div>`s, inline SVG with selectable axis text in the PDF, `data-rd-mermaid-state="drawn"`. 2930 DB-less examples 0 failures; **1069 minitest runs, 1 failure and 12 errors — byte-identical to the same run at `517f79e`**, so pre-existing: the 12 are system tests with no working ChromeDriver here, and the 1 is `GalleryRakeTest` catching **M-3**, which is T-42's |
 | **T-42** | **open** — every shipped template parses on Liquid 4 *and* 5, with the axis in CI. §Findings **M-3** |
 | **T-43** | **open** — the my-page ERB comment leak, and the gate that stops the next one. §Findings **M-4** |
 | **T-44** | **open** — the widget frame measures itself over `postMessage`. §Findings **M-5** |
@@ -172,29 +172,42 @@ unmodified, renders as three `<div class="rrd-chart-placeholder" data-rd-chart="
 
 It is a wiring gap, not a design failure, and that is why it is one task rather than a phase.
 
-**M-2 · THE `srcdoc` CSP REFUSES EVERY SCRIPT THE PLUGIN ITSELF SHIPS, SO `{% mermaid %}` WORKS
-IN A PDF AND IS RAW TEXT IN EVERY BROWSER.** 2026-09-16, and it is M-1's sibling rather than a
-separate bug.
+**M-2 · THE `srcdoc` CSP REFUSES WHAT THIS PLUGIN'S OWN ASSET BINDING PRODUCES, SO
+`{% mermaid %}` DRAWS IN A PDF AND IS RAW TEXT IN EVERY BROWSER.** 2026-09-16, and it is
+M-1's sibling rather than a separate bug.
 
-`report_frame.rb:58` sets `script-src 'unsafe-inline'` with `default-src 'none'`.
-`mermaid_tag.rb:350` emits `<script src="/plugin_assets/redmine_reporter_dashboards/javascripts/
-vendor/mermaid.min.js">` plus its boot script. On the PDF binding `AssetBinding` inlines both and
-the diagram draws — measured, a correct vector flowchart in a `chromium_cdp` PDF. On the HTML
-binding the browser refuses both, `data-rd-mermaid-state` is never set, and the reader sees the
-Mermaid source as literal text. The dashboard widget, the template page and the editor preview
-are all that binding.
+**THE FIRST DIAGNOSIS IN THIS ENTRY WAS WRONG AND THE CORRECTION IS THE USEFUL PART.** It
+read: the tag emits `<script src="/plugin_assets/…">`, the CSP has no host source, the
+browser refuses it — so the fix is a host source. That is what the code looks like, it is
+what `mermaid_tag.rb:350` literally writes, and it is not what reaches the browser. The
+srcdoc was measured instead of read:
 
-T-38 already found and fixed the *stylesheet* half of this ("THE CHROME STYLESHEET'S MERMAID
-RULES WERE DEAD CSS"). The script half survived it.
+    srcdoc length: 4 767 298
+    <script src="data:text/javascript;base64,InVzZSBzdHJpY3QiO3ZhciBfX2VzYnVpbGRfZXNtX21lcm1haWRfbm0…
 
-**The CSP change this needs is smaller than it looks and the argument is worth writing down
-once.** The frame is `sandbox="allow-scripts"` — an opaque origin — and the CSP **already**
-carries `'unsafe-inline'`, because INV-9 says authoring is code execution and an author may
-write `<script>` directly. So the frame already executes arbitrary author JavaScript in an
-origin that is isolated from the viewer's session, which is the property the sandbox exists for.
-Adding the plugin's own asset origin to `script-src` lets the frame fetch *this repository's
-vendored bundles* and changes nothing else about what an author can reach. It is not a widening
-of the author's privilege; it is the plugin regaining the ability to ship its own runtime.
+`Assets::Resolver` embeds every subresource before the body ever reaches this frame. It has
+two ways to do it — RESTRUCTURE the element (`<script src=…>` becomes `<script>…</script>`)
+or, when it cannot, rewrite the attribute to a `data:` URI — and it cannot restructure a
+file above `inline_max_bytes` (512 KiB), which Mermaid's 3.5 MB always is. So the document
+arrives self-contained, exactly as designed, carrying a `data:` script URL that
+`script-src 'unsafe-inline'` does not permit. **The policy refused its own asset binding.**
+Chart.js is 208 KB and would have been restructured, which is why M-1 hid this one: with no
+chart markup emitted at all, the only subresource on the page was Mermaid's.
+
+`style-src` has the same hole for the same reason — a stylesheet above the threshold is
+rewritten the same way, and a refused stylesheet is a report that silently loses its layout.
+`img-src data:` was already there, which is the tell: one of the three was thought about.
+
+**So the fix is `data:` on `script-src` and `style-src`, and nothing else** — no host, no
+`'self'` (an opaque origin's `'self'` is nothing), no `connect-src`. It is not a widening of
+what a template may do: `'unsafe-inline'` is already there because INV-9 makes authoring a
+code-execution privilege by design, and the frame is `sandbox="allow-scripts"` with no
+`allow-same-origin`, so script that runs there cannot reach the viewer's session whatever
+URL it arrived under. `data:` adds a second spelling of a capability the author already has.
+
+Measured after the change, on the same install: `data-rd-mermaid-state="drawn"`, one `<svg>`,
+and the only remaining CSP refusal on the page is the legacy template's `cdnjs` reference —
+which is the `:bundled` policy working, and is M-10's subject.
 
 **M-3 · TWO OF THE FIVE SHIPPED STARTERS DO NOT PARSE ON LIQUID 4, WHICH IS THE LIQUID A
 MIGRATING INSTALL HAS.** 2026-09-16. `aggregate-report` and `version-status`, saved unmodified
@@ -5165,10 +5178,13 @@ is **replaced** by the emitter the binding selects — `ChartjsEmitter` (a `<can
 fallback. **The substitution is one step in one place** — the assembler, not each surface; four
 surfaces (widget, my-page, template page, preview) must not each learn how to do this.
 
-The `srcdoc` CSP gains the plugin's asset origin on `script-src` **and nothing else** — no
-`'self'` (an opaque origin's `'self'` is nothing), no `img-src` change, `default-src 'none'`
-unchanged. M-2 carries the argument; **restate it in the code at the CSP**, because the next
-reader will otherwise correctly ask why a sandbox is being widened.
+The `srcdoc` CSP gains `data:` on `script-src` and `style-src` **and nothing else** — no host,
+no `'self'` (an opaque origin's `'self'` is nothing), no `connect-src`, `default-src 'none'`
+unchanged. **This is narrower than this line first said**, and M-2 carries why: the asset
+binding has already embedded every subresource by the time the frame sees it, so what had to
+be permitted was the binding's own output rather than an origin. **Restate the argument in the
+code at the CSP**, because the next reader will otherwise correctly ask why a sandbox is being
+widened.
 
 *Tests:* a rendered HTML body contains one `<canvas>` and one config block per non-refused
 chart and **zero** `rrd-chart-placeholder` elements; the same template on `:pdf` contains one
