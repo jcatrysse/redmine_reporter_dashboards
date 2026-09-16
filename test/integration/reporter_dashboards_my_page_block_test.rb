@@ -108,6 +108,37 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     assert_no_match(/translation missing/i, response.body)
   end
 
+  # T-43, §Findings M-4 — THE VIEW'S OWN COMMENT MUST NOT BE THE PAGE.
+  #
+  # `_report_by_issues.erb` opened a `<%#` header comment at line 1 and quoted an ERB tag at
+  # line 29 as prose about the code below it. ERB closes a comment at the first `%>`, so the
+  # remaining thirty lines became template text: they printed above the report on `/my/page`,
+  # for every user who added the block, ending in a literal `%>`.
+  #
+  # `script/gates/erb_comment_integrity.sh` is the mechanical half and catches the SHAPE in
+  # any view. This is the behavioural half and catches the OUTCOME on the one page the
+  # defect reached — the two answer different questions and a regression needs both, because
+  # a comment could also leak through a partial the gate has no reason to look at.
+  #
+  # Asserted on both blocks, and on the settings form as well as the configured widget: the
+  # leaked text sat OUTSIDE the `if`, so an unconfigured widget printed it too.
+  def test_no_view_comment_reaches_the_page
+    template = my_page_template(name: 'Comment check')
+    configure_block(template)
+
+    get '/my/page'
+
+    assert_response :success
+    %w[report_by_issues report_by_spent_time].each do |block|
+      refute_includes response.body, 'WHAT IS DIFFERENT FROM THE PROJECT DASHBOARD',
+                      "#{block}: the view's header comment is being printed as page content"
+    end
+    refute_includes response.body, 'include_all_helpers = false'
+    refute_includes response.body, 'the only writes in the'
+    # The literal terminator the leak ended on, which is the part a reader actually noticed.
+    refute_match(/^\s*%>\s*$/, response.body)
+  end
+
   # THE SCOPE IS EVERY ISSUE THE VIEWER CAN SEE, because my-page has no project and this
   # widget names no saved query. Asserted against a SECOND project so a single-project
   # answer cannot pass: the count above would be the same either way with one project.

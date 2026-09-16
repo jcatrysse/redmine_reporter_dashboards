@@ -110,7 +110,7 @@ now agree, and the correction is recorded rather than quietly applied, because a
 was wrong for a whole phase is the kind of thing that gets believed twice.
 | **T-41** | **done** — `charts/binding.rb` plus the two call sites in `ReportRun`, and `data:` on the frame's `script-src`/`style-src`. **The CSP half's diagnosis changed under measurement**: the browser never sees a `/plugin_assets/…` URL, because `Assets::Resolver` has already embedded the subresource — as a `data:` URI whenever it is too large to restructure — so the policy was refusing its own asset binding, and the source needed is `data:` rather than a host. §Findings **M-1**, **M-2** (corrected). Measured on a real install: 3 canvases drawn in the browser where there were 3 empty `<div>`s, inline SVG with selectable axis text in the PDF, `data-rd-mermaid-state="drawn"`. 2930 DB-less examples 0 failures; **1069 minitest runs, 1 failure and 12 errors — byte-identical to the same run at `517f79e`**, so pre-existing: the 12 are system tests with no working ChromeDriver here, and the 1 is `GalleryRakeTest` catching **M-3**, which is T-42's |
 | **T-42** | **done** — both starters' header comments rewritten, and `spec_liquid/shipped_template_parse_spec.rb`, which rides the one CI step that pins both majors. **The gap was never a missing assertion**: `reporter_dashboards_gallery_rake_test.rb` caught M-3 on the first run with the exact Liquid message, and it shipped anyway because no job has ever resolved Liquid 4. Four examples, including the planted block-tag-in-a-comment and a mechanical rule over both shipped directories, so the prose fix cannot be undone silently. Green on 4.0.4 and 5.5.1; 5.13.0 is not runnable on Ruby 3.2 (HANDOVER §2c) and is CI's job. §Findings **M-3** |
-| **T-43** | **open** — the my-page ERB comment leak, and the gate that stops the next one. §Findings **M-4** |
+| **T-43** | **done** — the view fixed and `script/gates/erb_comment_integrity.{rb,sh}` plus its self-test, in CI. **THE FIX REINTRODUCED THE DEFECT ONCE, INSIDE THE SENTENCE EXPLAINING IT**, by quoting the CLOSING delimiter — and the gate reported OK, because it looked only for an opener. So it has two rules now: an ERB opener inside the span, and a multi-line comment that terminates mid-line. Both are in the committed self-test (9 cases), along with the case rule B must not fire on. Caught by `reporter_dashboards_my_page_block_test.rb`'s new behavioural half, which is why both halves exist. 15 runs, 111 assertions, 0 failures. §Findings **M-4** |
 | **T-44** | **open** — the widget frame measures itself over `postMessage`. §Findings **M-5** |
 | **T-45** | **open** — a global template is reachable in the templates UI. §Findings **M-7** |
 | **T-46** | **open** — the import carries `orientation`/`description` and states that copies are private. §Findings **M-6**, **M-8** |
@@ -246,6 +246,14 @@ A scan of `app/views/**/*.erb` for an `<%#` whose body contains `<%` finds **exa
 occurrence, which is why this is a two-character fix with a gate rather than a sweep. The gate is
 the deliverable: this repository writes very long view comments on purpose, and the next one that
 quotes an ERB tag will do the same thing.
+
+**AND IT DID, IMMEDIATELY, IN THE FIX ITSELF.** The replacement sentence explaining M-4 said *"ERB
+closes a comment at the first `%>`"* — and that quoted `%>` closed the comment, printing the rest
+again. The gate reported OK, because it had taken that delimiter for the terminator and found no
+opener before it. So the rule is not "no `<%` inside a comment"; it is **both delimiters**, and the
+second one is expressed as *a multi-line comment must not terminate mid-line* — a real terminator
+is the last thing on its line, and a comment that ends in the middle of a sentence ended by
+accident. The integration test caught it, not the gate, which is the argument for having both.
 
 **M-5 · THE WIDGET FRAME CAN MEASURE ITSELF AFTER ALL, AND THE COMMENT SAYING IT CANNOT IS
 REASONING FROM THE WRONG MECHANISM.** 2026-09-16, curator decision the same day.

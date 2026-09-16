@@ -1205,6 +1205,20 @@ jobs:
           ./script/gates/no_html_safe_selftest.sh
           ./script/gates/no_html_safe.sh
 
+      # T-43, §Findings M-4 — no ERB tag inside an ERB comment. THE SELF-TEST RUNS FIRST,
+      # for the reason its neighbours give: a gate nobody has seen say no might not be able
+      # to, and this one's reader is a span walk rather than a grep, which is exactly the
+      # kind of reader that can silently scan nothing.
+      #
+      # The defect it exists for printed thirty lines of a view's own source comment at the
+      # top of `/my/page`, to every user who added the block, for a whole release. No test
+      # rendered that view, and no grep could have found it: the comment opened on line 1
+      # and the offending `<%= render %>` sat on line 29.
+      - name: erb_comment_integrity
+        run: |
+          ./script/gates/erb_comment_integrity_selftest.sh
+          ./script/gates/erb_comment_integrity.sh
+
       # T-17 — one parse entry point, and no globally registered filters. Every limit
       # the execution policy applies is a property of the CALL SITE (resource limits,
       # the deadline, :strict, and rethrow_errors, without which Liquid writes its

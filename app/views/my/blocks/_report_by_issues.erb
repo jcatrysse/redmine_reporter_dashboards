@@ -26,8 +26,16 @@
   that carry its own close button, and the user is left with a block they cannot remove.
 
   Nothing is appended to the output buffer before the rescue: the only writes in the
-  guarded body are the `<%= render %>` calls, and `render` builds its result before
+  guarded body are the two `render` calls, and `render` builds its result before
   returning, so a raise inside one leaves the buffer untouched.
+
+  (Written without its ERB delimiters on purpose, and neither delimiter appears anywhere in
+  this comment for the same reason. ERB ends a comment at the first closing delimiter it
+  meets, so quoting either one inside a comment ends it there and prints everything after
+  it — which is what this file did on /my/page, for thirty lines, for every user who added
+  the block. Findings M-4; script/gates/erb_comment_integrity.sh is what stops the next
+  one, and it checks for BOTH delimiters because the first version of this very sentence
+  reintroduced the defect with the closing one.)
 
   --- WHAT IS DIFFERENT FROM THE PROJECT DASHBOARD ---
 
