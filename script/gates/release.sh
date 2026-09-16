@@ -143,6 +143,13 @@ run_gate no_html_safe bash -c \
 
 run_gate single_parse "$GATES_DIR/single_parse.sh"
 
+# T-43, §Findings M-4. Its self-test runs first, for the reason every self-test here does:
+# a gate that cannot say no reports OK about nothing. This was added to `ci.yml` and NOT
+# here when T-43 landed, and the coverage check below is exactly what caught it - which is
+# the check doing its job, so it is worth saying rather than quietly fixing.
+run_gate erb_comment_integrity bash -c \
+  "$GATES_DIR/erb_comment_integrity_selftest.sh && $GATES_DIR/erb_comment_integrity.sh"
+
 run_gate migration_reversibility "$GATES_DIR/migration_reversibility.sh"
 
 # WITHOUT `--expiry-advisory`. See the header: this is the one deliberate difference from

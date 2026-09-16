@@ -186,7 +186,16 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
                  'no inline script may appear in the block: that is the shape a template ' \
                  'body would take if it ever became an element'
     scripts.each do |node|
-      assert_match %r{\A/plugin_assets/redmine_reporter_dashboards/}, node['src'],
+      # THE PATH DIFFERS BY REDMINE BRANCH, and the first version of this assertion pinned
+      # 5.1's spelling and went red on the other three. Measured in CI: 5.1 serves the
+      # mirrored file at `/plugin_assets/<plugin>/<name>.js`; 6.0, 6.1 and 7.0 serve it
+      # through the asset pipeline as
+      # `/assets/plugin_assets/<plugin>/<name>-<digest>.js`. Both are this plugin's own
+      # asset and neither is a third-party host, which is what INV-9 is about — so the
+      # anchor is on the OPTIONAL `/assets` prefix and on the plugin's own directory, and
+      # the digest is allowed for.
+      assert_match %r{\A(?:/assets)?/plugin_assets/redmine_reporter_dashboards/},
+                   node['src'],
                    'the only scripts in this block are this plugin\'s own assets'
     end
 
