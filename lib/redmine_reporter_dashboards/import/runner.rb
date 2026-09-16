@@ -255,11 +255,44 @@ module RedmineReporterDashboards
 
         private
 
+        # AN ABSENT SOURCE TABLE HAS TWO READINGS AND THEY ARE NOT THE SAME NEWS.
+        #
+        # The message here used to say *"this is the expected state on an installation that
+        # never had the base plugin"* for both of them. On a fresh install that is exactly
+        # right. On an installation that HAD `redmine_reporter` and ran
+        # `redmine:plugins:migrate NAME=redmine_reporter VERSION=0` before importing, it is
+        # a reassuring sentence printed over the moment the templates were destroyed — and
+        # that ordering is the single footgun this whole migration path has, because
+        # `VERSION=0` is also the documented way to uninstall the base plugin.
+        #
+        # Copies already made are the discriminator that exists: a template carrying a
+        # `source_template_id` can only have come from that table. It distinguishes the two
+        # good states from each other. It cannot distinguish the BAD state — dropped before
+        # importing anything — from a fresh install, because in both cases the evidence is
+        # absent by construction. So the third line says so plainly instead of implying
+        # everything is fine, and names the one thing that recovers it.
+        def absent_source_notes
+          imported = Template.where.not(source_template_id: nil).count
+
+          if imported.positive?
+            return ["#{Survey::TEMPLATES} does not exist, and #{imported} template(s) here " \
+                    'were imported from it. The base plugin has been uninstalled since the ' \
+                    'import, which is the intended end state — the copies are this ' \
+                    "plugin's own rows and do not need it."]
+          end
+
+          ["#{Survey::TEMPLATES} does not exist, so there is nothing to import.",
+           'On an installation that never had the base plugin this is the expected state ' \
+           'and there is nothing to do.',
+           'If this installation DID have redmine_reporter with templates in it, they were ' \
+           'in that table and they are gone: uninstalling the base plugin with VERSION=0 ' \
+           'drops it. Restore the database from a backup taken before the uninstall, run ' \
+           'this import, and only then uninstall.']
+        end
+
         def read_source(connection, notes, project_ids)
           unless Survey.send(:table_exists?, connection, Survey::TEMPLATES)
-            notes << "#{Survey::TEMPLATES} does not exist, so there is nothing to import. " \
-                     'This is the expected state on an installation that never had the ' \
-                     'base plugin.'
+            notes.concat(absent_source_notes)
             return []
           end
 

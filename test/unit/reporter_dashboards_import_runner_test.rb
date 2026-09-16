@@ -207,6 +207,35 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
     assert_equal 'portrait', copy.reload.orientation
   end
 
+  # THE TWO READINGS OF AN ABSENT SOURCE TABLE, and the reason they are two messages.
+  #
+  # `VERSION=0` on the base plugin is both the documented way to uninstall it and the one
+  # way to destroy everything this importer exists to copy. A single reassuring sentence
+  # over both states is a sentence printed at the worst possible moment on the second one.
+  def test_an_absent_source_on_a_never_had_it_install_says_so_and_warns_about_the_other_case
+    drop_source_tables # `setup` creates it; this case is the install that never had one
+    result = run_import
+
+    notes = result.notes.join(' ')
+    assert_match(/never had the base plugin/, notes)
+    assert_match(/VERSION=0/, notes, 'the destructive reading has to be named, not implied')
+    assert_match(/backup/, notes, 'and the one thing that recovers it')
+  end
+
+  # AND WHEN THE COPIES ARE THERE, the same absent table is the intended end state and must
+  # not read as a warning. This is what an operator sees after a completed migration.
+  def test_an_absent_source_after_a_successful_import_reads_as_the_end_state
+    source_id = seed_source
+    run_import
+    assert Template.find_by(source_template_id: source_id)
+
+    drop_source_tables
+    notes = run_import.notes.join(' ')
+
+    assert_match(/were imported from it/, notes)
+    assert_no_match(/backup/, notes)
+  end
+
   # ------------------------------------------------------------------ copy, forward-only
 
   def test_it_copies_a_template_and_stamps_its_source_and_digest

@@ -367,6 +367,30 @@ bundle exec rake reporter_dashboards:migrate_from_reporter:run RAILS_ENV=product
 `reporter_dashboards:migrate_from_reporter:status` afterwards reports which imported
 templates have drifted from their source.
 
+### Only then remove `redmine_reporter`, and mind which of the two removals you do
+
+This plugin never writes to `redmine_reporter`'s tables. It copies out of them into its own
+`reporter_dashboards_*` tables, so once the import has run, nothing here reads or needs the
+other plugin again — its templates, its schedules, its code and its `redmineup` gem can all
+go.
+
+The order is the only thing that matters, and the two ways of removing it are not the same:
+
+| | What it does | When it is safe |
+|---|---|---|
+| Delete `plugins/redmine_reporter/` and restart | Removes the code. `report_templates` and `report_schedules` stay in the database, untouched | Any time. The import can still run afterwards — it reads tables, not classes |
+| `rake redmine:plugins:migrate NAME=redmine_reporter VERSION=0` | **Drops those tables.** The templates are gone | Only after the import has run and you have checked the copies |
+
+**Run the import before `VERSION=0`, not after.** There is no way back from the second
+command except a database restore: the source templates exist in exactly one place, and that
+is the table it drops. If you run the import against an installation whose tables are already
+gone, it tells you so and names the backup as the only recovery — it will not report an empty
+result as a clean bill of health.
+
+Downgrading `redmine_reporter` to an older release is the same question in a different shape.
+The code you downgrade to is irrelevant to this plugin; what matters is whether the downgrade
+runs migrations that drop or reshape those two tables. If it does, import first.
+
 ### Then widen the visibility, or the dashboards stay broken for everybody else
 
 **Every copy is private to the administrator who ran the import.** That is deliberate — the
