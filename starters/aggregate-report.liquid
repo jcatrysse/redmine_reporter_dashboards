@@ -10,9 +10,17 @@
  40 000 issues costs the same as one over 40 — and the numbers are
  computed over exactly the issues the reader is allowed to see.
 
- A `{% for issue in issues %}` loop is the alternative and it is the
+ A `for issue in issues` loop is the alternative and it is the
  wrong tool for a total: it reads every row to add up numbers the
  database can add up itself.
+
+ (Written without its Liquid tag delimiters on purpose. On Liquid 4 a
+ comment block still tokenises its body, and a BLOCK tag — for, if, unless,
+ case, capture, tablerow, raw — written inside a comment opens a block that
+ then meets the end of the comment, and the whole template fails to parse.
+ A simple tag such as sql_aggregate above is safe, because a comment ignores
+ a tag it does not know. Liquid 5 stopped reading comment bodies altogether,
+ which is why this cost a release to find. See T-42.)
 
  `drill: true` puts a URL on every bucket, so every row below is a link
  into the issue list filtered to that row. It works in the PDF as well —

@@ -2182,6 +2182,22 @@ Three things changed visibly and all three are §Findings entries: the charts we
 (**M-1**, **M-10**), the PDF turned portrait (**M-6**), and the widget frame stopped growing
 (**M-5**).
 
+### Running `spec_liquid` on both majors, locally
+
+`spec_liquid/` is the only place either Liquid major is pinned, and T-42 put the shipped-template
+parse check there so it rides that axis. Two facts about running it by hand:
+
+- **Liquid 4.0.4 and 5.5.x run on Ruby 3.2. Liquid 5.13.0 does not** — `NoMethodError: undefined
+  method 'peek_byte' for StringScanner`, because 5.13 needs a `strscan` newer than the default
+  gem Ruby 3.2 activates, and pinning `gem 'strscan', '3.1.8'` first does not displace it. The
+  whole directory fails, **274 of 370**, which is how you tell it apart from a real regression:
+  a change of yours does not break 274 examples in one step. CI runs this step on the
+  `6.1-stable` leg, i.e. Ruby 3.4, where 5.13 is fine.
+- `filters_spec.rb` **fails by design on any unpinned Liquid version** and prints the filter list
+  to paste in. `PINNED` holds 4.0.4 and 5.13.0 — the two versions CI installs — so running 5.5.1
+  to get round the point above costs one deliberate failure. That is the gate working, not a
+  finding.
+
 ### How to redo it
 
 The rehearsal was driven with Playwright against the cloud image's Chromium

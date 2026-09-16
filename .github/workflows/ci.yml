@@ -144,7 +144,13 @@ jobs:
       # install that already has 4.x is not forced to upgrade. One Redmine branch only —
       # this proves a property of the GEM, and running it four times proves it four
       # times.
-      - name: NamedRefDrop under both Liquid majors
+      #
+      # T-42 WIDENED WHAT THIS STEP IS FOR, so its name changed with it. §Findings **M-3**:
+      # two of the five shipped starters did not parse on Liquid 4 and shipped that way,
+      # because every other job takes the Liquid the lockfile resolves — 5.x — and this is
+      # the only place 4.0.4 is ever installed. `shipped_template_parse_spec.rb` is in this
+      # directory for exactly that reason, and it is in the loop below by being here.
+      - name: The real-Liquid specs under both Liquid majors
         if: matrix.redmine == '6.1-stable'
         run: |
           gem install rspec --no-document

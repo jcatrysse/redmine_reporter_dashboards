@@ -5,10 +5,18 @@
  Set the template's OUTPUT to "One document for the whole set" and its
  SOURCE to "Issues".
 
- `{% version_rollup %}` does in one query what a
- `{% for version %}{% for issue %}` loop does in hundreds: it groups the
+ `{% version_rollup %}` does in one query what a nested
+ `for version` / `for issue` loop does in hundreds: it groups the
  report's issues by target version and returns one row per version, with
  the counts, the hours and the dates already summed.
+
+ (Those two are written without their Liquid tag delimiters on purpose.
+ On Liquid 4 a comment block still tokenises its body, and a BLOCK tag — for,
+ if, unless, case, capture, tablerow, raw — written inside a comment opens a
+ block that then meets the end of the comment, and the whole template fails to
+ parse. A simple tag such as version_rollup above is safe, because a comment
+ ignores a tag it does not know. Liquid 5 stopped reading comment bodies
+ altogether, which is why this cost a release to find. See T-42.)
 
  `closed_statuses:` names the statuses that count as finished. Without it
  the tag uses Redmine's own `is_closed` flag, which is usually what you
