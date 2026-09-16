@@ -405,13 +405,31 @@ module RedmineReporterDashboards
           # SAID, NOT SNIFFED — §Findings S-13. This is what stops `{% sql_aggregate %}`
           # handing a time-entry relation to the issue kernel and getting plausible,
           # wrong numbers back.
-          source: template.source.to_sym
+          source: template.source.to_sym,
+          # T-47 — the project this report is FOR, for the drill-through builder and for
+          # nothing else. See `report_project`.
+          project: report_project
         )
       end
 
       # A per-record document is about ONE issue, so the collection the template sees is
       # not the whole scope. Returning the full scope there would let `{{ issues.size }}`
       # print 4 000 on every one of 4 000 documents, each of which is about one row.
+      # T-47, §Findings **M-9** — WHERE THE PROJECT COMES FROM, and both halves are needed.
+      #
+      # A saved query names a project explicitly and it is the right one on a dashboard: a
+      # widget renders a template in ITS project, which is not necessarily the template's.
+      # With no saved query there is no query to ask, and the template's own project is then
+      # the only explicit answer left — which is exactly the case M-9 is about, because "no
+      # saved query" is precisely when drill-through went silent.
+      #
+      # Both nil is a real answer and not a gap: a my-page widget has no project, and neither
+      # has a global template rendered with no query. The builder then declines, which is the
+      # behaviour that was there before this task, so nothing regresses into a guess.
+      def report_project
+        query&.project || template.project
+      end
+
       def scope_for_render
         return scope if limit.nil? || scope.nil?
 

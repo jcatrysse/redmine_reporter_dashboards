@@ -161,13 +161,35 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
   # INV-9. The body reaches the page as `srcdoc` ATTRIBUTE data, so a template's own markup
   # can never become an element in MY PAGE's document, where it would run with the viewer's
   # session. Asserted on the rendered page, because that is the surface the claim is about.
+  #
+  # THIS USED TO ASSERT ZERO `script` ELEMENTS IN THE BLOCK, AND T-44 MADE THAT TOO BLUNT.
+  # The block now carries one — `javascript_include_tag` for the frame's parent-side
+  # measurement, which cannot go in `header_tags` from a my-page block because the partial
+  # renders long after the head was emitted. The claim is unchanged; the proxy for it was
+  # wrong, so the proxy is replaced by something sharper rather than relaxed:
+  #
+  #   * NO INLINE SCRIPT AT ALL in the block. That is the shape a template's own markup
+  #     would take if it ever became an element, and it is now asserted directly rather
+  #     than implied by a count.
+  #   * Every script in the block is a `src` under this plugin's own asset path, so "the
+  #     only scripts here are ours" is stated rather than left to the count.
+  #   * The template's `<script>` still appears only inside the srcdoc ATTRIBUTE.
   def test_a_script_in_a_template_does_not_become_markup_in_my_page
     configure_block(my_page_template(content: '<script>alert(1)</script>'))
 
     get '/my/page'
 
     assert_response :success
-    assert_select "#block-#{BLOCK} script", 0
+
+    scripts = css_select("#block-#{BLOCK} script")
+    assert_empty scripts.reject { |node| node['src'].present? },
+                 'no inline script may appear in the block: that is the shape a template ' \
+                 'body would take if it ever became an element'
+    scripts.each do |node|
+      assert_match %r{\A/plugin_assets/redmine_reporter_dashboards/}, node['src'],
+                   'the only scripts in this block are this plugin\'s own assets'
+    end
+
     assert_includes css_select("#block-#{BLOCK} iframe").first['srcdoc'],
                     '<script>alert(1)</script>'
   end

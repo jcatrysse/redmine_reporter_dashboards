@@ -72,7 +72,7 @@ module RedmineReporterDashboards
       SOURCES = %i[issues time_entries].freeze
 
       attr_reader :actor, :scope, :query, :correlation_id, :diagnostics, :budget, :batch,
-                  :charts, :output, :source
+                  :charts, :output, :source, :project
 
       # actor          the user the render is FOR. Required (INV-1).
       # scope          an ActiveRecord issue relation, already visibility-scoped by
@@ -110,9 +110,23 @@ module RedmineReporterDashboards
       #                the shape T-25's review found reporting success while mailing the
       #                wrong person's numbers, and the same argument applies to a scope
       #                whose table nobody can name.
+      # `project` — T-47. The project the report is FOR, or nil where there is none
+      # (`/my/page`, and a global template rendered with no saved query).
+      #
+      # NOT A SECOND SCOPE, and the distinction is the whole reason this is safe: NOTHING
+      # COUNTS ANYTHING FROM IT. Its one reader is `{% sql_aggregate %}`'s drill-through
+      # builder, which needs an `IssueQuery` to inherit from and has none when the template
+      # names no saved query — §Findings **M-9**. The URL it builds points at Redmine's own
+      # issue list, which applies the viewer's own visibility when they open it, so an actor
+      # can no more see somebody else's issues through a drill link than by typing the URL.
+      #
+      # `scope` is NOT where this comes from, and that is deliberate: a relation's project
+      # condition may be a subtree, a set, or absent, and reading one back out of it would be
+      # exactly the ambient inference INV-1 exists to remove. `ReportRun` derives it from the
+      # two things that name a project explicitly — the saved query's, then the template's.
       def initialize(actor:, scope: nil, query: nil, correlation_id: nil,
                      diagnostics: nil, budget: nil, batch: nil, charts: nil,
-                     output: :html, source: :issues)
+                     output: :html, source: :issues, project: nil)
         if actor.nil?
           raise ArgumentError,
                 'a RenderContext needs an actor (INV-1: never ambient User.current)'
@@ -124,6 +138,7 @@ module RedmineReporterDashboards
         end
 
         @actor = actor
+        @project = project
         @source = source.to_sym
         @scope = scope
         @query = query
@@ -189,7 +204,7 @@ module RedmineReporterDashboards
         self.class.new(actor: @actor, scope: @scope, query: @query,
                        correlation_id: @correlation_id, diagnostics: @diagnostics,
                        budget: @budget, batch: other_batch, charts: @charts,
-                       output: @output, source: @source)
+                       output: @output, source: @source, project: @project)
       end
 
       # The output binding is chosen by whoever is producing the document, and it is a
@@ -204,7 +219,7 @@ module RedmineReporterDashboards
         self.class.new(actor: @actor, scope: @scope, query: @query,
                        correlation_id: @correlation_id, diagnostics: @diagnostics,
                        budget: @budget, batch: @batch, charts: @charts,
-                       output: other_output, source: @source)
+                       output: other_output, source: @source, project: @project)
       end
 
       def with_budget(other_budget)
@@ -213,7 +228,7 @@ module RedmineReporterDashboards
                        budget: other_budget,
                        batch: Batch.new(actor: @actor, scope: @scope,
                                         diagnostics: @diagnostics, budget: other_budget),
-                       charts: @charts, output: @output, source: @source)
+                       charts: @charts, output: @output, source: @source, project: @project)
       end
 
       # The one register lookup the owned path performs. Returns nil when there is no

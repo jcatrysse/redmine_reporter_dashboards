@@ -311,9 +311,9 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
     @spec_actor ||= Struct.new(:id, :login).new(1, 'spec-actor').freeze
   end
 
-  def owned_registers(scope: nil, query: nil, source: :issues)
+  def owned_registers(scope: nil, query: nil, source: :issues, project: nil)
     context = RedmineReporterDashboards::Liquid::RenderContext.new(
-      actor: spec_actor, scope: scope, query: query, source: source
+      actor: spec_actor, scope: scope, query: query, source: source, project: project
     )
     { RedmineReporterDashboards::Liquid::RenderContext::REGISTER_KEY => context }
   end
@@ -1882,8 +1882,63 @@ RSpec.describe SqlAggregation::LiquidAggregateTag do
       ctx.scopes.last['stats']
     end
 
+    # T-47, §Findings **M-9** — WITH NO SAVED QUERY, WHICH IS EVERY SURFACE EXCEPT A WIDGET.
+    #
+    # `drill: true` emitted URLs only where an `IssueQuery` was in context. The template's
+    # own page, the PDF download, a mailed report and a share link all render with none, so
+    # every bucket came back `url` nil and `drill_available` false — while the shipped
+    # starter told its reader the links work in the PDF too. Measured before the fix, same
+    # template and data: widget `drill_available=true`, template page `false`.
+    describe 'with no saved query' do
+      def render_without_query(markup, result: dimension_with_filters, project: nil)
+        allow(SqlAggregation::QueryAggregator).to receive(:dimension_breakdown).and_return(result)
+        ctx = build_context({}, owned_registers(scope: scope, query: nil, project: project))
+        build_tag(markup).render(ctx)
+        ctx.scopes.last['stats']
+      end
+
+      subject(:res) do
+        render_without_query('group_by: cf_92, drill: true, assign_to: stats',
+                             project: project)
+      end
+
+      it 'inherits from an unfiltered query over the report\'s own project' do
+        expect(res['drill_available']).to be(true)
+        expect(res['base_url']).to start_with('https://redmine.example/projects/ops/issues?')
+      end
+
+      it 'still puts the dimension filter on every expressible bucket' do
+        expect(res['buckets'][0]['url']).to include('v%5Bcf_92%5D%5B%5D=415')
+      end
+
+      # `IssueQuery.new` arrives with `status_id: open` already set, and inheriting THAT
+      # would send somebody who clicked a bar labelled "Closed: 46" to a list of open
+      # issues — a link that is worse than no link, because it looks like an answer.
+      it 'does not inherit the default open-issues filter' do
+        expect(res['base_url']).not_to include('status_id')
+      end
+
+      # A my-page widget has no project, and neither has a global template rendered with no
+      # query. Declining is what happened before this task, so nothing regresses into a guess.
+      it 'declines when there is no project either, exactly as before' do
+        without = render_without_query('group_by: cf_92, drill: true, assign_to: stats')
+
+        expect(without['drill_available']).to be(false)
+        expect(without['buckets'][0]['url']).to be_nil
+      end
+    end
+
     describe 'a breakdown' do
       subject(:res) { render('group_by: cf_92, drill: true, assign_to: stats') }
+
+      # THE REGRESSION GUARD. The fallback must never reach the path that already worked:
+      # a widget inherits its query's filters, columns, grouping, totals and sort, and a
+      # bare project query has none of those. Measured in a browser before and after the
+      # change — the widget's URL is byte-identical.
+      it 'still inherits the report query rather than the project fallback' do
+        expect(res['base_url']).to include('c%5B%5D=tracker')
+        expect(res['base_url']).to include('status_id')
+      end
 
       it 'reports drill-through as available' do
         expect(res['drill_available']).to be(true)

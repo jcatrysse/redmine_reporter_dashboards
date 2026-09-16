@@ -442,7 +442,7 @@ module SqlAggregation
     end
 
     def drill_builder(context)
-      query = resolve_query(context)
+      query = resolve_query(context) || project_query(context)
       if query.nil?
         Rails.logger.warn('[sql_aggregate] drill: true but no IssueQuery could be resolved — ' \
                           'no drill-down URLs (counts are unaffected)')
@@ -459,6 +459,39 @@ module SqlAggregation
 
     # all (default) — filters, columns, grouping, totals and sort order
     # filters      — filters only, for a shorter URL or to land on an ungrouped list
+    # T-47, §Findings **M-9** — THE FALLBACK, AND IT IS THE DIFFERENCE BETWEEN A FEATURE
+    # THAT WORKS ON ONE SURFACE AND ONE THAT WORKS.
+    #
+    # `drill: true` emitted URLs only where an `IssueQuery` was in context, which is a
+    # dashboard widget and nothing else. The template's own page, the PDF download, a mailed
+    # report and a share link all render with no saved query, so every bucket came back with
+    # `url` nil and `drill_available` false — while `starters/aggregate-report.liquid` told
+    # its reader *"It works in the PDF as well — those are real link annotations, not blue
+    # text"*. Measured, same template and data: the widget had a filtered issue-list URL on
+    # every bucket and the PDF had none.
+    #
+    # A report with no saved query is not a report with no SCOPE — `Reporting::ReportScope`
+    # already answers "this project's visible issues". What was missing is a query to
+    # INHERIT from, and an unfiltered query over the report's own project is the honest one:
+    # `base_url` becomes the project issue list and each bucket adds its own dimension
+    # filter, which is what a reader clicking a bar expects.
+    #
+    # `filters = {}` rather than the default: `IssueQuery.new` arrives with `status_id: open`
+    # already set, and inheriting that would send somebody who clicked a bar labelled
+    # "Closed: 46" to a list of open issues. `DrillThrough` builds its element queries the
+    # same way, from the same starting point, which is why this needs nothing else set.
+    #
+    # NOT A VISIBILITY DECISION. The URL points at Redmine's own issue list, which applies
+    # the viewer's own visibility when they open it; this query is never executed here.
+    def project_query(context)
+      project = RedmineReporterDashboards::Liquid::RenderContext.from(context)&.project
+      return nil if project.nil?
+
+      query = IssueQuery.new(name: '_', project: project)
+      query.filters = {}
+      query
+    end
+
     def drill_inherit(context)
       value = str_param(@raw_params['drill_inherit'], context, default: 'all').strip.downcase
       return :filters_only if value == 'filters'
