@@ -553,3 +553,37 @@ than a silent gap.
 **Recommendation: 3**, because the reader's complaint was never "I want the lint output", it was
 "nothing said anything". A degradation line is already computed for the run; this is choosing to
 show it. **Decision:**
+
+## Part 5 — which project a report is about, 2026-09-18
+
+### 18. Should a report be able to name SEVERAL projects? — **OPEN**
+
+**The situation.** T-52 gives a my-page widget one project. The curator asked whether it should be
+"een project of projecten", and chose one project now with the plural recorded rather than closed.
+
+**What already covers part of it.** A saved query can name several projects on its own: a global
+`IssueQuery` carries a `project_id` filter (`redmine/app/models/issue_query.rb:799-809`), so "Bouw
+and Onderhoud but nothing else" is expressible today by building that query and choosing it in the
+widget. What a query cannot do is be reused across widgets that each want a different pair.
+
+**Why it is not free.** Three things assume exactly one project and would each need an answer:
+
+* the drill-through URL — `DrillThrough` builds a project issue-list URL, and with several projects
+  there is no single list to link to (the honest answer is probably the global issue list with a
+  project filter, which is a different URL shape);
+* `reporter_time_entry_visibility_notice` — S-14's notice makes a claim about ONE project's roles,
+  and with several it is either several notices or a claim that is no longer true;
+* the `project` drop a template can read — `{{ project.name }}` has no meaning for a set.
+
+**Options.**
+
+1. **Leave it at one project**, and point at a saved query for the multi-project case. Nothing new to
+   explain, and the capability already exists one layer down.
+2. **A multi-select on the widget**, plus an answer for each of the three above. Two to three times
+   the size of T-52.
+3. **A "project and its subprojects" toggle only**, which is not the same thing but covers the case
+   people usually mean by "several projects".
+
+**Recommendation: 1**, revisited once T-52 has been used. The plural is a real want, but every
+surface that would have to change is one this plan has already had to correct once, and the saved
+query covers the case that exists today. **Decision:**

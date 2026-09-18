@@ -5436,6 +5436,134 @@ reads afterwards as a review that found only what was fixed.
 | **R-13** | T-48's lint panel is gated on `editable_by?`, which is administrator-only for a global template — so on a migrated install it reaches one person | **Recorded, not changed.** `DECISIONS-PENDING.md` #17, recommending a one-line degradation summary for every viewer and the full panel for editors |
 | **R-14** | `Collector`'s duplicate-id control sees tags; the binding substitutes on markup, so a hand-written placeholder beside a real `{% chart %}` produced two canvases with one id | **Fixed.** The binding binds the first occurrence of an id and leaves the rest, logging why |
 
+### Phase 6 — which project a report is about *(ships 0.9.0; curator question 2026-09-18)*
+
+**The question, in the curator's words:** *"als in een report een query gebruikt wordt die niet aan
+een project hangt, dan neemt hij de issues van alle projecten. Er zou eens moeten nagedacht worden
+hoe we dat kunnen herleiden tot de context van het relevante project. Althans indien gewenst."*
+
+**Measured first, on Redmine 5.1 / PostgreSQL 16 against the fixture database, before any of this
+was designed.** Two of the three findings below contradict what the code says about itself.
+
+#### What the surfaces actually do
+
+Every route in `config/routes.rb` except the public share link is project-scoped, and every caller
+of `ReportScope.build` passes that project. `WidgetReport.render_for_my_page` passes `project: nil`.
+
+| Surface | `project:` | a project-less query |
+|---|---|---|
+| Template page, preview, PDF, export | `@project` | bounded to the subtree |
+| Project dashboard widget, `report_pdf` | `@project` | bounded to the subtree |
+| Schedule (mail) | `schedule.project`, always set | bounded to the subtree |
+| Ad-hoc mail | `@project` | bounded to the subtree |
+| Share link snapshot | `share_link.project`, always set | bounded to the subtree |
+| **`/my/page` widget** | **`nil`** | **unbounded — every project the actor can see** |
+
+Through `ReportScope.build`, one global `IssueQuery`, one actor:
+
+```
+all visible issues                       : 14
+no project, no query   (my-page default) : 14
+project 1, no query                      :  7
+no project + global query (my-page)      : 14   projects [1, 2, 3, 5]
+project 1 + global query (dashboard)     : 13   projects [1, 3, 5]
+subtree of project 1                     :      [1, 3, 4, 5, 6]
+```
+
+Two things fall out. My-page counts project **2**, which is not related to project 1 at all. And on
+one dashboard page "this project" means 7 without a query and 13 with one, with nothing on the page
+saying so.
+
+#### The premise under the current bound is REFUTED
+
+`report_scope.rb` states that `query.project = project` — core's own idiom — does not change
+`base_scope`, and builds a hand-written `where(project_id: subtree_ids)` because of it. Measured
+2026-09-18:
+
+```
+global query, no project assigned        : 14   [1, 2, 3, 5]
+project 1 assigned, display_sub = 1      : 13   [1, 3, 5]
+project 1 assigned, display_sub = 0      :  7   [1]
+   + subproject_id '!*' (main only)      :  7   [1]
+   + subproject_id '='  [3]              : 10   [1, 3]
+```
+
+Assignment works. `Query#statement` appends `project_statement` (`redmine/app/models/query.rb:1029`)
+and that method already implements the rule this phase wants: the query's own `subproject_id` filter
+decides, and failing that `Setting.display_subprojects_issues?` decides. Measured identically for
+`TimeEntryQuery`.
+
+**Why the original measurement was a false negative, because the trap is worth keeping:** it was
+made on projects 1 and 3, and project 3 is a DESCENDANT of project 1. With the setting on, `[1, 3]`
+is the same correct answer before and after assignment. The file next door already records the same
+trap from the other side — `test_a_global_query_does_not_pull_hours_from_outside_this_project_subtree`
+says *"the first version of this example put them in project 3, which MEASURED as a DESCENDANT of
+project 1, so the bound was a no-op"*. Project 2 is the only place a row can be out of bounds.
+
+#### Curator decisions, 2026-09-18
+
+1. **My-page gets a project picker**, blank meaning today's behaviour.
+2. **The rule is Redmine's own**: the `Setting.display_subprojects_issues?` switch, overridden by the
+   query's own subproject selection. Delegated to `project_statement` rather than reimplemented.
+3. **The same rule applies with no query too**, so one page has one meaning of "this project". This
+   WIDENS the no-query path on a default install (the switch ships on): 7 becomes 13 above.
+4. **One project per widget, not several.** Recorded as DECISIONS-PENDING #18 rather than closed.
+
+---
+
+**T-51 · THE BOUND BECOMES REDMINE'S OWN RULE.** *(deps: none)*
+*Touches:* `lib/redmine_reporter_dashboards/reporting/report_scope.rb`,
+`lib/redmine_reporter_dashboards/reporting/report_run.rb`, `test/functional/…_templates_controller_test.rb`,
+`docs/admin-guide.md`, `README.md`.
+
+*Accept:* `ReportScope.resolve` assigns the project to the query and drops
+`project_subtree_ids`/`within`'s project arm, so `project_statement` decides. The assignment is
+in-memory on the instance `ReportScope` itself loaded and is NEVER saved — a test asserts the row is
+unchanged after a render. The no-query path answers the same rule. `ReportRun#report_project` reads
+the caller's project first, so the drill-through URL and the figures name the same project: today it
+is `query&.project || template.project` and a global template with a global query on a project
+dashboard counts project rows while offering no drill link at all.
+`test_a_global_query_does_not_pull_hours_from_outside_this_project_subtree` asserts BOTH settings
+instead of assuming the subtree. The refuted paragraph in `report_scope.rb` is replaced by the
+measurement above, including why the old one misled.
+
+*Explicitly in scope and easy to miss:* the release note. On a default install a report without a
+saved query starts counting subproject rows, so existing figures grow. That is the correction, and
+it must be stated where an operator reads it rather than discovered on a dashboard.
+
+*G7:* `aggregation/drill_through.rb` is a frozen kernel file and is NOT modified — it merely receives
+a query that now carries a project, and builds its `copy` from it. Verify against
+`kernel_exception.rb` before landing; no entry is expected to be owed.
+
+**T-52 · A PROJECT CONTEXT ON `/my/page`.** *(deps: T-51)*
+*Touches:* `lib/redmine_reporter_dashboards/widget_report.rb`,
+`app/views/reporter_dashboards/widgets/_my_report_settings.html.erb`,
+`app/views/my/blocks/_report_by_issues.erb`, `_report_by_spent_time.erb`, all twelve locale files.
+
+*Accept:* a `project_id` in the my-page widget settings, blank by default and blank meaning exactly
+today's behaviour. The picker lists only projects where the actor holds
+`view_reporter_dashboards_reports`, and the id is re-checked server-side on render rather than
+trusted from the form — a stored id the actor may no longer use answers "no project context", not an
+error. With a project chosen the widget is bounded by T-51's rule, so subprojects follow the Redmine
+switch. FR-15: the value is typed and bounded, and an over-long or unparseable one is dropped with a
+log line rather than stored.
+
+*Explicitly out of scope:* narrowing the my-page QUERY picker. It offers `IssueQuery.visible(actor)`
+today — every query of every project — where the dashboard and schedule pickers offer
+`project_id: [nil, project.id]`. That difference was never decided; narrowing it would break existing
+my-page widgets that legitimately point at another project's query. Recorded here, not changed.
+
+**T-53 · A GLOBAL TEMPLATE CAN BE SCHEDULED AND SHARED.** *(deps: none)*
+*Touches:* `app/controllers/reporter_dashboards/schedules_controller.rb:265`,
+`app/controllers/reporter_dashboards/share_links_controller.rb:287`, functional tests for both.
+
+*Accept:* both resolve a template from `[nil, @project.id]` rather than `@project.id`, which is the
+scope `TemplatesController` already uses since T-45. Imported templates are global in the ordinary
+case, so today the ordinary migrated template cannot be scheduled or shared at all. Neither change
+touches authorization: `SchedulesController` starts from `Template.visible(User.current)` and
+`ShareLinksController#find_template` answers 404 unless `@template.visible?(User.current)`, and both
+tests assert that a template the actor may not see is still a 404.
+
 ## 2. Sequencing
 
 ```mermaid
