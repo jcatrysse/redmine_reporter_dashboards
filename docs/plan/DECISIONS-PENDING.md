@@ -587,3 +587,62 @@ widget. What a query cannot do is be reused across widgets that each want a diff
 **Recommendation: 1**, revisited once T-52 has been used. The plural is a real want, but every
 surface that would have to change is one this plan has already had to correct once, and the saved
 query covers the case that exists today. **Decision:**
+
+
+### 19. May the no-query path follow the subproject setting? — **OPEN, blocked**
+
+**The situation.** Phase 6 makes a project surface bind its saved query the way Redmine's issue list
+does, which honours `Setting.display_subprojects_issues?`. The path with NO saved query keeps its
+exact-project bound, so one page still has two meanings of "this project": exactly the project
+without a query, the project and its subprojects with one (when the setting is on).
+
+The curator asked on 2026-09-18 for one rule everywhere and I recommended it. **That recommendation
+was wrong and a red team measured why.** An actor whose role lacks `:view_time_entries` in project 1
+sees `COUNT=0` today. Widened, they see `COUNT=1` — a row from project 3, where they are a
+non-member and the built-in Non-member role carries the permission — while
+`TimeEntryVisibility.state(actor, project)` still answers `:none`, so the page prints *"your role does
+not let you see spent time in this project"* above a figure of 1. That is §Findings S-14 rebuilt on
+the surface S-14 exists for. A second form: an actor with `time_entries_visibility: 'all'` in one
+project and `'own'` in another gets no notice at all and a figure that silently drops somebody else's
+row.
+
+**The blocker is the notice, not the scope.** `TimeEntryVisibility.state` is per-project by
+construction (`time_entry_visibility.rb:45`) and has four readers. Until it can answer for a set of
+projects — there is an unused `state_across_projects` at `:130` that may be the start — this cannot
+ship.
+
+**Options.** 1. Leave the asymmetry and document it. 2. Teach the notice to speak about a set of
+projects, then widen. 3. Narrow the other way: make the query path exactly-this-project too, which
+would disagree with Redmine's issue list and break drill-through agreement.
+
+**Recommendation: 2, as its own task, not folded into Phase 6.** **Decision:**
+
+### 20. May a global template be shared to an unauthenticated URL? — **OPEN**
+
+**The situation.** T-45 made global templates reachable in the templates UI. `SchedulesController` and
+`ShareLinksController` still resolve templates with `project_id = @project.id`, so the ordinary
+migrated template — global, because the base plugin's table has no project column — can be neither
+scheduled nor shared. T-53 fixes the schedules half, which is a pure lookup alignment.
+
+The share half is not, and a red team measured both halves of why.
+
+* `ShareLink.for_template` (`share_link.rb:301`) has no project clause, and `index`, `revoke_all` and
+  `find_link` all use it. Today `find_template` pins the template to one project, so "every link for
+  this template" is necessarily "every link in this project". For a global template it would become
+  every link in every project: `purpose` (free text naming the recipient), creator, public flag, use
+  count and last use, readable by anyone holding `share_…` in any one project. `ShareLink` already
+  carries `project_id`, so this is one `where` — but it has to be part of whatever ships.
+* `Template#visible?` short-circuits the permission gate for a project-less template
+  (`template.rb:307`, measured: a global public template is visible to a user with zero memberships
+  and to `User.anonymous`). So after a naive widening, any holder of `share_…` in any project could
+  mint an unauthenticated public URL rendering any global template. The DATA stays bounded to the
+  sharer's project and is rendered as the sharer, so the exposure is the report's content and
+  structure, not another project's rows.
+
+**Options.** 1. Schedules only; global templates stay unshareable. 2. Share too, with the
+`for_template` scope fixed and the widened publication surface accepted and documented. 3. Share too,
+but minting a link for a global template requires an administrator, mirroring how T-45 already
+restricts EDITING a global template.
+
+**Recommendation: 1 for now**, because it is the half with no security question at all and it unblocks
+the ordinary migration. **Decision:**
