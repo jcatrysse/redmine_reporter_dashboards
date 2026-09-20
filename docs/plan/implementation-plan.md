@@ -5436,197 +5436,141 @@ reads afterwards as a review that found only what was fixed.
 | **R-13** | T-48's lint panel is gated on `editable_by?`, which is administrator-only for a global template — so on a migrated install it reaches one person | **Recorded, not changed.** `DECISIONS-PENDING.md` #17, recommending a one-line degradation summary for every viewer and the full panel for editors |
 | **R-14** | `Collector`'s duplicate-id control sees tags; the binding substitutes on markup, so a hand-written placeholder beside a real `{% chart %}` produced two canvases with one id | **Fixed.** The binding binds the first occurrence of an id and leaves the rest, logging why |
 
-### Phase 6 — which project a report is about *(ships 0.9.0; curator question 2026-09-18, redesigned 2026-09-19)*
+### Phase 6 — which project a report is about *(ships 0.9.0; curator 2026-09-18, cut down 2026-09-20)*
 
-**REDESIGNED AFTER A RED TEAM STOPPED THE FIRST VERSION.** The first version delegated the bound to
-`Query#project_statement` unconditionally, and widened the no-query path as well. A red team
-implemented it in a mirrored Redmine and measured **26 failing tests across 8 files**, six of them
-security assertions, plus five design faults. That version is gone. What is below is a different and
-much smaller rule, and the sections it kept are the measurements.
+**TWO PLANS WERE KILLED BEFORE THIS ONE.** Both tried to bind the saved query to the surface's
+project the way `QueriesHelper#retrieve_query` does. A red team and an independent review each built
+that and measured it. It works for the row count and it breaks something else, and the third version
+is deliberately much smaller than the first two.
 
-#### The rule
+#### The two defects, measured three times independently
 
-**Do what Redmine's own issue list does.** That is one sentence, it is what a Redmine user already
-expects, and it is what keeps a figure and the issue list you reach by clicking it in agreement.
+Fixture: project 1's descendants are 3, 4, 5, 6. **Project 2 is a sibling, not family.** The recipe
+is `docs/plan/reference/verification-project-scope.md`.
 
-`QueriesHelper#retrieve_query` (`redmine/app/helpers/queries_helper.rb:345-355`) is the whole
-specification:
+| | setting ON (default) | OFF |
+|---|---|---|
+| Redmine's own issue list, global query, in project 1 | 10 · `[1,3,5]` | 4 · `[1]` |
+| plugin project surface (dashboard, page, PDF, mail) | 10 · `[1,3,5]` | **10 · `[1,3,5]`** |
+| plugin `/my/page` | **11 · `[1,2,3,5]`** | **11 · `[1,2,3,5]`** |
 
-```ruby
-scope = klass.where(:project_id => nil)
-scope = scope.or(klass.where(:project_id => @project)) if @project
-@query = scope.find(params[:query_id])      # another project's query is a 404
-raise ::Unauthorized unless @query.visible?
-@query.project = @project                   # and THEN the project is assigned
+**D-1.** On a project surface the plugin ignores `Setting.display_subprojects_issues?`. With the
+setting on, which is the default, it already answers what Redmine answers; with it off it does not.
+
+**D-2.** On `/my/page` a project-less query is unbounded, sibling project 2 included, and nothing can
+narrow it. This is the curator's original observation.
+
+#### Why the bind-the-query approach was abandoned — MEASURED, and it reverses the argument that sold it
+
+Every figure in a report is a link to the issue list that produced it. Measured end to end with a
+global query carrying its own `project_id` filter, on project 1's surface:
+
+```
+today                     figure 3  ->  list 3    they agree
+with the query bound      figure 3  ->  list 10   they do not
 ```
 
-Two halves, and this plan needs both. The **refusal** (only a global query or this project's own) is
-the half that makes the **assignment** safe.
+`IssueQuery#initialize_available_filters` offers `project_id` **only when the query has no project**.
+Binding removes it from the drill-through query's available filters, the URL still carries it, and the
+receiving list discards it. So the approach breaks the very property it was recommended for. A
+proposed follow-up task to repair that was built and measured too: it did not repair it, and the
+refusal it needed is not expressible where it would have to live.
 
-#### What was measured, 2026-09-19, Redmine 5.1.13 / PostgreSQL 16
+**So this phase does not touch the query object at all.** No assignment, no `readonly!`, no ordering
+requirement, no frozen kernel file, no new refusal. What is left is the two defects above.
 
-Fixture: project 1 has descendants 3, 4, 5, 6. **Project 2 is a SIBLING, not family.** 14 visible
-issues: 7 in project 1 itself, 1 in project 2. The query below is a global `IssueQuery` carrying a
-filter of its own, hence 10 and 11 rather than 13 and 14.
+#### Deliberately unchanged
 
-| | `display_subprojects_issues` ON (default) | OFF |
-|---|---|---|
-| Redmine issue list, global query, in project 1 | 10 · `[1,3,5]` | 4 · `[1]` |
-| Redmine issue list, global query, no project | 11 · `[1,2,3,5]` | 11 · `[1,2,3,5]` |
-| Redmine issue list, project 1's query, in project 5 | **404** | **404** |
-| Plugin dashboard / template page / PDF / mail | 10 · `[1,3,5]` | **10 · `[1,3,5]`** |
-| Plugin my-page | **11 · `[1,2,3,5]`** | **11 · `[1,2,3,5]`** |
+* **The no-query path keeps its exact-project bound.** Widening it was the curator's instruction of
+  2026-09-18 and my recommendation, and both were wrong: a red team measured an actor whose role lacks
+  `:view_time_entries` in project 1 seeing `COUNT=1` from project 3, where they are a non-member,
+  under a notice still saying their role shows them no hours here. §Findings **S-14** rebuilt.
+  DECISIONS-PENDING #19.
+* **Drill-through agreement** is its own question, mis-diagnosed in the previous version of this text
+  and now recorded as DECISIONS-PENDING #21 rather than carried as a task.
 
-Three defects fall straight out of that table.
-
-**D-1. On a project surface the plugin IGNORES the Redmine setting.** With subprojects switched off
-Redmine answers 4 and the plugin answers 10. With the setting on (the default) the two already agree
-at 10, so this is invisible on most installations and wrong on the ones that deliberately turned it
-off.
-
-**D-2. On `/my/page` a global query really is global**, project 2 included, and nothing can bound it.
-This is the curator's original observation and it is the only place "all projects" genuinely happens.
-
-**D-3. The plugin has no equivalent of Redmine's refusal.** The my-page query picker is
-`IssueQuery.visible(actor)` — every query of every project. Harmless while my-page has no project;
-the moment T-52 adds one, project 1's query can be rendered under project 5. A red team measured
-that combination returning 6 rows from projects `[3, 5]` where project 5's subtree is `[5, 6]`.
-
-#### What is deliberately NOT changed, and why
-
-**The no-query path keeps its exact-project bound.** The first version widened it to follow the
-setting, and a red team measured the consequence: an actor whose role lacks `:view_time_entries` in
-project 1 sees `COUNT=0` today and `COUNT=1` widened — a row from project 3, where they are a
-non-member — while `TimeEntryVisibility.state` still answers `:none` and the page prints *"your role
-does not let you see spent time in this project"*. That is §Findings **S-14** rebuilt on the surface
-S-14 was written for. Widening this path cannot ship before the notice can speak about more than one
-project, and that is not this phase. Recorded as DECISIONS-PENDING #19.
-
-Consequence worth stating plainly: **on a default installation this phase changes no existing
-figure.** The setting ships on, and with it on the project surfaces already answer what Redmine
-answers. What changes is the off case, my-page, and a refusal that has no legitimate traffic.
+**On a default installation this phase changes no existing figure.**
 
 ---
 
-**T-51 · A PROJECT SURFACE BINDS ITS QUERY THE WAY REDMINE DOES.** *(deps: none)*
+**T-51 · THE PROJECT BOUND FOLLOWS REDMINE'S SUBPROJECT SETTING.** *(deps: none)*
 
 *Touches:* `lib/redmine_reporter_dashboards/reporting/report_scope.rb`,
-`lib/redmine_reporter_dashboards/reporting/report_run.rb`,
 `test/unit/reporter_dashboards_report_scope_test.rb`,
-`test/functional/reporter_dashboards_templates_controller_test.rb`, `docs/admin-guide.md`.
+`test/functional/reporter_dashboards_templates_controller_test.rb`, `docs/user-guide.md`.
 
-*Accept:*
+*Accept:* `project_subtree_ids` answers `[project.id]` when `Setting.display_subprojects_issues?` is
+false and `[project.id] + non-archived descendants` when it is true. Nothing else in `ReportScope`
+changes: `within` stays, the no-query path stays, the query object is never touched. Both sources are
+covered, because `ReportScope` serves issues and time entries through one method and an administrator
+switching a setting named for issues also narrows spent-time reports — that is Redmine's own
+behaviour and the user guide says so.
 
-1. `ReportScope.resolve` **refuses a query belonging to another project** when `project` is present,
-   with the same shape `find_query` already uses: `project_id IS NULL OR project_id = project.id`,
-   and the existing `:ignore` / `:raise` split unchanged (interactive ignores, a schedule raises).
-   This is `retrieve_query`'s first half and it is what makes the second half safe.
-2. With `project` present, the query is **assigned** that project and its own `base_scope` is used.
-   `project_subtree_ids` and `within`'s project arm are deleted. The assignment happens **before
-   anything reads `statement` or `available_filters`** — Redmine memoises both, and a red team
-   measured that assigning afterwards leaves a stale statement, so the order is load-bearing and gets
-   a comment saying so.
-3. With `project` **nil**, nothing is assigned and nothing is bounded. `query.project = nil` would
-   STRIP a project query's own bound — measured, 3 rows becomes 14 — so the guard is structural, not
-   stylistic.
-4. `query.readonly!` immediately after the assignment. The record really is dirty
-   (`changes == {"project_id" => [nil, 1]}`, measured) and no code saves a query today; `readonly!`
-   is what keeps that true. **Not `dup`** (flips `new_record?`, which changes `Query#as_params` and
-   breaks `_my_report.html.erb:31`) and **not `clone`** (shares `@attributes`).
-5. `ReportRun#report_project` becomes `project || query&.project || template.project`, so the
-   drill-through fallback names the project the figures are about. There is currently **no test in
-   the tree naming `report_project` at all**; this task adds them.
-6. The `report_scope.rb` paragraph claiming `query.project = project` does not work is replaced by
-   the measurement that refutes it, including why the original was a false negative: it compared
-   projects 1 and 3, and 3 is a DESCENDANT of 1, so the answer was identical either way.
+*Tests:* the setting ON and OFF, for `IssueQuery` and for `TimeEntryQuery`, each asserting the row
+count and the set of project ids; a sibling-project row that must never appear under either setting;
+an archived descendant that must not appear under either.
+`test_a_global_query_does_not_pull_hours_from_outside_this_project_subtree` keeps its subject and
+gains the OFF case, because its present name and comment would otherwise become false.
 
-*Blast radius, to be measured before landing, not assumed:* with the setting on, every project
-surface answers what it answers today, so the expectation is near zero. The red team's 26 failures
-came from the widened no-query path and from the unconditional assignment, both of which are gone.
-If the measured number is not near zero, that is a finding and the task stops.
+*Invariants:* INV-1 is untouched — `ReportScope` already threads the actor and this changes only an
+id list. It is worth recording where INV-1 actually rests on this path: `Query#base_scope` calls
+`Issue.visible` / `TimeEntry.visible` with **no argument**, so it reads `User.current`, and what holds
+the invariant for a saved query is `Snapshot#as` and `ScheduledDelivery#as` setting `User.current` to
+the actor around the render. That is pre-existing, it is not made worse here, and `report_scope.rb`'s
+comment should say it rather than imply the threading covers it.
 
-*The one thing this task does not answer, and must name:* a global query carrying a `project_id`
-filter, bound to a project, produces a drill-through URL wider than its own figure — measured 4 rows
-charted against a 10-row list. The cause is that `DrillThrough` checks `filter_available?` for the
-bucket descriptor (`drill_through.rb:515`) and not for the inherited filters (`:508`), while its own
-header promises that check. `drill_through.rb` is in `Baseline::KERNEL_FILES`, so fixing it needs a
-`kernel_exception.rb` entry with a reason, and G7 passes either way because G7 is byte-identity.
-Split as **T-54** rather than absorbed here (§11.5), and until T-54 lands T-51 must not make the
-situation worse than it is today.
+*G6:* the id list is computed once per `resolve` as it is today, so nothing moves. No query-count
+change is expected and `reporter_dashboards_drill_query_count_test.rb` is the place it would show.
 
-**T-52 · A PROJECT CONTEXT ON `/my/page`.** *(deps: T-51)*
+**T-52 · A PROJECT ON THE `/my/page` WIDGET.** *(deps: T-51)*
 
 *Touches:* `lib/redmine_reporter_dashboards/widget_report.rb`,
 `app/views/reporter_dashboards/widgets/_my_report_settings.html.erb`,
 `app/views/reporter_dashboards/widgets/_my_report.html.erb`,
-`app/views/my/blocks/_report_by_issues.erb`, `_report_by_spent_time.erb`, all twelve locale files,
-`test/unit/reporter_dashboards_widget_report_test.rb`,
-`test/integration/reporter_dashboards_my_page_block_test.rb`.
+`app/views/my/blocks/_report_by_issues.erb`, `_report_by_spent_time.erb`,
+`config/locales/*.yml` (twelve), `test/unit/reporter_dashboards_widget_report_test.rb`,
+`test/integration/reporter_dashboards_my_page_block_test.rb`, `docs/user-guide.md`.
 
 *Accept:*
 
-1. A `project_id` in the my-page widget settings. Blank is the default and blank means exactly
-   today's behaviour: no project, nothing assigned, a global query stays global.
-2. Chosen, the widget behaves as that project's issue list — which is T-51's rule, reached by passing
-   the project to `WidgetReport.run`.
-3. The picker offers only projects where the actor holds `view_reporter_dashboards_reports`, and the
-   stored id is **re-resolved through that same check on every read**. A stored project the actor may
-   no longer use answers "no project context" and renders as it does today; it is never an error and
-   never discloses that the project exists.
-4. **Validated on READ, not on write, and the Accept says so** because the alternative is a control
-   this plugin cannot have: `MyController#update_page` stores `settings.to_unsafe_hash` with no
-   validation and there is no hook on that write
-   (`redmine/app/controllers/my_controller.rb:157-166`; the partial's own header already records it).
-   FR-15's "dropped rather than stored" is not achievable here and the task must not claim it.
-5. **The TEMPLATE lookup is not narrowed.** `WidgetReport.render` passes `project:` into
-   `template_for`, which would scope templates to `[nil, project.id]` — so an existing widget naming
-   another project's template would silently stop resolving and flip to the settings form. The chosen
-   project bounds the SCOPE only; the template lookup stays `Template.visible(actor)`, which is what
-   the picker in `_report_by_issues.erb:70` already offers. Stated here because the first version
-   inherited the narrowing without noticing it.
-6. **Redmine's refusal applies here too.** With a project chosen and a stored `query_id` belonging to
-   a different project, the widget renders with no query and says so, rather than combining the two.
-   This is the one place D-3 is reachable, and it is closed here rather than by narrowing the picker,
-   because narrowing it would break existing widgets that legitimately point at another project's
-   query while having no project of their own.
-7. `_my_report.html.erb:29-35` prints `widget.query.project` as the heading and links its issue list.
-   With T-51 that becomes the chosen project, which is right, but it is a visible change and gets a
-   test rather than being discovered.
+1. A `project_id` in the widget settings. Blank is the default and means exactly today's behaviour.
+   Chosen, it is passed to `WidgetReport.run` and T-51's bound applies.
+2. The picker lists projects where the actor holds `view_reporter_dashboards_reports`, ordered like
+   Redmine orders projects, with a blank first option.
+3. **Resolved on every read with `find_by` and a permission check, never `find`.** `find` raises for
+   an unknown id and returns for a forbidden one, and the my-page partials rescue and print an error
+   placeholder — which would make the pair a usable oracle for which project ids exist. Validation is
+   on read rather than on write because `MyController#update_page` stores `settings.to_unsafe_hash`
+   with no hook to validate on write; the settings partial's header already records that.
+4. **A stored project that no longer resolves FAILS CLOSED**: the widget renders no report and says
+   the project is unavailable. It must not silently fall back to "every project", which is wider than
+   what the owner configured (CLAUDE.md §4).
+5. **The template lookup is not narrowed.** `WidgetReport.render` passes `project:` to `template_for`,
+   which would scope templates to `[nil, project.id]` and silently stop resolving an existing widget's
+   template. The chosen project bounds the rows only.
+6. **The spent-time notice becomes per-project when a project is chosen.** `time_entry_notice_key`
+   uses `state_across_projects`, which answers `:all` if any membership grants it — with a project
+   chosen that is the wrong sentence over the right figure, which is S-14's shape again. With a
+   project it asks `state(actor, project)`, exactly as the project dashboard does.
+   `block_permitted?` stays global and gets a comment saying why: it decides whether the block is
+   offered at all, not what it counts.
 
-**T-53 · A GLOBAL TEMPLATE CAN BE SCHEDULED.** *(deps: none)*
+*Tests:* blank behaves as today; a chosen project narrows; a stored project the actor lost access to
+renders the unavailable state and no report; a stored id that is not a project does the same and does
+not raise; the template lookup still resolves another project's template; the spent-time notice is the
+per-project one when a project is chosen and the across-projects one when it is not.
 
-*Touches:* `app/controllers/reporter_dashboards/schedules_controller.rb:265`, its functional test.
+*Invariants:* INV-3 — the unavailable state is the fail-closed answer. INV-4 — it says so rather than
+rendering an empty report.
 
-*Accept:* `apply_template` resolves from `[nil, @project.id]` rather than `@project.id`, aligning it
-with `apply_query` (`:288-291`), which already uses that scope, and with `TemplatesController` since
-T-45. Imported templates are global in the ordinary case, so today the ordinary migrated template
-cannot be scheduled at all. Authorization is unchanged: the lookup starts from
-`Template.visible(User.current)`, and a test asserts a template the actor may not see is still
-refused. A red team walked every action in this controller and found nothing else.
+*Locale keys:* `label_reporter_widget_project` (the picker), `label_reporter_widget_project_any` (the
+blank option), `text_reporter_widget_project_unavailable` (Accept 4). English first, then all twelve.
 
-*The share-link half was REMOVED from this task.* Widening `ShareLinksController#find_template` the
-same way is **not** the same change, for two measured reasons: `ShareLink.for_template`
-(`share_link.rb:301`) carries no project clause, so a global template's link list — `purpose`,
-creator, use count, last use — becomes readable from every project at once; and `Template#visible?`
-short-circuits the permission gate for a project-less template, so any holder of
-`share_reporter_dashboards_reports` anywhere could mint an unauthenticated public URL for any global
-template. That is a product decision, not a widening of a lookup. DECISIONS-PENDING #20.
+---
 
-**T-54 · A DRILL-THROUGH LINK NEVER OUTRUNS ITS OWN FIGURE.** *(deps: T-51)*
-
-*Touches:* `lib/redmine_reporter_dashboards/aggregation/drill_through.rb`,
-`script/gates/kernel_exception.rb`, `spec/sql_aggregation/drill_through_spec.rb`, a new integration
-test.
-
-*Accept:* the `filter_available?` check `drill_through.rb:45-48` promises in words — *"Query#add_filter
-silently ignores a field that is not in available_filters, which would drop the user on a wider list
-than the element they clicked. Every field is checked against available_filters first"* — is applied
-to the INHERITED filters at `:508` and not only to the bucket descriptor at `:515`. A filter the
-target list cannot carry means no URL for that element, which is the module's own stated rule ("no
-URL is better than a wrong URL"). Because the file is frozen, a `kernel_exception.rb` entry with the
-reason lands in the same change. `drill_through_spec.rb:125` stubs `available_filters` as a static
-hash that always contains `project_id`, so the existing spec is structurally unable to see this and a
-test at the integration level is owed.
+**Not in this phase, recorded instead:** the ad-hoc mail and share-link controllers still refuse a
+global template (DECISIONS-PENDING #20); `{% sql_aggregate query_id: %}` bypasses every project bound
+(#22); the golden byte-identity specs skip themselves in a git worktree (#23).
 
 ## 2. Sequencing
 

@@ -646,3 +646,70 @@ restricts EDITING a global template.
 
 **Recommendation: 1 for now**, because it is the half with no security question at all and it unblocks
 the ordinary migration. **Decision:**
+
+
+### 21. Does a figure's drill-through link return the same rows as the figure? — **OPEN**
+
+**The situation.** Every figure a report prints is a link to the issue list that produced it. Phase 6's
+second draft claimed that link is already too wide today and proposed a fix. A red team measured both
+halves and both were wrong: today, for a global query carrying its own `project_id` filter on a project
+surface, **figure 3 and list 3 agree**; the proposed binding is what made them 3 and 10; and the
+proposed repair, built and measured, did not repair it.
+
+**What is actually true.** `DrillThrough` builds its URL from the saved query and never sees the bound
+`ReportScope` applies. So whenever that bound narrows anything — which is every project surface, today
+— the link is as wide as the query and the figure is narrower. The `project_id`-filter shape happens
+to agree by coincidence. `drill_through.rb:45-48` promises every field is checked against
+`available_filters`; the check is applied to the bucket descriptor (`:256`) and not to the inherited
+filters (`:508`).
+
+**Why it is not a task yet.** `drill_through.rb` is in `Baseline::KERNEL_FILES` and
+`spec/golden/baseline_spec.rb:121` asserts it carries no exception at all;
+`spec/golden/kernel_exception.rb:40-50` admits exactly one file and one defect and says anything else
+is a finding rather than an entry, with `RATCHET = 1`. So a fix inside that file is a curator decision.
+A fix outside it — sanitising at `lib/sql_aggregation/liquid_aggregate_tag.rb:452`, which is not a
+kernel file, the pattern T-47 established — may be possible and is unexplored.
+
+**Recommendation: measure first, as its own investigation.** The question to answer is "for which
+shapes do figure and list disagree today", not "how do we change DrillThrough". **Decision:**
+
+### 22. `{% sql_aggregate query_id: N %}` bypasses every project bound — **OPEN**
+
+**MEASURED.** `lib/redmine_reporter_dashboards/liquid/scope_binding.rb:192-224` resolves any
+`IssueQuery.visible(actor)` by id from the template body and returns `query.base_scope` with no
+project bound of any kind. On one project-2 dashboard, one template:
+
+```
+{% sql_aggregate assign_to: a %}            -> 1     (the surface's bound applies)
+{% sql_aggregate query_id: 5, assign_to: b %} -> 11   (projects [1,2,3,5])
+```
+
+Both agents in the 2026-09-19 audits found this independently. It is pre-existing, it is not a
+visibility leak (`Issue.visible(actor)` still applies, so no row appears that the reader may not see),
+and it is reachable only by somebody who may author a template — which INV-9 already treats as a
+code-execution privilege. But "the surface decides which project a report is about" is not true while
+this exists, and Phase 6 says it is.
+
+**Options.** 1. Apply the surface's bound here too — `RenderContext#project` already carries what is
+needed since T-47. 2. Refuse a `query_id` belonging to another project, the way Redmine's own
+`retrieve_query` does. 3. Document it as an authoring privilege and leave it.
+
+**Recommendation: 1**, as a small task after Phase 6. **Decision:**
+
+### 23. The byte-identity gate skips itself in a git worktree — **OPEN, and it is live**
+
+**MEASURED, in this repository, today.** `spec/golden/baseline_spec.rb:26` and
+`spec/golden/kernel_exception_spec.rb:86` guard the reference check with
+`File.directory?(File.join(repo_root, '.git'))`. In a git **worktree** `.git` is a FILE, not a
+directory, so the guard is false and the check skips. In `/home/user/work/rrd-fix` the golden specs
+report `175 examples, 0 failures, 12 pending`; in a real clone of the same commit they report no
+pending. The comment directly above that guard says *"a skipped guard looks exactly like a passing
+one"*.
+
+Every session in this project has worked in a worktree. G7's reference half has therefore been
+reporting green without running, on the branch all the work happens on. CI clones rather than creating
+a worktree, so CI is unaffected — which is why nobody saw it.
+
+**Fix:** `File.exist?` rather than `File.directory?`, plus a self-test that the guard can fail.
+**Recommendation: do it before the next task that touches a kernel file, and independently of Phase 6.**
+**Decision:**
