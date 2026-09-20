@@ -43,6 +43,17 @@
             <%= select_tag "settings[#{block}][report_template_id]",
                            content_tag('option') + options_from_collection_for_select(report_templates, :id, :name, settings[:report_template_id]) %>
           </label>
+          <%# T-52 — THE ROWS, NOT THE TEMPLATES. Blank is the default and means what this
+              widget has always meant: every project this actor may read. Choosing one bounds
+              the figures to it, subprojects included or not exactly as Redmine's own issue
+              list decides. The blank option carries a WORD rather than being empty, because
+              an empty first option in a project list reads as "none" rather than as "all". %>
+          <label>
+            <%= l(:label_reporter_widget_project) %>
+            <%= select_tag "settings[#{block}][project_id]",
+                           content_tag('option', l(:label_reporter_widget_project_any), value: '') +
+                           options_from_collection_for_select(projects, :id, :name, settings[:project_id]) %>
+          </label>
         </p>
       </div>
       <p>

@@ -38,11 +38,16 @@
   (<%= widget.outcome.total_count %>)
 </h3>
 
-<%# §Findings S-14 across projects. `state` takes a project and answers `:none` for a nil
-    one, so asking it here would print "your role does not let you see spent time in this
-    project" over a report drawing on four of them — a false sentence, which is worse than
-    the silence S-14 exists to remove. `state_across_projects` is the honest version. %>
-<% rrd_notice = RedmineReporterDashboards::WidgetReport.time_entry_notice_key(widget.template, user) %>
+<%# §Findings S-14, and WHICH sentence is honest depends on whether this widget has a
+    project (T-52). With none, `state` would answer `:none` for a nil project and print "your
+    role does not let you see spent time in this project" over a report drawing on four of
+    them, so `state_across_projects` is the honest version. With one, the reverse is true:
+    `state_across_projects` answers `:all` as soon as ANY membership grants it, which would
+    leave a reader with no notice at all over a project where their role shows only their own
+    hours. `time_entry_notice_key` takes the project and asks the right one. %>
+<% rrd_notice = RedmineReporterDashboards::WidgetReport.time_entry_notice_key(
+     widget.template, user, project: widget.project
+   ) %>
 <% if rrd_notice %>
   <p class="warning"><%= l(rrd_notice) %></p>
 <% end %>

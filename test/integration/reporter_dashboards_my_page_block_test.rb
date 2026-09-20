@@ -412,6 +412,59 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     Rails.logger = original
   end
 
+  # ------------------------------------------------ T-52: a project on the my-page widget
+
+  # THE SETTINGS FORM OFFERS IT. A picker nobody can reach is a setting that does not exist.
+  def test_the_settings_form_offers_a_project
+    Role.find(1).add_permission!(:view_reporter_dashboards_reports)
+    put_block_on_my_page
+    log_user('jsmith', 'jsmith')
+
+    get '/my/page'
+
+    assert_response :success
+    assert_select "select[name=?]", "settings[#{BLOCK}][project_id]" do
+      assert_select 'option', text: I18n.t(:label_reporter_widget_project_any)
+      assert_select 'option', text: @project.name
+    end
+  end
+
+  # THE ROWS NARROW, END TO END. The unit test proves the module; this proves nothing
+  # between the stored setting and the rendered page undoes it.
+  def test_a_chosen_project_narrows_what_the_block_counts
+    Role.find(1).add_permission!(:view_reporter_dashboards_reports)
+    template = my_page_template
+    everywhere = Issue.visible(@jsmith).count
+    here = Issue.visible(@jsmith).where(project_id: @project.id).count
+    assert_operator everywhere, :>, here, 'precondition: jsmith sees issues outside project 1'
+
+    configure_block(template, project_id: @project.id.to_s)
+    log_user('jsmith', 'jsmith')
+    get '/my/page'
+
+    assert_response :success
+    assert_include "ISSUES=#{here}", response.body
+    assert_not_include "ISSUES=#{everywhere}", response.body
+  end
+
+  # FAILS CLOSED, AND SAYS SO. Not an error placeholder — nothing went wrong, the setting is
+  # simply no longer usable — and emphatically not a silent fallback to every project.
+  def test_a_block_whose_project_is_gone_says_so_and_renders_no_report
+    Role.find(1).add_permission!(:view_reporter_dashboards_reports)
+    template = my_page_template
+    configure_block(template, project_id: @project.id.to_s)
+    @project.disable_module!(:reporter_dashboards_reports)
+    log_user('jsmith', 'jsmith')
+
+    get '/my/page'
+
+    assert_response :success
+    assert_include ERB::Util.html_escape(I18n.t(:text_reporter_widget_project_unavailable)),
+                   response.body
+    assert_not_include 'ISSUES=', response.body
+    assert_not_include I18n.t(:error_reporter_widget_render_failed), response.body
+  end
+
   def my_page_template(name: 'My page report', content: '<p>ISSUES={{ issues.size }}</p>',
                        source: 'issues')
     Template.create!(project: @project, author: @admin, name: name, content: content,
@@ -425,10 +478,10 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     pref.save!
   end
 
-  def configure_block(template, block: BLOCK)
+  def configure_block(template, block: BLOCK, **extra)
     pref = @jsmith.pref
     pref.my_page_layout = { 'left' => [block], 'right' => [] }
-    pref.my_page_settings = { block => { report_template_id: template.id } }
+    pref.my_page_settings = { block => { report_template_id: template.id }.merge(extra) }
     pref.save!
   end
 end

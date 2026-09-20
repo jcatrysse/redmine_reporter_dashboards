@@ -13,6 +13,9 @@ fr:
   error_reporter_dashboard_save_failed: Le tableau de bord n'a pas pu être enregistré.
   error_reporter_widget_render_failed: Ce widget n'a pas pu être affiché. Consultez le journal de l'application pour plus de détails.
   text_reporter_widget_requires_plugin: Ce widget nécessite le plugin %{plugin}, qui n'est pas installé.
+  label_reporter_widget_project: "Projet"
+  label_reporter_widget_project_any: "Tous les projets que je peux voir"
+  text_reporter_widget_project_unavailable: "Ce bloc est associé à un projet que vous ne pouvez plus ouvrir. Choisissez un autre projet dans ses paramètres."
   label_reporter_widget_report_by_issues: "Rapport sur les demandes"
   label_reporter_widget_report_by_spent_time: "Rapport sur le temps passé"
   text_reporter_widget_no_templates: "Il n'existe encore aucun modèle de rapport que ce widget puisse utiliser. Les modèles de rapport combinés se créent sous Rapports, et le module Rapports doit être activé sur ce projet."

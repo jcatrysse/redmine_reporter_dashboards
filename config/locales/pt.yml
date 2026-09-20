@@ -13,6 +13,9 @@ pt:
   error_reporter_dashboard_save_failed: Não foi possível guardar o painel.
   error_reporter_widget_render_failed: Não foi possível apresentar este widget. Consulte o registo da aplicação para mais detalhes.
   text_reporter_widget_requires_plugin: Este widget necessita do plugin %{plugin}, que não está instalado.
+  label_reporter_widget_project: "Projeto"
+  label_reporter_widget_project_any: "Todos os projetos que posso ver"
+  text_reporter_widget_project_unavailable: "Este bloco está definido para um projeto que já não consegue abrir. Escolha outro projeto nas definições."
   label_reporter_widget_report_by_issues: "Relatório de tarefas"
   label_reporter_widget_report_by_spent_time: "Relatório de tempo gasto"
   text_reporter_widget_no_templates: "Ainda não existe nenhum modelo de relatório que este widget possa usar. Os modelos de relatório combinados são criados em Relatórios, e este projeto precisa do módulo Relatórios ativado."

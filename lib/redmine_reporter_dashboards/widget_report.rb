@@ -70,7 +70,15 @@ module RedmineReporterDashboards
     # two views come to disagree about what a failure looks like. The other two are what the
     # heading names: the template (its own name) and the saved query the scope came from,
     # which is `nil` when the widget names none and the report covers the whole project.
-    Widget = Struct.new(:template, :query, :outcome, keyword_init: true)
+    # `project_unavailable` is the only one that travels alone: when it is true the other
+    # three are nil, because there is nothing to render. See `render_for_my_page`.
+    Widget = Struct.new(:template, :query, :outcome, :project, :project_unavailable,
+                        keyword_init: true)
+
+    # A sentinel, because `nil` is a MEANINGFUL value for `rows_project:` — it is what
+    # my-page passes when the owner has chosen no project — so it cannot also mean
+    # "not given".
+    SAME_AS_TEMPLATES = Object.new.freeze
 
     class << self
       # THE INSTANCE SUFFIX IS STRIPPED, and the first version of this method did not do
@@ -148,12 +156,31 @@ module RedmineReporterDashboards
       # and the two are NOT interchangeable: that one asks `TimeEntryVisibility.state`, which
       # answers `:none` for a nil project — so used here it would tell a reader their role
       # does not let them see spent time "in this project" over a report drawing on four.
-      def time_entry_notice_key(template, actor)
+      # T-52 — AND `project:` IS THE WHOLE POINT OF THE ARGUMENT, not a convenience.
+      #
+      # `state_across_projects` answers `:all` as soon as ANY membership grants it. Over a
+      # widget whose rows are bounded to one project that is the wrong sentence over the
+      # right figure: an actor with full spent-time visibility in project A who points the
+      # widget at project B, where their role shows only their own hours, would get no
+      # notice at all. That is §Findings S-14's shape, and it is the reason
+      # DECISIONS-PENDING #19 blocks the other half of this phase — so reintroducing it
+      # through this door would be the same defect by a different route.
+      #
+      # With a project the question is the project dashboard's question, so it is asked the
+      # project dashboard's way and answered with the project-scoped keys.
+      def time_entry_notice_key(template, actor, project: nil)
         return nil unless template.respond_to?(:source) && template.source.to_s == 'time_entries'
 
-        case Reporting::TimeEntryVisibility.state_across_projects(actor)
-        when :own then :text_reporter_time_entries_own_only_across_projects
-        when :none then :text_reporter_time_entries_not_visible_anywhere
+        if project
+          case Reporting::TimeEntryVisibility.state(actor, project)
+          when :own then :text_reporter_time_entries_own_only
+          when :none then :text_reporter_time_entries_not_visible
+          end
+        else
+          case Reporting::TimeEntryVisibility.state_across_projects(actor)
+          when :own then :text_reporter_time_entries_own_only_across_projects
+          when :none then :text_reporter_time_entries_not_visible_anywhere
+          end
         end
       end
 
@@ -164,8 +191,45 @@ module RedmineReporterDashboards
       # see. The user asking for this put it exactly right: the query defines the input, so
       # there is nothing for a project selector to add that a query does not already say,
       # and a second way of saying it is a second thing that can disagree.
+      # T-52 — AND THE COMMENT ABOVE USED TO ARGUE THE OPPOSITE, SO IT IS REPLACED RATHER
+      # THAN EXTENDED.
+      #
+      # It said a project selector could add nothing a query does not already say. Measured
+      # on Redmine 5.1 (`docs/plan/reference/verification-project-scope.md`): a saved query
+      # with no project of its own answers 11 rows from projects `[1, 2, 3, 5]` here, where
+      # the same query on project 1's surface answers 10 from `[1, 3, 5]`. Project 2 is a
+      # SIBLING of project 1 — not family — so my-page is the one surface where a report
+      # genuinely counts unrelated projects, and nothing in the settings could say otherwise.
+      # That is what the selector adds.
+      #
+      # --- TWO PROJECTS, AND THEY ARE DELIBERATELY DIFFERENT ---
+      #
+      # The chosen project bounds the ROWS and nothing else. The TEMPLATE lookup stays
+      # `Template.visible(actor)`, which is what the settings form already offers. Narrowing
+      # it too would be one keyword and would mean that choosing a project silently
+      # unresolves a widget whose template belongs elsewhere — the block would flip to the
+      # settings form with nothing saying why, and the owner's next move would be to change
+      # the template rather than to understand it.
       def render_for_my_page(actor:, block:, settings:, logger: Rails.logger)
-        render(project: nil, actor: actor, block: block, settings: settings, logger: logger)
+        project, unavailable = my_page_project(actor, settings)
+        return Widget.new(project_unavailable: true) if unavailable
+
+        widget = render(project: nil, actor: actor, block: block, settings: settings,
+                        logger: logger, rows_project: project)
+        widget&.tap { |found| found.project = project }
+      end
+
+      # The projects a my-page widget may be pointed at: where this actor may read reports
+      # at all. `Project.allowed_to_condition` is what every other surface in this plugin
+      # asks, through `Template.visible` and `Issue.visible`, so the picker cannot offer a
+      # project whose report would then be empty for a permission reason.
+      #
+      # Archived projects are excluded by `allowed_to_condition` itself, for everybody.
+      def projects_for(actor:)
+        return ::Project.none unless actor.respond_to?(:logged?) && actor.logged?
+
+        ::Project.where(::Project.allowed_to_condition(actor, Template::VIEW_PERMISSION))
+                 .sorted
       end
 
       # Whether this actor may be shown the block at all. Only the spent-time widget has an
@@ -204,7 +268,12 @@ module RedmineReporterDashboards
       # report the widget shows" is only true while the two resolve identically — and the
       # base-plugin version of this proved that by resolving them in two places and drifting
       # (see the controller's own comment about `in_project_and_global`).
-      def render(project:, actor:, block:, settings:, pdf: false, logger: Rails.logger)
+      # `rows_project:` EXISTS FOR MY-PAGE AND DEFAULTS TO THE OBVIOUS THING. On a project
+      # dashboard the templates and the rows are bounded by the same project and the caller
+      # says it once. On my-page they differ — see `render_for_my_page` — so that one caller
+      # says both.
+      def render(project:, actor:, block:, settings:, pdf: false, logger: Rails.logger,
+                 rows_project: SAME_AS_TEMPLATES)
         source = source_for(block)
         return nil if source.nil?
 
@@ -212,11 +281,48 @@ module RedmineReporterDashboards
                                 template_id: settings_value(settings, :report_template_id))
         return nil if template.nil?
 
-        run(template: template, actor: actor, project: project,
+        bound = rows_project.equal?(SAME_AS_TEMPLATES) ? project : rows_project
+        run(template: template, actor: actor, project: bound,
             query_id: settings_value(settings, :query_id), pdf: pdf, logger: logger)
       end
 
       private
+
+      # T-52 — THE STORED PROJECT, RESOLVED ON EVERY READ. Answers `[project, unavailable]`.
+      #
+      # Three states, and the third is the one worth the code:
+      #
+      #   blank        `[nil, false]`      exactly what my-page did before this task
+      #   resolvable   `[project, false]`  the rows are bounded to it
+      #   stored, gone `[nil, true]`       the widget says so and renders NO report
+      #
+      # **VALIDATED ON READ, NOT ON WRITE, and that is forced rather than chosen.**
+      # `MyController#update_page` stores `settings.to_unsafe_hash` with no validation and no
+      # hook a plugin can reach, which the settings partial's own header already records. So
+      # this value arrives unvalidated by construction and the only honest place to check it
+      # is here.
+      #
+      # **`find_by`, NEVER `find`.** The my-page partials rescue and print an error
+      # placeholder, so `find` would answer differently for an id that does not exist
+      # (raise, placeholder) and one that exists but is forbidden (return, normal render) —
+      # a usable oracle over the project table, POSTable by anyone with a my-page. `find_by`
+      # plus `projects_for` makes both cases the same answer.
+      #
+      # **IT FAILS CLOSED** (CLAUDE.md §4, INV-3). The tempting alternative is to treat a
+      # gone project as "no project" and render everything, which is what this widget does
+      # with a blank setting — but the owner did not ask for everything, they asked for one
+      # project, and silently widening a report because a permission was revoked is the
+      # wrong direction to be wrong in.
+      def my_page_project(actor, settings)
+        raw = settings_value(settings, :project_id)
+        return [nil, false] if raw.blank?
+
+        id = raw.to_s.strip
+        return [nil, true] unless id.match?(/\A\d+\z/)
+
+        project = projects_for(actor: actor).find_by(id: Integer(id, 10))
+        project ? [project, false] : [nil, true]
+      end
 
       # `report_template_id` KEEPS ITS NAME, and that is FR-46 rather than inertia: it is
       # the key already stored in every existing dashboard and already emitted by

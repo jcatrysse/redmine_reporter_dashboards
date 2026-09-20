@@ -38,6 +38,13 @@
 
   <% if !rrd_permitted %>
     <p class="nodata"><%= l(:label_no_data) %></p>
+  <%# T-52 — the third state. A stored project this actor may no longer read renders NO
+      report and says so, rather than falling back to every project: the owner asked for one
+      project and widening because a permission was revoked is the wrong way to be wrong
+      (INV-3, CLAUDE.md §4). It is not an error placeholder either — nothing went wrong, the
+      setting is simply no longer usable. %>
+  <% elsif rrd_widget && rrd_widget.project_unavailable %>
+    <p class="nodata"><%= l(:text_reporter_widget_project_unavailable) %></p>
   <% elsif rrd_widget %>
     <%= render partial: 'reporter_dashboards/widgets/my_report',
                locals: { block: block, widget: rrd_widget, user: rrd_actor } %>
@@ -47,6 +54,9 @@
                          queries: TimeEntryQuery.visible(rrd_actor).sorted,
                          report_templates: RedmineReporterDashboards::WidgetReport.templates_for(
                            project: nil, actor: rrd_actor, source: 'time_entries'
+                         ),
+                         projects: RedmineReporterDashboards::WidgetReport.projects_for(
+                           actor: rrd_actor
                          ) } %>
   <% end %>
 <% rescue StandardError, ScriptError => rrd_error %>

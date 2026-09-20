@@ -13,6 +13,9 @@ en:
   error_reporter_dashboard_save_failed: Could not save the dashboard.
   error_reporter_widget_render_failed: This widget could not be displayed. See the application log for details.
   text_reporter_widget_requires_plugin: This widget needs the %{plugin} plugin, which is not installed.
+  label_reporter_widget_project: "Project"
+  label_reporter_widget_project_any: "All projects I can see"
+  text_reporter_widget_project_unavailable: "This widget is set to a project you can no longer open. Choose another project in its settings."
   label_reporter_widget_report_by_issues: "Issue report"
   label_reporter_widget_report_by_spent_time: "Spent time report"
   text_reporter_widget_no_templates: "There is no report template this widget can use yet. Combined report templates are created under Reports, and this project needs the Reports module enabled."

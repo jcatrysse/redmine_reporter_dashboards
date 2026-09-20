@@ -58,6 +58,35 @@ private to someone else. The settings form says which.
 
 The report widget has an **Export as PDF** link that renders the same report as a document.
 
+### Which project a report counts
+
+On a project dashboard a report counts that project. Whether it also counts the subprojects
+is **Redmine's own setting**, not ours: **Administration → Settings → Issue tracking →
+Display subprojects issues on main projects by default**. It is on out of the box, so a
+report on *Bouw* also counts *Fase 1* and *Fase 2* unless somebody turned it off.
+
+That is the same rule the issue list follows, so a figure in a report and the issue list
+beside it agree. Two things worth knowing:
+
+- The setting is named for issues and it narrows a **spent time** report too. That is how
+  Redmine itself behaves; it is not something this plugin adds.
+- If you pick a **saved query** for the widget, the query's own filters still apply on top.
+  The project bound narrows, it never widens.
+
+### Report widgets on your own page
+
+**My page → Add → Issue report** (or **Spent time report**) puts the same widget on your
+personal page.
+
+It has one extra setting the project dashboard does not need: **Project**. Your own page
+belongs to no project, so by default such a widget counts **every project you can see** —
+including ones that have nothing to do with each other. Choose a project and it counts only
+that one, with subprojects following the same Redmine setting as above.
+
+If the project you picked is later closed to you, the block says so and shows no figures. It
+does not quietly fall back to counting everything: you asked for one project, and a report
+that silently grew because a permission was withdrawn is worse than one that stops.
+
 ### Tabs
 
 Create, rename and reorder tabs from the same settings panel. Tabs are per project — they

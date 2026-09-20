@@ -13,6 +13,9 @@ nl:
   error_reporter_dashboard_save_failed: Het dashboard kon niet worden opgeslagen.
   error_reporter_widget_render_failed: Deze widget kon niet worden weergegeven. Zie het applicatielogboek voor details.
   text_reporter_widget_requires_plugin: Deze widget heeft de plugin %{plugin} nodig, die niet geïnstalleerd is.
+  label_reporter_widget_project: "Project"
+  label_reporter_widget_project_any: "Alle projecten die ik mag zien"
+  text_reporter_widget_project_unavailable: "Dit blok staat ingesteld op een project dat je niet meer kunt openen. Kies een ander project in de instellingen."
   label_reporter_widget_report_by_issues: "Issuerapport"
   label_reporter_widget_report_by_spent_time: "Rapport over gespendeerde tijd"
   text_reporter_widget_no_templates: "Er is nog geen rapportsjabloon dat deze widget kan gebruiken. Gecombineerde rapportsjablonen worden aangemaakt onder Rapporten, en voor dit project moet de module Rapporten ingeschakeld zijn."

@@ -304,4 +304,156 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
     assert_not_includes markup, '<script>'
     assert_includes markup, '&lt;script&gt;'
   end
+
+  # ------------------------------------------------ T-52: a project on the my-page widget
+
+  def counting_template(name: 'Counts')
+    Template.create!(project: nil, author: @admin, name: name,
+                     content: 'ISSUES={{ issues.size }}', source: 'issues',
+                     output: 'combined', visibility: Template::VISIBILITY_PUBLIC)
+  end
+
+  # jsmith's role carries no report permission in the fixture, and `projects_for` asks for
+  # exactly that — so without this the picker examples measure the fixture rather than the
+  # rule.
+  def grant_reports_to_jsmith
+    Role.find(1).add_permission!(:view_reporter_dashboards_reports)
+    User.current = nil
+  end
+
+  def my_page_body(actor, settings)
+    widget = Subject.render_for_my_page(actor: actor, block: 'report_by_issues',
+                                        settings: settings, logger: Rails.logger)
+    [widget, widget&.outcome&.sections&.first&.body.to_s.strip]
+  end
+
+  def test_no_project_counts_everything_the_actor_can_see
+    template = counting_template
+    User.current = @admin
+
+    widget, body = my_page_body(@admin, { report_template_id: template.id })
+
+    assert_nil widget.project
+    assert_equal "ISSUES=#{Issue.visible(@admin).count}", body
+  end
+
+  # THE POINT OF THE TASK. Project 2 is a SIBLING of project 1, so a widget bounded to
+  # project 1 must stop counting it — which is the difference a saved query cannot express.
+  def test_a_chosen_project_bounds_the_rows
+    template = counting_template
+    User.current = @admin
+    everywhere = Issue.visible(@admin).count
+    here = Issue.visible(@admin).where(project_id: @project.id).count
+    assert_operator everywhere, :>, here, 'precondition: rows exist outside project 1'
+
+    widget, body = my_page_body(@admin, { report_template_id: template.id,
+                                          project_id: @project.id.to_s })
+
+    assert_equal @project, widget.project
+    assert_equal "ISSUES=#{here}", body
+  end
+
+  # FAILS CLOSED. The owner asked for one project; a revoked permission must not silently
+  # turn that into every project (INV-3).
+  def test_a_project_the_actor_may_no_longer_read_renders_nothing_and_says_so
+    template = counting_template
+    grant_reports_to_jsmith
+    User.current = @jsmith
+    # Project 1, because that is where jsmith holds the role the grant above touched.
+    settings = { report_template_id: template.id, project_id: @project.id.to_s }
+    assert Subject.render_for_my_page(actor: @jsmith, block: 'report_by_issues',
+                                      settings: settings, logger: Rails.logger).outcome,
+           'precondition: jsmith can read this project to begin with'
+
+    @project.disable_module!(:reporter_dashboards_reports)
+    widget = Subject.render_for_my_page(actor: @jsmith, block: 'report_by_issues',
+                                        settings: settings, logger: Rails.logger)
+
+    assert widget.project_unavailable
+    assert_nil widget.outcome, 'a widget whose project is gone must render no report'
+  end
+
+  # NOT AN ORACLE. `find` would raise for an id that does not exist and return for one that
+  # exists but is forbidden, and the my-page partials turn a raise into a visible error
+  # placeholder — so the pair would answer which project ids exist. Both must look the same.
+  def test_an_unusable_project_id_answers_the_same_whether_or_not_it_exists
+    template = counting_template
+    grant_reports_to_jsmith
+    User.current = @jsmith
+    @other.disable_module!(:reporter_dashboards_reports)
+    missing = Project.maximum(:id).to_i + 1000
+
+    forbidden = Subject.render_for_my_page(
+      actor: @jsmith, block: 'report_by_issues',
+      settings: { report_template_id: template.id, project_id: @other.id.to_s },
+      logger: Rails.logger
+    )
+    nonexistent = Subject.render_for_my_page(
+      actor: @jsmith, block: 'report_by_issues',
+      settings: { report_template_id: template.id, project_id: missing.to_s },
+      logger: Rails.logger
+    )
+
+    assert forbidden.project_unavailable
+    assert nonexistent.project_unavailable
+    assert_equal forbidden.to_h, nonexistent.to_h
+  end
+
+  def test_rubbish_in_the_stored_project_id_does_not_raise
+    template = counting_template
+    User.current = @admin
+
+    %w[abc 0x1 -1 12.5].each do |rubbish|
+      widget = Subject.render_for_my_page(
+        actor: @admin, block: 'report_by_issues',
+        settings: { report_template_id: template.id, project_id: rubbish },
+        logger: Rails.logger
+      )
+
+      assert widget.project_unavailable, "#{rubbish.inspect} should be unusable, not fatal"
+    end
+  end
+
+  # THE TEMPLATE LOOKUP IS NOT NARROWED. One keyword would narrow it, and then choosing a
+  # project would silently unresolve a widget whose template belongs elsewhere.
+  def test_choosing_a_project_still_resolves_a_template_from_another_project
+    template = Template.create!(project: @other, author: @admin, name: 'Elsewhere',
+                                content: 'ISSUES={{ issues.size }}', source: 'issues',
+                                output: 'combined', visibility: Template::VISIBILITY_PUBLIC)
+    User.current = @admin
+
+    widget, = my_page_body(@admin, { report_template_id: template.id,
+                                     project_id: @project.id.to_s })
+
+    assert_equal template, widget.template
+    assert_equal @project, widget.project
+  end
+
+  # THE SPENT-TIME NOTICE FOLLOWS THE PROJECT. `state_across_projects` answers `:all` as
+  # soon as ANY membership grants it, so over a project-bounded widget it would print
+  # nothing where the project-scoped answer is "only your own hours" — S-14's shape.
+  def test_the_spent_time_notice_is_the_project_one_when_a_project_is_chosen
+    template = Template.new(source: 'time_entries')
+    Role.find(1).update_columns(time_entries_visibility: 'own')
+    Role.find(1).add_permission!(:view_time_entries)
+
+    assert_equal :text_reporter_time_entries_own_only,
+                 Subject.time_entry_notice_key(template, @jsmith, project: @project)
+    assert_equal :text_reporter_time_entries_own_only_across_projects,
+                 Subject.time_entry_notice_key(template, @jsmith)
+  end
+
+  # The picker must not offer a project whose report would then be empty for a permission
+  # reason, and must not offer one the actor cannot read at all.
+  def test_the_picker_offers_only_projects_the_actor_may_read_reports_in
+    grant_reports_to_jsmith
+    User.current = @jsmith
+    @other.disable_module!(:reporter_dashboards_reports)
+
+    offered = Subject.projects_for(actor: @jsmith)
+
+    assert_includes offered, @project
+    assert_not_includes offered, @other
+    assert_empty Subject.projects_for(actor: User.anonymous).to_a - Project.where(is_public: true).to_a
+  end
 end
