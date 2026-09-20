@@ -44,9 +44,11 @@
     them, so `state_across_projects` is the honest version. With one, the reverse is true:
     `state_across_projects` answers `:all` as soon as ANY membership grants it, which would
     leave a reader with no notice at all over a project where their role shows only their own
-    hours. `time_entry_notice_key` takes the project and asks the right one. %>
+    hours. `time_entry_notice_key` takes the PROJECTS THE ROWS ACTUALLY CAME FROM — which is
+    not the same as the project that was chosen, because a saved query widens the bound to
+    the subtree — and answers the worst state among them. %>
 <% rrd_notice = RedmineReporterDashboards::WidgetReport.time_entry_notice_key(
-     widget.template, user, project: widget.project
+     widget.template, user, project_ids: widget.project_ids
    ) %>
 <% if rrd_notice %>
   <p class="warning"><%= l(rrd_notice) %></p>

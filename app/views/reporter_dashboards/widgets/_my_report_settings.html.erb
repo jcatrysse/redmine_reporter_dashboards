@@ -44,10 +44,16 @@
                            content_tag('option') + options_from_collection_for_select(report_templates, :id, :name, settings[:report_template_id]) %>
           </label>
           <%# T-52 — THE ROWS, NOT THE TEMPLATES. Blank is the default and means what this
-              widget has always meant: every project this actor may read. Choosing one bounds
-              the figures to it, subprojects included or not exactly as Redmine's own issue
-              list decides. The blank option carries a WORD rather than being empty, because
-              an empty first option in a project list reads as "none" rather than as "all". %>
+              widget has always meant: every project this actor may read.
+              Choosing one bounds the figures to it. WITH a saved query the subprojects come
+              along or not exactly as Redmine's own issue list decides
+              (`Setting.display_subprojects_issues?`); WITHOUT one it is that project alone,
+              which is the bound every surface in this plugin applies to a query-less report
+              and is DECISIONS-PENDING #19 rather than an oversight. An earlier version of
+              this comment promised the first for both and an independent review measured the
+              difference: 7 rows against 13.
+              The blank option carries a WORD rather than being empty, because an empty first
+              option in a project list reads as "none" rather than as "all". %>
           <label>
             <%= l(:label_reporter_widget_project) %>
             <%= select_tag "settings[#{block}][project_id]",

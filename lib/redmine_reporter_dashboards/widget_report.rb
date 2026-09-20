@@ -63,17 +63,22 @@ module RedmineReporterDashboards
     # `_report.html.erb`.
     OUTPUT = 'combined'
 
-    # What a caller needs to draw the widget, which is three things and not one.
+    # What a caller needs to draw the widget. Three things on a project dashboard; my-page
+    # adds the two that only it can answer.
     #
     # `outcome` is `ReportRun`'s, untouched — it already carries `sections`, the
     # degradations, the diagnostic and the counts, and a second vocabulary for those is how
     # two views come to disagree about what a failure looks like. The other two are what the
     # heading names: the template (its own name) and the saved query the scope came from,
     # which is `nil` when the widget names none and the report covers the whole project.
-    # `project_unavailable` is the only one that travels alone: when it is true the other
-    # three are nil, because there is nothing to render. See `render_for_my_page`.
-    Widget = Struct.new(:template, :query, :outcome, :project, :project_unavailable,
-                        keyword_init: true)
+    # `project_unavailable` is the only one that travels alone: when it is true every other
+    # member is nil, because there is nothing to render. See `render_for_my_page`.
+    #
+    # `project_ids` is the set the rows are actually bounded to, carried so the spent-time
+    # notice can make a claim about the same projects the figures cover rather than about
+    # the one that was chosen. Nil means unbounded.
+    Widget = Struct.new(:template, :query, :outcome, :project, :project_ids,
+                        :project_unavailable, keyword_init: true)
 
     # A sentinel, because `nil` is a MEANINGFUL value for `rows_project:` — it is what
     # my-page passes when the owner has chosen no project — so it cannot also mean
@@ -168,19 +173,42 @@ module RedmineReporterDashboards
       #
       # With a project the question is the project dashboard's question, so it is asked the
       # project dashboard's way and answered with the project-scoped keys.
-      def time_entry_notice_key(template, actor, project: nil)
+      def time_entry_notice_key(template, actor, project_ids: nil)
         return nil unless template.respond_to?(:source) && template.source.to_s == 'time_entries'
+        return across_projects_notice_key(actor) if project_ids.blank?
 
-        if project
-          case Reporting::TimeEntryVisibility.state(actor, project)
-          when :own then :text_reporter_time_entries_own_only
-          when :none then :text_reporter_time_entries_not_visible
-          end
-        else
-          case Reporting::TimeEntryVisibility.state_across_projects(actor)
-          when :own then :text_reporter_time_entries_own_only_across_projects
-          when :none then :text_reporter_time_entries_not_visible_anywhere
-          end
+        case worst_state(actor, project_ids)
+        when :own then :text_reporter_time_entries_own_only
+        when :none then :text_reporter_time_entries_not_visible
+        end
+      end
+
+      # THE WORST ANSWER OVER THE PROJECTS THE ROWS COME FROM, and "worst" is the only safe
+      # direction: a notice is a warning that what you see is narrower than what exists, so
+      # one project answering `:own` has to be said even if three others answer `:all`.
+      #
+      # An independent review measured the alternative. Asking about the ROOT project of a
+      # subtree bound gave `:all` and therefore silence, over a figure that had dropped two
+      # of three rows in a descendant where the actor is a non-member. Silence over a wrong
+      # number is what S-14 exists to remove.
+      #
+      # A project id that no longer resolves is skipped rather than treated as `:none`: it
+      # contributes no rows either, so it can make no claim false.
+      def worst_state(actor, project_ids)
+        states = ::Project.where(id: project_ids).map do |project|
+          Reporting::TimeEntryVisibility.state(actor, project)
+        end
+
+        return :none if states.include?(:none) && states.uniq == [:none]
+        return :own if states.any? { |state| state != :all }
+
+        nil
+      end
+
+      def across_projects_notice_key(actor)
+        case Reporting::TimeEntryVisibility.state_across_projects(actor)
+        when :own then :text_reporter_time_entries_own_only_across_projects
+        when :none then :text_reporter_time_entries_not_visible_anywhere
         end
       end
 
@@ -216,13 +244,24 @@ module RedmineReporterDashboards
 
         widget = render(project: nil, actor: actor, block: block, settings: settings,
                         logger: logger, rows_project: project)
-        widget&.tap { |found| found.project = project }
+        widget&.tap do |found|
+          found.project = project
+          # ASKED OF `ReportScope`, NOT RECONSTRUCTED. The bound depends on whether a query
+          # resolved, and a second copy of that branch here is how the notice and the
+          # figures would come to disagree — which is the defect this field exists to close.
+          found.project_ids = Reporting::ReportScope.bound_project_ids(project: project,
+                                                                      query: found.query)
+        end
       end
 
-      # The projects a my-page widget may be pointed at: where this actor may read reports
-      # at all. `Project.allowed_to_condition` is what every other surface in this plugin
-      # asks, through `Template.visible` and `Issue.visible`, so the picker cannot offer a
-      # project whose report would then be empty for a permission reason.
+      # The projects a my-page widget may be pointed at: where this actor holds
+      # `view_reporter_dashboards_reports`, which is the permission that governs reading a
+      # report at all and is what `Template.visible` asks.
+      #
+      # IT DOES NOT PROMISE A NON-EMPTY REPORT, and an earlier version of this comment said
+      # it did. Measured by an independent review: a role holding the report permission and
+      # not `:view_issues` is offered its project here and renders `ISSUES=0`. The two
+      # permissions are independent in Redmine and this method asks only the first.
       #
       # Archived projects are excluded by `allowed_to_condition` itself, for everybody.
       def projects_for(actor:)
@@ -233,9 +272,15 @@ module RedmineReporterDashboards
       end
 
       # Whether this actor may be shown the block at all. Only the spent-time widget has an
-      # extra condition, and it is core's `:view_time_entries` asked GLOBALLY, because
-      # my-page has no project to ask it about — the same rule the project dashboard applies
-      # per project, stated once here so the two surfaces cannot come to disagree.
+      # extra condition, and it is core's `:view_time_entries` asked GLOBALLY.
+      #
+      # T-52 GAVE MY-PAGE A PROJECT AND THIS STAYED GLOBAL ON PURPOSE. It decides whether the
+      # block is OFFERED, not what the block counts — and it is asked before the settings are
+      # read, on a page where the owner may be about to choose any project they can reach. A
+      # per-project answer here would hide the block, and with it the settings form that is
+      # the only way to change the project, from somebody whose current choice happens to be
+      # the wrong one. What the block COUNTS is bounded by `TimeEntry.visible(actor)` either
+      # way, and what it SAYS about that is `time_entry_notice_key`'s job.
       def block_permitted?(block, actor)
         return true unless ProjectPage.base_block_name(block) == 'report_by_spent_time'
 

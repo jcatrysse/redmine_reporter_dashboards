@@ -60,8 +60,8 @@ The report widget has an **Export as PDF** link that renders the same report as 
 
 ### Which project a report counts
 
-On a project dashboard a report counts that project. Whether it also counts the subprojects
-is **Redmine's own setting**, not ours: **Administration → Settings → Issue tracking →
+On a project dashboard a report counts that project. If the widget uses a **saved query**,
+whether it also counts the subprojects is **Redmine's own setting**, not ours: **Administration → Settings → Issue tracking →
 Display subprojects issues on main projects by default**. It is on out of the box, so a
 report on *Bouw* also counts *Fase 1* and *Fase 2* unless somebody turned it off.
 
@@ -70,8 +70,10 @@ beside it agree. Two things worth knowing:
 
 - The setting is named for issues and it narrows a **spent time** report too. That is how
   Redmine itself behaves; it is not something this plugin adds.
-- If you pick a **saved query** for the widget, the query's own filters still apply on top.
-  The project bound narrows, it never widens.
+- The query's own filters still apply on top. The project bound narrows, it never widens.
+- A widget with **no** saved query counts the project you are on and not its subprojects,
+  whatever the setting says. That is long-standing behaviour and it is on the list to be
+  made consistent.
 
 ### Report widgets on your own page
 
@@ -79,9 +81,18 @@ beside it agree. Two things worth knowing:
 personal page.
 
 It has one extra setting the project dashboard does not need: **Project**. Your own page
-belongs to no project, so by default such a widget counts **every project you can see** —
+belongs to no project, so by default such a widget counts **every project you can see**,
 including ones that have nothing to do with each other. Choose a project and it counts only
-that one, with subprojects following the same Redmine setting as above.
+that one.
+
+Whether the subprojects come along depends on the same thing it depends on everywhere else
+in this plugin:
+
+- **with a saved query**, the Redmine setting above decides;
+- **without one**, only the project you picked, never its subprojects.
+
+That difference is not new and it is not specific to your page: it is how a report has always
+been bounded. It is on the list to be made consistent.
 
 If the project you picked is later closed to you, the block says so and shows no figures. It
 does not quietly fall back to counting everything: you asked for one project, and a report

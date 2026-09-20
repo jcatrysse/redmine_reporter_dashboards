@@ -2191,11 +2191,26 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert everywhere > inside,
            "no hours outside the subtree (#{everywhere} vs #{inside}), so this proves nothing"
 
-    get :show, params: { project_id: @project.identifier, id: template.id,
-                         query_id: query.id }
+    # THE SETTING IS PINNED RATHER THAN INHERITED (T-51, CLAUDE.md §6). Before T-51 this
+    # example's outcome did not depend on it; now it does, and an installation-level `0`
+    # would turn a green run red for a reason that has nothing to do with the subject.
+    with_subprojects(true) do
+      get :show, params: { project_id: @project.identifier, id: template.id,
+                           query_id: query.id }
 
-    assert_include ERB::Util.html_escape("COUNT=[#{inside}]"), response.body
-    assert_not_include ERB::Util.html_escape("COUNT=[#{everywhere}]"), response.body
+      assert_include ERB::Util.html_escape("COUNT=[#{inside}]"), response.body
+      assert_not_include ERB::Util.html_escape("COUNT=[#{everywhere}]"), response.body
+    end
+
+    # AND THE OTHER SETTING, because "outside this project's subtree" is only half the rule.
+    # With subprojects off, Redmine's own list answers this project alone and so must this.
+    here = TimeEntry.visible(@jsmith).where(project_id: @project.id).count
+    with_subprojects(false) do
+      get :show, params: { project_id: @project.identifier, id: template.id,
+                           query_id: query.id }
+
+      assert_include ERB::Util.html_escape("COUNT=[#{here}]"), response.body
+    end
   end
 
   # T-51 — AND WHAT "THIS PROJECT" MEANS IS REDMINE'S DECISION, NOT OURS.
@@ -2242,12 +2257,9 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     end
   end
 
-  def with_subprojects(included)
-    previous = Setting.display_subprojects_issues
-    Setting.display_subprojects_issues = included ? '1' : '0'
-    yield
-  ensure
-    Setting.display_subprojects_issues = previous
+  # Redmine's own helper, rather than a second save/restore of the same Setting.
+  def with_subprojects(included, &block)
+    with_settings(display_subprojects_issues: included ? '1' : '0', &block)
   end
 
   # `source` IS IN `PREVIEW_BLOCKING_ATTRIBUTES`, and half the argument for deleting

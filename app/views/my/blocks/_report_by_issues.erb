@@ -44,8 +44,13 @@
   piece of presentation it needs is therefore a MODULE — `ReportFrame`, `DegradationText` —
   which is why those two were extracted rather than left as helper methods.
 
-  There is no project, and no project SELECTOR either: the saved query defines the input
-  data, and with no query the report covers everything the viewer can see.
+  There is no project in the URL, and that is the whole of the difference. Until T-52 there
+  was no project SELECTOR either, on the argument that the saved query defines the input and
+  a second way of saying it is a second thing that can disagree. That argument was measured
+  and did not survive: a query with no project of its own counts every project the viewer
+  can see, siblings included, and nothing in the settings could say otherwise. The settings
+  now carry a project, blank by default, and it bounds the ROWS only —
+  `WidgetReport.render_for_my_page` argues both halves.
 %>
 <% begin %>
   <%
@@ -60,17 +65,25 @@
     )
   %>
 
-  <%# T-52 — the third state. A stored project this actor may no longer read renders NO
-      report and says so, rather than falling back to every project: the owner asked for one
-      project and widening because a permission was revoked is the wrong way to be wrong
-      (INV-3, CLAUDE.md §4). It is not an error placeholder either — nothing went wrong, the
-      setting is simply no longer usable. %>
-  <% if rrd_widget && rrd_widget.project_unavailable %>
-    <p class="nodata"><%= l(:text_reporter_widget_project_unavailable) %></p>
-  <% elsif rrd_widget %>
+  <%# T-52 — THE THIRD STATE, AND THE SETTINGS FORM RENDERS UNDER IT.
+      A stored project this actor may no longer read shows NO figures: the owner asked for
+      one project, and a report that silently grew because a permission was withdrawn is the
+      wrong way to be wrong (INV-3, CLAUDE.md §4). It is not an error placeholder either —
+      nothing went wrong, the setting is simply unusable.
+      The FORM is what makes it a state rather than a dead end. Core gives a my-page block
+      only Move and Delete, and this partial's unresolved branch is the only place the
+      settings form exists at all — so a bare notice would tell the reader to change a
+      setting that was no longer on the page. Measured by an independent review: deleting
+      and re-adding the block was the only way out, and
+      `UserPreference#clear_unused_block_settings` throws the template and query away with
+      it. %>
+  <% if rrd_widget && !rrd_widget.project_unavailable %>
     <%= render partial: 'reporter_dashboards/widgets/my_report',
                locals: { block: block, widget: rrd_widget, user: rrd_actor } %>
   <% else %>
+    <% if rrd_widget %>
+      <p class="nodata"><%= l(:text_reporter_widget_project_unavailable) %></p>
+    <% end %>
     <%= render partial: 'reporter_dashboards/widgets/my_report_settings',
                locals: { block: block, settings: settings, report_type: :issues,
                          queries: IssueQuery.visible(rrd_actor).sorted,

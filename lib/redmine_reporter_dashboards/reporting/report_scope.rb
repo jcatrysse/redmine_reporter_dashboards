@@ -94,9 +94,32 @@ module RedmineReporterDashboards
       # keeps finding in its own prose.
       def resolve(query_class, model, actor, project, query_id, on_missing_query)
         query = find_query(query_class, actor, query_id, on_missing_query)
-        return [within(query.base_scope, project_bound_ids(project)), query] if query
+        relation = query ? query.base_scope : model.visible(actor)
 
-        [within(model.visible(actor), project ? [project.id] : nil), nil]
+        [within(relation, bound_project_ids(project: project, query: query)), query]
+      end
+
+      # WHICH PROJECT IDS THIS RESOLVE WILL APPLY, AS A FUNCTION SOMEBODY ELSE CAN ASK.
+      #
+      # `resolve` used to inline this branch, and T-52 needed the same answer one layer up:
+      # the my-page widget's spent-time notice makes a claim about visibility, and a claim
+      # about a DIFFERENT set of projects than the figures cover is §Findings S-14's shape.
+      # An independent review measured exactly that — a widget bound to a subtree, a notice
+      # asked about the root, and a reader given silence over a figure that had dropped two
+      # of three rows in a descendant.
+      #
+      # So the branch lives once and both callers ask it, rather than the notice keeping a
+      # copy that can drift from the bound. `reporter_dashboards_report_scope_test.rb`
+      # asserts the two agree on the projects the scope actually returns.
+      #
+      #   no project   nil              nothing is constrained
+      #   a query      the setting's answer — see `project_bound_ids`
+      #   no query     exactly this project, and DECISIONS-PENDING #19 is why it is not
+      #                the setting's answer here too
+      def bound_project_ids(project:, query:)
+        return nil if project.nil?
+
+        query ? project_bound_ids(project) : [project.id]
       end
 
       def find_query(query_class, actor, query_id, on_missing_query)

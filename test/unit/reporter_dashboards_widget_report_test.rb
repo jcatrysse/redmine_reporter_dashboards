@@ -438,9 +438,66 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
     Role.find(1).add_permission!(:view_time_entries)
 
     assert_equal :text_reporter_time_entries_own_only,
-                 Subject.time_entry_notice_key(template, @jsmith, project: @project)
+                 Subject.time_entry_notice_key(template, @jsmith,
+                                               project_ids: [@project.id])
     assert_equal :text_reporter_time_entries_own_only_across_projects,
                  Subject.time_entry_notice_key(template, @jsmith)
+  end
+
+  # THE ONE AN INDEPENDENT REVIEW MEASURED, and the reason the notice takes a SET rather
+  # than the chosen project. With a saved query the rows come from the whole subtree, so a
+  # notice asked about the root alone answers `:all` and prints nothing — over a figure that
+  # has silently dropped rows in a descendant where the actor is a non-member. Silence over
+  # a wrong number is what S-14 exists to remove, so the worst state over the bound set wins.
+  def test_the_notice_speaks_for_the_whole_bound_and_not_only_the_chosen_project
+    template = Template.new(source: 'time_entries')
+    descendant = Project.find(3)
+    assert_equal @project.id, descendant.parent_id, 'precondition: project 3 is a descendant'
+    Role.find(1).update_columns(time_entries_visibility: 'all')
+    Role.find(1).add_permission!(:view_time_entries)
+    Role.non_member.update_columns(time_entries_visibility: 'own')
+    Role.non_member.add_permission!(:view_time_entries)
+    descendant.update_columns(is_public: true)
+
+    assert_nil Subject.time_entry_notice_key(template, @jsmith, project_ids: [@project.id]),
+               'precondition: the root alone answers "you see everything"'
+
+    assert_equal :text_reporter_time_entries_own_only,
+                 Subject.time_entry_notice_key(template, @jsmith,
+                                               project_ids: [@project.id, descendant.id])
+  end
+
+  # AND THE SET IS THE ONE THE SCOPE ACTUALLY APPLIES, asked of `ReportScope` rather than
+  # rebuilt here — so the notice and the figures cannot drift apart. This is the assertion
+  # that would catch a second copy of that branch appearing.
+  def test_the_widget_carries_the_project_ids_the_scope_bounds_to
+    template = counting_template
+    User.current = @admin
+    query = IssueQuery.new(name: 'all', project: nil, user: @admin, visibility: 2)
+    query.filters = {}
+    query.save!
+
+    with_query = Subject.render_for_my_page(
+      actor: @admin, block: 'report_by_issues',
+      settings: { report_template_id: template.id, project_id: @project.id.to_s,
+                  query_id: query.id.to_s },
+      logger: Rails.logger
+    )
+    without = Subject.render_for_my_page(
+      actor: @admin, block: 'report_by_issues',
+      settings: { report_template_id: template.id, project_id: @project.id.to_s },
+      logger: Rails.logger
+    )
+
+    assert_equal ([@project.id] + @project.descendants.ids).sort,
+                 with_query.project_ids.sort,
+                 'a query is bounded to the subtree while the setting is on'
+    assert_equal [@project.id], without.project_ids,
+                 'with no query the bound is this project alone'
+    assert_nil Subject.render_for_my_page(
+      actor: @admin, block: 'report_by_issues',
+      settings: { report_template_id: template.id }, logger: Rails.logger
+    ).project_ids, 'with no project nothing is bounded'
   end
 
   # The picker must not offer a project whose report would then be empty for a permission

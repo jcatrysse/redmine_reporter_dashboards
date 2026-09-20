@@ -396,29 +396,15 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     assert_not_includes @jsmith.reload.pref.my_page_layout.values.flatten, BLOCK
   end
 
-  private
-
-  # A real logger, not a Mocha matcher with a side effect in it. Nothing in Mocha's contract
-  # says a `with { }` block runs exactly once per call — it is also consulted when composing
-  # failure messages — so counting lines inside one depends on an implementation detail of
-  # the pinned version, and stubbing `warn` wholesale swallows unrelated warnings.
-  def capturing_rails_log
-    buffer = StringIO.new
-    original = Rails.logger
-    Rails.logger = ActiveSupport::Logger.new(buffer)
-    yield
-    buffer.string
-  ensure
-    Rails.logger = original
-  end
-
   # ------------------------------------------------ T-52: a project on the my-page widget
 
   # THE SETTINGS FORM OFFERS IT. A picker nobody can reach is a setting that does not exist.
   def test_the_settings_form_offers_a_project
     Role.find(1).add_permission!(:view_reporter_dashboards_reports)
+    # A TEMPLATE, because the settings partial renders its empty state instead of the form
+    # when the picker has nothing to offer — and then there is no project select to find.
+    my_page_template
     put_block_on_my_page
-    log_user('jsmith', 'jsmith')
 
     get '/my/page'
 
@@ -439,7 +425,6 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     assert_operator everywhere, :>, here, 'precondition: jsmith sees issues outside project 1'
 
     configure_block(template, project_id: @project.id.to_s)
-    log_user('jsmith', 'jsmith')
     get '/my/page'
 
     assert_response :success
@@ -453,8 +438,15 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     Role.find(1).add_permission!(:view_reporter_dashboards_reports)
     template = my_page_template
     configure_block(template, project_id: @project.id.to_s)
+    # A GLOBAL TEMPLATE, AND NOT DECORATION. Disabling the module below also takes the
+    # project's own template out of `Template.visible`, and the settings partial renders
+    # its empty state when the picker has nothing to offer — so without this the "way out"
+    # asserted at the end of this test would be absent for a second, unrelated reason and
+    # the assertion would be measuring the wrong thing.
+    Template.create!(project: nil, author: @admin, name: 'Global report',
+                     content: '<p>x</p>', source: 'issues', output: 'combined',
+                     visibility: Template::VISIBILITY_PUBLIC)
     @project.disable_module!(:reporter_dashboards_reports)
-    log_user('jsmith', 'jsmith')
 
     get '/my/page'
 
@@ -463,6 +455,27 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
                    response.body
     assert_not_include 'ISSUES=', response.body
     assert_not_include I18n.t(:error_reporter_widget_render_failed), response.body
+    # AND A WAY OUT, which is what makes this a state rather than a dead end. The notice's
+    # own sentence tells the reader to choose another project in the settings, and core
+    # gives a my-page block only Move and Delete — so the form has to be on the page or the
+    # sentence is a lie. Measured by an independent review before this assertion existed.
+    assert_select "select[name=?]", "settings[#{BLOCK}][project_id]"
+  end
+
+  private
+
+  # A real logger, not a Mocha matcher with a side effect in it. Nothing in Mocha's contract
+  # says a `with { }` block runs exactly once per call — it is also consulted when composing
+  # failure messages — so counting lines inside one depends on an implementation detail of
+  # the pinned version, and stubbing `warn` wholesale swallows unrelated warnings.
+  def capturing_rails_log
+    buffer = StringIO.new
+    original = Rails.logger
+    Rails.logger = ActiveSupport::Logger.new(buffer)
+    yield
+    buffer.string
+  ensure
+    Rails.logger = original
   end
 
   def my_page_template(name: 'My page report', content: '<p>ISSUES={{ issues.size }}</p>',

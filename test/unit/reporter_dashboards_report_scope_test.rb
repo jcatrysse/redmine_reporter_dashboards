@@ -144,14 +144,14 @@ class ReporterDashboardsReportScopeTest < ActiveSupport::TestCase
   # `Issue.visible(@jsmith)` and measured 9 against 13 — which is this fact, not a bound
   # defect. `report_scope.rb`'s `resolve` now says the same thing in prose; this is where it
   # is visible.
-  def with_subprojects(included)
-    previous = Setting.display_subprojects_issues
+  # `with_settings` IS REDMINE'S OWN (`test/test_helper.rb`), and a hand-rolled save/restore
+  # here would be a second way of doing something that already has one. What this adds is
+  # the actor, for the reason above.
+  def with_subprojects(included, &block)
     previous_user = User.current
-    Setting.display_subprojects_issues = included ? '1' : '0'
     User.current = @jsmith
-    yield
+    with_settings(display_subprojects_issues: included ? '1' : '0', &block)
   ensure
-    Setting.display_subprojects_issues = previous
     User.current = previous_user
   end
 
@@ -191,8 +191,11 @@ class ReporterDashboardsReportScopeTest < ActiveSupport::TestCase
     end
   end
 
-  # THE DISCRIMINATOR. Without it the two examples above still pass with the whole bound
-  # deleted, because every other project in the fixture is a descendant of project 1.
+  # THE REGRESSION GUARD ON THE BOUND ITSELF. An independent review pointed out that this
+  # one still passes with T-51 reverted, so it does not discriminate THIS change — it
+  # discriminates the bound existing at all, which is the older and more valuable property.
+  # It is here because every other project in the fixture is a DESCENDANT of project 1, so
+  # an example using project 3 as "elsewhere" would pass with the bound deleted entirely.
   def test_a_sibling_projects_rows_never_appear_under_either_setting
     query = unfiltered_global_query(IssueQuery)
     sibling = Project.find(2)
@@ -216,13 +219,16 @@ class ReporterDashboardsReportScopeTest < ActiveSupport::TestCase
     query = unfiltered_global_query(TimeEntryQuery)
     subtree = ([@project.id] + @project.descendants.ids).sort
 
-    wide = with_subprojects(true) { build('time_entries', query_id: query.id).first.count }
-    narrow = with_subprojects(false) { build('time_entries', query_id: query.id).first.count }
+    wide = with_subprojects(true) { build('time_entries', query_id: query.id).first }
+    narrow = with_subprojects(false) { build('time_entries', query_id: query.id).first }
 
-    assert_equal TimeEntry.visible(@jsmith).where(project_id: subtree).count, wide
-    assert_equal TimeEntry.visible(@jsmith).where(project_id: @project.id).count, narrow
-    assert_operator wide, :>, narrow,
+    assert_equal TimeEntry.visible(@jsmith).where(project_id: subtree).count, wide.count
+    assert_equal TimeEntry.visible(@jsmith).where(project_id: @project.id).count, narrow.count
+    assert_operator wide.count, :>, narrow.count,
                     'the fixture has no hours in a subproject, so this proves nothing'
+    # The SET, not only the size: two bounds can agree on a count and disagree on the rows.
+    assert_equal (project_ids_in(wide) - subtree), []
+    assert_equal [@project.id], project_ids_in(narrow)
   end
 
   # An archived descendant is excluded either way. `Project.allowed_to_condition` already does
