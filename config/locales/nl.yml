@@ -237,6 +237,8 @@ nl:
   text_reporter_time_entries_not_visible: "Uw rol laat u geen gespendeerde tijd zien in dit project, dus dit rapport is leeg."
   text_reporter_time_entries_own_only_across_projects: "In minstens één project laat uw rol u alleen uw eigen gespendeerde tijd zien, dus dit rapport mengt projecturen met uw eigen uren."
   text_reporter_time_entries_not_visible_anywhere: "Uw rollen laten u in geen enkel project gespendeerde tijd zien, dus dit rapport is leeg."
+  text_reporter_time_entries_own_only_in_these_projects: "In minstens één van de projecten die dit rapport bestrijkt, laat uw rol u alleen uw eigen gespendeerde tijd zien, dus deze cijfers mengen projecturen met uw eigen uren."
+  text_reporter_time_entries_not_visible_in_these_projects: "Uw rol laat u in geen van de projecten die dit rapport bestrijkt gespendeerde tijd zien, dus dit rapport is leeg."
   text_reporter_failure_document_notice: "Dit document is niet het rapport. Het legt vast dat het rapport niet kon worden geproduceerd. Vermeld de correlatie-id hierboven wanneer u een beheerder vraagt om het logboek te bekijken."
   text_reporter_failure_document_value_unavailable: "Deze waarde kon niet in dit document worden weergegeven."
   error_reporter_template_import_no_file: "Kies een bestand om te importeren."

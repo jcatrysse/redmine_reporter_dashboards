@@ -70,8 +70,13 @@
 
 <%# §Findings S-14 — the narrowing is stated, never silent. Answers nil for an issue
     template and for an actor who sees every hour here, so it is asked unconditionally
-    rather than behind a branch a later edit can get wrong. %>
-<% if (rrd_notice = reporter_time_entry_visibility_notice(widget.template, user, project)) %>
+    rather than behind a branch a later edit can get wrong.
+    T-51 — `widget.project_ids`, NOT `project`. A widget built on a saved query counts this
+    project AND its descendants whenever Redmine's own subproject setting is on, so asking
+    about the project whose page this is produced a sentence about one project over a figure
+    from five — silent where a descendant narrowed the reader, which is S-14 on the surface
+    S-14 was written for. Measured by an independent review. %>
+<% if (rrd_notice = reporter_time_entry_visibility_notice(widget.template, user, widget.project_ids)) %>
   <p class="warning"><%= rrd_notice %></p>
 <% end %>
 

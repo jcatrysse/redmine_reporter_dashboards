@@ -53,12 +53,25 @@
               this comment promised the first for both and an independent review measured the
               difference: 7 rows against 13.
               The blank option carries a WORD rather than being empty, because an empty first
-              option in a project list reads as "none" rather than as "all". %>
+              option in a project list reads as "none" rather than as "all".
+              `project_tree_options_for_select` RATHER THAN `options_from_collection_for_select`,
+              because it is what every other project picker in Redmine uses and it indents a
+              subproject under its parent. Without it the list is still in tree ORDER — the
+              collection is `Project.sorted`, i.e. by `lft` — so a child sits directly under
+              its parent looking like a sibling, which on this picker is the difference
+              between "Fase 1" meaning a phase of Bouw and meaning a project of its own. It
+              lives in core's `ApplicationHelper`, so a my-page block can reach it where it
+              cannot reach ours. `selected:` wants the RECORD, not the stored id string. %>
           <label>
             <%= l(:label_reporter_widget_project) %>
             <%= select_tag "settings[#{block}][project_id]",
-                           content_tag('option', l(:label_reporter_widget_project_any), value: '') +
-                           options_from_collection_for_select(projects, :id, :name, settings[:project_id]) %>
+                           project_tree_options_for_select(
+                             projects,
+                             include_blank: l(:label_reporter_widget_project_any),
+                             selected: projects.detect { |candidate|
+                               candidate.id.to_s == settings[:project_id].to_s
+                             }
+                           ) %>
           </label>
         </p>
       </div>

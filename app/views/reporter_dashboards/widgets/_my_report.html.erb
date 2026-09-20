@@ -46,7 +46,8 @@
     leave a reader with no notice at all over a project where their role shows only their own
     hours. `time_entry_notice_key` takes the PROJECTS THE ROWS ACTUALLY CAME FROM — which is
     not the same as the project that was chosen, because a saved query widens the bound to
-    the subtree — and answers the worst state among them. %>
+    the subtree when Redmine's subproject setting is on — and answers over that set, in the
+    register that set deserves: "in this project" only when the set holds exactly one. %>
 <% rrd_notice = RedmineReporterDashboards::WidgetReport.time_entry_notice_key(
      widget.template, user, project_ids: widget.project_ids
    ) %>

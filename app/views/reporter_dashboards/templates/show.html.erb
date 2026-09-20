@@ -95,7 +95,7 @@
 <%# §Findings S-14 — the narrowing is stated, never silent. Answers nil for an issue
     template and for an actor who sees every hour in the project, so this is rendered
     unconditionally rather than behind a branch a later edit can get wrong. %>
-<% if (rrd_notice = reporter_time_entry_visibility_notice(@template, User.current, @project)) %>
+<% if (rrd_notice = reporter_time_entry_visibility_notice(@template, User.current, @report_project_ids)) %>
   <p class="warning" id="reporter-time-entry-visibility"><%= rrd_notice %></p>
 <% end %>
 

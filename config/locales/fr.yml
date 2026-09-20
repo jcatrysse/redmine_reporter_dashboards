@@ -237,6 +237,8 @@ fr:
   text_reporter_time_entries_not_visible: "Votre rôle ne vous laisse pas voir le temps passé sur ce projet : ce rapport est donc vide."
   text_reporter_time_entries_own_only_across_projects: "Dans au moins un projet, votre rôle ne vous laisse voir que votre propre temps passé : ce rapport mêle donc les heures du projet aux vôtres."
   text_reporter_time_entries_not_visible_anywhere: "Vos rôles ne vous laissent voir le temps passé sur aucun projet : ce rapport est donc vide."
+  text_reporter_time_entries_own_only_in_these_projects: "Dans au moins un des projets couverts par ce rapport, votre rôle ne vous laisse voir que votre propre temps passé : ces chiffres mêlent donc les heures du projet aux vôtres."
+  text_reporter_time_entries_not_visible_in_these_projects: "Votre rôle ne vous laisse voir le temps passé sur aucun des projets couverts par ce rapport : ce rapport est donc vide."
   text_reporter_failure_document_notice: "Ce document n'est pas le rapport. Il consigne que le rapport n'a pas pu être produit. Citez l'identifiant de corrélation ci-dessus lorsque vous demandez à un administrateur de consulter le journal."
   text_reporter_failure_document_value_unavailable: "Cette valeur n'a pas pu être affichée dans ce document."
   error_reporter_template_import_no_file: "Veuillez choisir un fichier à importer."

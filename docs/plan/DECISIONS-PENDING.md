@@ -617,6 +617,20 @@ would disagree with Redmine's issue list and break drill-through agreement.
 
 **Recommendation: 2, as its own task, not folded into Phase 6.** **Decision:**
 
+**UPDATE 2026-09-20 — THE BLOCKER IS GONE; THE DECISION IS NOT TAKEN.** The notice half exists now,
+and it was built inside Phase 6 rather than as its own task, which is not what this entry
+recommended. It arrived for a different reason: T-51 bounds a query-backed report to the subtree, so
+every project surface ALREADY needed a notice that speaks for a set, and an independent review
+measured the project dashboard telling a reader nothing while a descendant narrowed them. The set
+answer is `TimeEntryVisibility.state_over` — `state_across_projects` is now that method asked about
+the actor's memberships — and every surface reads it through
+`WidgetReport.time_entry_notice_key`.
+
+That removes the obstacle this entry records. It does **not** widen the no-query path: that is still
+exactly-this-project, `reporter_dashboards_report_scope_test.rb` pins it, and choosing option 1, 2 or
+3 above remains a curator decision. What has changed is only that option 2 no longer costs a task of
+its own.
+
 ### 20. May a global template be shared to an unauthenticated URL? — **OPEN**
 
 **The situation.** T-45 made global templates reachable in the templates UI. `SchedulesController` and
@@ -673,6 +687,17 @@ kernel file, the pattern T-47 established — may be possible and is unexplored.
 **Recommendation: measure first, as its own investigation.** The question to answer is "for which
 shapes do figure and list disagree today", not "how do we change DrillThrough". **Decision:**
 
+**UPDATE 2026-09-20 — T-52 ADDS A SURFACE, and T-51 widens the gap on an installation that switched
+subprojects off.** Measured by an independent review on a project dashboard with a global query:
+setting ON, figure 13 against a list of 14; setting OFF, figure 7 against the same list of 14. On
+my-page the gap is new rather than wider: before T-52 that widget was unbounded and the two agreed;
+with a project chosen, the figure is bounded and `_project_issues_path(widget.query.project, …)`
+sends a global query to the GLOBAL list, so figure 13 links to 14 rows.
+
+Nothing in this phase repairs it, because the repair is this entry's decision. What T-52 does is
+stop it being silent: `docs/user-guide.md` now says plainly that a drill-through link can be wider
+than the figure and that the figure is the number to trust.
+
 ### 22. `{% sql_aggregate query_id: N %}` bypasses every project bound — **OPEN**
 
 **MEASURED.** `lib/redmine_reporter_dashboards/liquid/scope_binding.rb:192-224` resolves any
@@ -713,3 +738,33 @@ a worktree, so CI is unaffected — which is why nobody saw it.
 **Fix:** `File.exist?` rather than `File.directory?`, plus a self-test that the guard can fail.
 **Recommendation: do it before the next task that touches a kernel file, and independently of Phase 6.**
 **Decision:**
+
+### 24. A my-page report widget's settings cannot be reached once it renders — **OPEN**
+
+**MEASURED on a rendered `/my/page`.** With a resolving widget, `settings[report_by_issues]` appears
+nowhere on the page: `app/views/my/blocks/_report_by_issues.erb` renders the settings form only in
+its UNRESOLVED branch. So an owner who picked the wrong template, the wrong query or — since T-52 —
+the wrong project can only delete the block and start again, and
+`UserPreference#clear_unused_block_settings` throws the other two settings away with it.
+
+This is T-26a behaviour rather than T-52's, and T-52 is what made it matter: a template picked once
+is rarely wrong, a project bound is a thing people change. T-52 closed the same dead end for the
+*unavailable* case (the form renders under the notice) and left this one open.
+
+**Redmine's own answer is on the same page.** `app/views/my/blocks/_issues.erb` renders the block AND
+a hidden settings panel, toggled by an Options gear in `.contextual`:
+
+```erb
+<div class="contextual">
+  <%= link_to_function l(:label_options), "$('#<block>-settings').toggle();", class: 'icon-only icon-settings' %>
+</div>
+...
+<div id="<block>-settings" style="display:none;"> ... form ... </div>
+```
+
+**Options.** 1. Adopt core's pattern on both report blocks. 2. Leave it, and say so in the user guide.
+
+**Recommendation: 1**, as its own small task. It is not folded into Phase 6 for one concrete reason:
+it changes the chrome of a widget that already renders, on four Redmine branches, and this session
+can only execute 5.1 — `link_to_function` is core API whose availability across 5.1 → 7.0 has not
+been verified here, and CLAUDE.md §4 says to read that rather than assume it. **Decision:**

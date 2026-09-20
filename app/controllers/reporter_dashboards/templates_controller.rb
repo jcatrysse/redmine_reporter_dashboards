@@ -580,11 +580,19 @@ module ReporterDashboards
     # starts from the model's own `visible` scope either way, so the relation handed to the
     # render is visibility-scoped before it leaves that module — which is what INV-1/INV-3
     # ask of the application layer.
+    #
+    # `@report_project_ids` IS THE OTHER SIDE EFFECT, and it is here for the same reason
+    # `@query` is: the view needs to know which projects the rows could come from, and only
+    # this method knows whether a query resolved. `show` and `preview` hand it to
+    # `reporter_time_entry_visibility_notice`, which would otherwise ask about `@project`
+    # alone over a report bounded to its whole subtree (T-51).
     def report_scope
       scope, @query = Reporting::ReportScope.build(template: @template,
                                                    actor: User.current,
                                                    project: @project,
                                                    query_id: params[:query_id])
+      @report_project_ids = Reporting::ReportScope.bound_project_ids(project: @project,
+                                                                     query: @query)
       scope
     end
 

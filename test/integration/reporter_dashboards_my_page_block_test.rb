@@ -415,6 +415,60 @@ class ReporterDashboardsMyPageBlockTest < Redmine::IntegrationTest
     end
   end
 
+  # A SUBPROJECT IS INDENTED UNDER ITS PARENT, which is `project_tree_options_for_select`'s
+  # whole reason for being preferred over `options_from_collection_for_select`. Without it
+  # the list is still in tree ORDER — the collection is `Project.sorted`, by `lft` — so a
+  # child looks like a sibling and "Fase 1" reads as a project of its own rather than as a
+  # phase of the project above it. Core uses this helper in every project picker it has.
+  def test_the_project_picker_indents_a_subproject_under_its_parent
+    Role.find(1).add_permission!(:view_reporter_dashboards_reports)
+    # PROJECT 5, MEASURED: jsmith is a member of 1, 2 and 5 in Redmine's own fixtures, and
+    # 5 is a child of 1. Project 3 is also a descendant but he is not a member there, so the
+    # picker would not offer it and this test would fail for the wrong reason.
+    child = Project.find(5)
+    assert_equal @project.id, child.parent_id, 'precondition: project 5 is a descendant'
+    assert @jsmith.member_of?(child), 'precondition: jsmith must be a member here'
+    child.enable_module!(:reporter_dashboards_reports)
+    my_page_template
+    put_block_on_my_page
+
+    get '/my/page'
+
+    assert_response :success
+    options = css_select("select[name=\"settings[#{BLOCK}][project_id]\"] option")
+    parent = options.detect { |node| node.text.strip == @project.name }
+    nested = options.detect { |node| node.text.include?(child.name) }
+    assert parent, 'the parent project must be offered'
+    assert nested, 'the subproject must be offered'
+    assert_not_equal child.name, nested.text.strip,
+                     'a subproject must carry the tree prefix, not sit flush with its parent'
+    assert_includes nested.text, '»'
+  end
+
+  # THE STORED PROJECT COMES BACK SELECTED, which is what makes the picker a setting rather
+  # than a one-way door. It also pins the key type: `settings[:project_id]` is read with a
+  # symbol and core stores the hash from `params`, so a plain-String-keyed hash here would
+  # silently preselect nothing and the owner would be told their choice had been forgotten.
+  def test_the_stored_project_comes_back_selected
+    Role.find(1).add_permission!(:view_reporter_dashboards_reports)
+    my_page_template
+    pref = @jsmith.pref
+    pref.my_page_layout = { 'left' => [BLOCK], 'right' => [] }
+    # NO TEMPLATE, deliberately: the settings form is the block's unresolved branch, so a
+    # resolving widget would render the report and there would be no select to look at.
+    pref.my_page_settings = { BLOCK => { project_id: @project.id.to_s } }
+    pref.save!
+
+    get '/my/page'
+
+    assert_response :success
+    assert_select "select[name=?] option[selected=selected]",
+                  "settings[#{BLOCK}][project_id]" do |selected|
+      assert_equal 1, selected.size
+      assert_equal @project.name, selected.first.text.strip
+    end
+  end
+
   # THE ROWS NARROW, END TO END. The unit test proves the module; this proves nothing
   # between the stored setting and the rendered page undoes it.
   def test_a_chosen_project_narrows_what_the_block_counts

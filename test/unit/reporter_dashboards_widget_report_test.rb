@@ -448,9 +448,89 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
   # than the chosen project. With a saved query the rows come from the whole subtree, so a
   # notice asked about the root alone answers `:all` and prints nothing — over a figure that
   # has silently dropped rows in a descendant where the actor is a non-member. Silence over
-  # a wrong number is what S-14 exists to remove, so the worst state over the bound set wins.
+  # a wrong number is what S-14 exists to remove.
   def test_the_notice_speaks_for_the_whole_bound_and_not_only_the_chosen_project
     template = Template.new(source: 'time_entries')
+    descendant = narrowing_public_descendant
+
+    assert_nil Subject.time_entry_notice_key(template, @jsmith, project_ids: [@project.id]),
+               'precondition: the root alone answers "you see everything"'
+
+    assert_equal :text_reporter_time_entries_own_only_in_these_projects,
+                 Subject.time_entry_notice_key(template, @jsmith,
+                                               project_ids: [@project.id, descendant.id])
+  end
+
+  # --------------------------------------------------- the two the first version got wrong
+
+  # A PROJECT THAT CANNOT CONTRIBUTE A ROW MUST NOT PRODUCE A NOTICE, and the first version
+  # of this notice said it did. It read "anything that is not `:all` narrows you", and
+  # `TimeEntryVisibility.state` answers `:none` for a project whose `time_tracking` module
+  # is simply switched off. On Redmine's own fixtures the ordinary grant plus the ordinary
+  # subtree therefore printed *"your role lets you see only your own spent time"* over a
+  # figure of four hours, three of which belong to somebody else and none of which is hidden
+  # by any role. Measured end to end by an independent review; this is the regression guard.
+  def test_a_project_with_time_tracking_off_produces_no_notice
+    template = Template.new(source: 'time_entries')
+    Role.find(1).update_columns(time_entries_visibility: 'all')
+    Role.find(1).add_permission!(:view_time_entries)
+    dark = Project.find(4)
+    dark.disable_module!(:time_tracking)
+    assert_equal :none,
+                 RedmineReporterDashboards::Reporting::TimeEntryVisibility.state(@jsmith, dark),
+                 'precondition: a module-less project answers :none'
+
+    assert_nil Subject.time_entry_notice_key(template, @jsmith,
+                                             project_ids: [@project.id, dark.id]),
+               'a project that contributes no rows cannot make a claim false'
+  end
+
+  # AND IT IS STILL SAID WHEN THERE IS GENUINELY NOTHING TO SEE. The rule above must not
+  # become "ignore `:none`" — when EVERY project in the bound answers it, the report is
+  # empty for a permission reason and that is exactly what the reader has to be told.
+  def test_a_bound_where_nothing_is_visible_still_says_so
+    template = Template.new(source: 'time_entries')
+    Role.all.each { |role| role.remove_permission!(:view_time_entries) }
+
+    assert_equal :text_reporter_time_entries_not_visible,
+                 Subject.time_entry_notice_key(template, @jsmith, project_ids: [@project.id])
+    assert_equal :text_reporter_time_entries_not_visible_in_these_projects,
+                 Subject.time_entry_notice_key(template, @jsmith,
+                                               project_ids: [@project.id, Project.find(3).id])
+  end
+
+  # THE REGISTER FOLLOWS THE NUMBER OF PROJECTS, which is the other half of the same defect:
+  # *"…only your own spent time in this project…"* over a bound of five is a sentence about
+  # a project the reader cannot identify, and `time_entry_notice_key`'s own header condemned
+  # exactly that before the code did it. One project keeps the project-scoped sentence.
+  def test_the_sentence_is_plural_when_the_bound_holds_more_than_one_project
+    template = Template.new(source: 'time_entries')
+    descendant = narrowing_public_descendant
+    Role.find(1).update_columns(time_entries_visibility: 'own')
+
+    assert_equal :text_reporter_time_entries_own_only,
+                 Subject.time_entry_notice_key(template, @jsmith, project_ids: [@project.id]),
+                 'one project gets the project dashboard\'s own sentence'
+    assert_equal :text_reporter_time_entries_own_only_in_these_projects,
+                 Subject.time_entry_notice_key(template, @jsmith,
+                                               project_ids: [@project.id, descendant.id])
+  end
+
+  # A project id the bound carries but the table no longer holds is skipped rather than read
+  # as `:none`, for the same reason: it contributes no rows.
+  def test_a_project_id_that_no_longer_resolves_changes_nothing
+    template = Template.new(source: 'time_entries')
+    Role.find(1).update_columns(time_entries_visibility: 'all')
+    Role.find(1).add_permission!(:view_time_entries)
+
+    assert_nil Subject.time_entry_notice_key(template, @jsmith,
+                                             project_ids: [@project.id, 999_999])
+  end
+
+  # jsmith is a NON-MEMBER of project 3 and the built-in Non member role is what narrows him
+  # there, which is the shape the bound exists for: a descendant he can read and cannot read
+  # fully. Returns the descendant.
+  def narrowing_public_descendant
     descendant = Project.find(3)
     assert_equal @project.id, descendant.parent_id, 'precondition: project 3 is a descendant'
     Role.find(1).update_columns(time_entries_visibility: 'all')
@@ -458,21 +538,22 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
     Role.non_member.update_columns(time_entries_visibility: 'own')
     Role.non_member.add_permission!(:view_time_entries)
     descendant.update_columns(is_public: true)
-
-    assert_nil Subject.time_entry_notice_key(template, @jsmith, project_ids: [@project.id]),
-               'precondition: the root alone answers "you see everything"'
-
-    assert_equal :text_reporter_time_entries_own_only,
-                 Subject.time_entry_notice_key(template, @jsmith,
-                                               project_ids: [@project.id, descendant.id])
+    descendant.enable_module!(:time_tracking)
+    descendant
   end
 
   # AND THE SET IS THE ONE THE SCOPE ACTUALLY APPLIES, asked of `ReportScope` rather than
   # rebuilt here — so the notice and the figures cannot drift apart. This is the assertion
   # that would catch a second copy of that branch appearing.
+  # THE SETTING IS PINNED RATHER THAN INHERITED (CLAUDE.md §6). The assertion below is
+  # about the subtree, which is what `display_subprojects_issues` answers ON — so on an
+  # installation whose administrator turned it off this example would go red for a reason
+  # that has nothing to do with its subject. An independent review measured exactly that:
+  # stubbed off, this file went to 1 failure while the integration file stayed green.
   def test_the_widget_carries_the_project_ids_the_scope_bounds_to
     template = counting_template
     User.current = @admin
+    with_settings(display_subprojects_issues: '1') do
     query = IssueQuery.new(name: 'all', project: nil, user: @admin, visibility: 2)
     query.filters = {}
     query.save!
@@ -498,6 +579,7 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
       actor: @admin, block: 'report_by_issues',
       settings: { report_template_id: template.id }, logger: Rails.logger
     ).project_ids, 'with no project nothing is bounded'
+    end
   end
 
   # The picker must not offer a project whose report would then be empty for a permission
@@ -511,6 +593,13 @@ class ReporterDashboardsWidgetReportTest < ActiveSupport::TestCase
 
     assert_includes offered, @project
     assert_not_includes offered, @other
-    assert_empty Subject.projects_for(actor: User.anonymous).to_a - Project.where(is_public: true).to_a
+    # ANONYMOUS GETS NOTHING AT ALL, and the first version of this line asserted something
+    # weaker that could not fail: `projects_for` short-circuits on `logged?`, so
+    # `[] - anything` was empty whatever the rule underneath said. An independent review
+    # pointed it out. The claim is that a my-page widget has no anonymous reader — my-page
+    # requires a session — so the honest assertion is emptiness, and it discriminates: the
+    # short-circuit is what makes it true.
+    assert_empty Subject.projects_for(actor: User.anonymous).to_a,
+                 'my-page has no anonymous viewer, so the picker offers nothing'
   end
 end

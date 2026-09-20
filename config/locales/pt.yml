@@ -237,6 +237,8 @@ pt:
   text_reporter_time_entries_not_visible: "O seu perfil não lhe permite ver tempo gasto neste projeto, pelo que este relatório está vazio."
   text_reporter_time_entries_own_only_across_projects: "Em pelo menos um projeto o seu perfil só lhe permite ver o seu próprio tempo gasto, pelo que este relatório mistura horas do projeto com as suas."
   text_reporter_time_entries_not_visible_anywhere: "Os seus perfis não lhe permitem ver tempo gasto em nenhum projeto, pelo que este relatório está vazio."
+  text_reporter_time_entries_own_only_in_these_projects: "Em pelo menos um dos projetos abrangidos por este relatório, o seu perfil só lhe permite ver o seu próprio tempo gasto, pelo que estes números misturam as horas do projeto com as suas."
+  text_reporter_time_entries_not_visible_in_these_projects: "O seu perfil não lhe permite ver tempo gasto em nenhum dos projetos abrangidos por este relatório, pelo que este relatório está vazio."
   text_reporter_failure_document_notice: "Este documento não é o relatório. Regista que o relatório não pôde ser produzido. Indique o ID de correlação acima quando pedir a um administrador para consultar o registo."
   text_reporter_failure_document_value_unavailable: "Não foi possível mostrar este valor neste documento."
   error_reporter_template_import_no_file: "Escolha um ficheiro para importar."

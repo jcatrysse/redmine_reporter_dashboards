@@ -24,8 +24,10 @@ require File.expand_path('../test_helper', __dir__)
 # --- MINITEST TRAP (HANDOVER §1) ---
 #
 # Test methods defined after a `private` section are silently not run. This file has no
-# `private`; every helper is defined ABOVE the tests and the run count is checked against
-# `grep -c '^  def test_'`.
+# `private`, which is the whole of the protection. Helpers are another matter and several of
+# them sit BETWEEN tests, beside their only callers; an earlier version of this line claimed
+# every helper was above every test and was simply wrong about its own file. The check that
+# holds is the run count against `grep -c '^  def test_'`.
 class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
   # NAMED EXPLICITLY. Rails infers the controller from the test class name, and this
   # controller is namespaced while the test class is not — inference would look for
@@ -2145,6 +2147,51 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
 
     assert_response :success
     assert_include l(:text_reporter_time_entries_not_visible), response.body
+  end
+
+  # T-51 — THE NOTICE SPEAKS FOR THE SUBTREE THE FIGURES CAME FROM, NOT FOR THE PROJECT
+  # WHOSE PAGE THIS IS.
+  #
+  # The three examples above have no saved query, so the bound is this project alone and the
+  # project-scoped sentence is the right one. WITH a query the bound is the subtree whenever
+  # Redmine's subproject setting is on, and this page asked `TimeEntryVisibility.state` about
+  # the root regardless — so a descendant that narrows the reader to their own hours produced
+  # SILENCE over a figure that had dropped somebody else's rows. That is §Findings S-14 on
+  # the surface S-14 was written for, and it survived T-51 by a month.
+  #
+  # jsmith is a non-member of project 3, so the built-in Non member role is what narrows him
+  # there — no contrived membership.
+  def test_the_notice_covers_the_subtree_when_a_query_widens_the_bound
+    template = create_template(source: 'time_entries', content: 'x')
+    grant_time(:view_reporter_dashboards_reports)
+    descendant = Project.find(3)
+    assert_equal @project.id, descendant.parent_id, 'precondition: project 3 is a descendant'
+    descendant.update_columns(is_public: true)
+    descendant.enable_module!(:time_tracking)
+    Role.non_member.update_columns(time_entries_visibility: 'own')
+    Role.non_member.add_permission!(:view_time_entries)
+    query = TimeEntryQuery.create!(name: 'everything', project: nil, user: @jsmith,
+                                   visibility: 2, filters: {})
+
+    with_subprojects(false) do
+      get :show, params: { project_id: @project.identifier, id: template.id,
+                           query_id: query.id }
+
+      assert_response :success
+      assert_not_include l(:text_reporter_time_entries_own_only_in_these_projects),
+                         response.body,
+                         'with subprojects off the bound is one project and so is the notice'
+    end
+
+    with_subprojects(true) do
+      get :show, params: { project_id: @project.identifier, id: template.id,
+                           query_id: query.id }
+
+      assert_response :success
+      assert_include l(:text_reporter_time_entries_own_only_in_these_projects), response.body
+      assert_not_include l(:text_reporter_time_entries_own_only), response.body,
+                         'the singular sentence names a project the reader cannot identify'
+    end
   end
 
   # AN ISSUE TEMPLATE NEVER CARRIES THE NOTICE, whatever the actor's time-entry role is.

@@ -61,12 +61,13 @@ The report widget has an **Export as PDF** link that renders the same report as 
 ### Which project a report counts
 
 On a project dashboard a report counts that project. If the widget uses a **saved query**,
-whether it also counts the subprojects is **Redmine's own setting**, not ours: **Administration → Settings → Issue tracking →
-Display subprojects issues on main projects by default**. It is on out of the box, so a
-report on *Bouw* also counts *Fase 1* and *Fase 2* unless somebody turned it off.
+whether it also counts the subprojects is **Redmine's own setting**, not ours:
+**Administration → Settings → Issue tracking → Display subprojects issues on main projects
+by default**. It is on out of the box, so a report on *Bouw* also counts *Fase 1* and
+*Fase 2* unless somebody turned it off.
 
-That is the same rule the issue list follows, so a figure in a report and the issue list
-beside it agree. Two things worth knowing:
+That is the same rule Redmine's own issue list follows, so the report counts what that list
+would count. Four things worth knowing:
 
 - The setting is named for issues and it narrows a **spent time** report too. That is how
   Redmine itself behaves; it is not something this plugin adds.
@@ -74,6 +75,10 @@ beside it agree. Two things worth knowing:
 - A widget with **no** saved query counts the project you are on and not its subprojects,
   whatever the setting says. That is long-standing behaviour and it is on the list to be
   made consistent.
+- **A drill-through link can be wider than the figure it came from.** Clicking a number
+  opens Redmine's issue list with the report's query, and that list applies its own project
+  rule rather than the report's bound, so the list can show more rows than the figure. It is
+  a known gap, it is recorded, and until it is closed the figure is the number to trust.
 
 ### Report widgets on your own page
 

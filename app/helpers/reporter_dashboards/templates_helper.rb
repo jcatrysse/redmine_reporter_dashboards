@@ -82,13 +82,29 @@ module ReporterDashboards
     #
     # Answers nil for an issue template and for an actor who sees everything, so a view can
     # render it unconditionally.
-    def reporter_time_entry_visibility_notice(template, user, project)
-      return nil unless template.respond_to?(:source) && template.source.to_s == 'time_entries'
+    #
+    # --- T-51: IT TAKES THE PROJECT IDS, NOT THE PROJECT, AND THAT IS THE FIX ---
+    #
+    # It used to ask `TimeEntryVisibility.state(user, project)` — the project whose page you
+    # are on. `ReportScope` bounds a report built on a saved query to that project AND its
+    # descendants whenever Redmine's own subproject setting is on, which is the default, so
+    # the sentence was about one project and the figure about five. Measured on Redmine's
+    # own fixtures: the root answered `:all` and the notice stayed silent while a descendant
+    # narrowed the actor to their own hours. That is §Findings S-14 on the very surface S-14
+    # was written for.
+    #
+    # `project_ids` is `ReportScope.bound_project_ids`' answer — `widget.project_ids` on a
+    # dashboard, `@report_project_ids` on a template's own page — and nil means unbounded.
+    #
+    # THE DECISION IS `WidgetReport.time_entry_notice_key`'S, not a second copy of it here.
+    # Two implementations of "which narrowing happened" is what produced the defect above:
+    # one of them was fixed and the other was not, for a month.
+    def reporter_time_entry_visibility_notice(template, user, project_ids)
+      key = RedmineReporterDashboards::WidgetReport.time_entry_notice_key(
+        template, user, project_ids: project_ids
+      )
 
-      case RedmineReporterDashboards::Reporting::TimeEntryVisibility.state(user, project)
-      when :own then l(:text_reporter_time_entries_own_only)
-      when :none then l(:text_reporter_time_entries_not_visible)
-      end
+      key && l(key)
     end
 
     def reporter_template_orientation_options

@@ -75,12 +75,16 @@ module RedmineReporterDashboards
       # widens anything:
       #
       #   no query   exactly this project — T-23's behaviour, unchanged
-      #   a query    this project's SUBTREE — narrowed from unbounded
+      #   a query    what REDMINE means by this project — see `project_bound_ids`, which
+      #              since T-51 reads `Setting.display_subprojects_issues?` rather than
+      #              answering the subtree unconditionally. The line above used to say
+      #              "this project's SUBTREE" flatly, and that is true only while the
+      #              setting is on, which is merely the default
       #
       # The asymmetry is the point. The default scope is "the page you are on". A saved query
       # is an explicit authoring choice that may legitimately roll several projects up, so
-      # narrowing it to a single id would break that on purpose; the subtree is what Redmine
-      # itself means by a project's data (`Query#project_statement` unions the descendants).
+      # narrowing it to a single id would break that on purpose; Redmine's own issue list is
+      # what a report is read beside, so it is what the query path matches.
       #
       # --- WHERE INV-1 ACTUALLY RESTS ON THE QUERY PATH, SAID OUT LOUD (T-51) ---
       #
@@ -183,6 +187,15 @@ module RedmineReporterDashboards
       # ARCHIVED DESCENDANTS ARE EXCLUDED EITHER WAY, and that is belt and braces rather than
       # the load-bearing part: `Project.allowed_to_condition`, inside `Issue.visible` and
       # `TimeEntry.visible`, already excludes them for everybody including an administrator.
+      # An independent review mutated the line away and measured that no row and no example
+      # moved, which is the honest state of it.
+      #
+      # T-52 GAVE THIS LIST A SECOND CONSUMER and the question was asked again: the
+      # spent-time notice reasons over these ids. It is still belt and braces, measured —
+      # `TimeEntryVisibility.state` answers `:none` for an archived project (jsmith, role
+      # `own`, project 3 archived: `:all` before, `:none` after), and `state_over` ignores a
+      # `:none` precisely because such a project contributes no rows. The line survives on
+      # its original argument, not on a new one.
       def project_bound_ids(project)
         return nil if project.nil?
 

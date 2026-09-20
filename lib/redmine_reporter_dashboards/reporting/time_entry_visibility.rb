@@ -118,7 +118,7 @@ module RedmineReporterDashboards
       # Mutation testing removed that filter and nothing failed, so the case analysis was
       # done rather than a test invented for it: `state` carries its own module gate and
       # answers `:none` for a project with time tracking off, and `:none` changes none of
-      # the three outcomes below — `all?(:none)` is unaffected by adding another `:none`,
+      # `state_over`'s three outcomes — `all?(:none)` is unaffected by adding another `:none`,
       # `include?(:own)` is unaffected, and the fallthrough is reached in both. A guard with
       # no observable effect is a comment, so it is gone rather than wrapped in a test of
       # its fiction (the precedent is T-25's, where the surviving mutant's guard was deleted
@@ -127,15 +127,56 @@ module RedmineReporterDashboards
       #
       # AN ADMINISTRATOR IS `:all`, and that is not a shortcut: `TimeEntry.visible` gives an
       # administrator every entry, so any narrowing notice shown to them would be false.
+      #
+      # THE RULE ITSELF IS `state_over`'s, below. This method only decides WHICH projects to
+      # ask about, which for a surface with no project is "the ones this actor is a member
+      # of". The two used to be one method, and then T-52 needed the same rule over a
+      # BOUNDED set and grew a second copy of it in `WidgetReport` that got `:none` wrong.
       def state_across_projects(user)
         return :none if user.nil?
         return :all if user.respond_to?(:admin?) && user.admin?
         return :none unless user.respond_to?(:memberships)
 
-        states = user.memberships.filter_map do |membership|
-          project = membership.project
-          state(user, project) if project
-        end
+        state_over(user, user.memberships.filter_map(&:project))
+      end
+
+      # T-51/T-52 — THE SAME QUESTION OVER A GIVEN SET OF PROJECTS.
+      #
+      # `state_across_projects` asks it about the actor's memberships, because my-page has
+      # nothing narrower to ask about. A BOUNDED report does: `ReportScope` knows exactly
+      # which project ids the rows can come from, and a notice about any other set is the
+      # §Findings S-14 defect wearing a different hat.
+      #
+      # --- THE RULE, AND WHY `:none` IS NOT "THE WORST ANSWER" ---
+      #
+      # A first version of this lived in `WidgetReport` as `worst_state` and read "anything
+      # that is not `:all` narrows you". An independent review measured what that does on
+      # Redmine's own fixtures, with the ordinary grant (`view_time_entries`, visibility
+      # `all`) and a report bounded to project 1 and its descendants:
+      #
+      #   p1 tt on   :all   3 rows      p5 tt OFF  :none  0 rows
+      #   p3 tt on   :all   1 row       p6 tt OFF  :none  0 rows
+      #                                 p4 tt OFF  :none  0 rows
+      #   -> "Your role lets you see only your own spent time in this project"
+      #
+      # Three of those four visible hours are somebody else's and NOTHING is hidden by a
+      # role: `state` answers `:none` for a project whose `time_tracking` module is off
+      # (`:58` above), and such a project contributes no rows at all. A `:none` therefore
+      # cannot make a claim false and must not drag the answer down — which is the rule
+      # `state_across_projects` already had, and the reason this is one method now rather
+      # than two that disagree.
+      #
+      #   :none   EVERY project answers `:none` — there is nothing to see anywhere in the set
+      #   :own    at least one project narrows to the actor's own hours
+      #   :all    the rest
+      #
+      # `projects` is an enumerable of `Project` records; a nil entry is skipped, for the
+      # same reason — it contributes nothing.
+      def state_over(user, projects)
+        return :none if user.nil?
+        return :all if user.respond_to?(:admin?) && user.admin?
+
+        states = projects.filter_map { |project| state(user, project) if project }
         return :none if states.empty? || states.all? { |s| s == :none }
         return :own if states.include?(:own)
 

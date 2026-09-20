@@ -74,9 +74,12 @@ module RedmineReporterDashboards
     # `project_unavailable` is the only one that travels alone: when it is true every other
     # member is nil, because there is nothing to render. See `render_for_my_page`.
     #
-    # `project_ids` is the set the rows are actually bounded to, carried so the spent-time
-    # notice can make a claim about the same projects the figures cover rather than about
-    # the one that was chosen. Nil means unbounded.
+    # `project_ids` is the set the rows are actually bounded to — `run` fills it in on every
+    # surface — carried so the spent-time notice can make a claim about the same projects the
+    # figures cover rather than about the one that was chosen. Nil means unbounded.
+    #
+    # `project` is my-page's only: it is the project the OWNER chose, which is not the set
+    # the rows came from whenever a saved query widens the bound to the subtree.
     Widget = Struct.new(:template, :query, :outcome, :project, :project_ids,
                         :project_unavailable, keyword_init: true)
 
@@ -149,7 +152,11 @@ module RedmineReporterDashboards
           .find_by(id: template_id)
       end
 
-      # §Findings S-14 ON A SURFACE WITH NO PROJECT — the locale KEY, not the sentence.
+      # §Findings S-14 — the locale KEY, not the sentence. THE ONE DECISION, for every
+      # surface: `TemplatesHelper#reporter_time_entry_visibility_notice` translates whatever
+      # this answers rather than deciding again, since two implementations of "which
+      # narrowing happened" is how the project dashboard came to ask about its root while
+      # its rows came from a subtree.
       #
       # A key rather than a translated string because the my-page partial has `l` (through
       # `ApplicationHelper`) and does not have our helper, so the view translates and this
@@ -157,52 +164,53 @@ module RedmineReporterDashboards
       # the caller renders it unconditionally rather than behind a branch a later edit can
       # get wrong.
       #
-      # The project-scoped version is `TemplatesHelper#reporter_time_entry_visibility_notice`
-      # and the two are NOT interchangeable: that one asks `TimeEntryVisibility.state`, which
-      # answers `:none` for a nil project — so used here it would tell a reader their role
-      # does not let them see spent time "in this project" over a report drawing on four.
-      # T-52 — AND `project:` IS THE WHOLE POINT OF THE ARGUMENT, not a convenience.
+      # --- T-51/T-52: THE PROJECTS THE ROWS CAME FROM, WHICH IS NOT THE ONE THAT WAS CHOSEN
       #
-      # `state_across_projects` answers `:all` as soon as ANY membership grants it. Over a
-      # widget whose rows are bounded to one project that is the wrong sentence over the
-      # right figure: an actor with full spent-time visibility in project A who points the
-      # widget at project B, where their role shows only their own hours, would get no
-      # notice at all. That is §Findings S-14's shape, and it is the reason
-      # DECISIONS-PENDING #19 blocks the other half of this phase — so reintroducing it
-      # through this door would be the same defect by a different route.
+      # `project_ids` is `ReportScope.bound_project_ids`' answer, carried on the widget. It
+      # is passed rather than recomputed so the sentence and the figure cannot drift, and it
+      # is the SET rather than the chosen project because a saved query widens the bound to
+      # the subtree when Redmine's own subproject setting is on.
       #
-      # With a project the question is the project dashboard's question, so it is asked the
-      # project dashboard's way and answered with the project-scoped keys.
+      # Asking about the chosen project alone was measured wrong by an independent review: a
+      # widget bound to a subtree, a notice asked about the root, and silence over a figure
+      # that had dropped two of three rows in a descendant.
+      #
+      # --- WHICH SENTENCE, AND THE NUMBER OF PROJECTS DECIDES ---
+      #
+      # This method's own earlier version answered the SINGULAR key for any bound, which is
+      # exactly the register its predecessor comment condemned: *"…only your own spent time
+      # in this project…"* over a report drawing on five is a sentence about a project the
+      # reader cannot identify. So:
+      #
+      #   no bound at all   the my-page `_across_projects` keys — every project in reach
+      #   exactly one       the project-scoped keys, the project dashboard's own sentences
+      #   more than one     `_in_these_projects`, which names the report's own scope
+      #
+      # The third pair is not the second pair reused. *"…do not let you see spent time in
+      # any project…"* is FALSE over a five-project bound for an actor who sees hours in a
+      # sixth, and this repository treats a false sentence as worse than no sentence
+      # (`time_entry_visibility.rb:103`).
+      #
+      # The STATE is `TimeEntryVisibility.state_over`'s and not this module's. It lived here
+      # for one commit and got `:none` wrong — see that method for the measurement.
       def time_entry_notice_key(template, actor, project_ids: nil)
         return nil unless template.respond_to?(:source) && template.source.to_s == 'time_entries'
         return across_projects_notice_key(actor) if project_ids.blank?
 
-        case worst_state(actor, project_ids)
-        when :own then :text_reporter_time_entries_own_only
-        when :none then :text_reporter_time_entries_not_visible
-        end
+        projects = ::Project.where(id: project_ids).to_a
+        notice_key(Reporting::TimeEntryVisibility.state_over(actor, projects),
+                   single: projects.size == 1)
       end
 
-      # THE WORST ANSWER OVER THE PROJECTS THE ROWS COME FROM, and "worst" is the only safe
-      # direction: a notice is a warning that what you see is narrower than what exists, so
-      # one project answering `:own` has to be said even if three others answer `:all`.
-      #
-      # An independent review measured the alternative. Asking about the ROOT project of a
-      # subtree bound gave `:all` and therefore silence, over a figure that had dropped two
-      # of three rows in a descendant where the actor is a non-member. Silence over a wrong
-      # number is what S-14 exists to remove.
-      #
-      # A project id that no longer resolves is skipped rather than treated as `:none`: it
-      # contributes no rows either, so it can make no claim false.
-      def worst_state(actor, project_ids)
-        states = ::Project.where(id: project_ids).map do |project|
-          Reporting::TimeEntryVisibility.state(actor, project)
+      def notice_key(state, single:)
+        case state
+        when :own
+          single ? :text_reporter_time_entries_own_only
+                 : :text_reporter_time_entries_own_only_in_these_projects
+        when :none
+          single ? :text_reporter_time_entries_not_visible
+                 : :text_reporter_time_entries_not_visible_in_these_projects
         end
-
-        return :none if states.include?(:none) && states.uniq == [:none]
-        return :own if states.any? { |state| state != :all }
-
-        nil
       end
 
       def across_projects_notice_key(actor)
@@ -244,14 +252,10 @@ module RedmineReporterDashboards
 
         widget = render(project: nil, actor: actor, block: block, settings: settings,
                         logger: logger, rows_project: project)
-        widget&.tap do |found|
-          found.project = project
-          # ASKED OF `ReportScope`, NOT RECONSTRUCTED. The bound depends on whether a query
-          # resolved, and a second copy of that branch here is how the notice and the
-          # figures would come to disagree — which is the defect this field exists to close.
-          found.project_ids = Reporting::ReportScope.bound_project_ids(project: project,
-                                                                      query: found.query)
-        end
+        # ONLY `project` IS SET HERE. `project_ids` — the set the rows are bounded to — is
+        # filled in by `run`, where the query is known, so every surface carries it and the
+        # notice cannot be given a different answer on one of them than on another.
+        widget&.tap { |found| found.project = project }
       end
 
       # The projects a my-page widget may be pointed at: where this actor holds
@@ -399,7 +403,15 @@ module RedmineReporterDashboards
                                           query: query, output_class: :widget,
                                           guard: Render::BatchGuard.new(logger: logger),
                                           logger: logger).call(pdf: pdf)
-        Widget.new(template: template, query: query, outcome: outcome)
+        # `project_ids` IS FILLED IN HERE AND NOWHERE ELSE. It is the same call `ReportScope`
+        # just made internally, asked again rather than returned, because a third value out
+        # of `build` would change a signature three callers use to solve a problem only the
+        # notice has. What matters is that it is ASKED rather than reconstructed: the bound
+        # depends on whether the query resolved, and a second copy of that branch is how the
+        # sentence and the figure come to disagree (§Findings S-14).
+        Widget.new(template: template, query: query, outcome: outcome,
+                   project_ids: Reporting::ReportScope.bound_project_ids(project: project,
+                                                                        query: query))
       end
     end
   end

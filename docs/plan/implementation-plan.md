@@ -5555,6 +5555,32 @@ change is expected and `reporter_dashboards_drill_query_count_test.rb` is the pl
    `block_permitted?` stays global and gets a comment saying why: it decides whether the block is
    offered at all, not what it counts.
 
+   **AS BUILT, ACCEPT 6 IS WRONG AND THE CODE DOES NOT DO IT.** Two independent reviews took it
+   apart, and this line is kept rather than edited because the wrong version is the instructive one.
+   Asking `state(actor, project)` is asking about the CHOSEN project, and T-51 bounds a
+   query-backed report to that project's whole subtree — so the sentence was about one project and
+   the figures about five. The first repair made it "the worst state over the bound", which was
+   wrong in the other direction: `state` answers `:none` for a project whose `time_tracking` module
+   is merely switched off, and on Redmine's own fixtures the ordinary grant then printed *"your role
+   lets you see only your own spent time"* over four hours, three of them somebody else's, with
+   nothing hidden by any role. What shipped:
+
+   * `TimeEntryVisibility.state_over(actor, projects)` answers for a SET, and a `:none` is ignored
+     because such a project contributes no rows. `state_across_projects` is now that method asked
+     about the actor's memberships, so there is one rule rather than three.
+   * `Widget#project_ids` carries `ReportScope.bound_project_ids`' answer, filled in by
+     `WidgetReport.run` on **every** surface, and the notice reads that rather than a project.
+   * The register follows the size of the set: the project-scoped sentences for exactly one, two new
+     `_in_these_projects` keys for more. Reusing *"…in any project…"* over a five-project bound is a
+     false sentence for an actor who sees hours in a sixth.
+   * **The project dashboard and the template page are fixed too.** They had the same defect through
+     `TemplatesHelper#reporter_time_entry_visibility_notice`, which asked about `@project` while
+     their own rows came from the subtree. That helper now translates
+     `WidgetReport.time_entry_notice_key`'s answer instead of deciding again.
+
+   This removes DECISIONS-PENDING #19's stated blocker, which is recorded there. It does not take
+   #19's decision: the no-query path is still exactly-this-project.
+
 *Tests:* blank behaves as today; a chosen project narrows; a stored project the actor lost access to
 renders the unavailable state and no report; a stored id that is not a project does the same and does
 not raise; the template lookup still resolves another project's template; the spent-time notice is the
@@ -5564,7 +5590,9 @@ per-project one when a project is chosen and the across-projects one when it is 
 rendering an empty report.
 
 *Locale keys:* `label_reporter_widget_project` (the picker), `label_reporter_widget_project_any` (the
-blank option), `text_reporter_widget_project_unavailable` (Accept 4). English first, then all twelve.
+blank option), `text_reporter_widget_project_unavailable` (Accept 4), and — from the repair above —
+`text_reporter_time_entries_own_only_in_these_projects` and
+`text_reporter_time_entries_not_visible_in_these_projects`. English first, then all twelve.
 
 ---
 

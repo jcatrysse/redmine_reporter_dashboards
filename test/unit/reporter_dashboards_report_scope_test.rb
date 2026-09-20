@@ -17,7 +17,12 @@ require File.expand_path('../test_helper', __dir__)
 #
 # --- MINITEST TRAP (HANDOVER §1) ---
 #
-# No `private` section; the helpers are above the tests.
+# No `private` section, which is the half that matters: a TEST method defined after one is
+# silently not run. Helpers are not, and some of this file's sit between test methods rather
+# than above all of them — `with_subprojects` and friends live beside the T-51 examples that
+# are their only callers. An earlier version of this line said "the helpers are above the
+# tests" and stopped being true when those were added; the run count, not the layout, is what
+# the claim rests on, and it is checked against `grep -c '^  def test_'`.
 class ReporterDashboardsReportScopeTest < ActiveSupport::TestCase
   fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules,
            :issues, :issue_statuses, :trackers, :enumerations, :projects_trackers,
