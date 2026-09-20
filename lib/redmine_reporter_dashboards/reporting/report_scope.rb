@@ -81,9 +81,20 @@ module RedmineReporterDashboards
       # is an explicit authoring choice that may legitimately roll several projects up, so
       # narrowing it to a single id would break that on purpose; the subtree is what Redmine
       # itself means by a project's data (`Query#project_statement` unions the descendants).
+      #
+      # --- WHERE INV-1 ACTUALLY RESTS ON THE QUERY PATH, SAID OUT LOUD (T-51) ---
+      #
+      # `actor` is threaded explicitly and the no-query branch below uses it. The QUERY branch
+      # does not: `Query#base_scope` calls `Issue.visible` / `TimeEntry.visible` with NO
+      # argument, so it reads `User.current`. What holds INV-1 there is `Snapshot#as` and
+      # `ScheduledDelivery#as`, which set `User.current` to the actor around the render — not
+      # the threading in this file. That is pre-existing and T-51 does not change it; it is
+      # written down because a reader of this method would otherwise conclude the opposite,
+      # and a comment that implies coverage it does not have is the defect this repository
+      # keeps finding in its own prose.
       def resolve(query_class, model, actor, project, query_id, on_missing_query)
         query = find_query(query_class, actor, query_id, on_missing_query)
-        return [within(query.base_scope, project_subtree_ids(project)), query] if query
+        return [within(query.base_scope, project_bound_ids(project)), query] if query
 
         [within(model.visible(actor), project ? [project.id] : nil), nil]
       end
@@ -116,14 +127,56 @@ module RedmineReporterDashboards
         scope.where(project_id: project_ids)
       end
 
-      def project_subtree_ids(project)
+      # T-51 — WHICH PROJECTS "THIS PROJECT" MEANS, AND REDMINE ALREADY DECIDED THAT.
+      #
+      # This answered the subtree unconditionally, which is right on a default installation and
+      # wrong on one that switched subprojects off. Measured on Redmine 5.1 with one global
+      # `IssueQuery` on project 1's surface (`docs/plan/reference/verification-project-scope.md`):
+      #
+      #   setting ON    Redmine's own issue list 10 rows `[1,3,5]`   this method 10 `[1,3,5]`
+      #   setting OFF   Redmine's own issue list  4 rows `[1]`       this method 10 `[1,3,5]`
+      #
+      # `Setting.display_subprojects_issues?` is what Redmine's own list consults
+      # (`Query#project_statement`, `redmine/app/models/query.rb:965-968`), it ships ON
+      # (`config/settings.yml:229`), and an administrator who turns it off is asking for exactly
+      # the narrowing the OFF row shows. So the setting decides here too.
+      #
+      # --- WHY THE SETTING RATHER THAN `project_statement` ITSELF ---
+      #
+      # Two earlier drafts of this task assigned the project to the query and let
+      # `project_statement` answer, which is literally what `QueriesHelper#retrieve_query` does.
+      # A red team and an independent review each built it and measured the same consequence:
+      # `IssueQuery` offers its `project_id` FILTER only while the query has no project, so
+      # assigning one removes that filter from the drill-through query's `available_filters`,
+      # the URL still emits it and the receiving list discards it. A figure of 3 linked to a
+      # list of 10. Reading one setting keeps the query object untouched and keeps that link
+      # exactly as it is.
+      #
+      # BOTH SOURCES, deliberately. `ReportScope` serves issues and time entries through one
+      # `resolve`, and `Query#project_statement` is shared, so Redmine's own spent-time list
+      # honours the same issue-named setting. Matching that is the point; `docs/user-guide.md`
+      # says so where an administrator reads it.
+      #
+      # ARCHIVED DESCENDANTS ARE EXCLUDED EITHER WAY, and that is belt and braces rather than
+      # the load-bearing part: `Project.allowed_to_condition`, inside `Issue.visible` and
+      # `TimeEntry.visible`, already excludes them for everybody including an administrator.
+      def project_bound_ids(project)
         return nil if project.nil?
 
         ids = [project.id]
-        if project.respond_to?(:descendants)
-          ids += project.descendants.where.not(status: ::Project::STATUS_ARCHIVED).ids
-        end
-        ids
+        return ids unless subprojects_included?
+        return ids unless project.respond_to?(:descendants)
+
+        ids + project.descendants.where.not(status: ::Project::STATUS_ARCHIVED).ids
+      end
+
+      # `respond_to?` because this module is driven by doubles in the DB-less suite, where
+      # `Setting` may not be the real class. An installation always has it; a spec that does
+      # not gets the default, which is Redmine's own default.
+      def subprojects_included?
+        return true unless defined?(::Setting) && ::Setting.respond_to?(:display_subprojects_issues?)
+
+        ::Setting.display_subprojects_issues?
       end
     end
   end

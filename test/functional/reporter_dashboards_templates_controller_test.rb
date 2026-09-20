@@ -2198,6 +2198,58 @@ class ReporterDashboardsTemplatesControllerTest < ActionController::TestCase
     assert_not_include ERB::Util.html_escape("COUNT=[#{everywhere}]"), response.body
   end
 
+  # T-51 — AND WHAT "THIS PROJECT" MEANS IS REDMINE'S DECISION, NOT OURS.
+  #
+  # The example above pins the subtree, which is right on a default installation because
+  # `display_subprojects_issues` ships ON. An installation that switches it OFF is asking for
+  # the narrower answer, and Redmine's own issue list gives it — measured, 10 rows against 4,
+  # in `docs/plan/reference/verification-project-scope.md`. Before T-51 this plugin answered
+  # the subtree either way, so a report and the issue list beside it disagreed on exactly the
+  # installations that had expressed a preference.
+  #
+  # Driven through the controller rather than through `ReportScope` because the unit test
+  # already covers the module; what this adds is that nothing between the setting and the
+  # rendered page undoes it.
+  def test_the_subproject_setting_decides_what_a_project_report_counts
+    subproject = Project.find(3)
+    assert_equal @project.id, subproject.parent_id, 'precondition: project 3 is a descendant'
+    subproject.enable_module!(:reporter_dashboards_reports)
+
+    query = IssueQuery.create!(name: 'everything', project: nil, user: @jsmith, visibility: 2)
+    query.filters = {}
+    query.save!
+    template = create_template(content: 'COUNT=[{{ issues.size }}]')
+    grant(:view_reporter_dashboards_reports)
+
+    here = Issue.visible(@jsmith).where(project_id: @project.id).count
+    subtree = Issue.visible(@jsmith)
+                   .where(project_id: [@project.id] + @project.descendants.ids).count
+    assert_operator subtree, :>, here,
+                    'no issues in a subproject, so this example proves nothing'
+
+    with_subprojects(false) do
+      get :show, params: { project_id: @project.identifier, id: template.id,
+                           query_id: query.id }
+      assert_response :success
+      assert_include ERB::Util.html_escape("COUNT=[#{here}]"), response.body
+    end
+
+    with_subprojects(true) do
+      get :show, params: { project_id: @project.identifier, id: template.id,
+                           query_id: query.id }
+      assert_response :success
+      assert_include ERB::Util.html_escape("COUNT=[#{subtree}]"), response.body
+    end
+  end
+
+  def with_subprojects(included)
+    previous = Setting.display_subprojects_issues
+    Setting.display_subprojects_issues = included ? '1' : '0'
+    yield
+  ensure
+    Setting.display_subprojects_issues = previous
+  end
+
   # `source` IS IN `PREVIEW_BLOCKING_ATTRIBUTES`, and half the argument for deleting
   # `report_scope`'s defensive `else` rests on it. Mutation showed nothing named the
   # constant: dropping `source` from the list left the whole suite green.
