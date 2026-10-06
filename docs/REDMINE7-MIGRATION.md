@@ -21,13 +21,27 @@ what is left. Written 2026-10-06 from a measured analysis (report at the bottom)
 | Runs on Redmine 7 as is | JA |
 | Upstream sync | GEEN UPSTREAM |
 | After sync | n.v.t. |
-| Complexity (1 trivial .. 5 rewrite) | 1 |
-| Measured on | Redmine 7.0.1 (7.0-stable-GEOxyz + latest 7.0-stable), Rails 8.1.3.1, Ruby 3.3.6, PostgreSQL 16 and MariaDB 10.11 |
-| Branch head when this file was written | `7404135` |
+| Complexity (1 trivial .. 5 rewrite) | 1 for Redmine 7; the session found and fixed MariaDB and Redmine 5.1 defects next to it |
+| Measured on | Redmine 7.0.1 (7.0-stable-GEOxyz 8067e23), Rails 8.1.3.1, Ruby 3.3.6, PostgreSQL 16 and MariaDB 10.11; Redmine 5.1-stable-GEOxyz (bcf917c), Ruby 3.2.6, PostgreSQL 16 |
+| Migration session | 2026-10-06, done: work list closed, tests green on both databases, e2e green on both, reviews resolved (see "Verdicts" and the sections after it) |
+| Branch head | see `git log`; the session's last code commit is `121c1dc` |
 
 ## Already on this branch
 
 - `4c43d3c` Declare rexml as a test dependency for the SVG chart specs
+- Migration session 2026-10-06, one concern per commit:
+  - `86c74b3` Tooling: clone 7.0-stable-GEOxyz (`REDMINE_REPO_URL`), and never load another adapter's schema.rb
+  - `9380ddd` Share-link concurrency test: run on MariaDB instead of hanging the suite
+  - `ca33c96` Liquid 5.14.0: add it to the reviewed filter surface
+  - `68baafa` Register Liquid tags through `Compat.register_liquid_tag` (no deprecation at boot, ready for Liquid 6)
+  - `6000e85` Template: refuse content the database column cannot hold, instead of a 500
+  - `dda0cfe` Tests: make the full-app suite pass on MariaDB (+ e2e scenarios)
+  - `322e9b9`, `e997540`, part of `e047c62` Admin menu: Render preflight gets a core sprite icon (`checked`, present on 6.0, 6.1, 7.0)
+  - `c4d91f5` Share links: show a new link's URL once, not also as a raw flash box
+  - `6a323c8` e2e scenarios that pass on a real Redmine 7; smoke handles downloads
+  - `673f23d` Tooling: start_server.sh writes file mail delivery for the server env only
+  - `e047c62` Fixes from the independent review
+  - `121c1dc` Gemfile: Liquid below 5.6 on Ruby older than 3.3, so Redmine 5.1 renders at all
 
 ## Work list for the migration session
 
@@ -52,6 +66,151 @@ In this order: things that break, security, the GEOxyz changes, the open items, 
 9. Check Redmine 7 webhooks against this plugin (see "Rules"), and note the result here even if nothing is needed.
 10. Verify every feature of the plugin by hand on a running Redmine 7 (screenshots).
 
+### Verdicts (migration session 2026-10-06)
+
+| # | Verdict |
+|---|---|
+| 1 | Open, the curator's call: merging into main is not done here. This branch is `claude/next-session-prompt-it4too` + the plan + this session's commits (see Q4). |
+| 2, 4 | Done, both halves, because a measurement made the choice: 5.14.0 is in `PINNED` (`ca33c96`, same 61 filters, its one change tightens resource accounting) and stays what Redmine 7 (Ruby 3.3) resolves; Ruby < 3.3 is capped below 5.6 (`121c1dc`), because there Liquid ≥ 5.6.1 cannot parse anything (see "After the upgrade"); 5.5.1 is in `PINNED` too (a strict subset of 5.13.0's filters). |
+| 3 | Done on this branch (`4c43d3c`); carrying it into the dev branch is part of item 1. |
+| 5 | Done (`68baafa`): `Compat.register_liquid_tag`, `Environment.default` on 5.5+, `Template.register_tag` on 4.x and 5.0–5.4. The boot deprecation is gone (0 lines in the PostgreSQL run log, it printed at every boot before). spec_liquid green on 4.0.4, 5.5.1 and 5.14.0. |
+| 6 | Done. In the browser on Redmine 7 (production mode, both databases): bar and pie charts (bundled Chart.js) and the Mermaid diagram draw in the sandboxed frame on the template page, the preview, the dashboard widget and the My page block; PDF via headless Chromium (`chromium_cdp` Chrome 141) for template, widget, mail, schedule and share link. Render conformance corpus (`RRD_CONFORMANCE=1 rspec spec/conformance`, non-root): chromium_cdp and Gotenberg (docker, pinned digest) all pass; wkhtmltopdf fails 4 corpus cases with Ubuntu's apt build (not the patched-Qt build CI uses), engine-level and independent of Redmine, so G9's matrix diff could not be regenerated here. |
+| 7 | Measured, not built; open question Q3. With `redmine_issue_todo_lists2` installed and issue #1 on a list, `{{ issue.todolists_with_positions.size }}` prints nothing in this plugin's templates (`docs/e2e/together/todolists-with-positions-preview.png`), no error, no lint finding. The todo plugin extends only `RedmineCrm::Liquid::IssueDrop`, which does not exist without redmineup. |
+| 8 | Done, numbers below. Redmine 5.1 run included: it found the Liquid/strscan break (fixed). |
+| 9 | Checked, nothing needed: the plugin patches only `Project`, `ProjectsHelper` and `Role` (`lib/redmine_reporter_dashboards/patches/`), adds no issue fields, hides no issue data and has no issue API view. Core webhook payloads (`issues/show.api.rsb` as the webhook owner) are unaffected. |
+| 10 | Done: 8 scenario files, every function below, on both databases. |
+
+### Test results (final code, Redmine 7.0-stable-GEOxyz, Ruby 3.3.6)
+
+| Suite | PostgreSQL 16 | MariaDB 10.11 |
+|---|---|---|
+| rspec `spec/` (no DB) | 2954 examples, 0 failures, 106 pending | 2954, 0 failures, 106 pending |
+| rspec `spec/adapter` (real DB) | 260, 0 failures, 9 pending | 260, 0 failures, 3 pending |
+| golden corpus (pinned 2025-12-29) | 217, 0 failures | 217, 0 failures |
+| minitest units / functionals / integration | 605 / 456 / 58 runs, 0 failures, 0 errors, 0 skips | 605 / 456 / 58 runs, 0 failures, 0 errors, 0 skips |
+| system tests (Chromium 141 + chromedriver 141) | 12 runs, 0 failures | 12 runs, 0 failures |
+| spec_liquid (Liquid 5.14.0) | 373, 0 failures | 373, 0 failures |
+| migrations down to 0 and up (`script/migrate_updown.sh`, both arms) | OK | OK |
+| reversibility gate | OK, 10 migrations, 0 findings | |
+
+Baseline before any change (same checkout): PostgreSQL 1113 minitest runs green, rspec green,
+spec_liquid 1 failure (the 5.14.0 review gate). MariaDB: the unit run **hung** (the
+share-link concurrency test, `9380ddd`), and once unblocked gave 18 failures and 23 errors, all
+test-portability problems except one product defect (template content over 64 KiB → 500,
+`6000e85`); CI never ran the full-app suite on MariaDB. Pending examples are the ones that need
+an env var (browser corpus, Gotenberg, git history, benchmark); MariaDB has 3 instead of 9
+because the MySQL-only adapter cases run there.
+
+Redmine 5.1-stable-GEOxyz, Ruby 3.2.6, PostgreSQL (with `Gemfile.local`
+`gem 'activerecord-session_store'`, which that branch's `config/application.rb` needs):
+before `121c1dc` 44 failures, 27 errors and spec_liquid 275/373 failing (Liquid 5.13/5.14 on
+Ruby 3.2); after it 2954 / 260 / 217 specs, 605 / 456 / 58 minitest runs (1 pre-existing
+reasoned skip), spec_liquid 373, all 0 failures.
+
+Together with `redmine_issue_todo_lists2` (its `redmine70-migration` branch, PostgreSQL): boot,
+migrations, smoke 30 pages, core flows and all plugin scenarios green (`docs/e2e/together/`).
+
+### End to end on a real Redmine 7 (production mode, seeded, as an unprivileged user)
+
+`./.codex/start_server.sh --reset` + `./.codex/e2e.sh`, once per database, both on the final
+code: **smoke 30 pages, core flows 6, 8 plugin scenarios with 56 screenshots, 0 problems** on
+PostgreSQL (`docs/e2e/postgresql/`) and on MariaDB (`docs/e2e/mariadb/`). Every screenshot was
+opened; findings from looking at them are in this file (share URL twice, missing menu icon,
+blank frame captures that turned out to be capture timing). `docs/e2e/before/` holds the two
+Redmine 7 pictures before the UI fixes. No Redmine 5.1 "before" pictures: no layout changed
+except those two, and on 5.1 the admin menu has no icons and the flash code is the same (read
+on 5.1-stable).
+
+Functions, how they are reached, and where each is proven (scenario `test/e2e/<file>.mjs`,
+screenshots `docs/e2e/<db>/<file>-*.png`, captions in `<file>.md`):
+
+| Function | How a user reaches it | Scenario | Paths covered |
+|---|---|---|---|
+| Project dashboard page | Project menu "Project dashboard" (module + `view_reporter_project_page`) | dashboard | manager sees it; reporter: no menu item, 403; outsider on private project: 403; anonymous: login |
+| Dashboard tabs (add) | "Add tab" in the tab bar → settings box (`manage_reporter_project_tabs`) | dashboard | tab created and selected |
+| Widgets: add, move, remove | "Add" picker, arrows, close icon (`manage_reporter_project_page`) | dashboard | issue query, activity, spent time, issue report; move; remove |
+| Report widget + its PDF | Report widget settings → template; PDF icon | dashboard | renders charts + Mermaid; PDF 33 KB `application/pdf` |
+| Project settings tab "Reports and dashboards" | Project → Settings | templates | manager sees links; reporter 403 |
+| Report templates: list, new (starter gallery), preview, create, show, edit, delete | Settings tab → Report templates | templates | unsaved preview (HTML + PDF); syntax error shown, no 500; create without name → error box; edit stored; delete with notice; reporter 403; outsider 403 |
+| Template document (PDF) and export (JSON) | "Download as PDF", "Export" | templates | PDF 33 KB; JSON with the template |
+| Template import (bundle) | rake `import:plan` / `import:run`; the "Import a report template" form on the list | rake_tasks | plan, missing file refused (exit 2), run into the private project. The upload form is shown (templates-index) but was not submitted in the browser; its controller path has functional tests |
+| Ad hoc mail of a report | Template page → "Send report by e-mail" (`mail_reporter_dashboards_reports`) | delivery | no recipient → refused, nothing sent; sent with PDF attached; mail log; reporter 403 |
+| Report schedules: list, new, create, show, edit, delete, test send | Settings tab → Report schedules | delivery | end date before start → refused; weekly created; test send (confirm) writes 1 mail; edited; deleted (404 afterwards); reporter 403; outsider 403 |
+| Scheduler (cron) | `rake reporter_dashboards:schedules:run` / `:status` | rake_tasks | status warns before first run (exit 1, by design); run delivers 1 mail with PDF; second run same day delivers nothing; run row shown in the browser |
+| Share links: list, new, create, revoke; public `/reporter/s/:token` | Template page → "Share links" (`share_reporter_dashboards_reports`, public needs `publish_…`) | share_links | URL shown once; non-public link: anonymous → login, member → PDF; public link anonymous → PDF; single-use second open refused; revoked refused; unknown token 404; reporter 403 |
+| My page blocks "Issue report", "Spent time report" | My page → Add | my_page | both render for manager; reporter is offered no project/template (fails closed) |
+| Plugin settings | Administration → Plugins → Configure | admin | page renders, save round-trip with notice; non-admin 403 |
+| Render preflight | Administration → "Render preflight" | admin | Chromium probe: every check passed; non-admin 403 |
+| Statistics JSON `/sql/stats/monthly_flow` | GET with `project_id`, `months` (logged in) | admin | visible project JSON; months capped at 24; unknown project 404; private project as outsider 404; anonymous refused |
+| Liquid tags `sql_aggregate`, `version_rollup`, `chart`, `mermaid` | In templates | templates, dashboard, my_page | rendered in the seeded report on screen and in PDF |
+| Rake: migrate_from_reporter plan, lint_templates, export bundle, documents purge (dry run), render preflight | Command line | rake_tasks | all exit as documented (`rake_tasks-commands.md`) |
+| Mail in / REST API / webhooks | none in this plugin | - | n.v.t. |
+
+Not covered, out of reach here: a real SMTP relay (mail went to files), Gotenberg as the
+selected engine inside Redmine (it was exercised by the conformance corpus, not by the server),
+real production templates (Q3).
+
+### Reviews
+
+- Own review: done while working (the adversarial re-read caught the MariaDB TEXT "off by one",
+  which measurement then refuted: MariaDB trims the YAML dump's trailing newline; no change made,
+  a test documents it).
+- Independent review by a fresh subagent: 2 blockers, 5 should-fix, nits. Fixed in `e047c62`:
+  `shield-check` absent on Redmine 6.0 (now `checked`, test checks the running sprite), project 1
+  left archived by the non-transactional import test, validation not exercised in PostgreSQL CI
+  (stubbed limit test added), `description` also a text column (covered), vacuous deprecation
+  test (fixed, now fails if reverted), comment in the share-link controller, duplicated helper.
+  Not changed, with reason: a non-String flash value for the share URL (it would raise in 5.1's
+  `render_flash_messages`, read on 5.1-stable); deriving the 64 KiB settings cap from the column
+  (measured working on MariaDB, test pins it); `:too_long` says "characters" for a byte limit
+  (same message the tab model already uses, no new locale keys); e2e `if (count)` branches (each
+  has an `else fail`).
+- OpenAI review (`./.codex/openai_review.sh`, gpt-5): two rounds, one finding each, both the
+  same false claim (`content_changed?` / `attribute_changed?` missing on Rails 8.1); refuted by
+  measurement, resolutions in `docs/reviews/openai-2026-10-06-*.md`.
+
+### Findings recorded, not fixed (outside the migration's scope)
+
+- **Every chart report shows "Parts of this report could not be produced as asked"** with
+  default settings: the bundled Mermaid (3.5 MB) is above the 512 KB inline threshold. It is a
+  notice, the report is complete. Same on every Redmine version (asset policy, not Redmine). UX
+  worth a look: the notice reads like an error to a reader of a correct report.
+- **Next run shows "-" for an enabled schedule until the first scheduler run** (it is computed
+  by the runner). Correct but uninformative.
+- **The admin menu icon `checked` is drawn dark**, like core's other glyph icons; fine, noted.
+- **CI runs the full-app suite on PostgreSQL only**, which is why the MariaDB hang and failures
+  above went unseen. Recommend a MariaDB leg in the `test` job (Actions are manual-only per the
+  rules; `ci.yml` still has push/pull_request triggers, untouched here).
+- **wkhtmltopdf conformance** needs the patched-Qt build; Ubuntu's apt build fails 4 cases.
+- **Tooling** (`.codex/`): `rsync` and `rexml` gaps, and the session's three fixes are in the
+  commits above; `test_setup.sh` still appends `rails-controller-testing` that the plugin Gemfile
+  also declares (bundler warns about a duplicate, harmless).
+
+## Open questions for Jan
+
+Taken unattended, each built the way most likely right for GEOxyz and losing nothing:
+
+- **Q1. Liquid version policy.** Options: (a) as built: 5.14.0 on Ruby ≥ 3.3, < 5.6 (5.5.1) on
+  Ruby < 3.3; (b) one cap for all, < 5.6 (loses 5.14's range-accounting fix on Redmine 7 for no
+  measured reason); (c) no cap (5.1 hosts break on the next `bundle update`). Recommendation: (a).
+- **Q2. Templates over 64 KiB on MariaDB.** Built: a validation message instead of a 500;
+  PostgreSQL unchanged. Alternative: widen `content`/`description` to MEDIUMTEXT on MySQL the way
+  core does for `issues.description` (`limit: 16.megabytes`), which needs a `change_column`
+  migration the project's reversibility gate (G11) forbids today. Recommendation: keep the
+  validation unless GEOxyz runs MariaDB in production and has templates that large; which
+  database does production use?
+- **Q3. `todolists_with_positions` in reports.** Not built. Options: (a) `redmine_issue_todo_lists2`
+  also extends this plugin's `IssueDrop` (the fix belongs there; this plugin has no drop
+  extension point yet); (b) this plugin adds the accessor when the todo plugin is present (new
+  drop surface, visibility to decide); (c) document it. Recommendation: first grep the production
+  templates (`rake reporter_dashboards:migrate_from_reporter:plan` lists accessors, or SQL on
+  `report_templates.content LIKE '%todolists_with_positions%'`); if any use it, (a).
+- **Q4. Branch.** The task named `redmine70-migration`; the session-start hook pins
+  `claude/next-session-prompt-it4too` and moved the session there; the session moved back
+  because the task (with commit authority) named this branch explicitly. `CLAUDE.md`'s pin was not
+  edited. Merge order suggestion: this branch into the dev branch, then the dev branch into main.
+- **Q5. Admin menu icon.** `checked` was chosen (exists on 6.0/6.1/7.0). Any preference?
+
 ## GEOxyz changes to review or re-apply
 
 Own plugin: all of it is GEOxyz code, so there is nothing to re-apply. While migrating, hold the code you touch to the rules below; list larger quality problems you find in the work list instead of fixing them in passing.
@@ -60,7 +219,27 @@ Own plugin: all of it is GEOxyz code, so there is nothing to re-apply. While mig
 
 Actions the person doing the upgrade must take, or know about, for this plugin:
 
-- None known. Add here what the session finds.
+- **`bundle install` after deploying this branch.** The plugin Gemfile now picks Liquid by Ruby
+  version: Ruby 3.3+ (Redmine 7.0) resolves `liquid` 5.14.0; Ruby < 3.3 resolves 5.5.1. Nothing
+  else changes in the bundle.
+- **Ruby 3.2 hosts (Redmine 5.1, until the switch): run `bundle install` with this branch, or at
+  least make sure Gemfile.lock does not hold Liquid 5.6.1 or newer.** With those, every report
+  template fails to parse on Ruby 3.2 (`undefined method 'peek_byte' for StringScanner`). A host
+  whose lock was written before Liquid 5.6.1 was released is not affected today, but any `bundle
+  update` there would have broken all reports. Check: `grep '    liquid (' Gemfile.lock`.
+- **No migration.** The schema is unchanged; `rake redmine:plugins:migrate` is a no-op for this
+  plugin. Down/up was run on PostgreSQL and MariaDB (`script/migrate_updown.sh`: OK, both arms).
+- **PDF engine**: the default engine is headless Chromium on the Redmine host and it refuses to
+  run as root (it never sets `--no-sandbox`, on purpose). Redmine must run as an unprivileged
+  user, as it normally does under Passenger or Puma. Measured: as root every PDF fails with
+  `engine_crashed ... Running as root without --no-sandbox is not supported`.
+- **Scheduled reports still need the cron entry** (`rake reporter_dashboards:schedules:run`,
+  README). `schedules:status` exits 1 with a warning until the first run; that is by design.
+- **MariaDB/MySQL**: a report template larger than 65 535 bytes (or a description over it) is now
+  refused with a validation message instead of a 500 on save. PostgreSQL is unchanged (no limit).
+  If GEOxyz has templates near that size on MariaDB, see "Open questions for Jan" (Q2).
+- **Templates using `issue.todolists_with_positions`** (from `redmine_issue_todo_lists2`) render
+  that part empty in this plugin; grep production templates before the switch (Q3).
 
 ## How to test
 
@@ -80,6 +259,20 @@ membership); password `Redmine7Test!`. Needs Node with Playwright and Chromium
 The coordinator's harness (`plugin-check.sh` in the migration kit, kept outside this repo) adds a
 browser smoke test of every page the plugin adds and runs all GEOxyz plugins together; the
 results quoted in the analysis come from it.
+
+Notes from the 2026-10-06 run, for whoever repeats it here:
+
+- `REDMINE_REPO_URL=https://github.com/jcatrysse/redmine ./.codex/redmine_clone.sh 7.0-stable-GEOxyz`
+  clones the GEOxyz branch; switching `RRD_DB` needs `bundle install` in the checkout (Redmine
+  picks adapter gems from database.yml).
+- Run `start_server.sh` and `e2e.sh` as an unprivileged user (the PDF engine refuses root),
+  e.g. `su rrd -c '... ./.codex/start_server.sh --reset'`, with `PLAYWRIGHT_BROWSERS_PATH` set.
+- The system tests need a chromedriver matching the Chromium (141 here, from
+  chrome-for-testing), `RAILS_ENV=test`, `RRD_CHROME_PATH` and `GOOGLE_CHROME_OPTS_ARGS`.
+- `script/migrate_updown.sh` needs a test database built by migrating, not by `db:schema:load`
+  (the latter does not record the plugin's versions, and VERSION=0 then reverts nothing).
+- Re-running the e2e set on a database not reset since the last run fails by design in two
+  places: today's schedule is already delivered, and My page blocks are already placed.
 
 ## How the migration session works (same for every plugin)
 
