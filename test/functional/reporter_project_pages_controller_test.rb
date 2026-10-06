@@ -198,20 +198,36 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
   # exactly like a successful one, and the widget redrew from the in-memory object the
   # user had just changed. The size limit on the settings column is the easiest real
   # rejection to produce.
+  #
+  # Under a 1 KiB limit rather than the real 64 KiB one: an already-oversized row has to be
+  # STORED first, and on MySQL/MariaDB (TEXT holds 65 535 bytes) one over the real limit
+  # cannot be, so `update_column` raised ValueTooLong there before the request was made.
   def test_update_page_reports_a_failed_save_and_reloads
-    @tab.update!(layout: [['news']])
-    # Past the settings size limit, written with update_column so it bypasses both the
-    # sanitizer (which bounds each value) and the validation. Any further legal change
-    # then merges onto an already-oversized column, so save really does fail — no stub.
-    @tab.update_column(:settings, { 'news' => { 'note' => 'x' * (ReporterProjectTab::MAX_SETTINGS_BYTES + 1) } })
+    with_settings_limit(1024) do
+      @tab.update!(layout: [['news']])
+      # Past the settings size limit, written with update_column so it bypasses both the
+      # sanitizer (which bounds each value) and the validation. Any further legal change
+      # then merges onto an already-oversized column, so save really does fail — no stub.
+      @tab.update_column(:settings, { 'news' => { 'note' => 'x' * (ReporterProjectTab::MAX_SETTINGS_BYTES + 1) } })
 
-    compatible_xhr_request :patch, :update_page, project_id: @project.identifier, tab: @tab.id,
-                                                settings: { news: { limit: '5' } }
+      compatible_xhr_request :patch, :update_page, project_id: @project.identifier, tab: @tab.id,
+                                                  settings: { news: { limit: '5' } }
 
-    assert_response :success
-    assert_match 'window.location.reload', @response.body
-    assert_match I18n.t(:error_reporter_dashboard_save_failed), flash[:error]
-    assert_nil @tab.reload.block_settings('news')[:limit]
+      assert_response :success
+      assert_match 'window.location.reload', @response.body
+      assert_match I18n.t(:error_reporter_dashboard_save_failed), flash[:error]
+      assert_nil @tab.reload.block_settings('news')[:limit]
+    end
+  end
+
+  def with_settings_limit(bytes)
+    previous = ReporterProjectTab::MAX_SETTINGS_BYTES
+    ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
+    ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, bytes)
+    yield
+  ensure
+    ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
+    ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, previous)
   end
 
   def test_update_page_does_not_reload_on_a_successful_save

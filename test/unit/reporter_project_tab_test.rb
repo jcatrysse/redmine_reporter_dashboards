@@ -209,18 +209,44 @@ class ReporterProjectTabTest < ActiveSupport::TestCase
 
   # The size check has to measure what will actually be written, and settings belonging
   # to widgets that are no longer on the dashboard are dropped on the way there.
+  #
+  # Under a 1 KiB limit rather than the real one: the precondition is a row ALREADY over the
+  # limit, and on MySQL/MariaDB a row over the real limit cannot be stored at all (TEXT holds
+  # 65 535 bytes), so `update_column` raised there before the assertion was reached.
   def test_settings_of_removed_widgets_do_not_count_towards_the_size_limit
+    with_settings_limit(1024) do
+      tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
+      tab.add_block('news')
+      tab.save!
+      # 'activity' is not on the dashboard, so its settings are pruned before validation.
+      tab.update_column(:settings,
+                        { 'activity' => { 'note' => 'x' * (ReporterProjectTab::MAX_SETTINGS_BYTES + 1) } })
+      tab.reload
+
+      assert tab.valid?
+      assert tab.save
+      assert_equal({}, tab.reload.block_settings)
+    end
+  end
+
+  # AT the limit, the real one: a tab whose settings dump to exactly MAX_SETTINGS_BYTES is
+  # valid and must be STORED, on every engine. Worth asserting because the column is TEXT on
+  # MySQL/MariaDB (65 535 bytes) and the limit is 65 536: it holds there only because the
+  # dump ends in a newline the engine trims (measured on MariaDB 10.11: stored as 65 535
+  # bytes, no error). A limit raised past that would be a 500 on those engines only.
+  def test_settings_exactly_at_the_limit_are_stored
     tab = ReporterProjectTab.create!(project: @project, title: 'Overview')
     tab.add_block('news')
     tab.save!
-    # 'activity' is not on the dashboard, so its settings are pruned before validation.
-    tab.update_column(:settings,
-                      { 'activity' => { 'note' => 'x' * (ReporterProjectTab::MAX_SETTINGS_BYTES + 1) } })
-    tab.reload
+    tab.update_block_settings('news', { 'note' => 'x' })
+    overhead = YAML.dump(tab.settings).bytesize - 1 # measured: the key may be stored as a Symbol
+    tab.update_block_settings('news', { 'note' => 'x' * (ReporterProjectTab::MAX_SETTINGS_BYTES - overhead) })
+    assert_equal ReporterProjectTab::MAX_SETTINGS_BYTES, YAML.dump(tab.settings).bytesize
 
     assert tab.valid?
     assert tab.save
-    assert_equal({}, tab.reload.block_settings)
+    assert_equal ReporterProjectTab::MAX_SETTINGS_BYTES - overhead,
+                 tab.reload.block_settings('news').values.first.length
   end
 
   # The backstop behind the per-widget limits in BlockSettings: settings is a
@@ -242,5 +268,15 @@ class ReporterProjectTabTest < ActiveSupport::TestCase
     tab.update_block_settings('news', { 'note' => 'x' * 1_000 })
 
     assert tab.valid?
+  end
+
+  def with_settings_limit(bytes)
+    previous = ReporterProjectTab::MAX_SETTINGS_BYTES
+    ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
+    ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, bytes)
+    yield
+  ensure
+    ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
+    ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, previous)
   end
 end

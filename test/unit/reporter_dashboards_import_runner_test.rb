@@ -17,6 +17,17 @@ require File.expand_path('../test_helper', __dir__)
 class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
   fixtures :projects, :users, :roles, :members, :member_roles, :enabled_modules
 
+  # NOT TRANSACTIONAL, and that is a MySQL/MariaDB requirement. Every test here creates and
+  # drops a stand-in for reporter's `report_templates`, and on MySQL and MariaDB DDL commits
+  # the open transaction implicitly: the fixture transaction was gone after `setup`, the
+  # importer's own `transaction(requires_new: true)` failed with "SAVEPOINT active_record_1
+  # does not exist" (21 errors), and what the tests wrote stayed committed and broke 8 tests
+  # in other files of the same run. Found by the first full-app run on MariaDB; PostgreSQL
+  # has transactional DDL, which is why CI never saw it. Same remedy as
+  # `ReporterDashboardsShareLinkConcurrencyTest`: no transaction, and `teardown` removes what
+  # a test can have committed.
+  self.use_transactional_tests = false
+
   Runner = RedmineReporterDashboards::Import::Runner
   Template = RedmineReporterDashboards::Template
 
@@ -29,6 +40,21 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
 
   def teardown
     drop_source_tables
+    remove_committed_rows
+  end
+
+  # The plugin's own tables are never fixtures, so every other test starts from them empty:
+  # emptying them restores exactly that. Fixture tables are reloaded by the next test that
+  # declares them (a non-transactional class resets the fixture cache); the two users
+  # `test_resolve_actor_refuses_an_administrator_who_cannot_log_in` creates are the one
+  # write outside both, and are removed by login with their e-mail rows.
+  def remove_committed_rows
+    connection.tables
+              .select { |name| name.start_with?('reporter_dashboards_') || name == 'reporter_project_tabs' }
+              .each { |name| connection.delete("DELETE FROM #{connection.quote_table_name(name)}") }
+    user_ids = User.where(login: %w[lockedadmin regadmin]).pluck(:id)
+    EmailAddress.where(user_id: user_ids).delete_all
+    User.where(id: user_ids).delete_all
   end
 
   # ------------------------------------------------------------------ the substrate
