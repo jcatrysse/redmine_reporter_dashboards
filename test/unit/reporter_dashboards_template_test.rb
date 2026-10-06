@@ -53,6 +53,41 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
     assert_includes template.errors.attribute_names, :visibility
   end
 
+  # THE CONTENT HAS TO FIT THE COLUMN ON THE ENGINE IN USE. On MySQL/MariaDB `text` is TEXT
+  # (65 535 bytes) and a longer template raised ActiveRecord::ValueTooLong on save — a 500
+  # in the editor. Both branches assert something: where the column has a limit, one byte
+  # over is a validation error and the limit itself saves; where it has none (PostgreSQL),
+  # a template past 64 KiB still saves, so the fix took nothing away there.
+  def test_content_must_fit_the_column_of_the_engine_in_use
+    limit = Template.columns_hash['content'].limit
+    template = Template.new(project: @project, author_id: @author.id, name: 'Long')
+
+    if limit
+      template.content = 'x' * (limit + 1)
+      assert_not template.valid?
+      assert template.errors[:content].any?, 'one byte past the column must be refused'
+
+      template.content = ('é' * (limit / 2)) + ('x' * (limit % 2))
+      assert_equal limit, template.content.bytesize
+      assert template.save, 'a template exactly at the column limit must be stored'
+      assert_equal limit, template.reload.content.bytesize
+    else
+      template.content = 'x' * (70 * 1024)
+      assert template.save, 'PostgreSQL has no text limit, and keeps storing long templates'
+      assert_equal 70 * 1024, template.reload.content.bytesize
+    end
+  end
+
+  def test_content_over_the_column_limit_is_counted_in_bytes_not_characters
+    limit = Template.columns_hash['content'].limit
+    template = Template.new(project: @project, author_id: @author.id, name: 'Multibyte',
+                            content: 'é' * ((limit || 65_535) / 2 + 1))
+
+    assert_equal(limit.nil?, template.valid?,
+                 'over the limit in bytes while under it in characters must be refused ' \
+                 'wherever the column has a limit')
+  end
+
   def test_a_name_is_required
     assert_not Template.new(project: @project, author_id: @author.id).valid?
   end

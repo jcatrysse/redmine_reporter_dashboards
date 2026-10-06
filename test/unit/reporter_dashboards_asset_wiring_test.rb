@@ -566,7 +566,16 @@ class ReporterDashboardsAssetWiringTest < ActiveSupport::TestCase
     # assertions. A body big enough to separate them is the only fixture that discriminates.
     body = "<p>#{'x' * 3_000_000}</p>"
     with_run_budget(1024 * 1024) do
-      outcome = render(body)
+      # UNSAVED: a 3 MB template cannot be stored on MySQL/MariaDB (TEXT holds 65 535
+      # bytes, and Template validates that), and what is under test is the run budget, not
+      # storage. ReportRun reads the content off the record it is given.
+      @template.content = body
+      outcome = run_with(RecordingEngine) do
+        ReportRun.new(template: @template, actor: @actor,
+                      scope: Issue.visible(@actor).where(project_id: @project.id),
+                      guard: RedmineReporterDashboards::Render::BatchGuard.new(max_documents: 5))
+                 .call(pdf: true)
+      end
 
       assert_not outcome.ok?
       assert_includes outcome.diagnostic.message, '2 MB', 'the SIZE must be named'
