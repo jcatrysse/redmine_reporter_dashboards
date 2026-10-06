@@ -74,10 +74,17 @@ if [ "$adapter" = mysql2 ] && command -v mysql >/dev/null 2>&1; then
     mysql -h "$host" -P "$port" -uroot -p"$password" -e "$grant" 2>/dev/null || true
 fi
 
+# Under the SERVER's environment, not `default:`. A `default:` email_delivery also applies
+# to RAILS_ENV=test and replaces its :test delivery method, so every plugin test that reads
+# ActionMailer::Base.deliveries failed once the server had been started in that checkout.
+if [ -f "$REDMINE_DIR/config/configuration.yml" ] && grep -q '^default:' "$REDMINE_DIR/config/configuration.yml" \
+   && grep -q 'tmp/mails' "$REDMINE_DIR/config/configuration.yml"; then
+  rm -f "$REDMINE_DIR/config/configuration.yml"   # the one an earlier version of this script wrote
+fi
 if [ ! -f "$REDMINE_DIR/config/configuration.yml" ]; then
   mkdir -p "$REDMINE_DIR/tmp/mails"
   cat > "$REDMINE_DIR/config/configuration.yml" <<YAML
-default:
+$RMP_SERVER_ENV:
   email_delivery:
     delivery_method: :file
     file_settings:
