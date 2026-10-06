@@ -98,7 +98,7 @@ class ReporterPreflightControllerTest < ActionController::TestCase
     item = Redmine::MenuManager.items(:admin_menu).detect { |i| i.name == :reporter_dashboards_preflight }
 
     assert item, 'the preflight is reachable from the administration menu'
-    assert_equal 'application-pdf', item.icon if item.respond_to?(:icon)
+    assert_equal 'shield-check', item.icon if item.respond_to?(:icon)
   end
 
   def test_show_redirects_an_anonymous_visitor_to_login
