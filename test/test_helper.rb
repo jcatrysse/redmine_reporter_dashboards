@@ -25,3 +25,16 @@ end
 # instead of skipping on exactly the standalone configuration FR-01 is about, and the skip
 # inventory (G10) shrank rather than being rewritten. `ReporterReportTemplates` — the module
 # they read their class list from — went with them.
+
+# ReporterProjectTab::MAX_SETTINGS_BYTES lowered for the block. A test whose precondition is a
+# row ALREADY over the limit cannot use the real 64 KiB one on MySQL/MariaDB, whose TEXT
+# column holds 65 535 bytes, so `update_column` raised before the test began.
+def with_settings_limit(bytes)
+  previous = ReporterProjectTab::MAX_SETTINGS_BYTES
+  ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
+  ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, bytes)
+  yield
+ensure
+  ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
+  ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, previous)
+end

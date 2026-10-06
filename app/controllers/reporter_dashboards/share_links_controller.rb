@@ -176,7 +176,11 @@ module ReporterDashboards
 
       # NOT `flash[:notice]`. The token is a credential and the notice partial is rendered
       # into every page of the next request; keeping it in its own key means the view has to
-      # ask for it deliberately, and nothing else can print it by accident.
+      # ask for it deliberately. A key of its own is NOT invisible to core, though: the layout
+      # prints every String flash value (render_flash_messages, 5.1 through 7.0), so the
+      # share-link list takes it out of the flash before the layout renders. If the redirect
+      # below lands anywhere else, core prints it there once, to the user who just minted it.
+      # A non-String value would be skipped on 7.0 but raises in 5.1's `v.html_safe`.
       flash[:reporter_share_url] = reporter_share_url(token: token)
       flash[:notice] = l(:notice_reporter_share_link_created)
       redirect_to project_reporter_template_share_links_path(@project, @template)

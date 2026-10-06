@@ -34,7 +34,12 @@ RSpec.describe RedmineReporterDashboards::Compat do
     expect(::Liquid::Template.parse('a{% rrd_compat_probe %}b').render).to eq('aprobe-renderedb')
   end
 
+  # Liquid warns ONCE PER PROCESS (`Liquid::Deprecations.warned`), and other spec_liquid files
+  # call Template.register_tag first, so the set is cleared for the example: otherwise it
+  # would pass with the old call in place (independent review).
   it 'says nothing on stderr while registering, where Template.register_tag warns on 5.5+' do
+    ::Liquid::Deprecations.warned.clear if defined?(::Liquid::Deprecations)
+
     out = capture_stderr { described_class.register_liquid_tag('rrd_compat_quiet', probe) }
 
     expect(out).not_to include('DEPRECATION')
@@ -42,6 +47,10 @@ RSpec.describe RedmineReporterDashboards::Compat do
 
   if defined?(::Liquid::Environment) && ::Liquid::Environment.respond_to?(:default)
     it 'writes the default Environment, the registry Template.parse reads (Liquid 5.5+)' do
+      # Template.register_tag also lands in Environment.default, so the registry alone could
+      # not tell the deprecated call from the new one: assert the deprecated one is not made.
+      expect(::Liquid::Template).not_to receive(:register_tag)
+
       described_class.register_liquid_tag('rrd_compat_env', probe)
 
       expect(::Liquid::Environment.default.tags['rrd_compat_env']).to eq(probe)

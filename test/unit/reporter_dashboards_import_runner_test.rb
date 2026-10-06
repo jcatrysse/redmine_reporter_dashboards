@@ -45,10 +45,15 @@ class ReporterDashboardsImportRunnerTest < ActiveSupport::TestCase
 
   # The plugin's own tables are never fixtures, so every other test starts from them empty:
   # emptying them restores exactly that. Fixture tables are reloaded by the next test that
-  # declares them (a non-transactional class resets the fixture cache); the two users
-  # `test_resolve_actor_refuses_an_administrator_who_cannot_log_in` creates are the one
+  # declares them (a non-transactional class resets the fixture cache), but a class that
+  # reads project 1 WITHOUT declaring `:projects` would see whatever this one left, so the
+  # one fixture row a test here changes (`test_a_template_in_an_archived_project_is_still_
+  # imported` archives project 1; its fixture status is active) is put back as well
+  # (independent review). The two users
+  # `test_resolve_actor_refuses_an_administrator_who_cannot_log_in` creates are the other
   # write outside both, and are removed by login with their e-mail rows.
   def remove_committed_rows
+    Project.where(id: @project.id).update_all(status: Project::STATUS_ACTIVE) if @project
     connection.tables
               .select { |name| name.start_with?('reporter_dashboards_') || name == 'reporter_project_tabs' }
               .each { |name| connection.delete("DELETE FROM #{connection.quote_table_name(name)}") }

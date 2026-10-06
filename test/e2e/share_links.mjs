@@ -33,6 +33,10 @@ async function mint(purpose, maxUses, publicLink = false) {
 await t.go(`${sharesUrl}/new`);
 await t.shot('new', 'The new share link form: purpose, expiry, use limit, public flag');
 const privUrl = await mint('E2E members only', 0);
+// The URL is shown once, in the labelled box, and not again as a raw core flash box.
+const occurrences = (await t.page.content()).split(privUrl).length - 1;
+if (occurrences !== 1) fail(`the new share URL is on the page ${occurrences} times, expected once`);
+if (await t.page.locator('#flash_reporter_share_url').count()) fail('core printed the share URL as a flash box');
 await t.shot('created', 'Link created: the URL is shown once, the list shows expiry, uses and the revoke action');
 
 // A non-public link: anonymous is sent to the login page, a logged-in user gets the PDF.
@@ -76,7 +80,7 @@ await t.login('manager');
 await t.go(sharesUrl);
 const row = t.page.locator('tr', { hasText: 'E2E review' });
 t.page.once('dialog', d => d.accept());
-await row.locator('a[href*="revoke"], input[type=submit], button').first().click();
+await row.locator('a[href*="/revoke"]').first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
 t.check('revoke');

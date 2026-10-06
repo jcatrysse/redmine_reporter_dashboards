@@ -126,11 +126,12 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
   # menu with no icon. It needs no `compat/` entry, which is what T-14 assumed: Redmine 5.1's
   # MenuItem#initialize reads only the keys it knows and ignores `:icon` (read on
   # 5.1-stable, Redmine 7 migration), so 5.1 renders the plain link it always did.
-  # shield-check rather than application-pdf: the file-type icons are drawn dark, the menu's
-  # line icons in the link colour.
+  # `checked` because it is in core's sprite on 6.0, 6.1 and 7.0 (read on each branch): the
+  # file-type icons such as application-pdf are drawn dark beside the menu's line icons, and
+  # shield-check, tried first, does not exist on 6.0 (independent review).
   menu :admin_menu, :reporter_dashboards_preflight,
        { controller: 'reporter_preflight', action: 'show' },
-       caption: :label_reporter_preflight, icon: 'shield-check'
+       caption: :label_reporter_preflight, icon: 'checked'
 
   # ONE PROJECT MENU ITEM, AND THE OTHER TWO WERE DELETED RATHER THAN HIDDEN.
   #

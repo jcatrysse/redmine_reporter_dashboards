@@ -163,7 +163,7 @@ module RedmineReporterDashboards
     validates :orientation, inclusion: { in: ORIENTATIONS }
     validates :page_size, inclusion: { in: PAGE_SIZES }
     validates :margins, format: { with: MARGINS_FORMAT }, allow_blank: true
-    validate :content_fits_its_column, if: :content_changed?
+    validate :text_fits_its_column
     # Redmine's own rule for a roles-visible query (`app/models/query.rb:276-278`): a
     # visibility of ROLES with no roles named is not "visible to nobody", it is a form
     # somebody filled in wrong. The message is assembled from the two core keys core
@@ -228,6 +228,12 @@ module RedmineReporterDashboards
     # **NOT COVERED BY ANY MySQL OR MariaDB RUN** — finding S-9's shape exactly. This is
     # hand-written SQL with an EXISTS subquery and it executes only in the `minitest` job,
     # which is PostgreSQL only. Recorded rather than implied.
+    # The byte capacity the database reports for a `text` column: 65 535 on MySQL/MariaDB,
+    # nil (unbounded) on PostgreSQL. See #text_fits_its_column.
+    def self.text_column_limit(name)
+      columns_hash[name.to_s]&.limit
+    end
+
     def self.visible(user)
       raise ArgumentError, 'Template.visible needs an actor (INV-1)' if user.nil?
 
@@ -475,18 +481,26 @@ module RedmineReporterDashboards
 
     private
 
-    # THE SAME CROSS-ENGINE RULE AS MAX_STRING, for `content`. It is a `text` column: no
-    # limit on PostgreSQL, TEXT on MySQL and MariaDB, which holds 65 535 bytes. A longer
-    # template validated, then raised ActiveRecord::ValueTooLong on save there — a 500 in the
-    # editor, decided by the engine (first full-app run on MariaDB). The limit is asked of
-    # the column rather than written down, so PostgreSQL keeps storing templates of any
-    # size and a column widened by an administrator is honoured. Measured in bytes, as the
-    # engine counts; the message is Rails' own :too_long, as ReporterProjectTab's is.
-    def content_fits_its_column
-      limit = self.class.columns_hash['content']&.limit
-      return if limit.nil? || content.nil? || content.bytesize <= limit
+    # THE SAME CROSS-ENGINE RULE AS MAX_STRING, for the two `text` columns. No limit on
+    # PostgreSQL; TEXT on MySQL and MariaDB, which holds 65 535 bytes. A longer template
+    # validated, then raised ActiveRecord::ValueTooLong on save there — a 500 in the editor,
+    # decided by the engine (first full-app run on MariaDB). The limit is asked of the column
+    # rather than written down, so PostgreSQL keeps storing templates of any size and a column
+    # widened by an administrator is honoured. Measured in bytes, as the engine counts; the
+    # message is Rails' own :too_long, as ReporterProjectTab's is. Only a value being changed
+    # is measured, so a row stored before this rule (impossible on MySQL anyway) stays savable.
+    TEXT_COLUMNS = %w[content description].freeze
 
-      errors.add(:content, :too_long, count: limit)
+    def text_fits_its_column
+      TEXT_COLUMNS.each do |name|
+        next unless attribute_changed?(name)
+
+        limit = self.class.text_column_limit(name)
+        value = self[name]
+        next if limit.nil? || value.nil? || value.bytesize <= limit
+
+        errors.add(name.to_sym, :too_long, count: limit)
+      end
     end
 
     # T-28 — DELETING A REPORT TAKES ITS SNAPSHOTS' BYTES OFF THE DISK, and keeps the rows.

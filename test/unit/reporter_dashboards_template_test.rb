@@ -59,7 +59,7 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
   # over is a validation error and the limit itself saves; where it has none (PostgreSQL),
   # a template past 64 KiB still saves, so the fix took nothing away there.
   def test_content_must_fit_the_column_of_the_engine_in_use
-    limit = Template.columns_hash['content'].limit
+    limit = Template.text_column_limit('content')
     template = Template.new(project: @project, author_id: @author.id, name: 'Long')
 
     if limit
@@ -78,8 +78,25 @@ class ReporterDashboardsTemplateTest < ActiveSupport::TestCase
     end
   end
 
+  # THE SAME RULE, ON EVERY ENGINE CI RUNS. CI's full-app suite runs on PostgreSQL only, where
+  # `text` has no limit and the two tests above take their "no limit" branch; here the column
+  # reports a MySQL-sized limit, so reverting the validation fails CI, not only a MariaDB run.
+  def test_a_column_limit_is_enforced_for_content_and_description_wherever_one_is_reported
+    Template.stubs(:text_column_limit).returns(1024)
+    template = Template.new(project: @project, author_id: @author.id, name: 'Stubbed',
+                            content: 'x' * 1025, description: 'é' * 513)
+
+    assert_not template.valid?
+    assert template.errors[:content].any?, 'content one byte past the column'
+    assert template.errors[:description].any?, 'description past the column in bytes, not characters'
+
+    template.content = 'x' * 1024
+    template.description = 'é' * 512
+    assert template.valid?, template.errors.full_messages.join(', ')
+  end
+
   def test_content_over_the_column_limit_is_counted_in_bytes_not_characters
-    limit = Template.columns_hash['content'].limit
+    limit = Template.text_column_limit('content')
     template = Template.new(project: @project, author_id: @author.id, name: 'Multibyte',
                             content: 'é' * ((limit || 65_535) / 2 + 1))
 

@@ -98,7 +98,13 @@ class ReporterPreflightControllerTest < ActionController::TestCase
     item = Redmine::MenuManager.items(:admin_menu).detect { |i| i.name == :reporter_dashboards_preflight }
 
     assert item, 'the preflight is reachable from the administration menu'
-    assert_equal 'shield-check', item.icon if item.respond_to?(:icon)
+    return unless item.respond_to?(:icon)
+
+    assert_equal 'checked', item.icon
+    # The name must exist in THIS Redmine's sprite, or the menu draws an empty <use>:
+    # shield-check, tried first, is absent on 6.0.
+    sprite = File.read(Rails.root.join('app/assets/images/icons.svg'))
+    assert_includes sprite, %(id="icon--#{item.icon}")
   end
 
   def test_show_redirects_an_anonymous_visitor_to_login

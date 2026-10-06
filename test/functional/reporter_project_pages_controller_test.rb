@@ -220,16 +220,6 @@ class ReporterProjectPagesControllerTest < ActionController::TestCase
     end
   end
 
-  def with_settings_limit(bytes)
-    previous = ReporterProjectTab::MAX_SETTINGS_BYTES
-    ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
-    ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, bytes)
-    yield
-  ensure
-    ReporterProjectTab.send(:remove_const, :MAX_SETTINGS_BYTES)
-    ReporterProjectTab.const_set(:MAX_SETTINGS_BYTES, previous)
-  end
-
   def test_update_page_does_not_reload_on_a_successful_save
     @tab.update!(layout: [['news']])
 
