@@ -135,6 +135,24 @@ class ReporterDashboardsShareLinksControllerTest < Redmine::ControllerTest
 
   # ------------------------------------------------------------------ reaching the surface
 
+  # THE URL IS SHOWN ONCE ON THE PAGE, in the labelled box. Core's layout prints every
+  # string flash key as a raw `div.flash`; before the view took the key out, the URL was on
+  # the page twice, the second time above the notice with no label (Redmine 7 browser run).
+  def test_the_minted_url_appears_once_and_not_as_a_core_flash_box
+    grant(:share_reporter_dashboards_reports)
+    @request.session[:user_id] = @owner.id
+    url = 'http://example.net/reporter/s/abcDEF123_-'
+
+    get :index, params: { project_id: @project.identifier, template_id: @template.id },
+                flash: { reporter_share_url: url }
+
+    assert_response :success
+    assert_select 'div#flash_reporter_share_url', 0
+    assert_select 'input[readonly][value=?]', url, 1
+    assert_equal 1, @response.body.scan(url).length
+  end
+
+
   def test_the_holder_of_the_share_permission_sees_the_list
     grant(:share_reporter_dashboards_reports)
     @request.session[:user_id] = @owner.id

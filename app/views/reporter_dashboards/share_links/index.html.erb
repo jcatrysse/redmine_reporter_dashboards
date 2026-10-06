@@ -30,11 +30,19 @@
 
   It arrives in its OWN flash key rather than in `:notice`, so that the shared notice
   partial cannot print a credential by accident.
+
+  AND IT IS TAKEN OUT OF THE FLASH HERE. Core's layout prints EVERY string flash key
+  (`render_flash_messages`, 5.1 through 7.0), as a raw `div.flash`, after this template
+  has rendered: left in place, the URL was printed a second time above the notice, unlabelled
+  and unescaped (seen in the Redmine 7 browser run). Read, then deleted (FlashHash#delete
+  answers the flash, not the value), so nothing is left for the layout.
 %>
-<% if flash[:reporter_share_url].present? %>
+<% share_url = flash[:reporter_share_url] %>
+<% flash.delete(:reporter_share_url) %>
+<% if share_url.present? %>
   <div class="info">
     <p><strong><%= l(:text_reporter_share_url_once) %></strong></p>
-    <p><input type="text" readonly="readonly" size="80" value="<%= flash[:reporter_share_url] %>" /></p>
+    <p><input type="text" readonly="readonly" size="80" value="<%= share_url %>" /></p>
   </div>
 <% end %>
 
