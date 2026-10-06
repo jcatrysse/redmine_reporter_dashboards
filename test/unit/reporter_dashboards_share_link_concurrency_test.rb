@@ -105,8 +105,15 @@ class ReporterDashboardsShareLinkConcurrencyTest < ActiveSupport::TestCase
     threads = 2.times.map do
       Thread.new do
         ActiveRecord::Base.connection_pool.with_connection do |connection|
-          pids << connection.select_value('SELECT pg_backend_pid()')
-          arrived << :ready
+          # `ensure`, because a thread that raises before arriving left the main thread in
+          # `arrived.pop` forever: on MariaDB `pg_backend_pid()` raised, and the whole unit
+          # suite hung here with no output instead of failing (Redmine 7 migration, first
+          # full-app run on MariaDB). `join` below re-raises the thread's exception.
+          begin
+            pids << connection.select_value(backend_id_sql(connection))
+          ensure
+            arrived << :ready
+          end
           go.pop
           results << ShareLink.find(link.id).use!
         end
@@ -118,6 +125,17 @@ class ReporterDashboardsShareLinkConcurrencyTest < ActiveSupport::TestCase
     threads.each(&:join)
 
     [Array.new(2) { results.pop }, Array.new(2) { pids.pop }]
+  end
+
+  # The server-side id of a connection, asked in each engine's own words. PostgreSQL and
+  # MySQL/MariaDB are the two engines this plugin supports (README); anything else fails
+  # loudly rather than guessing, because a wrong answer here makes the file assert nothing.
+  def backend_id_sql(connection)
+    case connection.adapter_name
+    when /postg/i then 'SELECT pg_backend_pid()'
+    when /mysql|trilogy/i then 'SELECT CONNECTION_ID()'
+    else raise "no backend-id query for #{connection.adapter_name}"
+    end
   end
 
   # ------------------------------------------------------------------ the discriminator
