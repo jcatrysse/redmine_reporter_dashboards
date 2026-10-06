@@ -404,8 +404,8 @@ module RedmineReporterDashboards
     return unless defined?(::Liquid::Tag)
 
     require File.join(lib_root, 'sql_aggregation/liquid_aggregate_tag')
-    ::Liquid::Template.register_tag(TAG_NAME, SqlAggregation::LiquidAggregateTag)
-    ::Liquid::Template.register_tag(TAG_ALIAS, SqlAggregation::LiquidAggregateTag)
+    Compat.register_liquid_tag(TAG_NAME, SqlAggregation::LiquidAggregateTag)
+    Compat.register_liquid_tag(TAG_ALIAS, SqlAggregation::LiquidAggregateTag)
   rescue => e
     Rails.logger.warn("[reporter_dashboards] sql_aggregate tag registration failed: #{e.message}")
   end
@@ -422,7 +422,7 @@ module RedmineReporterDashboards
     return unless defined?(::Liquid::Tag)
 
     require File.join(lib_root, 'sql_aggregation/liquid_version_rollup_tag')
-    ::Liquid::Template.register_tag(VERSION_ROLLUP_TAG_NAME, SqlAggregation::LiquidVersionRollupTag)
+    Compat.register_liquid_tag(VERSION_ROLLUP_TAG_NAME, SqlAggregation::LiquidVersionRollupTag)
   rescue => e
     Rails.logger.warn("[reporter_dashboards] version_rollup tag registration failed: #{e.message}")
   end
@@ -439,7 +439,7 @@ module RedmineReporterDashboards
     return unless defined?(::Liquid::Tag)
 
     require File.join(lib_root, 'version_mapping/liquid_version_map_tag')
-    ::Liquid::Template.register_tag(VERSION_MAP_TAG_NAME, VersionMapping::LiquidVersionMapTag)
+    Compat.register_liquid_tag(VERSION_MAP_TAG_NAME, VersionMapping::LiquidVersionMapTag)
   rescue => e
     Rails.logger.warn("[reporter_dashboards] geo_version_map tag registration failed: #{e.message}")
   end
@@ -454,8 +454,8 @@ module RedmineReporterDashboards
     return unless defined?(::Liquid::Tag)
 
     require File.join(lib_root, 'redmine_reporter_dashboards/liquid/tags/chart_tag')
-    ::Liquid::Template.register_tag(CHART_TAG_NAME,
-                                    RedmineReporterDashboards::Liquid::Tags::ChartTag)
+    Compat.register_liquid_tag(CHART_TAG_NAME,
+                               RedmineReporterDashboards::Liquid::Tags::ChartTag)
   rescue => e
     Rails.logger.warn("[reporter_dashboards] chart tag registration failed: #{e.message}")
   end
@@ -465,8 +465,8 @@ module RedmineReporterDashboards
     return unless defined?(::Liquid::Tag)
 
     require File.join(lib_root, 'redmine_reporter_dashboards/liquid/tags/mermaid_tag')
-    ::Liquid::Template.register_tag(MERMAID_TAG_NAME,
-                                    RedmineReporterDashboards::Liquid::Tags::MermaidTag)
+    Compat.register_liquid_tag(MERMAID_TAG_NAME,
+                               RedmineReporterDashboards::Liquid::Tags::MermaidTag)
   rescue => e
     Rails.logger.warn("[reporter_dashboards] mermaid tag registration failed: #{e.message}")
   end

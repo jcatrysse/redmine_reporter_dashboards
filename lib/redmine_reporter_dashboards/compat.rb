@@ -106,6 +106,29 @@ module RedmineReporterDashboards
       false
     end
 
+    # Where a Liquid tag is registered. A LIQUID divergence, not a Rails one, but the same
+    # rule applies: one home.
+    #
+    #   Liquid 5.5+   `Liquid::Environment.default.register_tag`. `Template.register_tag`
+    #                 still works there, but only as a wrapper that calls exactly this and
+    #                 prints "[DEPRECATION] Template.register_tag is deprecated" (5.14.0,
+    #                 which Redmine 7.0 resolves to, prints it at every boot), and the
+    #                 deprecation names Liquid 6 as the release that drops it.
+    #   Liquid 4.x,   HAVE NO Environment; `Template.register_tag` is the only way.
+    #   5.0 .. 5.4
+    #
+    # Same registry either way: `Template.parse` without an `environment:` option parses
+    # against `Environment.default`, which is how the renderer parses, so a tag registered
+    # here is the tag the renderer sees. Asked with `respond_to?` rather than of
+    # `Liquid::VERSION`, because which object answers is what the versions differ on.
+    def self.register_liquid_tag(name, klass)
+      if defined?(::Liquid::Environment) && ::Liquid::Environment.respond_to?(:default)
+        ::Liquid::Environment.default.register_tag(name, klass)
+      else
+        ::Liquid::Template.register_tag(name, klass)
+      end
+    end
+
     # Rails 7.2 moved the schema cache from the connection to the pool. Asked with
     # `respond_to?` rather than of `Rails::VERSION`, because the question is which object
     # answers, and that is what the two branches actually differ on.
