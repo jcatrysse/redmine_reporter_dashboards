@@ -168,5 +168,10 @@ fi
 # create — so switching Redmine branches produced "5 pending migrations" and the
 # full-app suite could not run standalone at all. Reporter's presence decides which
 # CONFIGURATION is set up, never whether there is a database to set up.
+# Redmine ships no schema.rb. The one a previous run dumped belongs to THAT run's adapter,
+# and `db:migrate` on an empty database loads it instead of migrating, so switching
+# RRD_DB from postgresql to mariadb died on PostgreSQL's `lower((login)::text)` index
+# syntax. Removed so every setup migrates from scratch on the engine it was asked for.
+rm -f db/schema.rb
 run_command bundle exec rake db:drop db:create db:migrate RAILS_ENV=test
 run_command bundle exec rake redmine:plugins:migrate RAILS_ENV=test
