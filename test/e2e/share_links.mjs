@@ -16,8 +16,9 @@ const sharesUrl = `${showUrl}/shares`;
 await t.go(sharesUrl);
 await t.shot('index-empty', 'Share links of "E2E issue report" before any link exists: the empty state and the create action');
 
-async function mint(purpose, maxUses) {
+async function mint(purpose, maxUses, publicLink = false) {
   await t.go(`${sharesUrl}/new`);
+  if (publicLink) await t.page.check('input[name=public_link]');
   await t.page.fill('#purpose', purpose).catch(() => t.page.fill('input[name=purpose]', purpose));
   if (maxUses) await t.page.fill('input[name=max_uses]', String(maxUses)).catch(() => fail('no max_uses field'));
   await t.page.locator('#content input[type=submit]').first().click();
@@ -31,26 +32,37 @@ async function mint(purpose, maxUses) {
 
 await t.go(`${sharesUrl}/new`);
 await t.shot('new', 'The new share link form: purpose, expiry, use limit, public flag');
-const url = await mint('E2E review', 0);
+const privUrl = await mint('E2E members only', 0);
 await t.shot('created', 'Link created: the URL is shown once, the list shows expiry, uses and the revoke action');
 
-// Open it anonymously in a fresh context.
+// A non-public link: anonymous is sent to the login page, a logged-in user gets the PDF.
+const privPath = privUrl.replace(/^https?:\/\/[^/]+/, '');
+await t.anonymous();
+await t.go(privPath);
+if (!t.page.url().includes('/login')) fail(`non-public link did not ask anonymous to log in: ${t.page.url()}`);
+await t.shot('private-anonymous', 'A non-public share link opened anonymously: Redmine asks for a login first');
+await t.login('reporter');
+let res = await t.page.request.get(t.BASE + privPath);
+let body = await res.body();
+if (res.status() !== 200 || body.subarray(0, 5).toString() !== '%PDF-') fail(`non-public link as a logged-in user: HTTP ${res.status()}, ${res.headers()['content-type']}`);
+else console.log(`  non-public link as reporter: ${body.length} bytes PDF`);
+
+// A public link: the frozen snapshot, anonymously.
+await t.login('manager');
+const url = await mint('E2E review', 0, true);
 const path = url.replace(/^https?:\/\/[^/]+/, '');
 await t.anonymous();
-const res = await t.page.request.get(t.BASE + path);
-const body = await res.body();
-if (res.status() !== 200) fail(`anonymous share open: HTTP ${res.status()}`);
-else console.log(`  share link served ${body.length} bytes, ${res.headers()['content-type']}`);
-await t.go(path).catch(() => {});
-await t.shot('anonymous-open', 'The share link opened anonymously serves the frozen snapshot (PDF)', { full: false });
-
-// Unknown token.
+res = await t.page.request.get(t.BASE + path);
+body = await res.body();
+if (res.status() !== 200 || body.subarray(0, 5).toString() !== '%PDF-') fail(`public link anonymously: HTTP ${res.status()}, ${res.headers()['content-type']}`);
+else console.log(`  public link anonymously: ${body.length} bytes, ${res.headers()['content-type']}`);
 await t.go('/reporter/s/thisIsNotAToken123', { status: 404 });
 await t.shot('unknown-token', 'An unknown token: refused with 404 and nothing about the report');
 
+
 // Single-use link: second use refused.
 await t.login('manager');
-const once = await mint('E2E single use', 1);
+const once = await mint('E2E single use', 1, true);
 const oncePath = once.replace(/^https?:\/\/[^/]+/, '');
 await t.anonymous();
 const r1 = await t.page.request.get(t.BASE + oncePath);

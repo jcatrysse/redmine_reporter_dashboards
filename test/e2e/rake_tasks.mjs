@@ -35,13 +35,18 @@ if (!fs.existsSync(bundleFile) || !fs.readFileSync(bundleFile, 'utf8').includes(
 rake('reporter_dashboards:import:plan', { RRD_FILE: bundleFile, RRD_PROJECT: 'e2e-private' });
 rake('reporter_dashboards:import:plan', { RRD_FILE: '/nonexistent.json', RRD_PROJECT: 'e2e-private' }, 2);
 rake('reporter_dashboards:import:run', { RRD_FILE: bundleFile, RRD_PROJECT: 'e2e-private', RRD_ON_CONFLICT: 'rename', RRD_ACTOR: 'admin' });
-rake('reporter_dashboards:schedules:status');
-const since = Date.now();
+// Before any run the status warns that nothing calls the scheduler, and says so with exit 1.
+rake('reporter_dashboards:schedules:status', {}, 1);
+// Redmine's :file delivery APPENDS every mail to one file per recipient, so mails are
+// counted by subject before and after rather than by file.
+const subjects = (subject) => t.mails(0).reduce((n, m) => n + m.body.split(`Subject: ${subject}`).length - 1, 0);
+const before = subjects('E2E daily issue report');
 rake('reporter_dashboards:schedules:run');
-const mails = t.mails(since).filter(m => m.body.includes('E2E daily issue report'));
-if (!mails.length) fail('schedules:run delivered no "E2E daily issue report" mail');
-else log.push(`schedules:run wrote ${mails.length} mail(s): ${mails.map(m => m.to).join(', ')}; PDF attached: ${mails.every(m => /application\/pdf/.test(m.body))}\n`);
+const delivered = subjects('E2E daily issue report') - before;
+if (delivered < 1) fail('schedules:run delivered no "E2E daily issue report" mail');
+else log.push(`schedules:run delivered ${delivered} mail(s) with subject "E2E daily issue report"\n`);
 rake('reporter_dashboards:schedules:run'); // second run the same day: nothing due, still exit 0
+if (subjects('E2E daily issue report') - before !== delivered) fail('a second schedules:run on the same day delivered again');
 rake('reporter_dashboards:schedules:status');
 rake('reporter_dashboards:documents:purge', { RRD_DRY_RUN: '1' });
 rake('reporter_dashboards:render:preflight', { RRD_ENGINE: 'chromium_cdp' });
@@ -51,7 +56,7 @@ fs.writeFileSync(path.join(OUT, 'rake_tasks-commands.md'), `# Rake tasks against
 // The run is visible in the browser too.
 await t.login('manager');
 await t.go('/projects/e2e-project/reporter/schedules');
-await t.page.locator('a', { hasText: 'E2E daily issue report' }).first().click();
+await t.page.locator('tr', { hasText: 'E2E issue report' }).locator('a[href*="/reporter/schedules/"]').first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
 await t.shot('schedule-after-run', 'The schedule after `rake reporter_dashboards:schedules:run`: the run is recorded as delivered, the next run moved on');

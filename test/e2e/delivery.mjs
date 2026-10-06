@@ -5,6 +5,8 @@ import { e2e } from '../../.codex/e2e/lib.mjs';
 const t = await e2e('delivery');
 const P = '/projects/e2e-project';
 const fail = (msg) => t.problems.push(msg);
+// Redmine's :file delivery APPENDS every mail to one file per recipient: count by subject.
+const subjects = (subject) => t.mails(0).reduce((n, m) => n + m.body.split(`Subject: ${subject}`).length - 1, 0);
 const text = async () => (await t.page.locator('#content').innerText()).replace(/\s+/g, ' ');
 
 await t.login('manager');
@@ -18,37 +20,35 @@ await t.go(`${P}/reporter/mail/new?template_id=${tplId}`);
 await t.shot('mail-new', 'The "send report by e-mail" form: recipients from the project, issues, subject');
 
 // No recipient: refused with a message, nothing sent.
-let since = Date.now();
+let mailsBefore = t.mails(0).reduce((n, m) => n + m.body.split('Subject: ').length - 1, 0);
 await t.page.locator('#content input[type=submit]').first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
 t.check('mail without recipient', { requests: ['422'] });
-if (t.mails(since).length) fail('a mail was written although no recipient was chosen');
+if (t.mails(0).reduce((n, m) => n + m.body.split('Subject: ').length - 1, 0) !== mailsBefore) fail('a mail was written although no recipient was chosen');
 await t.shot('mail-no-recipient', 'Sending without a recipient: an error, and no mail is written');
 
 await t.go(`${P}/reporter/mail/new?template_id=${tplId}`);
 await t.page.selectOption('#recipient_user_ids', { label: 'Manager E2E' });
 await t.page.fill('#subject', 'E2E ad hoc report');
-since = Date.now();
+const adhocBefore = subjects('E2E ad hoc report');
 await t.page.locator('#content input[type=submit]').first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
 t.check('mail send');
 await t.page.waitForTimeout(2000);
-const mails = t.mails(since);
-const adhoc = mails.find(m => m.body.includes('E2E ad hoc report'));
-if (!adhoc) fail(`no ad hoc mail written (${mails.length} mail file(s) since send)`);
-else {
-  console.log(`  ad hoc mail: ${adhoc.to}, ${adhoc.body.length} bytes, PDF attached: ${/application\/pdf/.test(adhoc.body)}`);
-  if (!/application\/pdf/.test(adhoc.body)) fail('the ad hoc mail has no PDF attachment');
-}
+const adhocMail = t.mails(0).find(m => m.to === 'manager@example.net');
+const lastAdhoc = adhocMail ? adhocMail.body.slice(adhocMail.body.lastIndexOf('Subject: E2E ad hoc report')) : '';
+if (subjects('E2E ad hoc report') - adhocBefore !== 1) fail('the ad hoc send did not write exactly one mail');
+else console.log(`  ad hoc mail to manager@example.net, PDF attached: ${/application\/pdf/.test(lastAdhoc)}`);
+if (!/application\/pdf/.test(lastAdhoc)) fail('the ad hoc mail has no PDF attachment');
 await t.shot('mail-sent', 'After sending: the mail log lists the send with its recipients and status');
 await t.go(`${P}/reporter/mail`);
 await t.shot('mail-log', 'The mail log of the project');
 
 // --- schedules ----------------------------------------------------------------------
 await t.go(`${P}/reporter/schedules`);
-if (!(await text()).includes('E2E daily issue report')) fail('seeded schedule missing from the list');
+if (!(await text()).includes('E2E issue report')) fail('seeded schedule missing from the list');
 await t.shot('schedules-index', 'Report schedules of the project: the seeded daily schedule with its next run');
 
 await t.go(`${P}/reporter/schedules/new`);
@@ -56,12 +56,14 @@ await t.shot('schedule-new', 'New schedule form: template, query, repeat, dates,
 await t.page.selectOption('select[name="schedule[template_id]"]', { label: 'E2E time report' });
 await t.page.selectOption('select[name="schedule[repeat]"]', 'weekly').catch(() => fail('no weekly repeat'));
 await t.page.fill('input[name="schedule[email_subject]"]', 'E2E weekly time report');
+await t.page.check('input[name="schedule[enabled]"][type=checkbox]');
 await t.page.selectOption('select[name="schedule[recipient_user_ids][]"]', { label: 'Manager E2E' });
 await t.page.locator('#content input[type=submit]').first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
 t.check('schedule create');
-if (!/schedules\/\d+/.test(t.page.url()) && !(await text()).includes('E2E weekly time report')) fail('schedule was not created');
+if (!/schedules\/\d+$/.test(t.page.url())) fail(`schedule was not created: ${t.page.url()}`);
+const weeklyUrl = t.page.url().replace(t.BASE, '');
 await t.shot('schedule-created', 'The new weekly schedule is saved');
 
 // Invalid: end date before start date.
@@ -78,47 +80,43 @@ await t.shot('schedule-invalid', 'End date before start date: rejected with an e
 
 // Test send of the seeded schedule.
 await t.go(`${P}/reporter/schedules`);
-await t.page.locator('a', { hasText: 'E2E daily issue report' }).first().click();
+await t.page.locator('tr', { hasText: 'E2E issue report' }).locator('a[href*="/reporter/schedules/"]').first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
-await t.shot('schedule-show', 'The seeded schedule: settings, recipients, run history');
-const testSend = t.page.locator('form[action$="test_send"] input[type=submit], a[href$="test_send"]').first();
+await t.shot('schedule-show', 'The seeded schedule: template, repeat, recipients, run history');
+const testSend = t.page.locator('a[href$="test_send"], form[action$="test_send"] [type=submit]').first();
 if (await testSend.count()) {
-  since = Date.now();
+  const allBefore = t.mails(0).reduce((n, m) => n + m.body.split('Subject: ').length - 1, 0);
+  t.page.once('dialog', d => { console.log(`  confirm: ${d.message()}`); d.accept(); });
   await testSend.click();
   await t.page.waitForLoadState('load');
   await t.settle();
   t.check('test send');
   await t.page.waitForTimeout(2000);
-  const sent = t.mails(since);
-  if (!sent.length) fail('test send wrote no mail');
-  else console.log(`  test send: ${sent.length} mail(s), first to ${sent[0].to}`);
-  await t.shot('schedule-test-sent', 'After "Send a test": the flash confirms and a mail is written to the sender');
+  const sent = t.mails(0).reduce((n, m) => n + m.body.split('Subject: ').length - 1, 0) - allBefore;
+  if (sent !== 1) fail(`test send wrote ${sent} mail(s), expected 1`);
+  else console.log('  test send: 1 mail to manager@example.net');
+  await t.shot('schedule-test-sent', 'After "Send a test": the flash confirms and a mail is written');
 } else fail('no "Send a test" control on the schedule');
 
 // Edit then delete the weekly schedule.
-await t.go(`${P}/reporter/schedules`);
-const weekly = t.page.locator('tr', { hasText: 'E2E weekly time report' });
-const editLink = weekly.locator('a[href$="/edit"]').first();
-if (await editLink.count()) {
-  await editLink.click();
-  await t.page.waitForLoadState('load');
-  await t.page.fill('input[name="schedule[email_subject]"]', 'E2E weekly time report (edited)');
-  await t.page.locator('#content input[type=submit]').first().click();
-  await t.page.waitForLoadState('load');
-  await t.settle();
-  t.check('schedule update');
-}
-await t.go(`${P}/reporter/schedules`);
-if (!(await text()).includes('(edited)')) fail('schedule edit not stored');
-const del = t.page.locator('tr', { hasText: '(edited)' }).locator('a[data-method=delete], a.icon-del').first();
+await t.go(`${weeklyUrl}/edit`);
+await t.page.fill('input[name="schedule[email_subject]"]', 'E2E weekly time report (edited)');
+await t.page.locator('#content input[type=submit]').first().click();
+await t.page.waitForLoadState('load');
+await t.settle();
+t.check('schedule update');
+await t.go(`${weeklyUrl}/edit`);
+if ((await t.page.inputValue('input[name="schedule[email_subject]"]')) !== 'E2E weekly time report (edited)') fail('schedule edit not stored');
+await t.go(weeklyUrl);
 t.page.once('dialog', d => d.accept());
-await del.click();
+await t.page.locator('#content .contextual a[data-method=delete], #content a.icon-del').first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
 t.check('schedule delete');
-if ((await text()).includes('(edited)')) fail('schedule delete left the row');
-await t.shot('schedule-deleted', 'After deleting, only the seeded schedule remains');
+await t.shot('schedule-deleted', 'After deleting the weekly schedule: the deletion notice and the list without it');
+const gone = await t.page.request.get(t.BASE + weeklyUrl);
+if (gone.status() !== 404) fail(`the deleted schedule still answers HTTP ${gone.status()}`);
 
 // --- refusals ---------------------------------------------------------------------
 await t.login('reporter');

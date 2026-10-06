@@ -14,7 +14,10 @@ if (!(await t.page.locator('#main-menu a', { hasText: 'Project dashboard' }).cou
 await t.shot('manager-initial', 'Manager opens the project dashboard from the project menu: tab bar, widget picker and settings toggle are there');
 
 // Add a tab through the settings box.
-await t.go(`${P}/reporter?new_tab=1`);
+await t.page.click('#reporter-tab-add');
+await t.page.waitForLoadState('load');
+await t.settle();
+t.check('open add tab');
 await t.shot('new-tab-form', 'The "new tab" form in the dashboard settings box');
 const title = t.page.locator('#reporter-dashboard-settings input[type=text]').first();
 await title.fill('E2E tab');
@@ -45,7 +48,16 @@ if (await tplSelect.count()) {
 } else fail('report widget settings form not found');
 const frame = t.page.locator('iframe').first();
 if (!(await frame.count())) fail('report widget: no rendered report frame after choosing a template');
-await t.page.waitForTimeout(2500); // Chart.js and Mermaid draw inside the sandboxed frame
+// Chart.js and Mermaid draw inside the sandboxed frame: wait for its text, not a delay.
+{
+  let seen = false;
+  for (let i = 0; i < 60 && !seen; i++) {
+    for (const f of t.page.frames()) if (f !== t.page.mainFrame() && (await f.locator('body').innerText().catch(() => '')).includes('issues in scope')) seen = true;
+    if (!seen) await t.page.waitForTimeout(250);
+  }
+  if (!seen) fail('the report widget frame never showed the report');
+  await t.page.waitForTimeout(1000);
+}
 await t.shot('report-widget', 'The report widget renders "E2E issue report" inside the dashboard, with its chart and diagram');
 
 // Report widget PDF.

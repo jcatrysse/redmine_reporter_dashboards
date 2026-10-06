@@ -6,6 +6,21 @@ const t = await e2e('templates');
 const P = '/projects/e2e-project';
 const fail = (msg) => t.problems.push(msg);
 const text = async () => (await t.page.locator('#content').innerText()).replace(/\s+/g, ' ');
+// The report is drawn in a sandboxed srcdoc frame: wait until it has painted the expected
+// text (a fixed delay screenshotted an empty frame once), and fail when it never does.
+async function frameShows(expected, timeout = 15000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    for (const f of t.page.frames()) {
+      if (f === t.page.mainFrame()) continue;
+      const body = await f.locator('body').innerText().catch(() => '');
+      if (expected instanceof RegExp ? expected.test(body) : body.includes(expected)) { await t.page.waitForTimeout(500); return true; }
+    }
+    await t.page.waitForTimeout(250);
+  }
+  fail(`the report frame never showed "${expected}"`);
+  return false;
+}
 
 // --- manager --------------------------------------------------------------------------
 await t.login('manager');
@@ -32,7 +47,7 @@ await t.page.locator('input[name=preview]').click();
 await t.page.waitForLoadState('load');
 await t.settle();
 t.check('preview');
-await t.page.waitForTimeout(2000);
+await frameShows(/Total \d+/);
 await t.shot('preview', 'Preview of the unsaved template: the render shows the heading, the chart and the total; nothing is stored yet');
 await t.go(`${P}/reporter/templates`);
 if ((await text()).includes('E2E created in the browser')) fail('preview stored the template');
@@ -69,7 +84,7 @@ await t.page.waitForLoadState('load');
 await t.settle();
 t.check('create');
 if (!/\/reporter\/templates\/\d+/.test(t.page.url())) fail(`after create not on the template page: ${t.page.url()}`);
-await t.page.waitForTimeout(1500);
+await frameShows('Made in e2e');
 await t.shot('created', 'The created template\'s page: rendered report and the export, mail and share actions');
 const createdUrl = t.page.url().replace(t.BASE, '');
 
@@ -88,15 +103,22 @@ await t.shot('edited', 'Template list after editing: the new description is show
 await t.page.locator('a', { hasText: 'E2E issue report' }).first().click();
 await t.page.waitForLoadState('load');
 await t.settle();
-await t.page.waitForTimeout(3000);
+await frameShows(/\d+ issues in scope/);
 t.check('show issue report');
 await t.shot('show-report', 'The seeded issue report: bar and pie chart (bundled Chart.js) and the Mermaid diagram drawn in the sandboxed frame');
 const showUrl = t.page.url().replace(t.BASE, '');
+
+// The document download (PDF), which the generic smoke cannot open as a page.
+const doc = await t.page.request.get(`${t.BASE}${showUrl}/document`);
+const docBytes = await doc.body();
+if (doc.status() !== 200 || docBytes.subarray(0, 5).toString() !== '%PDF-') fail(`document download: HTTP ${doc.status()}, ${doc.headers()['content-type']}`);
+else console.log(`  document download: ${docBytes.length} bytes, ${doc.headers()['content-type']}`);
 
 // Export as a bundle (JSON download).
 const exp = await t.page.request.get(`${t.BASE}${showUrl}/export`);
 if (exp.status() !== 200) fail(`export: HTTP ${exp.status()}`);
 else if (!(await exp.text()).includes('E2E issue report')) fail('export does not contain the template');
+else console.log(`  export: ${exp.headers()['content-type']}, ${(await exp.body()).length} bytes`);
 
 // Delete the browser-created template.
 await t.go(`${P}/reporter/templates`);

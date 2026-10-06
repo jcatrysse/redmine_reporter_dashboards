@@ -13,7 +13,7 @@ project  = Project.find_by!(identifier: 'e2e-project')
 private_project = Project.find_by!(identifier: 'e2e-private')
 User.current = admin
 
-ISSUE_REPORT = <<~LIQUID
+ISSUE_REPORT = <<~'LIQUID'
   {% sql_aggregate from: issues, group_by: status, drill: true, assign_to: by_status %}
   {% sql_aggregate from: issues, group_by: tracker, assign_to: by_tracker %}
   {% version_rollup assign_to: versions %}
@@ -52,7 +52,7 @@ ISSUE_REPORT = <<~LIQUID
   </ul>
 LIQUID
 
-TIME_REPORT = <<~LIQUID
+TIME_REPORT = <<~'LIQUID'
   {% sql_aggregate from: time_entries, group_by: activity, measure: hours, assign_to: by_activity %}
   <h1>E2E time report: {{ project.name }}</h1>
   {% for bucket in by_activity.buckets %}
@@ -85,11 +85,11 @@ e2e_template('E2E report in the private project',
 # Time entries for the time report and the timelog widget.
 activity = TimeEntryActivity.where(active: true).order(:position).first
 issue = Issue.where(project_id: project.id).order(:id).first
-if activity && issue && TimeEntry.where(project_id: project.id).none?
+if activity && issue && TimeEntry.where(project_id: project.id, comments: 'E2E plugin time').none?
   [[manager, 2.5], [manager, 1.0], [admin, 3.0]].each do |user, hours|
     TimeEntry.create!(project: project, issue: issue, user: user, author: user,
                       activity: activity, hours: hours, spent_on: issue.start_date || Date.today,
-                      comments: 'E2E time')
+                      comments: 'E2E plugin time')
   end
 end
 
@@ -98,8 +98,8 @@ if Schedule.where(template_id: issue_report.id).none?
                           email_subject: 'E2E daily issue report', repeat: 'daily',
                           start_date: Date.today, enabled: true, render_as: 'author',
                           timezone: 'UTC')
-  schedule.recipient_users = [manager]
   schedule.save!
+  schedule.recipient_users = [manager] # needs the schedule's id
 end
 
 puts "E2E plugin seed: #{Template.count} templates, #{Schedule.count} schedules, " \

@@ -30,7 +30,10 @@ await t.login('admin');
 let n = 0;
 for (const uri of pages) {
   n += 1;
-  const res = await t.page.goto(t.BASE + uri).catch(e => ({ status: () => 0, err: e }));
+  let res = await t.page.goto(t.BASE + uri).catch(e => ({ status: () => 0, err: e }));
+  // A download (Content-Disposition: attachment) is not a page: goto throws "Download is
+  // starting" and reported HTTP 0. Ask for the same URL as a plain request instead.
+  if (res.err && /Download is starting/.test(String(res.err.message))) res = await t.page.request.get(t.BASE + uri);
   await t.settle();
   const status = res.status();
   // 404/403/422 are expected for some guessed parameters; a 5xx never is.
