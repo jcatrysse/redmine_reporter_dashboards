@@ -121,13 +121,14 @@ Redmine::Plugin.register :redmine_reporter_dashboards do
     end
   end
 
-  # T-14. No icon class: the admin menu's icon mechanism changed between Redmine 5.1
-  # and 6.x (`icon icon-*` versus `sprite_icon`), and a one-item diagnostic link is not
-  # worth a `compat/` entry or a divergence the LOC budget has to carry. A plain link
-  # renders correctly on all four supported branches.
+  # T-14. `icon:` is Redmine 6.0+'s menu option (MenuItem#icon, drawn with `sprite_icon`
+  # from core's own sprite); on 7.0 without it this was the one entry of the administration
+  # menu with no icon. It needs no `compat/` entry, which is what T-14 assumed: Redmine 5.1's
+  # MenuItem#initialize reads only the keys it knows and ignores `:icon` (read on
+  # 5.1-stable, Redmine 7 migration), so 5.1 renders the plain link it always did.
   menu :admin_menu, :reporter_dashboards_preflight,
        { controller: 'reporter_preflight', action: 'show' },
-       caption: :label_reporter_preflight
+       caption: :label_reporter_preflight, icon: 'application-pdf'
 
   # ONE PROJECT MENU ITEM, AND THE OTHER TWO WERE DELETED RATHER THAN HIDDEN.
   #

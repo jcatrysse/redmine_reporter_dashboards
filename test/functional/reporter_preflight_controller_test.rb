@@ -90,6 +90,17 @@ class ReporterPreflightControllerTest < ActionController::TestCase
   # that starts a subprocess is exactly the action where an inherited check is not good
   # enough.
 
+  # The administration menu entry carries a core sprite icon on Redmine 6.0+, like every
+  # core entry beside it (Redmine 7 migration: it was the only one without). On 5.1 the
+  # option is ignored by MenuItem and the item is a plain link, so only presence is asserted
+  # there.
+  def test_the_admin_menu_entry_has_a_core_icon_where_menus_draw_icons
+    item = Redmine::MenuManager.items(:admin_menu).detect { |i| i.name == :reporter_dashboards_preflight }
+
+    assert item, 'the preflight is reachable from the administration menu'
+    assert_equal 'application-pdf', item.icon if item.respond_to?(:icon)
+  end
+
   def test_show_redirects_an_anonymous_visitor_to_login
     get :show
 
