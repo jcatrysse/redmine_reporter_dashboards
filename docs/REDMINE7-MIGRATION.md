@@ -166,8 +166,9 @@ real production templates (Q3).
   (same message the tab model already uses, no new locale keys); e2e `if (count)` branches (each
   has an `else fail`).
 - OpenAI review (`./.codex/openai_review.sh`, gpt-5): two rounds, one finding each, both the
-  same false claim (`content_changed?` / `attribute_changed?` missing on Rails 8.1); refuted by
-  measurement, resolutions in `docs/reviews/openai-2026-10-06-*.md`.
+  same false claim (`content_changed?` / `attribute_changed?` missing on Rails 8.1), refuted by
+  measurement; resolutions in `docs/reviews/openai-2026-10-06-*.md`. Third round on the final
+  head (`2afe62b`): "No findings."
 
 ### Findings recorded, not fixed (outside the migration's scope)
 
