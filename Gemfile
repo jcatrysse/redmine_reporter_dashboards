@@ -13,4 +13,8 @@ gem 'liquid', '>= 4.0', '< 6.0'
 group :test do
   gem 'rspec-rails'
   gem 'rails-controller-testing'
+  # The SVG chart specs parse their output with REXML. Redmine 5.1's Gemfile declares
+  # rexml; Redmine 7.0's no longer does, and since Ruby 3.0 it is a bundled gem that
+  # Bundler hides unless a Gemfile names it. Guarded so 5.1 does not list it twice.
+  gem 'rexml', require: false unless dependencies.any? { |d| d.name == 'rexml' }
 end
