@@ -136,6 +136,18 @@ module RedmineReporterDashboards
                          reject remove remove_first remove_last replace replace_first replace_last
                          reverse round rstrip size slice sort sort_natural split squish strip
                          strip_html strip_newlines sum times truncate truncatewords uniq upcase
+                         url_decode url_encode where].freeze,
+          # Reviewed 2026-10-06 for the Redmine 7 migration (7.0 resolves `liquid < 6.0` to
+          # 5.14.0). The same 61 filters as 5.13.0; 5.14.0's only change (History.md) is that
+          # `for`/`tablerow` no longer materialise an integer range and count each visited
+          # item against the resource limits, which tightens, not widens, template surface.
+          '5.14.0' => %w[abs append at_least at_most base64_decode base64_encode
+                         base64_url_safe_decode base64_url_safe_encode capitalize ceil compact concat
+                         date default divided_by downcase escape escape_once find find_index first
+                         floor h has join last lstrip map minus modulo newline_to_br plus prepend
+                         reject remove remove_first remove_last replace replace_first replace_last
+                         reverse round rstrip size slice sort sort_natural split squish strip
+                         strip_html strip_newlines sum times truncate truncatewords uniq upcase
                          url_decode url_encode where].freeze
         }.freeze
 
