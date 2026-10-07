@@ -37,3 +37,10 @@ Jan answered these follow-up questions from the migration report the same way, o
 
 - redmine_issue_todo_lists2-n2-1 (todo_lists 2): issue to-do lists in report templates were only usable through RedmineUP. The redmine_issue_todo_lists2 session read Jan's earlier request as option (a): reporter_dashboards offers the to-do items itself, with the permissions of whoever views the report; redmine_issue_todo_lists2 stays as it is.
   Jan chose: "Ja, in reporter_dashboards" and added: "ja in reporter dashboards maar in de nieuwe branch (laatste versie) niet die van main". Carry this out here, on `redmine70-migration` (the newest version), not on main.
+
+## Round 3, decided by Jan on 2026-10-08
+
+- reporter 9 (Q9): the accepted Gotenberg CVE-2026-56852 (pdfcpu, golang.org/x/text) expired on 2026-09-09; release.sh reports NOT RELEASABLE.
+  Jan chose: "Bijwerken, anders verlengen": look for a Gotenberg version that contains the fix and update to it; only if none exists, extend the acceptance by 3 months with the reason written down. Carry this out.
+- reporter 10 (Q10): a GitHub job that tests this plugin together with redmine_issue_todo_lists2?
+  Jan chose: "Alleen lokaal": no extra job; record it.
