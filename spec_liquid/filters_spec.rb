@@ -129,17 +129,6 @@ module RedmineReporterDashboards
                         replace_first reverse round rstrip size slice sort sort_natural split strip
                         strip_html strip_newlines times truncate truncatewords uniq upcase url_decode
                         url_encode where].freeze,
-          # Reviewed 2026-10-06 (Redmine 7 migration): what Ruby < 3.3 now resolves to, because
-          # the Gemfile caps Liquid below 5.6 there (strscan, see the Gemfile). The 5.13.0 list
-          # minus find, find_index, has, reject and squish: a strict subset, so nothing a
-          # template can reach on 5.13 is new here.
-          '5.5.1' => %w[abs append at_least at_most base64_decode base64_encode
-                        base64_url_safe_decode base64_url_safe_encode capitalize ceil compact concat
-                        date default divided_by downcase escape escape_once first floor h join last
-                        lstrip map minus modulo newline_to_br plus prepend remove remove_first
-                        remove_last replace replace_first replace_last reverse round rstrip size
-                        slice sort sort_natural split strip strip_html strip_newlines sum times
-                        truncate truncatewords uniq upcase url_decode url_encode where].freeze,
           '5.13.0' => %w[abs append at_least at_most base64_decode base64_encode
                          base64_url_safe_decode base64_url_safe_encode capitalize ceil compact concat
                          date default divided_by downcase escape escape_once find find_index first
