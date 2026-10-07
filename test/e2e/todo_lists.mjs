@@ -34,8 +34,10 @@ async function openTemplate() {
   return t.page.url().replace(t.BASE, '');
 }
 
-await t.login('admin');
-const installed = (await t.page.request.get(`${t.BASE}${P}/issue_todo_lists`)).status() === 200;
+// The todo plugin's route exists (an anonymous visitor is sent to the login page) or not (404).
+await t.anonymous();
+const probe = await t.page.request.get(`${t.BASE}${P}/issue_todo_lists`, { maxRedirects: 0 });
+const installed = probe.status() !== 404;
 console.log(`  redmine_issue_todo_lists2 ${installed ? 'installed' : 'not installed'}`);
 
 await t.login('manager');

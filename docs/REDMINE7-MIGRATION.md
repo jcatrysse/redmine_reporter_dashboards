@@ -25,6 +25,7 @@ what is left. Written 2026-10-06 from a measured analysis (report at the bottom)
 | Measured on | Redmine 7.0.1 (7.0-stable-GEOxyz 8067e23), Rails 8.1.3.1, Ruby 3.3.6, PostgreSQL 16 (and on 2026-10-06 MariaDB 10.11 and Redmine 5.1-stable-GEOxyz, no longer required) |
 | Migration session | 2026-10-06, done: work list closed, tests green on both databases, e2e green on both, reviews resolved (see "Verdicts" and the sections after it) |
 | Jan's decisions | 2026-10-07, built (see "Decided by Jan"): PostgreSQL 16 only, no Redmine 5.1, Actions manual only; with the GEOxyz plugins see "Together with every GEOxyz plugin" |
+| Jan's round-2 decision | 2026-10-07, built (`bdb854c`): to-do lists of redmine_issue_todo_lists2 in report templates, see "Decided by Jan" |
 | Tests on PostgreSQL, 2026-10-07 | alone: all green; with 30 GEOxyz plugins: 2 failures caused by redmine_people and view_customize; with all 38: Redmine itself 500s (alias chains in 4 plugins) |
 | Branch head | see `git log` |
 
@@ -83,7 +84,7 @@ In this order: things that break, security, the GEOxyz changes, the open items, 
 | 3 | Done on this branch (`4c43d3c`); carrying it into the dev branch is part of item 1. |
 | 5 | Done (`68baafa`): `Compat.register_liquid_tag`, `Environment.default` on 5.5+, `Template.register_tag` on 4.x and 5.0–5.4. The boot deprecation is gone (0 lines in the PostgreSQL run log, it printed at every boot before). spec_liquid green on 4.0.4, 5.5.1 and 5.14.0. |
 | 6 | Done. In the browser on Redmine 7 (production mode, both databases): bar and pie charts (bundled Chart.js) and the Mermaid diagram draw in the sandboxed frame on the template page, the preview, the dashboard widget and the My page block; PDF via headless Chromium (`chromium_cdp` Chrome 141) for template, widget, mail, schedule and share link. Render conformance corpus (`RRD_CONFORMANCE=1 rspec spec/conformance`, non-root): chromium_cdp and Gotenberg (docker, pinned digest) all pass; wkhtmltopdf fails 4 corpus cases with Ubuntu's apt build (not the patched-Qt build CI uses), engine-level and independent of Redmine, so G9's matrix diff could not be regenerated here. |
-| 7 | Measured, not built; open question Q3. With `redmine_issue_todo_lists2` installed and issue #1 on a list, `{{ issue.todolists_with_positions.size }}` prints nothing in this plugin's templates (`docs/e2e/together/todolists-with-positions-preview.png`), no error, no lint finding. The todo plugin extends only `RedmineCrm::Liquid::IssueDrop`, which does not exist without redmineup. |
+| 7 | Built after Jan's round-2 decision (`bdb854c`, see "Decided by Jan"). History: measured, not built; open question Q3. With `redmine_issue_todo_lists2` installed and issue #1 on a list, `{{ issue.todolists_with_positions.size }}` prints nothing in this plugin's templates (`docs/e2e/together/todolists-with-positions-preview.png`), no error, no lint finding. The todo plugin extends only `RedmineCrm::Liquid::IssueDrop`, which does not exist without redmineup. |
 | 8 | Done, numbers below. Redmine 5.1 run included: it found the Liquid/strscan break (fixed). |
 | 9 | Checked, nothing needed: the plugin patches only `Project`, `ProjectsHelper` and `Role` (`lib/redmine_reporter_dashboards/patches/`), adds no issue fields, hides no issue data and has no issue API view. Core webhook payloads (`issues/show.api.rsb` as the webhook owner) are unaffected. |
 | 10 | Done: 8 scenario files, every function below, on both databases. |
@@ -157,6 +158,7 @@ screenshots `docs/e2e/<db>/<file>-*.png`, captions in `<file>.md`):
 | Statistics JSON `/sql/stats/monthly_flow` | GET with `project_id`, `months` (logged in) | admin | visible project JSON; months capped at 24; unknown project 404; private project as outsider 404; anonymous refused |
 | Liquid tags `sql_aggregate`, `version_rollup`, `chart`, `mermaid` | In templates | templates, dashboard, my_page | rendered in the seeded report on screen and in PDF |
 | Rake: migrate_from_reporter plan, lint_templates, export bundle, documents purge (dry run), render preflight | Command line | rake_tasks | all exit as documented (`rake_tasks-commands.md`) |
+| To-do lists of redmine_issue_todo_lists2 in a report (Jan, round 2) | `{% for list in issue.todolists_with_positions.items %}` in a template | todo_lists | with the todo plugin (`docs/e2e/todo-lists/`): manager sees "E2E sprint" with positions 1 and 2; a member who may read reports but not to-do lists sees the same issues, no list, count 0, and the todo plugin's own page refuses them (403); reporter and outsider: template 403. Without the todo plugin (`docs/e2e/todo-lists-absent/`): same template renders, every count 0, no error. All other scenarios rerun with the new seed: 0 problems |
 | Mail in / REST API / webhooks | none in this plugin | - | n.v.t. |
 | Core pages next to this plugin's settings tab (Jan's decision 2026-10-07) | Project > Settings, issue list, issue page | core_pages | admin and manager: settings with the "Reports and dashboards" tab, issue list and issue page 200; reporter and outsider: settings 403; outsider: private project issues 403. Alone (`docs/e2e/postgresql/core_pages-*`) and with 30 GEOxyz plugins (`docs/e2e/geoxyz-together/`) |
 
@@ -289,6 +291,30 @@ General decisions, for every GEOxyz plugin, and what they meant here:
 
 Decisions for this plugin:
 
+- **Round 2 (2026-10-07), was Q3**: "Issue to-do lists (redmine_issue_todo_lists2) must become usable
+  in report templates, offered by reporter_dashboards itself, with the permissions of whoever views
+  the report", on this branch only, optional when the todo plugin is absent. Built in `bdb854c`:
+  - `issue.todolists_with_positions` with the todo plugin's own names, so templates written for its
+    RedmineUP drop keep working: `.items` of lists with `id` (the list's), `project_id`, `title`,
+    `description`, `last_updated` (viewer's time zone), `remove_closed_issues`, `position` (the
+    issue's place on that list); plus `size`, `first`, `url`, and the drop itself iterates.
+  - Visibility is the todo plugin's own rule, `IssueTodoList.visible(actor)`
+    (`Project.allowed_to(actor, :view_issue_todo_lists)`), asked as the report's actor: the
+    LIST's project decides, so a viewer who sees the issue but may not view to-do lists in that
+    project gets an empty list. Share links render as their actor, anonymous gets nothing.
+  - One query per report (a new batch key, `technical-spec.md` §3.4 updated), ordered by list title
+    like the todo plugin's issue columns. Without the todo plugin: no query, empty list, no error.
+  - Tests: spec_liquid 379; unit test with the todo plugin 10 runs (manager/developer, list in
+    another project, module off, text item, anonymous, admin, one query for 1 and 3 issues; a
+    mutation that drops the visibility filter fails 2 of them) and without it 2 runs. Full suite on
+    PostgreSQL both ways: alone 2957/260/217 specs, 607/456/58 runs, 0 failures; with
+    redmine_issue_todo_lists2 the same specs and 612/456/58 runs, 0 failures (that run predates the
+    review fixes; the final unit file was then run on its own with the todo plugin: 10 runs, 0
+    failures). e2e: see the inventory row.
+  - **Not covered by CI**: CI installs this plugin alone, so the with-plugin tests run only where
+    redmine_issue_todo_lists2 is installed next to it (they are defined only then, not skipped, so
+    G10's inventory is unchanged). Measured here, not in Actions.
+
 - **redmine_reporter_dashboards-q1** (was Q2 here): "Wat doen we met rapportsjablonen groter dan
   64 KB als productie op MariaDB draait?" No option chosen; Jan's note, verbatim: "we gebruiken
   geen mariadb (Jan); geen kolomwijziging, nette melding laten staan". Done: no column change; the
@@ -296,11 +322,15 @@ Decisions for this plugin:
 
 ## Open questions for Jan
 
-- **Q3. `todolists_with_positions` in reports.** Not built. Options: (a) `redmine_issue_todo_lists2`
-  also extends this plugin's `IssueDrop` (the fix belongs there; this plugin has no drop
-  extension point yet); (b) this plugin adds the accessor when the todo plugin is present (new
-  drop surface, visibility to decide); (c) document it. Recommendation: first grep the production
-  templates (SQL on `report_templates.content LIKE '%todolists_with_positions%'`); if any use it, (a).
+- **Q3.** Decided in round 2 and built, see "Decided by Jan".
+- **Q9. Accepted Gotenberg CVE expired.** `script/gates/release.sh` reports NOT RELEASABLE because
+  CVE-2026-56852 (pdfcpu, golang.org/x/text) was accepted only through 2026-09-09. A date, not a code
+  change; renewing or dropping an acceptance is a security call, so it was not touched. Same result
+  before and after the round-2 commit.
+- **Q10. CI for the to-do list integration.** Add an Actions job that installs
+  redmine_issue_todo_lists2 next to this plugin, or keep it measured locally only? Recommendation:
+  add it when the todo plugin's branch is final; until then the README-level claim is "tested
+  locally".
 - **Q5. Admin menu icon.** `checked` was chosen (exists on 6.0/6.1/7.0). Any preference?
 - **Q6. GEOxyz plugins that still `alias_method` core methods** on their `redmine70-migration`
   branches (2026-10-07): redmine_itil_priority, redmine_mail_digest and
@@ -343,8 +373,9 @@ Actions the person doing the upgrade must take, or know about, for this plugin:
   README). `schedules:status` exits 1 with a warning until the first run; that is by design.
 - **MariaDB/MySQL** (not used by GEOxyz, Jan 2026-10-07): a template larger than 65 535 bytes is
   refused with a validation message there instead of a 500. PostgreSQL is unchanged (no limit).
-- **Templates using `issue.todolists_with_positions`** (from `redmine_issue_todo_lists2`) render
-  that part empty in this plugin; grep production templates before the switch (Q3).
+- **Templates using `issue.todolists_with_positions`** (from `redmine_issue_todo_lists2`) work in this
+  plugin's templates since `bdb854c`, with the permissions of the report's actor (for a schedule or
+  share link: its actor), like the todo plugin's own `todolists_with_positions(user)`.
 - **Project > Settings with all GEOxyz plugins**: answers 500 until redmine_mail_digest,
   redmine_itil_priority and redmine_depending_custom_fields stop alias-chaining
   `project_settings_tabs` (Q6). Check that page after deploying the full plugin set.
