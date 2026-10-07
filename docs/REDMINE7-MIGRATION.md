@@ -22,9 +22,11 @@ what is left. Written 2026-10-06 from a measured analysis (report at the bottom)
 | Upstream sync | GEEN UPSTREAM |
 | After sync | n.v.t. |
 | Complexity (1 trivial .. 5 rewrite) | 1 for Redmine 7; the session found and fixed MariaDB and Redmine 5.1 defects next to it |
-| Measured on | Redmine 7.0.1 (7.0-stable-GEOxyz 8067e23), Rails 8.1.3.1, Ruby 3.3.6, PostgreSQL 16 and MariaDB 10.11; Redmine 5.1-stable-GEOxyz (bcf917c), Ruby 3.2.6, PostgreSQL 16 |
+| Measured on | Redmine 7.0.1 (7.0-stable-GEOxyz 8067e23), Rails 8.1.3.1, Ruby 3.3.6, PostgreSQL 16 (and on 2026-10-06 MariaDB 10.11 and Redmine 5.1-stable-GEOxyz, no longer required) |
 | Migration session | 2026-10-06, done: work list closed, tests green on both databases, e2e green on both, reviews resolved (see "Verdicts" and the sections after it) |
-| Branch head | see `git log`; the session's last code commit is `121c1dc` |
+| Jan's decisions | 2026-10-07, built (see "Decided by Jan"): PostgreSQL 16 only, no Redmine 5.1, Actions manual only; with the GEOxyz plugins see "Together with every GEOxyz plugin" |
+| Tests on PostgreSQL, 2026-10-07 | alone: all green; with 30 GEOxyz plugins: 2 failures caused by redmine_people and view_customize; with all 38: Redmine itself 500s (alias chains in 4 plugins) |
+| Branch head | see `git log` |
 
 ## Already on this branch
 
@@ -42,6 +44,12 @@ what is left. Written 2026-10-06 from a measured analysis (report at the bottom)
   - `673f23d` Tooling: start_server.sh writes file mail delivery for the server env only
   - `e047c62` Fixes from the independent review
   - `121c1dc` Gemfile: Liquid below 5.6 on Ruby older than 3.3, so Redmine 5.1 renders at all
+    (reverted by `a8ab650` after Jan's decision)
+- After Jan's decisions, 2026-10-07:
+  - `e252673` CI: workflows run manually only (`workflow_dispatch`), with a spec that fails otherwise
+  - `a8ab650` Gemfile: drop the Ruby < 3.3 Liquid cap again, no 5.1-only code paths
+  - `f8be6ee` Test: compare spent-time dimensions with core's own criteria, past prepends
+  - `34b887f` e2e: `core_pages` scenario and the GEOxyz combination evidence
 
 ## Work list for the migration session
 
@@ -81,6 +89,11 @@ In this order: things that break, security, the GEOxyz changes, the open items, 
 | 10 | Done: 8 scenario files, every function below, on both databases. |
 
 ### Test results (final code, Redmine 7.0-stable-GEOxyz, Ruby 3.3.6)
+
+2026-10-07, after Jan's decisions, PostgreSQL 16 only, this plugin alone: specs 2957 / 260 / 217,
+0 failures; minitest 605 / 456 / 58 runs, 0 failures, 0 errors; system 12, 0 failures;
+spec_liquid 373 (Liquid 5.14.0), 0 failures. With the GEOxyz plugins: see "Together with every
+GEOxyz plugin". The table below is the 2026-10-06 run, kept as history.
 
 | Suite | PostgreSQL 16 | MariaDB 10.11 |
 |---|---|---|
@@ -145,6 +158,7 @@ screenshots `docs/e2e/<db>/<file>-*.png`, captions in `<file>.md`):
 | Liquid tags `sql_aggregate`, `version_rollup`, `chart`, `mermaid` | In templates | templates, dashboard, my_page | rendered in the seeded report on screen and in PDF |
 | Rake: migrate_from_reporter plan, lint_templates, export bundle, documents purge (dry run), render preflight | Command line | rake_tasks | all exit as documented (`rake_tasks-commands.md`) |
 | Mail in / REST API / webhooks | none in this plugin | - | n.v.t. |
+| Core pages next to this plugin's settings tab (Jan's decision 2026-10-07) | Project > Settings, issue list, issue page | core_pages | admin and manager: settings with the "Reports and dashboards" tab, issue list and issue page 200; reporter and outsider: settings 403; outsider: private project issues 403. Alone (`docs/e2e/postgresql/core_pages-*`) and with 30 GEOxyz plugins (`docs/e2e/geoxyz-together/`) |
 
 Not covered, out of reach here: a real SMTP relay (mail went to files), Gotenberg as the
 selected engine inside Redmine (it was exercised by the conformance corpus, not by the server),
@@ -187,30 +201,119 @@ real production templates (Q3).
   commits above; `test_setup.sh` still appends `rails-controller-testing` that the plugin Gemfile
   also declares (bundler warns about a duplicate, harmless).
 
+### Together with every GEOxyz plugin (2026-10-07, PostgreSQL 16)
+
+Jan's `prepend` decision asks for Project > Settings, the issue list and an issue page to answer
+200 with the other GEOxyz plugins installed. Installed next to this plugin: 38 GEOxyz plugins,
+each on its `redmine70-migration` branch as pushed on 2026-10-07 (30 public, 8 private attached
+read-only: redmine_agile, redmine_checklists, redmine_contacts, redmineup_tags, redmine_zenedit,
+redmine_people, redmine_ai_triage, redmine_contacts_helpdesk); redmine_context_menu_actions has
+no migration branch and is not included.
+
+**This plugin patches no core method with `alias_method`.** Its one method override,
+`project_settings_tabs`, sits in `ProjectsController`'s helper chain (outside
+`ProjectsHelper.ancestors`, so no alias chain can copy it), and `Project`/`Role` only gain
+associations. Nothing to switch to `prepend`.
+
+**With all 39 installed, Redmine does not work, and it is not this plugin.** Measured on the real
+server (production mode) and in this plugin's suite:
+
+| Page | Result | Cause (backtrace) |
+|---|---|---|
+| Project > Settings | 500 `super: no superclass method 'project_settings_tabs'` | redmine_mail_digest, redmine_itil_priority and redmine_depending_custom_fields `alias_method` it after redmine_contacts' `prepend`: all three `_without_` aliases hold a copy of redmine_contacts' method (source location read in the process) |
+| Issue list, issue page, My page, every page that builds an `IssueQuery` (this plugin's report pages too) | 500 `SystemStackError` | redmine_itil_priority `alias_method`s `IssueQuery#initialize_available_filters`/`available_columns` after redmine_agile's `prepend` (5 882 frames each); with those three removed, redmine_issue_todo_lists2 does the same on the same two methods |
+
+Evidence: `docs/e2e/geoxyz-all-with-alias-chains/` (smoke and core_pages reports, the 500 page),
+`run2-without-3/` (the second cause). Plugins in this set that still use `alias_method` on
+`Issue`, `IssueQuery`, `Query` or `ProjectsHelper` methods: redmine_itil_priority,
+redmine_mail_digest, redmine_depending_custom_fields, redmine_issue_todo_lists2,
+redmine_issue_field_visibility, redmine_view_issue_description, redmine_tint_issues,
+computed_custom_field. They are the subject of Jan's decision in their own sessions (Q6).
+
+**Without those eight, with the other 30 GEOxyz plugins** (fresh database, production mode):
+smoke 30 pages, core flows 6 and nine plugin scenarios with 69 screenshots, **0 problems**
+(`docs/e2e/geoxyz-together/`), including `core_pages`: Project > Settings with this plugin's
+tab, the issue list and an issue page answer 200 for admin and manager; Project > Settings is
+403 for reporter and outsider, the private project's issues 403 for outsider. In this
+combination redmineup 1.1.13 resolves **Liquid 4.0.4**; reports, charts and Mermaid render
+(screenshot `templates-show-report.png`).
+
+Other combination findings, not this plugin's:
+
+- A fresh core install cannot migrate with every GEOxyz plugin loaded (core migration 017
+  `CreateSettings`: `column "updated_on" of relation "settings" does not exist`; some plugin
+  touches `Setting` while loading). Production upgrades an existing database, so it is not hit
+  there; test setups have to migrate core first, then the plugins.
+- redmine_wiki_extensions' `PluginGemfile` adds `shoulda` (shoulda-context 2.0.0) to every
+  install without a plugin-local Gemfile; its test-reporter patch crashes on Rails 8.1 at the
+  first failing test (`undefined local variable or method 'executable'`), which stops any
+  plugin's suite at its first failure and hides the rest.
+- **redmine_people** patches `link_to_user` so that every user link does `User.active.find`
+  plus `Principal#visible?` (3 queries per link): this plugin's mail audit page then costs 42
+  queries for 2 rows and 102 for 12, and its query-count gate test fails in that combination
+  (as does every user list in Redmine). Not fixable here; the test stays strict.
+- **view_customize** (redmine-view-customize) writes `<!-- [view customize plugin] path:... -->`
+  with the request path into every page's `<head>`, so a share link's refusal page repeats the
+  token from the URL; this plugin's "no response echoes the token" test fails in that
+  combination. A concern for view_customize (it prints any path, credential or not).
+- With redmineup_tags, redmine_contacts or redmine_contacts_helpdesk installed, the spent-time
+  report offers extra criteria (`tags`, ...); this plugin's test that compares with core's
+  criteria now asks core's own method (`f8be6ee`).
+
+This plugin's suite in the 30-plugin combination (PostgreSQL, Liquid 4.0.4): specs 2957 / 260 /
+217, 0 failures; units 605, 0 failures; functionals 456, 1 failure (redmine_people, above);
+integration 58, 1 failure (view_customize, above); system 12, 0 failures; spec_liquid 373, 0
+failures. Measured with `shoulda` kept out of the bundle for the functionals and integration
+(an empty `plugins/redmine_wiki_extensions/Gemfile`, removed afterwards), because its reporter
+crash otherwise stops the run at the first failure. Jan's "green with the other GEOxyz
+plugins installed" is therefore NOT met, for the two reasons above, both in other plugins; with
+all 38 it cannot be met while Redmine itself answers 500 (Q6).
+
+## Decided by Jan (2026-10-07)
+
+Recorded from `docs/DECISIONS-2026-10-07.md` (the coordinating session's record of Jan's
+answers). These are final.
+
+General decisions, for every GEOxyz plugin, and what they meant here:
+
+| Decision | What was done here |
+|---|---|
+| No Redmine 5.1: straight to Redmine 7, nothing backported or cherry-picked; no code paths that exist only for 5.1 | `a8ab650` removes the Ruby < 3.3 Liquid cap and the 5.5.1 review entry from `121c1dc`, which existed only for 5.1 on Ruby 3.2. Rules above amended. Code paths for 5.1 that predate this branch (e.g. `Compat.base_record`, `Compat.svg_icons?`) were not added by it and are left alone. Old Q1 (Liquid policy) and Q4 (branch) are answered by this. |
+| PostgreSQL 16 only; MariaDB runs not required, MariaDB-only problems are notes | Rules amended. All runs after this point are PostgreSQL only. The MariaDB results earlier in this file stay as history. |
+| deface without a version constraint | Nothing to do: this plugin does not use deface. |
+| `prepend`, never `alias_method`, on a core method other plugins patch; check Project > Settings, the issue list and an issue page with the other GEOxyz plugins | This plugin uses no `alias_method` on any core method: its only method override (`project_settings_tabs`) sits in `ProjectsController`'s helper chain, outside `ProjectsHelper.ancestors`, and `Project`/`Role` get associations only. The combined check FOUND the bug the decision describes, caused by three other plugins, see "Together with every GEOxyz plugin". New scenario `test/e2e/core_pages.mjs`. |
+| GitHub Actions manual only | `e252673`: `ci.yml` and `gotenberg-cve.yml` triggered by `workflow_dispatch` only; `spec/workflow_triggers_spec.rb` fails on any other trigger. |
+
+Decisions for this plugin:
+
+- **redmine_reporter_dashboards-q1** (was Q2 here): "Wat doen we met rapportsjablonen groter dan
+  64 KB als productie op MariaDB draait?" No option chosen; Jan's note, verbatim: "we gebruiken
+  geen mariadb (Jan); geen kolomwijziging, nette melding laten staan". Done: no column change; the
+  validation message from `6000e85` stays. Nothing to build.
+
 ## Open questions for Jan
 
-Taken unattended, each built the way most likely right for GEOxyz and losing nothing:
-
-- **Q1. Liquid version policy.** Options: (a) as built: 5.14.0 on Ruby ≥ 3.3, < 5.6 (5.5.1) on
-  Ruby < 3.3; (b) one cap for all, < 5.6 (loses 5.14's range-accounting fix on Redmine 7 for no
-  measured reason); (c) no cap (5.1 hosts break on the next `bundle update`). Recommendation: (a).
-- **Q2. Templates over 64 KiB on MariaDB.** Built: a validation message instead of a 500;
-  PostgreSQL unchanged. Alternative: widen `content`/`description` to MEDIUMTEXT on MySQL the way
-  core does for `issues.description` (`limit: 16.megabytes`), which needs a `change_column`
-  migration the project's reversibility gate (G11) forbids today. Recommendation: keep the
-  validation unless GEOxyz runs MariaDB in production and has templates that large; which
-  database does production use?
 - **Q3. `todolists_with_positions` in reports.** Not built. Options: (a) `redmine_issue_todo_lists2`
   also extends this plugin's `IssueDrop` (the fix belongs there; this plugin has no drop
   extension point yet); (b) this plugin adds the accessor when the todo plugin is present (new
   drop surface, visibility to decide); (c) document it. Recommendation: first grep the production
-  templates (`rake reporter_dashboards:migrate_from_reporter:plan` lists accessors, or SQL on
-  `report_templates.content LIKE '%todolists_with_positions%'`); if any use it, (a).
-- **Q4. Branch.** The task named `redmine70-migration`; the session-start hook pins
-  `claude/next-session-prompt-it4too` and moved the session there; the session moved back
-  because the task (with commit authority) named this branch explicitly. `CLAUDE.md`'s pin was not
-  edited. Merge order suggestion: this branch into the dev branch, then the dev branch into main.
+  templates (SQL on `report_templates.content LIKE '%todolists_with_positions%'`); if any use it, (a).
 - **Q5. Admin menu icon.** `checked` was chosen (exists on 6.0/6.1/7.0). Any preference?
+- **Q6. GEOxyz plugins that still `alias_method` core methods** on their `redmine70-migration`
+  branches (2026-10-07): redmine_itil_priority, redmine_mail_digest and
+  redmine_depending_custom_fields (`project_settings_tabs`), redmine_itil_priority and
+  redmine_issue_todo_lists2 (`IssueQuery#initialize_available_filters`/`available_columns`), and
+  further alias chains on `Issue`/`Query` methods in redmine_issue_field_visibility,
+  redmine_view_issue_description, redmine_tint_issues and computed_custom_field. With all GEOxyz
+  plugins installed Project > Settings, the issue list, issue pages and My page answer 500. That
+  is their fix under your `prepend` decision; this plugin cannot repair it from its side.
+- **Q7. redmine_people and view_customize** make two of this plugin's tests fail when installed
+  together (per-user queries in `link_to_user`; the request path echoed into every page's
+  `<head>`). Fix them there, or accept them? Recommendation: fix in those plugins; the
+  view_customize comment also exposes any token-in-path URL of other plugins.
+- **Q8. CLAUDE.md is now out of date** on two points this session did not edit, because it is
+  your file: §4/§9 still describe the 5.1 → 7.0 span, and §7 says the Gotenberg CVE scan "still
+  runs nightly" (it is manual since `e252673`).
 
 ## GEOxyz changes to review or re-apply
 
@@ -220,27 +323,28 @@ Own plugin: all of it is GEOxyz code, so there is nothing to re-apply. While mig
 
 Actions the person doing the upgrade must take, or know about, for this plugin:
 
-- **`bundle install` after deploying this branch.** The plugin Gemfile now picks Liquid by Ruby
-  version: Ruby 3.3+ (Redmine 7.0) resolves `liquid` 5.14.0; Ruby < 3.3 resolves 5.5.1. Nothing
-  else changes in the bundle.
-- **Ruby 3.2 hosts (Redmine 5.1, until the switch): run `bundle install` with this branch, or at
-  least make sure Gemfile.lock does not hold Liquid 5.6.1 or newer.** With those, every report
-  template fails to parse on Ruby 3.2 (`undefined method 'peek_byte' for StringScanner`). A host
-  whose lock was written before Liquid 5.6.1 was released is not affected today, but any `bundle
-  update` there would have broken all reports. Check: `grep '    liquid (' Gemfile.lock`.
+- **`bundle install` after deploying this branch.** The plugin asks for `liquid '>= 4.0', '< 6.0'`.
+  Alone on Redmine 7 that resolves 5.14.0; **with the GEOxyz RedmineUP plugins installed, redmineup
+  1.1.13 constrains it to 4.0.4**, which is what production will run. Both are tested
+  (spec_liquid green on 4.0.4 and 5.14.0; the full suite with all GEOxyz plugins runs on 4.0.4).
+- **Redmine must run on Ruby 3.3 or newer** (Redmine 7.0's minimum). On Ruby 3.2 any Liquid
+  >= 5.6.1 fails to parse every template (`undefined method 'peek_byte' for StringScanner`,
+  measured on 2026-10-06); irrelevant for Redmine 7, recorded because 5.1 is no longer covered.
 - **No migration.** The schema is unchanged; `rake redmine:plugins:migrate` is a no-op for this
-  plugin. Down/up was run on PostgreSQL and MariaDB (`script/migrate_updown.sh`: OK, both arms).
+  plugin. Down/up was run on PostgreSQL (and MariaDB before Jan's decision) (`script/migrate_updown.sh`: OK, both arms).
 - **PDF engine**: the default engine is headless Chromium on the Redmine host and it refuses to
   run as root (it never sets `--no-sandbox`, on purpose). Redmine must run as an unprivileged
   user, as it normally does under Passenger or Puma. Measured: as root every PDF fails with
   `engine_crashed ... Running as root without --no-sandbox is not supported`.
 - **Scheduled reports still need the cron entry** (`rake reporter_dashboards:schedules:run`,
   README). `schedules:status` exits 1 with a warning until the first run; that is by design.
-- **MariaDB/MySQL**: a report template larger than 65 535 bytes (or a description over it) is now
-  refused with a validation message instead of a 500 on save. PostgreSQL is unchanged (no limit).
-  If GEOxyz has templates near that size on MariaDB, see "Open questions for Jan" (Q2).
+- **MariaDB/MySQL** (not used by GEOxyz, Jan 2026-10-07): a template larger than 65 535 bytes is
+  refused with a validation message there instead of a 500. PostgreSQL is unchanged (no limit).
 - **Templates using `issue.todolists_with_positions`** (from `redmine_issue_todo_lists2`) render
   that part empty in this plugin; grep production templates before the switch (Q3).
+- **Project > Settings with all GEOxyz plugins**: answers 500 until redmine_mail_digest,
+  redmine_itil_priority and redmine_depending_custom_fields stop alias-chaining
+  `project_settings_tabs` (Q6). Check that page after deploying the full plugin set.
 
 ## How to test
 
@@ -292,9 +396,10 @@ Notes from the 2026-10-06 run, for whoever repeats it here:
 4. **GEOxyz changes**: go through the table above, one item at a time. Each kept or re-made change
    is its own commit with a test that proves it. Record the verdict in the table.
 5. **Work list**: then the numbered list, in order. One concern per commit.
-6. **Portability**: everything must run on Redmine's supported databases (PostgreSQL,
-   MySQL/MariaDB; SQLite where the plugin already supports it). Migrations must be reversible and
-   are run down and up on PostgreSQL and MariaDB.
+6. **Portability** (amended by Jan, 2026-10-07): GEOxyz runs PostgreSQL 16 only. Tests and the
+   e2e set run on PostgreSQL; keep SQL portable where that costs nothing, but MariaDB runs are not
+   required and a MariaDB-only problem is a note in this file, not a blocker. Migrations must be
+   reversible and are run down and up on PostgreSQL.
 7. **Together**: run with the other GEOxyz plugins installed (the migration kit's harness, or
    `RMP_EXTRA_PLUGINS`). A failure that only appears in combination is a finding to record here.
 8. **End to end, visually, every function**: on the real Redmine from `start_server.sh`
@@ -311,9 +416,8 @@ Notes from the 2026-10-06 run, for whoever repeats it here:
    - Functions without a page (mail in and out, REST API, rake tasks, cron, webhooks): exercise
      them against the same running instance (mails land in `redmine/tmp/mails`, `t.mails()`
      reads them; API through `t.page.request`) and record command and result.
-   - Before pictures where behaviour or layout changes: the branch GEOxyz runs today, on
-     Redmine 5.1, same scenarios, `RMP_E2E_OUT=docs/e2e/before`.
-   - Run the whole e2e set once on MariaDB as well (`RMP_DB=mariadb`, then `start_server.sh --reset`).
+   - Before pictures where behaviour or layout changes: on Redmine 7 before the change,
+     `RMP_E2E_OUT=docs/e2e/before` (Redmine 5.1 is no longer a reference, Jan 2026-10-07).
 9. **Independent review**: first your own, adversarial: re-read the whole diff as if someone
    else wrote it and you are paid to reject it. Then, **when `OPENAI_API_KEY` is set in the
    session**, `./.codex/openai_review.sh`: it sends the diff of this branch to an OpenAI model
@@ -358,8 +462,12 @@ Notes from the 2026-10-06 run, for whoever repeats it here:
   (on by default: `t.sudo()` in a scenario). The breaker list is in the migration kit's CHECKLIST.md.
 - **Locales**: keep the locales the plugin ships in sync; translate a new key by matching the
   closest existing key in the same file, not from scratch; do not add new languages.
-- **5.1 compatibility**: prefer fixes that also run on Redmine 5.1 so they can be merged early;
-  say so when a fix cannot.
+- **No Redmine 5.1** (Jan, 2026-10-07): GEOxyz goes straight to Redmine 7; nothing is backported
+  or cherry-picked to the default branch or the branch production runs today. Do not add code
+  paths that exist only for 5.1.
+- **Patching core**: a Redmine core method that other installed plugins also patch is patched with
+  `prepend`, never with `alias_method` (Jan, 2026-10-07).
+- **deface**, when a plugin needs it, is required without a version constraint (Jan, 2026-10-07).
 - **Git**: work on `redmine70-migration` only; never push to the default branch; never force-push
   a branch someone else uses. Descriptive commit messages (what and why). Push after every
   commit, together with the updated status in this file: a cloud session can stop at a usage
