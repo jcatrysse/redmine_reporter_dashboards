@@ -37,6 +37,7 @@ module RedmineReporterDashboards
         TimeEntryDrop TimeEntriesDrop
         AttachmentDrop
         CustomFieldValueDrop CustomFieldValuesDrop
+        TodoListDrop TodoListsDrop
       ].freeze
 
       # What the gem had and this layer deliberately does not, each with the reason
@@ -70,5 +71,7 @@ require_relative 'drops/users_drop'
 require_relative 'drops/version_drop'
 require_relative 'drops/time_entry_drop'
 require_relative 'drops/time_entries_drop'
+require_relative 'drops/todo_list_drop'
+require_relative 'drops/todo_lists_drop'
 require_relative 'drops/issue_drop'
 require_relative 'drops/issues_drop'

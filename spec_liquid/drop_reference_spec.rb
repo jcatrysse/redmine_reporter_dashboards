@@ -108,7 +108,7 @@ RSpec.describe RedmineReporterDashboards::Liquid::DropReference do
       batched = issue.accessors.select(&:batch?).map(&:name).sort
 
       expect(batched).to eq(%w[attachments custom_field_value custom_field_values spent_hours
-                               subtasks time_entries])
+                               subtasks time_entries todolists_with_positions])
     end
 
     it 'does not claim an ordinary attribute reader is batched' do

@@ -37,6 +37,7 @@ Reached from: assigned to a per-issue template; one issue of `issues`.
 | `attachments` | collection (AttachmentDrop) | yes | `{{ issue.attachments }}` |  |
 | `time_entries` | collection (TimeEntryDrop) | yes | `{{ issue.time_entries }}` |  |
 | `subtasks` | collection (IssueDrop) | yes | `{{ issue.subtasks }}` |  |
+| `todolists_with_positions` | drop (TodoListsDrop) | yes | `{{ issue.todolists_with_positions }}` | the to-do lists your role may see; empty without redmine_issue_todo_lists2 |
 | `custom_field_values` | lookup (CustomFieldValuesDrop) | yes | `{{ issue.custom_field_values[42] }}` | by field id or by field name |
 | `custom_field_value` | lookup (CustomFieldValuesDrop) | yes | `{{ issue.custom_field_value[42] }}` | the same object as `custom_field_values` |
 | `status_id` | integer |  | `{{ issue.status_id }}` |  |
@@ -189,6 +190,33 @@ Reached from: `issue.custom_field_values` / `issue.custom_field_value`.
 A BRACKET LOOKUP rather than a set of accessors: `{{ issue.custom_field_values[42] }}` by field id, or by field name. A field your role may not see resolves to nothing at all — not to a blank value, and not to the field name with an empty cell.
 
 _No accessors of its own._
+
+## TodoListsDrop
+
+Reached from: `issue.todolists_with_positions`.
+
+Iterate `items`: `{% for list in issue.todolists_with_positions.items %}`. Only lists in projects where your role may view to-do lists are listed, ordered by title, and the list is empty when redmine_issue_todo_lists2 is not installed or the issue is outside the report. A title is the author's text: print it as `{{ list.title | escape }}`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `items` | collection (TodoListDrop) | yes | `{{ issue.todolists_with_positions.items }}` |  |
+| `size` | integer |  | `{{ issue.todolists_with_positions.size }}` |  |
+| `first` | drop (TodoListDrop) |  | `{{ issue.todolists_with_positions.first }}` |  |
+
+## TodoListDrop
+
+Reached from: `issue.todolists_with_positions.items`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `id` | integer |  | `{{ list.id }}` | the to-do list's id |
+| `project_id` | integer |  | `{{ list.project_id }}` |  |
+| `title` | string |  | `{{ list.title }}` |  |
+| `description` | text |  | `{{ list.description }}` |  |
+| `last_updated` | time |  | `{{ list.last_updated }}` | in the report actor's own time zone |
+| `remove_closed_issues` | boolean |  | `{{ list.remove_closed_issues }}` |  |
+| `position` | integer |  | `{{ list.position }}` | the issue's position on this list |
+| `url` | url |  | `{{ list.url }}` |  |
 
 ## NamedRefDrop
 

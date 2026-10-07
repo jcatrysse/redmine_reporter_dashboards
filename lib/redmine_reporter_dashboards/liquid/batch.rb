@@ -62,15 +62,19 @@ module RedmineReporterDashboards
       # The keys §3.4 enumerates. Held as a constant so a spec can assert the table was
       # implemented rather than paraphrased, and so adding a seventh is a decision
       # somebody makes on purpose.
+      #
+      # `todo_lists` is the seventh, by Jan's decision of 2026-10-07: the issue to-do lists of
+      # redmine_issue_todo_lists2, offered by this plugin itself, with the permissions of the
+      # report's actor. It is optional: without that plugin it answers an empty list.
       KEYS = %i[custom_field_values spent_hours attachments time_entries subtasks
-                named_refs].freeze
+                named_refs todo_lists].freeze
 
       attr_reader :limit, :diagnostics, :actor
 
       # `scope`       the issue relation this render is about, or nil. Registered
       #               rather than required, because a RenderContext is built before
       #               anybody knows whether the template iterates anything.
-      # `actor`       required. See the class comment: four of the six keys are
+      # `actor`       required. See the class comment: five of the seven keys are
       #               visibility-bearing, and a batch with no actor is a batch that
       #               would have to guess (INV-1).
       # `diagnostics` where a truncation becomes visible (INV-4).
@@ -80,7 +84,7 @@ module RedmineReporterDashboards
                      limit: MAX_MATERIALISED_RECORDS)
         if actor.nil?
           raise ArgumentError,
-                'a Batch needs an actor: four of its six keys read tables with their ' \
+                'a Batch needs an actor: five of its seven keys read tables with their ' \
                 'own visibility rules (INV-1, INV-3)'
         end
 
@@ -204,6 +208,41 @@ module RedmineReporterDashboards
         resolve(:subtasks, issue_id) do |id_set|
           group(::Issue.visible(@actor).where(parent_id: id_set).order(:id), :parent_id)
         end[issue_id] || []
+      end
+
+      # The to-do lists of redmine_issue_todo_lists2 that hold this issue, as
+      # `IssueTodoListItem` rows (one per list the issue is on, carrying its POSITION there),
+      # with their list and the list's project preloaded.
+      #
+      # VISIBILITY IS THE TODO PLUGIN'S OWN RULE, asked as the actor: `IssueTodoList.visible`
+      # is `Project.allowed_to(actor, :view_issue_todo_lists)`, the same scope that plugin's
+      # own `Issue#todolists_with_positions(user)` and its pages use. A list in a project
+      # where the actor lacks that permission is not returned, even when the issue is
+      # visible. The issue ids already came from the actor's visible scope.
+      #
+      # OPTIONAL: without redmine_issue_todo_lists2 (no `IssueTodoList`) every issue has
+      # none, and no query is issued.
+      def todo_lists(issue_id)
+        return [] unless self.class.todo_lists_available?
+
+        resolve(:todo_lists, issue_id) do |id_set|
+          lists = ::IssueTodoList.visible(@actor)
+          # Ordered by list title, then id: the order of the todo plugin's own issue columns.
+          group(::IssueTodoListItem.where(issue_id: id_set, issue_todo_list_id: lists.select(:id))
+                                   .joins(:issue_todo_list)
+                                   .preload(issue_todo_list: :project)
+                                   .order("#{::IssueTodoList.table_name}.title",
+                                          "#{::IssueTodoList.table_name}.id"),
+                :issue_id)
+        end[issue_id] || []
+      end
+
+      # Whether redmine_issue_todo_lists2's models are loaded. `const_defined?` answers for
+      # a pending Zeitwerk autoload without forcing it, the same reason `Compat.base_record`
+      # uses it; `visible` is the scope the query above relies on.
+      def self.todo_lists_available?
+        Object.const_defined?(:IssueTodoList) && Object.const_defined?(:IssueTodoListItem) &&
+          ::IssueTodoList.respond_to?(:visible)
       end
 
       # ------------------------------------------------------------------

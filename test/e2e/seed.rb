@@ -102,5 +102,58 @@ if Schedule.where(template_id: issue_report.id).none?
   schedule.recipient_users = [manager] # needs the schedule's id
 end
 
+# To-do lists of redmine_issue_todo_lists2 in a report (Jan, 2026-10-07, round 2). The
+# template is seeded always: without the todo plugin it must render with every list empty.
+# The list, and the member who may read reports but not to-do lists, only when it is there.
+TODO_REPORT = <<~'LIQUID'
+  <h1>E2E to-do lists</h1>
+  <table>
+    <thead><tr><th>Issue</th><th>To-do lists</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for issue in issues %}
+      <tr><td>#{{ issue.id }} {{ issue.subject }}</td>
+          <td>{% for list in issue.todolists_with_positions.items %}{{ list.title | escape }} (position {{ list.position }}){% unless forloop.last %}, {% endunless %}{% endfor %}</td>
+          <td>{{ issue.todolists_with_positions.size }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+LIQUID
+e2e_template('E2E to-do lists',
+             project: project, author: manager, content: TODO_REPORT,
+             description: 'The to-do lists each issue is on', source: 'issues', output: 'combined',
+             visibility: Template::VISIBILITY_PUBLIC)
+
+if Object.const_defined?(:IssueTodoList)
+  list = IssueTodoList.find_by(project_id: project.id, title: 'E2E sprint') ||
+         IssueTodoList.create!(project: project, title: 'E2E sprint', description: 'Seeded for e2e')
+  ['E2E assigned issue', 'E2E unassigned issue'].each_with_index do |subject, index|
+    listed = Issue.find_by!(project_id: project.id, subject: subject)
+    next if IssueTodoListItem.where(issue_todo_list_id: list.id, issue_id: listed.id).exists?
+
+    IssueTodoListItem.create!(issue_todo_list: list, issue: listed, position: index + 1)
+  end
+
+  # Every permission of "E2E full" except the todo plugin's own: reports yes, to-do lists no.
+  # Not `modules_permissions`: that also returns every permission without a module.
+  todo_permissions = Redmine::AccessControl.permissions
+                                           .select { |p| p.project_module.to_s == 'issue_todo_lists' }
+                                           .map(&:name)
+  listless_role = Role.find_by(name: 'E2E without to-do lists') ||
+                  Role.new(name: 'E2E without to-do lists', assignable: true)
+  listless_role.permissions = Role.find_by!(name: 'E2E full').permissions - todo_permissions
+  listless_role.issues_visibility = 'all'
+  listless_role.save!
+  listless = User.find_by(login: 'listless') ||
+             User.new(login: 'listless', firstname: 'Listless', lastname: 'E2E', mail: 'listless@example.net')
+  listless.password = listless.password_confirmation =
+    ENV.fetch('RMP_USER_PASSWORD', ENV.fetch('RMP_ADMIN_PASSWORD', 'Redmine7Test!'))
+  listless.must_change_passwd = false
+  listless.status = User::STATUS_ACTIVE
+  listless.save!(validate: false)
+  unless Member.where(user_id: listless.id, project_id: project.id).exists?
+    Member.create!(principal: listless, project: project, roles: [listless_role])
+  end
+end
+
 puts "E2E plugin seed: #{Template.count} templates, #{Schedule.count} schedules, " \
      "#{TimeEntry.where(project_id: project.id).count} time entries"

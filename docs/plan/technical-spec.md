@@ -415,6 +415,7 @@ the full id set. The *first* `{{ issue.custom_field_value[20] }}` inside a 500-i
 | `:spent_hours` | `TimeEntry.where(issue_id: ids).group(:issue_id).sum(:hours)` | `spent_hours`, `total_spent_hours` |
 | `:attachments` / `:time_entries` / `:subtasks` | one query each | the matching accessors |
 | `:named_refs` | `IssueStatus/Tracker/… .where(id: ids).pluck(:id,:name)` | every `NamedRefDrop` |
+| `:todo_lists` | `IssueTodoListItem.where(issue_id: ids, issue_todo_list_id: IssueTodoList.visible(actor))` | `todolists_with_positions` (Jan, 2026-10-07: the to-do lists of `redmine_issue_todo_lists2`, with the actor's permissions; empty when that plugin is absent) |
 
 **Cap** mirroring the aggregator's discipline: `MAX_MATERIALISED_RECORDS` default **5 000**; past
 it `each` stops, logs one line, and sets `Degradation(:collection_truncated, seen: n)` — visible,

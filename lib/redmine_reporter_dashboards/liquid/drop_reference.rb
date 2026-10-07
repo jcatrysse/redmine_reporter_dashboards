@@ -136,6 +136,9 @@ module RedmineReporterDashboards
             'attachments' => { type: :collection, of: 'AttachmentDrop', batch: true },
             'time_entries' => { type: :collection, of: 'TimeEntryDrop', batch: true },
             'subtasks' => { type: :collection, of: 'IssueDrop', batch: true },
+            'todolists_with_positions' => { type: :drop, of: 'TodoListsDrop', batch: true,
+                                             note: 'the to-do lists your role may see; ' \
+                                                   'empty without redmine_issue_todo_lists2' },
             'custom_field_values' => { type: :lookup, of: 'CustomFieldValuesDrop',
                                        batch: true,
                                        note: 'by field id or by field name' },
@@ -295,6 +298,35 @@ module RedmineReporterDashboards
                 'A field your role may not see resolves to nothing at all — not to a ' \
                 'blank value, and not to the field name with an empty cell.',
           accessors: {}
+        },
+        'TodoListsDrop' => {
+          variable: 'issue.todolists_with_positions',
+          reached_from: '`issue.todolists_with_positions`',
+          note: 'Iterate `items`: `{% for list in issue.todolists_with_positions.items %}`. ' \
+                'Only lists in projects where your role may view to-do lists are listed, ' \
+                'ordered by title, and the list is empty when redmine_issue_todo_lists2 is ' \
+                'not installed or the issue is outside the report. A title is the author\'s ' \
+                'text: print it as `{{ list.title | escape }}`.',
+          accessors: {
+            'items' => { type: :collection, of: 'TodoListDrop', batch: true },
+            'size' => { type: :integer },
+            'first' => { type: :drop, of: 'TodoListDrop' }
+          }
+        },
+        'TodoListDrop' => {
+          variable: 'list',
+          reached_from: '`issue.todolists_with_positions.items`',
+          inherits: 'RecordDrop',
+          accessors: {
+            'id' => { type: :integer, note: "the to-do list's id" },
+            'project_id' => { type: :integer },
+            'title' => { type: :string },
+            'description' => { type: :text },
+            'last_updated' => { type: :time, note: "in the report actor's own time zone" },
+            'remove_closed_issues' => { type: :boolean },
+            'position' => { type: :integer, note: "the issue's position on this list" },
+            'url' => { type: :url }
+          }
         },
         'NamedRefDrop' => {
           variable: 'status',

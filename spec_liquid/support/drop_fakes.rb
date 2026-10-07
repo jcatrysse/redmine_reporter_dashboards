@@ -222,7 +222,7 @@ module DropFakes
 
     def initialize(limit: 5_000, custom_field_values: {}, custom_fields: {},
                    spent_hours: {}, attachments: {}, time_entries: {}, subtasks: {},
-                   named_refs: {})
+                   named_refs: {}, todo_lists: {})
       @limit = limit
       @custom_field_values = custom_field_values
       @custom_fields = custom_fields
@@ -231,6 +231,7 @@ module DropFakes
       @time_entries = time_entries
       @subtasks = subtasks
       @named_refs = named_refs
+      @todo_lists = todo_lists
       @asked = []
     end
 
@@ -261,6 +262,11 @@ module DropFakes
     def subtasks(issue_id)
       @asked << :subtasks
       @subtasks[issue_id] || []
+    end
+
+    def todo_lists(issue_id)
+      @asked << :todo_lists
+      @todo_lists[issue_id] || []
     end
 
     def named_ref(klass, id, column: nil)

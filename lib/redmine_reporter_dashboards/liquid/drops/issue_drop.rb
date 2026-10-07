@@ -10,6 +10,7 @@ require_relative 'project_drop'
 require_relative 'time_entry_drop'
 require_relative 'user_drop'
 require_relative 'version_drop'
+require_relative 'todo_lists_drop'
 
 module RedmineReporterDashboards
   module Liquid
@@ -297,6 +298,14 @@ module RedmineReporterDashboards
         def subtasks
           @subtasks ||= batch.subtasks(id)
                              .map { |i| self.class.new(i, context: render_context) }
+        end
+
+        # The to-do lists of redmine_issue_todo_lists2 holding this issue that the VIEWER
+        # may see (Jan, 2026-10-07). Empty when that plugin is not installed.
+        def todolists_with_positions
+          @todolists_with_positions ||= TodoListsDrop.new(
+            batch.todo_lists(id).map { |item| TodoListDrop.new(item, context: render_context) }
+          )
         end
 
         # ------------------------------------------------------------------

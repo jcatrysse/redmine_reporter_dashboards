@@ -573,6 +573,67 @@ module RedmineReporterDashboards
         end
 
         # --------------------------------------------------------------
+        # To-do lists of redmine_issue_todo_lists2 (Jan, 2026-10-07)
+        # --------------------------------------------------------------
+
+        describe 'issue.todolists_with_positions' do
+          let(:updated) { DropFakes::Time.new('2026-05-06T07:08:09Z') }
+          let(:sprint) do
+            DropFakes::Record.new(id: 31, project_id: 3, project: project, title: 'Sprint 12',
+                                  description: 'This sprint', last_updated: updated,
+                                  remove_closed_issues: true)
+          end
+          let(:backlog) do
+            DropFakes::Record.new(id: 32, project_id: 3, project: project, title: 'Backlog',
+                                  description: nil, last_updated: nil,
+                                  remove_closed_issues: nil)
+          end
+          let(:items) do
+            [DropFakes::Record.new(id: 501, issue_todo_list_id: 31, issue_todo_list: sprint, position: 2),
+             DropFakes::Record.new(id: 502, issue_todo_list_id: 32, issue_todo_list: backlog, position: 7)]
+          end
+          let(:batch) { DropFakes::Batch.new(todo_lists: { 42 => items }) }
+
+          it "keeps the todo plugin's own names, with the LIST's id and the issue's position" do
+            out = render('{% for l in issue.todolists_with_positions.items %}' \
+                         '[{{ l.id }}|{{ l.project_id }}|{{ l.title }}|{{ l.description }}|' \
+                         '{{ l.position }}|{{ l.remove_closed_issues }}]{% endfor %}')
+            expect(out).to eq('[31|3|Sprint 12|This sprint|2|true][32|3|Backlog||7|false]')
+          end
+
+          it 'iterates the drop itself as well as its items' do
+            expect(render('{% for l in issue.todolists_with_positions %}{{ l.title }};{% endfor %}'))
+              .to eq('Sprint 12;Backlog;')
+          end
+
+          it 'answers size, first and a link to the list' do
+            expect(render('{{ issue.todolists_with_positions.size }}')).to eq('2')
+            expect(render('{{ issue.todolists_with_positions.first }}')).to eq('Sprint 12')
+            expect(render('{{ issue.todolists_with_positions.first.url }}'))
+              .to eq('https://redmine.example/rm/projects/survey/issue_todo_lists/31')
+          end
+
+          it "gives last_updated in the actor's time zone" do
+            expect(render('{{ issue.todolists_with_positions.first.last_updated }}'))
+              .to eq('2026-05-06T07:08:09Z@Europe/Brussels')
+          end
+
+          it 'reads through the batch once, however often the template asks' do
+            render('{{ issue.todolists_with_positions.size }}{{ issue.todolists_with_positions.first }}')
+            expect(batch.asked.count(:todo_lists)).to eq(1)
+          end
+
+          context 'when the issue is on no list the viewer may see' do
+            let(:batch) { DropFakes::Batch.new }
+
+            it 'renders an empty list, not an error' do
+              expect(render('[{% for l in issue.todolists_with_positions.items %}x{% endfor %}]' \
+                            '{{ issue.todolists_with_positions.size }}')).to eq('[]0')
+            end
+          end
+        end
+
+        # --------------------------------------------------------------
         # INV-1 at the constructor
         # --------------------------------------------------------------
 
