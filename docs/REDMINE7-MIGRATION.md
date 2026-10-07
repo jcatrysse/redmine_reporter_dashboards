@@ -183,6 +183,9 @@ real production templates (Q3).
   same false claim (`content_changed?` / `attribute_changed?` missing on Rails 8.1), refuted by
   measurement; resolutions in `docs/reviews/openai-2026-10-06-*.md`. Third round on the final
   head (`2afe62b`): "No findings."
+- 2026-10-07, after Jan's decisions: own adversarial review of `e252673`..`c7ff068` (nothing
+  found), then the OpenAI review of the whole branch at `c7ff068`: "No findings" in both parts
+  (`docs/reviews/openai-2026-10-07-c7ff068.md`).
 
 ### Findings recorded, not fixed (outside the migration's scope)
 
