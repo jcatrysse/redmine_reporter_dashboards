@@ -45,7 +45,7 @@ behind a link with an expiry, a use limit and an access log.
 | Database | PostgreSQL or MySQL/MariaDB. SQLite is not supported |
 | PDF rendering | Headless Chromium on the Redmine host (default), or Gotenberg |
 
-Every combination in that table runs in CI on every push. See
+Every combination in that table is in the CI matrix, which is started by hand (`workflow_dispatch`). See
 [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md) for what each PDF engine
 can do.
 

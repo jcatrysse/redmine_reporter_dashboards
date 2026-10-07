@@ -51,10 +51,10 @@
 
 name: CI
 
+# MANUAL ONLY, by Jan's decision of 2026-10-07 for every GEOxyz plugin: a person starts
+# this workflow (Actions -> CI -> Run workflow). No push, pull_request or schedule trigger;
+# spec/workflow_triggers_spec.rb fails if one comes back.
 on:
-  push:
-    branches: ['**']
-  pull_request:
   workflow_dispatch:
 
 concurrency:
