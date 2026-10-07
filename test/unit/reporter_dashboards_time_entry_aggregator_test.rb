@@ -130,11 +130,18 @@ class ReporterDashboardsTimeEntryAggregatorTest < ActiveSupport::TestCase
   # dimension at all, where the issue kernel does (`cf_92` in the README). Recorded as
   # §Findings S-18 rather than built here: it needs `TimeEntryCustomField` visibility, a
   # `custom_values` join and a `cf_` filter payload, which is its own task.
+  #
+  # CORE'S OWN METHOD, PAST ANY PLUGIN THAT PREPENDS TO IT. With the GEOxyz plugins installed,
+  # redmineup_tags, redmine_contacts and redmine_contacts_helpdesk each prepend to
+  # `load_available_criteria` and add their own criteria (`tags`, ...), so the public
+  # `available_criteria` answered for another plugin and this test failed in that combination
+  # (Redmine 7 migration, run together with every GEOxyz plugin). The comparison is with the
+  # method `TimeReport` defines itself, reached through `super_method`.
   def test_the_dimensions_are_the_ones_core_offers_for_a_spent_time_report
-    core = Redmine::Helpers::TimeReport
-           .new(@project, nil, [], TimeEntry.none)
-           .available_criteria.keys
-           .reject { |key| key.start_with?('cf_') }
+    report = Redmine::Helpers::TimeReport.new(@project, nil, [], TimeEntry.none)
+    method = Redmine::Helpers::TimeReport.instance_method(:load_available_criteria)
+    method = method.super_method until method.owner == Redmine::Helpers::TimeReport
+    core = method.bind_call(report).keys.reject { |key| key.start_with?('cf_') }
 
     assert_equal core.sort, Subject::DIMENSIONS.keys.sort,
                  'the dimension set drifted from the core criteria Redmine offers itself'
