@@ -199,7 +199,7 @@ Iterate `items`: `{% for list in issue.todolists_with_positions.items %}`. Only 
 
 | Accessor | Type | Batch | Snippet | Notes |
 |---|---|---|---|---|
-| `items` | collection (TodoListDrop) | yes | `{{ issue.todolists_with_positions.items }}` |  |
+| `items` | collection (TodoListDrop) |  | `{{ issue.todolists_with_positions.items }}` | already loaded by `issue.todolists_with_positions` |
 | `size` | integer |  | `{{ issue.todolists_with_positions.size }}` |  |
 | `first` | drop (TodoListDrop) |  | `{{ issue.todolists_with_positions.first }}` |  |
 

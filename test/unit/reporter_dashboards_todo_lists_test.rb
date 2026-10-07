@@ -135,6 +135,15 @@ class ReporterDashboardsTodoListsTest < ActiveSupport::TestCase
       assert_equal one.length, three.length, three.join("\n")
     end
 
+    # `last_updated` is the todo plugin's own column (its migration 001), stamped on save.
+    def test_last_updated_is_the_lists_own_timestamp
+      out = render(@manager, [3], content: '{% for issue in issues %}' \
+                                           '{{ issue.todolists_with_positions.first.last_updated }}{% endfor %}')
+      assert_not_empty out
+      assert_not_nil @backlog.reload.last_updated
+      assert_includes out, @backlog.last_updated.utc.strftime('%Y-%m-%d')
+    end
+
     def test_the_url_names_the_lists_project_and_id
       out = render(@manager, [3], content: '{% for issue in issues %}' \
                                            '{{ issue.todolists_with_positions.first.url }}{% endfor %}')

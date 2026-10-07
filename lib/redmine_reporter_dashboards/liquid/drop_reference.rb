@@ -308,7 +308,8 @@ module RedmineReporterDashboards
                 'not installed or the issue is outside the report. A title is the author\'s ' \
                 'text: print it as `{{ list.title | escape }}`.',
           accessors: {
-            'items' => { type: :collection, of: 'TodoListDrop', batch: true },
+            'items' => { type: :collection, of: 'TodoListDrop',
+                         note: 'already loaded by `issue.todolists_with_positions`' },
             'size' => { type: :integer },
             'first' => { type: :drop, of: 'TodoListDrop' }
           }

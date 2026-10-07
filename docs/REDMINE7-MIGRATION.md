@@ -308,9 +308,16 @@ Decisions for this plugin:
     another project, module off, text item, anonymous, admin, one query for 1 and 3 issues; a
     mutation that drops the visibility filter fails 2 of them) and without it 2 runs. Full suite on
     PostgreSQL both ways: alone 2957/260/217 specs, 607/456/58 runs, 0 failures; with
-    redmine_issue_todo_lists2 the same specs and 612/456/58 runs, 0 failures (that run predates the
-    review fixes; the final unit file was then run on its own with the todo plugin: 10 runs, 0
-    failures). e2e: see the inventory row.
+    redmine_issue_todo_lists2 the same specs and 616/456/58 runs, 0 failures (final code, server-side
+    runs as the unprivileged user). e2e: see the inventory row.
+  - Reviews: an independent subagent (10 findings: seed permission set, missing cross-project /
+    text-item / anonymous tests, §3.4 table, `each` on the drop, order, seed pinning, escaping
+    note, all fixed; the CI gap is Q10) and OpenAI (`docs/reviews/openai-2026-10-07-9c12cd1.md`:
+    a Major refuted by the schema and now pinned by a test, a Minor fixed).
+  - Found on the way, not caused by this work: `spec/reporting/report_run_spec.rb` "binds the
+    charts even when the run fails for want of an engine" failed on seed 56574 where Chromium can
+    start, at `861d00a` as well; it relied on no earlier example having loaded an engine adapter.
+    Now runs inside `Registry.isolated`.
   - **Not covered by CI**: CI installs this plugin alone, so the with-plugin tests run only where
     redmine_issue_todo_lists2 is installed next to it (they are defined only then, not skipped, so
     G10's inventory is unchanged). Measured here, not in Actions.
