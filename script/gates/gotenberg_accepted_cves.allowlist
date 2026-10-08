@@ -64,6 +64,10 @@
 #   CVE-2026-46602  pdfcpu golang.org/x/image -> absent
 #   CVE-2026-56852  pdfcpu golang.org/x/text  -> absent
 #
+# CVE-2026-46604 (x/image, TIFF panic) was accepted on 2026-08-10 and deleted on 2026-08-11
+# when the database stopped listing it for the same digest. If a scan reports it again, the
+# database has listed it again; it is not a new finding nobody has seen.
+#
 # Keeping them would have been the stale arm's case (3): an exemption for something the scan
 # no longer reports. They are history now, not exemptions.
 #
