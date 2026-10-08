@@ -26,6 +26,7 @@ what is left. Written 2026-10-06 from a measured analysis (report at the bottom)
 | Migration session | 2026-10-06, done: work list closed, tests green on both databases, e2e green on both, reviews resolved (see "Verdicts" and the sections after it) |
 | Jan's decisions | 2026-10-07, built (see "Decided by Jan"): PostgreSQL 16 only, no Redmine 5.1, Actions manual only; with the GEOxyz plugins see "Together with every GEOxyz plugin" |
 | Jan's round-2 decision | 2026-10-07, built (`bdb854c`): to-do lists of redmine_issue_todo_lists2 in report templates, see "Decided by Jan" |
+| Jan's round-3 decisions | 2026-10-08, done: Gotenberg pin moved to 8.37.0 (no acceptance extended), `release.sh` passes again; the to-do list integration stays tested locally only |
 | Tests on PostgreSQL, 2026-10-07 | alone: all green; with 30 GEOxyz plugins: 2 failures caused by redmine_people and view_customize; with all 38: Redmine itself 500s (alias chains in 4 plugins) |
 | Branch head | see `git log` |
 
@@ -327,17 +328,55 @@ Decisions for this plugin:
   geen mariadb (Jan); geen kolomwijziging, nette melding laten staan". Done: no column change; the
   validation message from `6000e85` stays. Nothing to build.
 
+### Round 3 (2026-10-08)
+
+Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 3".
+
+- **Q9, "Bijwerken, anders verlengen"**: done by updating, nothing extended. Gotenberg 8.37.0
+  (published 2026-09-11, the newest release; `gotenberg/gotenberg:8` points at it) carries the
+  fixes. Trivy 0.73.0 (HIGH/CRITICAL, fixable only) no longer reports any of the three expired
+  acceptances: CVE-2026-56852 and CVE-2026-46602 (pdfcpu) and CVE-2026-19155 (Chromium 151, the
+  image now ships 152). All three expired on 2026-09-09, so all three are deleted from
+  `script/gates/gotenberg_accepted_cves.allowlist` rather than only the one named; keeping them
+  would be the gate's own "stale exemption" case. Pin: `docker-compose.gotenberg.yml`,
+  `sha256:f29984bd1e22…`. Evidence: `docs/e2e/gotenberg-8.37/` (scan summary, preflight screenshot).
+  - Tests against 8.37.0, run here, not in CI (Actions is manual): Gotenberg service spec and unit
+    spec 176 examples, 0 failures, 1 pending (the unauthenticated-endpoint check needs a second
+    Gotenberg started without a credential; this session's sandbox refused to start one).
+    Conformance corpus with `RRD_ENGINE=gotenberg`: every Gotenberg cell PASS; the run's only red
+    example is the G9 matrix comparison, whose diff is four wkhtmltopdf cells (F-04, F-18, F-21,
+    F-23), the Ubuntu-apt wkhtmltopdf limitation already recorded under Verdict 6.
+  - e2e with Gotenberg as the selected engine (production mode, server as the unprivileged
+    user): templates, dashboard, delivery, share_links, rake_tasks and admin, 0 problems; 9 report
+    PDFs (document download, widget PDF, mailed and scheduled reports, share links) all answered
+    200 by Gotenberg 8.37.0; Administration > Render preflight shows "gotenberg, Every check
+    passed, Engine version: 8.37.0".
+  - `script/gates/release.sh`: 12 passed, "every gate passes at its release configuration".
+  - Not decided, see Q11: the same scan lists 136 other fixable HIGH/CRITICAL advisories in 8.37.0
+    (255 in 8.35.0 on the same database).
+- **Q10, "Alleen lokaal"**: no CI job for the combination with redmine_issue_todo_lists2. The
+  with-plugin tests are defined only when that plugin is installed and are run locally, as recorded
+  under "Decided by Jan" (round 2).
+
 ## Open questions for Jan
 
 - **Q3.** Decided in round 2 and built, see "Decided by Jan".
-- **Q9. Accepted Gotenberg CVE expired.** `script/gates/release.sh` reports NOT RELEASABLE because
+- **Q9.** Decided in round 3 and done, see "Round 3". History: **Accepted Gotenberg CVE expired.** `script/gates/release.sh` reports NOT RELEASABLE because
   CVE-2026-56852 (pdfcpu, golang.org/x/text) was accepted only through 2026-09-09. A date, not a code
   change; renewing or dropping an acceptance is a security call, so it was not touched. Same result
   before and after the round-2 commit.
-- **Q10. CI for the to-do list integration.** Add an Actions job that installs
+- **Q10.** Decided in round 3: local only. History: **CI for the to-do list integration.** Add an Actions job that installs
   redmine_issue_todo_lists2 next to this plugin, or keep it measured locally only? Recommendation:
   add it when the todo plugin's branch is final; until then the README-level claim is "tested
   locally".
+- **Q11. 136 fixable HIGH/CRITICAL advisories in Gotenberg 8.37.0** (Trivy database of
+  2026-10-08), mostly Chromium 152 with fixes in 154, plus perl, glib and pcre2 in the Debian
+  layer. No Gotenberg release carries them yet. The manual `gotenberg-cve` workflow would list them
+  as new and, per CLAUDE.md §7, reports without blocking; `release.sh` only checks the acceptances'
+  shape and dates, so it passes. Options: (a) leave them reported and re-check when Gotenberg
+  publishes a release with Chromium 154; (b) accept them in bulk with a 30 to 90 day date and a
+  reason (containment: no network, non-root, sandbox on, PDF-engine routes off). Recommendation:
+  (a); a bulk acceptance of 136 entries would mostly be noise in a file meant to be read.
 - **Q5. Admin menu icon.** `checked` was chosen (exists on 6.0/6.1/7.0). Any preference?
 - **Q6. GEOxyz plugins that still `alias_method` core methods** on their `redmine70-migration`
   branches (2026-10-07): redmine_itil_priority, redmine_mail_digest and

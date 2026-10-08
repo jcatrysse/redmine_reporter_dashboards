@@ -1,0 +1,71 @@
+# Trivy 0.73.0, HIGH,CRITICAL, --ignore-unfixed, --scanners vuln, database of 2026-10-08
+
+## gotenberg@sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+targets: 4, advisories: 255
+CVE-2026-19155: chromium 151.0.7922.71-1~deb13u1 -> 151.0.7922.108-1~deb13u1; chromium-common 151.0.7922.71-1~deb13u1 -> 151.0.7922.108-1~deb13u1
+CVE-2026-46602: golang.org/x/image v0.41.0 -> 0.43.0
+CVE-2026-56852: golang.org/x/text v0.37.0 -> 0.39.0
+by package:
+      211 chromium-common 151.0.7922.71-1~deb13u1
+      211 chromium 151.0.7922.71-1~deb13u1
+       16 stdlib v1.26.5
+        7 perl-modules-5.40 5.40.1-6
+        7 perl-base 5.40.1-6
+        7 perl 5.40.1-6
+        7 libperl5.40 5.40.1-6
+        7 libglib2.0-0t64 2.84.4-3~deb13u3
+        4 libpcre2-8-0 10.46-1~deb13u1
+        3 util-linux 2.41-5
+        3 openssl-provider-legacy 3.5.6-1~deb13u2
+        3 openssl 3.5.6-1~deb13u2
+        3 mount 2.41-5
+        3 login 1:4.16.0-2+really2.41-5
+        3 libuuid1 2.41-5
+        3 libssl3t64 3.5.6-1~deb13u2
+        3 libsmartcols1 2.41-5
+        3 libmount1 2.41-5
+        3 liblastlog2-2 2.41-5
+        3 libblkid1 2.41-5
+        3 bsdutils 1:2.41-5
+        2 libsqlite3-0 3.46.1-7+deb13u1
+        2 google.golang.org/grpc v1.82.1
+        2 golang.org/x/image v0.41.0
+        1 python3.13-minimal 3.13.5-2+deb13u4
+        1 python3.13 3.13.5-2+deb13u4
+        1 libssh2-1t64 1.11.1-1+deb13u1
+        1 libpython3.13-stdlib 3.13.5-2+deb13u4
+        1 libpython3.13-minimal 3.13.5-2+deb13u4
+        1 libpython3.13 3.13.5-2+deb13u4
+        1 libgstreamer-plugins-base1.0-0 1.26.2-1+deb13u1
+        1 gzip 1.13-1
+        1 golang.org/x/text v0.37.0
+        1 golang.org/x/crypto v0.54.0
+        1 golang.org/x/crypto v0.52.0
+
+## gotenberg@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
+targets: 4, advisories: 136
+CVE-2026-19155: not reported
+CVE-2026-46602: not reported
+CVE-2026-56852: not reported
+by package:
+      109 chromium-common 152.0.7977.82-1~deb13u1
+      109 chromium 152.0.7977.82-1~deb13u1
+        7 perl-modules-5.40 5.40.1-6
+        7 perl-base 5.40.1-6
+        7 perl 5.40.1-6
+        7 libperl5.40 5.40.1-6
+        7 libglib2.0-0t64 2.84.4-3~deb13u3
+        4 libpcre2-8-0 10.46-1~deb13u1
+        2 openssl-provider-legacy 3.5.7-1~deb13u2
+        2 openssl 3.5.7-1~deb13u2
+        2 libssl3t64 3.5.7-1~deb13u2
+        2 libsqlite3-0 3.46.1-7+deb13u1
+        1 python3.13-minimal 3.13.5-2+deb13u4
+        1 python3.13 3.13.5-2+deb13u4
+        1 libssh2-1t64 1.11.1-1+deb13u1
+        1 libpython3.13-stdlib 3.13.5-2+deb13u4
+        1 libpython3.13-minimal 3.13.5-2+deb13u4
+        1 libpython3.13 3.13.5-2+deb13u4
+        1 gzip 1.13-1
+        1 golang.org/x/image v0.44.0
+        1 golang.org/x/crypto v0.54.0

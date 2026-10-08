@@ -50,7 +50,10 @@ services:
     # colon in it.
     #
     # Measured 2026-08-10: gotenberg/gotenberg:8 -> Gotenberg 8.35.0, 2.44 GB.
-    image: gotenberg/gotenberg:8@sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+    # Moved 2026-10-08 (Jan's round-3 decision): gotenberg/gotenberg:8 and :8.37.0 ->
+    # Gotenberg 8.37.0 (published 2026-09-11), the newest release. A Trivy 0.73.0 scan of it
+    # no longer reports the three advisories accepted against 8.35.0.
+    image: gotenberg/gotenberg:8@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
     restart: unless-stopped
 
     # Gotenberg's image already defines an unprivileged `gotenberg` user; naming the uid

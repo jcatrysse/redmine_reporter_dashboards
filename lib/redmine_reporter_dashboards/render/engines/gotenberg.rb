@@ -45,7 +45,9 @@ module RedmineReporterDashboards
       #
       # The wire-format constants below were read off `gotenberg/gotenberg:8` @
       # sha256:a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
-      # (Gotenberg 8.35.0) rather than off its documentation.
+      # (Gotenberg 8.35.0) rather than off its documentation. Re-run unchanged against 8.37.0
+      # (sha256:f29984bd1e22…) on 2026-10-08 when the pin moved: service spec and conformance
+      # corpus green, measured locally.
       class Gotenberg
         ID = :gotenberg
 

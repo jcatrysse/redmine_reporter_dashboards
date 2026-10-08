@@ -52,33 +52,23 @@
 # will not accept more than 90.
 #
 # ======================================================================================
-# Gotenberg 8.35.0 — digest a16a14e1f18a71405624bc028e90d4ef50ea774c352b303639c10bf7b141f760
+# Gotenberg 8.37.0 — digest f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
 # ======================================================================================
 #
-# ALL FOUR ENTRIES SHARE THE REASON ABOVE: there is nowhere to move the pin to. The Debian
-# fixes exist; a Gotenberg image carrying them does not.
+# NO ACCEPTANCES. The three records accepted against 8.35.0 (digest a16a14e1f18a…) expired
+# on 2026-09-09 and were not renewed: Jan decided on 2026-10-08 to move the pin to a release
+# that carries the fixes rather than extend them, and Gotenberg 8.37.0 does. Measured with
+# Trivy 0.73.0 (HIGH,CRITICAL, --ignore-unfixed, database of 2026-10-08):
 #
-# WHAT CONTAINS THEM MEANWHILE is in docker-compose.gotenberg.yml and is not rhetorical:
-# `internal: true` (no route off the network), a non-root user with Chromium's own sandbox
-# left ON, a read-only root filesystem, `cap_drop: ALL`, `no-new-privileges`, and the
-# LibreOffice and PDF-engine routes switched off. None of that fixes a use-after-free. It
-# decides what an attacker reaches after one.
-
-# THE ONE THAT MATTERS, because Chromium is the render path — the process that parses a
-# report's HTML. A sandbox escape means the containment above is all that is left, which
-# is exactly why the compose file refuses `--no-sandbox` and keeps the container non-root.
-CVE-2026-19155 | 2026-09-09 | chromium/chromium-common 151.0.7922.71: sandbox escape via use-after-free in Payments; fixed in 151.0.7922.108-1~deb13u1, which no published Gotenberg image contains.
-
-# THE THREE IN `usr/bin/pdfcpu`, reachable only through the PDF-engine routes — which the
-# documented compose file starts the container WITHOUT (`--pdfengines-disable-routes`), so
-# neither this plugin nor anyone following the example reaches the code. That is a
-# mitigation and NOT an argument that the finding is wrong: Trivy scans the image, and an
-# operator who drops that flag gets the exposure back.
-CVE-2026-46602 | 2026-09-09 | pdfcpu / golang.org/x/image v0.41.0: unbounded allocation decoding a TIFF; fixed in 0.43.0. Unreachable with --pdfengines-disable-routes.
-# CVE-2026-46604 (x/image: panic decoding an invalid TIFF) was accepted alongside the two
-# entries around it on 2026-08-10 and DELETED on 2026-08-11, when the stale arm fired on
-# run 31468632140: the scan of the SAME digest no longer reports it, so the acceptance
-# exempted nothing. The image did not change — the vulnerability database did. This
-# comment is not an exemption; it exists so the next scan that reports the id again reads
-# as "the database re-listed it" rather than as a new finding nobody has seen.
-CVE-2026-56852 | 2026-09-09 | pdfcpu / golang.org/x/text v0.37.0: denial of service on invalid UTF-8 input; fixed in 0.39.0. Unreachable with --pdfengines-disable-routes.
+#   CVE-2026-19155  chromium 151.0.7922.71   -> 8.37.0 ships chromium 152.0.7977.82: absent
+#   CVE-2026-46602  pdfcpu golang.org/x/image -> absent
+#   CVE-2026-56852  pdfcpu golang.org/x/text  -> absent
+#
+# Keeping them would have been the stale arm's case (3): an exemption for something the scan
+# no longer reports. They are history now, not exemptions.
+#
+# NOT DECIDED HERE, AND SAID SO: the same scan lists 136 other fixable HIGH/CRITICAL
+# advisories in 8.37.0 (255 in 8.35.0 on the same database), most in Chromium 152 with fixes
+# in 154, which no published Gotenberg release carries yet. Accepting them is a security
+# call that has not been made, so they are not listed; the nightly scan reports them and,
+# per CLAUDE.md §7, does not block. See docs/REDMINE7-MIGRATION.md, Q11.
