@@ -8,7 +8,7 @@ locale *values* are in their own language (§10).
 Today this plugin is an **addon** that hard-requires `redmine_reporter`, which in turn requires the
 `redmineup` gem. The plan (`docs/plan/05-decision.md`, ADR-004) turns it into **one standalone
 plugin** that owns its Liquid layer, its drops, its render path and its reporting surface, runs on
-**Redmine 5.1 → 7.0**, and needs neither the base plugin nor the vendor gem.
+**Redmine 7.0** (Jan, 2026-10-07: Redmine 7 only, no 5.1/6.x), and needs neither the base plugin nor the vendor gem.
 
 The work order is `docs/plan/implementation-plan.md`, tasks **T-00 … T-38**. Do one task per branch.
 
@@ -129,12 +129,10 @@ beautiful output**; one type scale shared by HTML and PDF.
 
 ## 4. Redmine and Rails specifics
 
-**Version span: Redmine 5.1 (Rails 6.1) / 6.0 (7.2) / 6.1 (7.2) / 7.0 (8.1) — three Rails majors.**
+**Version: Redmine 7.0 (Rails 8.1) only** — Jan's decision of 2026-10-07; nothing is backported to 5.1 or 6.x.
 
 - **Read the core source when in doubt**, at the branch you are targeting:
-  <https://github.com/jcatrysse/redmine/tree/5.1-stable> ·
-  <https://github.com/jcatrysse/redmine/tree/6.1-stable> — and the corresponding `6.0-stable` /
-  `7.0-stable` branches. `.codex/redmine_clone.sh` clones from **upstream**
+  <https://github.com/jcatrysse/redmine/tree/7.0-stable>. `.codex/redmine_clone.sh` clones from **upstream**
   `redmine/redmine.git`; the fork links above are for reading, not for building against.
 - **This bullet's premise was checked on 2026-08-04 and was stale.** `.codex/redmine_clone.sh`
   accepts *any* branch that exists on the remote, `7.0-stable` included, and `ci.yml:51`/`:236`
@@ -238,7 +236,7 @@ deployed, credentialed and chosen by an administrator, and the default renderer 
 on the Redmine host. **Which PDF renderer to run, and what vulnerability posture to accept in it, is
 that administrator's decision on their own estate.** A red cell here made a third party's Chromium CVE
 read as a defect in this plugin, on a repository that ships none of the bytes and can fix none of
-them. What did **not** change, and must not: the scan still runs nightly and still says what it found;
+them. What did **not** change, and must not: the scan still runs (by hand only since 2026-10-07, every workflow trigger is manual) and still says what it found;
 the allowlist keeps its per-CVE reasons and dates; `cve_accepted_diff_selftest.sh` still **hard**-fails,
 because "the gate can still say no" is a property of the script and a broken script would report a
 clean image; and `ci.yml`'s `gotenberg_accepted_cves` step is still **hard**, because it validates the
@@ -253,8 +251,7 @@ PASS.
 
 ```bash
 # 1. clone Redmine and mirror the plugin into it (per branch)
-./.codex/redmine_clone.sh 5.1-stable       # also: 6.0-stable, 6.1-stable
-                                           # 7.0 branch: see §4, must be added
+./.codex/redmine_clone.sh 7.0-stable
 # 2. install gems and prepare the test database
 ./.codex/test_setup.sh
 # 3. run the plugin's suite
