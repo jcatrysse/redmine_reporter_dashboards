@@ -44,3 +44,15 @@ Jan answered these follow-up questions from the migration report the same way, o
   Jan chose: "Bijwerken, anders verlengen": look for a Gotenberg version that contains the fix and update to it; only if none exists, extend the acceptance by 3 months with the reason written down. Carry this out.
 - reporter 10 (Q10): a GitHub job that tests this plugin together with redmine_issue_todo_lists2?
   Jan chose: "Alleen lokaal": no extra job; record it.
+
+## Round 6, 2026-10-12: the follow-up points of the plan
+
+Jan answered the open points this session recorded in docs/REDMINE7-MIGRATION.md after the earlier rounds, one by one in the coordinating session.
+
+- **Q11, 136 fixable HIGH/CRITICAL advisories in Gotenberg 8.37.0: (b), accept them all for a limited time.** Jan chose this over the recommendation. Accept each one in `script/gates/gotenberg_accepted_cves.allowlist` (or the file the gate reads) with an expiry of 60 days (2026-12-11) and the containment as reason (no network, non-root, Chromium sandbox on, PDF-engine routes off). Re-check and move the pin as soon as Gotenberg publishes a release with Chromium 154. `release.sh` and the manual `gotenberg-cve` workflow must accept the file; prove it by running both locally.
+- **Q5, admin menu icon: `stats`** (exists in Redmine 7's sprite) instead of `checked`. Check the menu in a real browser and replace the screenshot.
+- **Q8, CLAUDE.md: update the two out-of-date points** (Jan's go-ahead): §4/§9 no longer describe a 5.1 to 7.0 span (Redmine 7 only, Jan 2026-10-07), and §7 says the Gotenberg CVE scan runs by hand only. Change only those passages.
+- **Q6, alias_method in other plugins:** resolved meanwhile. The combined run of 2026-10-08 on all 44 `redmine70-migration` branches found 0 risky alias/prepend combinations; Project > Settings, the issue list, an issue page and My page answer 200. Record it; nothing to build here.
+- **Q7, redmine_people and view_customize:** fixed in those plugins (Jan: "oplossen in die 2 plugins"); their sessions get the work. Keep this plugin's two tests strict; re-run them with both plugins installed once their branches carry the fix.
+
+Build Q11, Q5 and Q8 now, one commit each, with tests where code changes; your own review and `./.codex/openai_review.sh` when OPENAI_API_KEY is set; push after every commit; end with a short Dutch report.
