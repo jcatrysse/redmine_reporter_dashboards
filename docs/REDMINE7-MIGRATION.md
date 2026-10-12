@@ -358,6 +358,15 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 3".
   with-plugin tests are defined only when that plugin is installed and are run locally, as recorded
   under "Decided by Jan" (round 2).
 
+### Round 6 (2026-10-12)
+
+Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
+
+- **Q5, admin menu icon `stats`**: `init.rb`. The functional test asserts the name and that the
+  id exists in the running Redmine's sprite (34 runs, 0 failures; with a non-existent name it
+  fails). Checked in the browser: Administration shows "Render preflight" with the bar-chart
+  icon; `docs/e2e/postgresql/admin-*.png` replaced (admin scenario, 0 problems).
+
 ## Open questions for Jan
 
 - **Q3.** Decided in round 2 and built, see "Decided by Jan".
@@ -377,7 +386,7 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 3".
   publishes a release with Chromium 154; (b) accept them in bulk with a 30 to 90 day date and a
   reason (containment: no network, non-root, sandbox on, PDF-engine routes off). Recommendation:
   (a); a bulk acceptance of 136 entries would mostly be noise in a file meant to be read.
-- **Q5. Admin menu icon.** `checked` was chosen (exists on 6.0/6.1/7.0). Any preference?
+- **Q5.** Decided in round 6 (2026-10-12): `stats`. Done, see "Round 6". History: **Admin menu icon.** `checked` was chosen (exists on 6.0/6.1/7.0). Any preference?
 - **Q6. GEOxyz plugins that still `alias_method` core methods** on their `redmine70-migration`
   branches (2026-10-07): redmine_itil_priority, redmine_mail_digest and
   redmine_depending_custom_fields (`project_settings_tabs`), redmine_itil_priority and
