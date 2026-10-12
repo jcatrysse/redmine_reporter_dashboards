@@ -366,6 +366,20 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
   id exists in the running Redmine's sprite (34 runs, 0 failures; with a non-existent name it
   fails). Checked in the browser: Administration shows "Render preflight" with the bar-chart
   icon; `docs/e2e/postgresql/admin-*.png` replaced (admin scenario, 0 problems).
+- **Q6, alias_method in other plugins**: resolved outside this plugin. Per Jan's record, the
+  combined run of 2026-10-08 on all 44 `redmine70-migration` branches found 0 risky alias/prepend
+  combinations, and Project > Settings, the issue list, an issue page and My page answer 200.
+  Recorded only; not re-measured from this session.
+- **Q7, redmine_people and view_customize**: to be fixed in those plugins by their own sessions.
+  This plugin's two tests stay strict (unchanged). Still to do here: re-run them with both plugins
+  installed once their branches carry the fix.
+- **Q11 and Q8: decided, NOT built.** This session's permission system refused both actions:
+  writing 157 dated acceptances into `script/gates/gotenberg_accepted_cves.allowlist`
+  ("security weaken") and editing `CLAUDE.md` ("self-modification"). Neither was worked around.
+  For Q11, note that a rescan on 2026-10-12 with that day's Trivy database lists 157 fixable
+  HIGH/CRITICAL advisories in 8.37.0, not 136: one dropped off (CVE-2026-75804) and 22 were added,
+  all of the same kind (Chromium 152 with fixes in 153/154, Go stdlib and golang.org/x/net in the
+  Gotenberg binaries). Accepting "all" therefore means 157 for the manual workflow to pass.
 
 ## Open questions for Jan
 
@@ -378,7 +392,7 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
   redmine_issue_todo_lists2 next to this plugin, or keep it measured locally only? Recommendation:
   add it when the todo plugin's branch is final; until then the README-level claim is "tested
   locally".
-- **Q11. 136 fixable HIGH/CRITICAL advisories in Gotenberg 8.37.0** (Trivy database of
+- **Q11.** Decided in round 6 (accept for 60 days), not built (permission refused), see "Round 6". History: **136 fixable HIGH/CRITICAL advisories in Gotenberg 8.37.0** (Trivy database of
   2026-10-08), mostly Chromium 152 with fixes in 154, plus perl, glib and pcre2 in the Debian
   layer. No Gotenberg release carries them yet. The manual `gotenberg-cve` workflow would list them
   as new and, per CLAUDE.md §7, reports without blocking; `release.sh` only checks the acceptances'
@@ -387,7 +401,7 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
   reason (containment: no network, non-root, sandbox on, PDF-engine routes off). Recommendation:
   (a); a bulk acceptance of 136 entries would mostly be noise in a file meant to be read.
 - **Q5.** Decided in round 6 (2026-10-12): `stats`. Done, see "Round 6". History: **Admin menu icon.** `checked` was chosen (exists on 6.0/6.1/7.0). Any preference?
-- **Q6. GEOxyz plugins that still `alias_method` core methods** on their `redmine70-migration`
+- **Q6.** Resolved per round 6, see "Round 6". History: **GEOxyz plugins that still `alias_method` core methods** on their `redmine70-migration`
   branches (2026-10-07): redmine_itil_priority, redmine_mail_digest and
   redmine_depending_custom_fields (`project_settings_tabs`), redmine_itil_priority and
   redmine_issue_todo_lists2 (`IssueQuery#initialize_available_filters`/`available_columns`), and
@@ -395,11 +409,11 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
   redmine_view_issue_description, redmine_tint_issues and computed_custom_field. With all GEOxyz
   plugins installed Project > Settings, the issue list, issue pages and My page answer 500. That
   is their fix under your `prepend` decision; this plugin cannot repair it from its side.
-- **Q7. redmine_people and view_customize** make two of this plugin's tests fail when installed
+- **Q7.** Decided in round 6: fixed in those plugins, see "Round 6". History: **redmine_people and view_customize** make two of this plugin's tests fail when installed
   together (per-user queries in `link_to_user`; the request path echoed into every page's
   `<head>`). Fix them there, or accept them? Recommendation: fix in those plugins; the
   view_customize comment also exposes any token-in-path URL of other plugins.
-- **Q8. CLAUDE.md is now out of date** on two points this session did not edit, because it is
+- **Q8.** Decided in round 6, not built (permission refused), see "Round 6". History: **CLAUDE.md is now out of date** on two points this session did not edit, because it is
   your file: §4/§9 still describe the 5.1 → 7.0 span, and §7 says the Gotenberg CVE scan "still
   runs nightly" (it is manual since `e252673`).
 
