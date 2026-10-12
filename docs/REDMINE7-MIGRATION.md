@@ -373,13 +373,16 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
 - **Q7, redmine_people and view_customize**: to be fixed in those plugins by their own sessions.
   This plugin's two tests stay strict (unchanged). Still to do here: re-run them with both plugins
   installed once their branches carry the fix.
-- **Q11 and Q8: decided, NOT built.** This session's permission system refused both actions:
-  writing 157 dated acceptances into `script/gates/gotenberg_accepted_cves.allowlist`
-  ("security weaken") and editing `CLAUDE.md` ("self-modification"). Neither was worked around.
-  For Q11, note that a rescan on 2026-10-12 with that day's Trivy database lists 157 fixable
-  HIGH/CRITICAL advisories in 8.37.0, not 136: one dropped off (CVE-2026-75804) and 22 were added,
-  all of the same kind (Chromium 152 with fixes in 153/154, Go stdlib and golang.org/x/net in the
-  Gotenberg binaries). Accepting "all" therefore means 157 for the manual workflow to pass.
+- **Q11, built on Jan's direct go-ahead (2026-10-12)**: 157 acceptances in
+  `script/gates/gotenberg_accepted_cves.allowlist`, valid through 2026-12-11, the containment as
+  reason. 157 rather than 136 because that day's Trivy database lists 157 for the same digest
+  (one dropped off, 22 of the same kind added). This session's permission system first refused
+  the write; Jan then asked for it directly. Proof, run locally: `cve_accepted_diff_selftest.sh`
+  53 cases as specified; `--validate-only` 157 well-formed; the workflow's comparison against the
+  2026-10-12 scan "157 accepted, 0 unaccepted, 0 stale" (and it still fails with one acceptance
+  removed or one stale added); `release.sh` 12 passed, "every gate passes at its release
+  configuration". Re-check when Gotenberg ships Chromium 154.
+- **Q8**: CLAUDE.md updated by Jan in `b2f8691`.
 
 ## Open questions for Jan
 
@@ -392,7 +395,7 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
   redmine_issue_todo_lists2 next to this plugin, or keep it measured locally only? Recommendation:
   add it when the todo plugin's branch is final; until then the README-level claim is "tested
   locally".
-- **Q11.** Decided in round 6 (accept for 60 days), not built (permission refused), see "Round 6". History: **136 fixable HIGH/CRITICAL advisories in Gotenberg 8.37.0** (Trivy database of
+- **Q11.** Decided in round 6 (accept for 60 days), built, see "Round 6", see "Round 6". History: **136 fixable HIGH/CRITICAL advisories in Gotenberg 8.37.0** (Trivy database of
   2026-10-08), mostly Chromium 152 with fixes in 154, plus perl, glib and pcre2 in the Debian
   layer. No Gotenberg release carries them yet. The manual `gotenberg-cve` workflow would list them
   as new and, per CLAUDE.md §7, reports without blocking; `release.sh` only checks the acceptances'
@@ -413,7 +416,7 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
   together (per-user queries in `link_to_user`; the request path echoed into every page's
   `<head>`). Fix them there, or accept them? Recommendation: fix in those plugins; the
   view_customize comment also exposes any token-in-path URL of other plugins.
-- **Q8.** Decided in round 6, not built (permission refused), see "Round 6". History: **CLAUDE.md is now out of date** on two points this session did not edit, because it is
+- **Q8.** Decided in round 6, done by Jan in `b2f8691`, see "Round 6". History: **CLAUDE.md is now out of date** on two points this session did not edit, because it is
   your file: §4/§9 still describe the 5.1 → 7.0 span, and §7 says the Gotenberg CVE scan "still
   runs nightly" (it is manual since `e252673`).
 
