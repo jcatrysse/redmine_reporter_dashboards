@@ -15,7 +15,8 @@ if [ ! -d "$REDMINE_DIR/.git" ]; then
 else
   (
     cd "$REDMINE_DIR"
-    git fetch --depth 1 origin "$REDMINE_VERSION:refs/remotes/origin/$REDMINE_VERSION"
+    # "+": the GEOxyz branch is rebased upstream from time to time; follow it.
+    git fetch --depth 1 origin "+$REDMINE_VERSION:refs/remotes/origin/$REDMINE_VERSION"
 
     # test_setup.sh appends a test-only gem to Redmine's OWN Gemfile, so after one
     # setup run this checkout is dirty and a plain `git checkout -B` refuses to switch
