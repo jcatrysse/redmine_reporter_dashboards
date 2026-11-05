@@ -38,7 +38,7 @@ existing setup and compare the two before committing to a migration.
 | 5.1 | 6.1 | 3.2 |
 | 6.0 | 7.1 | 3.3 |
 | 6.1 | 7.2 | 3.4 |
-| 7.0 | 8.1 | 3.4 |
+| 7.0 | 8.1 | 4.0 |
 
 | Database | |
 |---|---|

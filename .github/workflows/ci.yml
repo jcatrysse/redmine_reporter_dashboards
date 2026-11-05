@@ -80,7 +80,7 @@ jobs:
           - { redmine: '5.1-stable', ruby: '3.2' }
           - { redmine: '6.0-stable', ruby: '3.3' }
           - { redmine: '6.1-stable', ruby: '3.4' }
-          - { redmine: '7.0-stable', ruby: '3.4' }
+          - { redmine: '7.0-stable', ruby: '4.0' }
 
     steps:
       - name: Checkout plugin
@@ -312,7 +312,7 @@ jobs:
           - { redmine: '5.1-stable', ruby: '3.2' }
           - { redmine: '6.0-stable', ruby: '3.3' }
           - { redmine: '6.1-stable', ruby: '3.4' }
-          - { redmine: '7.0-stable', ruby: '3.4' }
+          - { redmine: '7.0-stable', ruby: '4.0' }
 
     services:
       postgres:
@@ -439,7 +439,7 @@ jobs:
       matrix:
         include:
           - { redmine: '5.1-stable', ruby: '3.2' }
-          - { redmine: '7.0-stable', ruby: '3.4' }
+          - { redmine: '7.0-stable', ruby: '4.0' }
 
     services:
       postgres:
@@ -658,7 +658,7 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.4'
+          ruby-version: '4.0'
           bundler-cache: false
           working-directory: redmine
 
@@ -796,11 +796,11 @@ jobs:
           - { redmine: '5.1-stable', ruby: '3.2', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
           - { redmine: '6.0-stable', ruby: '3.3', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
           - { redmine: '6.1-stable', ruby: '3.4', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
-          - { redmine: '7.0-stable', ruby: '3.4', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
+          - { redmine: '7.0-stable', ruby: '4.0', db: { label: PostgreSQL 16, image: 'postgres:16', port: 5432, adapter: postgresql, packages: libpq-dev, options: '--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 10' } }
           - { redmine: '6.1-stable', ruby: '3.4', db: { label: MySQL 8.0, image: 'mysql:8.0', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine" --health-interval 10s --health-timeout 5s --health-retries 20' } }
-          - { redmine: '7.0-stable', ruby: '3.4', db: { label: MySQL 8.0, image: 'mysql:8.0', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '7.0-stable', ruby: '4.0', db: { label: MySQL 8.0, image: 'mysql:8.0', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -predmine" --health-interval 10s --health-timeout 5s --health-retries 20' } }
           - { redmine: '6.1-stable', ruby: '3.4', db: { label: MariaDB 11, image: 'mariadb:11', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 10s --health-timeout 5s --health-retries 20' } }
-          - { redmine: '7.0-stable', ruby: '3.4', db: { label: MariaDB 11, image: 'mariadb:11', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 10s --health-timeout 5s --health-retries 20' } }
+          - { redmine: '7.0-stable', ruby: '4.0', db: { label: MariaDB 11, image: 'mariadb:11', port: 3306, adapter: mysql2, packages: default-libmysqlclient-dev, options: '--health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 10s --health-timeout 5s --health-retries 20' } }
 
     services:
       # One service definition for three engines: each image reads only the variables it
