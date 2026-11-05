@@ -27,7 +27,7 @@
 #   1. the ruby on PATH — if it satisfies the Gemfile, there is nothing to install
 #   2. mise's own list of real Ruby versions — take the NEWEST that satisfies
 #
-# which yields 3.2 / 3.3 / 3.4 / 3.4 for the four branches above, matching the
+# which yields 3.2 / 3.3 / 3.4 / 4.0 for the four branches above, matching the
 # ruby-version column of .github/workflows/ci.yml rather than diverging from it.
 
 # The quoted constraints on Redmine's `ruby` line, one per line. Non-zero when the
