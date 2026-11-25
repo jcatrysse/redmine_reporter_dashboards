@@ -423,6 +423,33 @@ Recorded in `docs/DECISIONS-2026-11-25.md`.
   answers fixed in `827b3f1`, the rest recorded above or accepted); OpenAI review
   `docs/reviews/openai-2026-11-25-827b3f1.md` (2 fixed, 4 answered).
 
+### 2026-11-25: the counting tags and redmine_issue_field_visibility
+
+Recorded in `docs/DECISIONS-2026-11-25.md` (Jan: "Ook de teltags afschermen"). The gap left
+by `ef7ac49` is closed.
+
+- **Built** (`2ed2565`, review fixes `163fd5d`): `{% sql_aggregate %}` / `{% geo_aggregate %}`
+  and `{% version_rollup %}` follow the fields redmine_issue_field_visibility hides from the
+  report's actor, per project: one Hidden bucket when grouping (no drill links on that axis),
+  visible projects only for sum/avg/distinct, flags and completeness recomputed over the
+  visible projects, a query filter on a hidden field leaves those projects out, the rollup
+  and spent time by version/category leave them out; `hidden_fields` and diagnostics say so.
+  Admin guide, "What the old accessors answer", lists every case.
+- **G7**: declared kernel hunk `field-visibility`, RATCHET 1 → 2; each hunk is now checked
+  against its own grant by id.
+- **Tests** (Redmine 7.0-stable-GEOxyz, Ruby 4.0.9, PostgreSQL 16), on `163fd5d`: alone rspec
+  2962 / 260 / 217, minitest 650 / 456 / 58; with redmine_view_issue_description and
+  redmine_issue_field_visibility (`redmine70-migration`, real plugin) rspec 2962 / 260 / 217,
+  minitest 648 / 456 / 58; all 0 failures. The new test file: 20 runs; 11 of its first 14
+  cases were red on the old code (the other three are byte-identity, filter-name and
+  query-count checks). G7 20 examples, 0 failures; gates green; RuboCop: no new offences.
+- **Not tested**: redmineup_tags, redmine_agile, redmine_checklists, redmine_contacts and
+  redmine_contacts_helpdesk (private; attaching them was refused in that session); MySQL and
+  MariaDB (a hidden grouping is a CASE, which MariaDB rejects under ONLY_FULL_GROUP_BY, as
+  for `age`; fails closed).
+- **Reviews**: independent subagent review (7 major, 6 minor; fixed in `163fd5d` or recorded
+  above); OpenAI review in `docs/reviews/`.
+
 ## Open questions for Jan
 
 - **Q3.** Decided in round 2 and built, see "Decided by Jan".
