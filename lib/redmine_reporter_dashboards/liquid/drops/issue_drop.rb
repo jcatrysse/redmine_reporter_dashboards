@@ -85,15 +85,15 @@ module RedmineReporterDashboards
 
         # nil for an issue the actor may not open (redmine_view_issue_description).
         def description
-          openable? ? record.description : nil
+          openable? && !hidden?('description') ? record.description : nil
         end
 
         def start_date
-          record.start_date
+          hidden?('start_date') ? nil : record.start_date
         end
 
         def due_date
-          record.due_date
+          hidden?('due_date') ? nil : record.due_date
         end
 
         def done_ratio
@@ -101,7 +101,7 @@ module RedmineReporterDashboards
         end
 
         def estimated_hours
-          record.estimated_hours
+          hidden?('estimated_hours') ? nil : record.estimated_hours
         end
 
         # ------------------------------------------------------------------
@@ -145,7 +145,9 @@ module RedmineReporterDashboards
           record.total_spent_hours.to_f
         end
 
+        # Hidden with `estimated_hours`, as redmine_issue_field_visibility hides the total.
         def total_estimated_hours
+          return nil if hidden?('estimated_hours')
           return estimated_hours if leaf?
 
           record.total_estimated_hours
@@ -209,11 +211,15 @@ module RedmineReporterDashboards
         end
 
         def priority
+          return nil if hidden?('priority_id')
+
           @priority ||= named_ref(reference(:priority, ::IssuePriority, :priority_id),
                                   path: '/enumerations/%d')
         end
 
         def category
+          return nil if hidden?('category_id')
+
           @category ||= named_ref(reference(:category, ::IssueCategory, :category_id),
                                   path: '/issue_categories/%d')
         end
@@ -221,6 +227,7 @@ module RedmineReporterDashboards
         # `version` is what the gem called it, so `version` is what it stays called.
         def version
           return @version if defined?(@version)
+          return @version = nil if hidden?('fixed_version_id')
 
           target = reference(:fixed_version, ::Version, :fixed_version_id)
           @version = target && VersionDrop.new(target, context: render_context)
@@ -245,15 +252,15 @@ module RedmineReporterDashboards
         end
 
         def priority_id
-          record.priority_id
+          hidden?('priority_id') ? nil : record.priority_id
         end
 
         def category_id
-          record.category_id
+          hidden?('category_id') ? nil : record.category_id
         end
 
         def fixed_version_id
-          record.fixed_version_id
+          hidden?('fixed_version_id') ? nil : record.fixed_version_id
         end
 
         def parent_id
@@ -269,7 +276,7 @@ module RedmineReporterDashboards
         end
 
         def assigned_to_id
-          record.assigned_to_id
+          hidden?('assigned_to_id') ? nil : record.assigned_to_id
         end
 
         # ------------------------------------------------------------------
@@ -281,6 +288,8 @@ module RedmineReporterDashboards
         end
 
         def assignee
+          return nil if hidden?('assigned_to_id')
+
           @assignee ||= (record.assigned_to && UserDrop.new(record.assigned_to, context: render_context))
         end
 
@@ -451,12 +460,32 @@ module RedmineReporterDashboards
           record.respond_to?(:leaf?) && record.leaf?
         end
 
+        # Core's `visible_custom_field_values`: a field the actor may see in this project
+        # AND one enabled for this issue's project and tracker (`available_custom_fields`) —
+        # a stored value of a field since removed from the tracker is not shown by core.
         def visible_values
-          @visible_values ||= batch.custom_field_values(id, record.project)
+          @visible_values ||= begin
+            available = batch.available_custom_field_ids(own(:project), own(:tracker_id))
+            values = batch.custom_field_values(id, record.project)
+            available.nil? ? values : values.select { |field_id, _| available.include?(field_id) }
+          end
         end
 
         def openable?
           batch.openable?(id)
+        end
+
+        # redmine_issue_field_visibility: the core fields it hides for the ACTOR's roles in
+        # this issue's project read as nil here — the reader, the `*_id` and the reference
+        # alike. Asked once per project and render (`Batch#hidden_core_fields`).
+        def hidden?(field)
+          batch.hidden_core_fields(own(:project)).include?(field)
+        end
+
+        # A column or association read defensively: an issue always has these, but the drop
+        # specs' fake records carry only what each example needs.
+        def own(name)
+          record.respond_to?(name) ? record.public_send(name) : nil
         end
 
         def visible_to_actor?(issue)

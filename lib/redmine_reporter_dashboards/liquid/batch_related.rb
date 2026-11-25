@@ -174,7 +174,9 @@ module RedmineReporterDashboards
       def story_points(issue_id)
         return nil unless self.class.related_available?(:story_points)
 
-        related_resolve(:story_points, issue_id) { |id_set| one_to_one_values(:agile_data, :story_points, id_set) }[issue_id]
+        related_resolve(:story_points, issue_id) do |id_set|
+          one_to_one_values(:agile_data, :story_points, id_set)
+        end[issue_id]
       end
 
       def color(issue_id)
@@ -250,6 +252,42 @@ module RedmineReporterDashboards
       end
 
       # ------------------------------------------------------------------
+      # redmine_issue_field_visibility and core's available custom fields
+      # ------------------------------------------------------------------
+
+      # The core fields redmine_issue_field_visibility hides from the actor in this project
+      # (`assigned_to_id`, `estimated_hours`, …), asked of that plugin with the actor passed
+      # explicitly — never through its `hide_values` block, which reads the ambient user.
+      # Empty without that plugin. Memoised per project.
+      def hidden_core_fields(project)
+        return [] unless self.class.field_visibility_rule?
+
+        @hidden_core_fields ||= {}
+        key = project&.id
+        return @hidden_core_fields[key] if @hidden_core_fields.key?(key)
+
+        @hidden_core_fields[key] =
+          Array(::RedmineIssueFieldVisibility.hidden_core_fields(@actor, project)).map(&:to_s).freeze
+      end
+
+      # The custom field ids enabled for this project AND tracker, core's
+      # `Issue#available_custom_fields`. Two queries per distinct pair and render. nil when
+      # it cannot be asked (no project or tracker id), which leaves the values unfiltered
+      # by this rule; the role rule (`custom_field_values`) still applies.
+      def available_custom_field_ids(project, tracker_id)
+        return nil if project.nil? || tracker_id.nil? || !project.respond_to?(:all_issue_custom_fields)
+
+        @available_custom_fields ||= {}
+        key = [project.id, tracker_id]
+        return @available_custom_fields[key] if @available_custom_fields.key?(key)
+
+        @budget.check!(:batch_available_custom_fields)
+        tracker = ::Tracker.find_by(id: tracker_id)
+        @available_custom_fields[key] =
+          (tracker ? project.all_issue_custom_fields.map(&:id) & tracker.custom_fields.map(&:id) : []).to_set
+      end
+
+      # ------------------------------------------------------------------
       # Availability
       # ------------------------------------------------------------------
 
@@ -276,6 +314,11 @@ module RedmineReporterDashboards
           associations, method = RELATED_PROBES.fetch(key)
           defined?(::Issue) && ::Issue.method_defined?(method) &&
             associations.all? { |name| ::Issue.reflect_on_association(name) }
+        end
+
+        def field_visibility_rule?
+          defined?(::RedmineIssueFieldVisibility) &&
+            ::RedmineIssueFieldVisibility.respond_to?(:hidden_core_fields)
         end
 
         # redmine_view_issue_description's batch method and the per-issue rule it runs.

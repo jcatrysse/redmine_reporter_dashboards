@@ -18,6 +18,7 @@
 # worked), and it is the template that is the contract.
 
 require 'liquid'
+require 'set'
 
 require_relative 'support/drop_fakes'
 require_relative '../lib/redmine_reporter_dashboards/liquid/drops'
@@ -668,6 +669,36 @@ module RedmineReporterDashboards
 
             it 'answers no description and no attachments' do
               expect(render('[{{ issue.description }}][{{ issue.attachments | size }}]')).to eq('[][0]')
+            end
+          end
+
+          # redmine_issue_field_visibility (2026-11-25): a core field hidden from the actor
+          # reads as nil through every spelling of it.
+          context 'when redmine_issue_field_visibility hides core fields from the actor' do
+            let(:batch) do
+              DropFakes::Batch.new(custom_fields: custom_fields,
+                                   related: related.merge(hidden_core_fields: %w[estimated_hours assigned_to_id
+                                                                                 priority_id description]))
+            end
+
+            it 'answers nil for each hidden field and its id, and keeps the others' do
+              expect(render('[{{ issue.estimated_hours }}][{{ issue.total_estimated_hours }}]' \
+                            '[{{ issue.assigned_to_id }}][{{ issue.assignee }}][{{ issue.priority }}]' \
+                            '[{{ issue.priority_id }}][{{ issue.description }}][{{ issue.category }}]' \
+                            '[{{ issue.due_date }}]')).to eq('[][][][][][][][Backend][2026-01-31]')
+            end
+          end
+
+          context "when a stored value's field is not enabled for the issue's tracker" do
+            let(:batch) do
+              DropFakes::Batch.new(custom_fields: custom_fields,
+                                   custom_field_values: { 42 => { 20 => 'Ops', 21 => %w[Aurora Borealis] } },
+                                   related: related.merge(available_custom_field_ids: Set[20]))
+            end
+
+            it 'leaves it out, as core does' do
+              expect(render('{% for cfv in issue.custom_field_values %}{{ cfv.name }};{% endfor %}'))
+                .to eq('Department;')
             end
           end
 

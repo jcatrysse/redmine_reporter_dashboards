@@ -453,6 +453,14 @@ error. With **redmine_view_issue_description** installed, an issue the person ma
 list but may not open shows no description, no attachments, no journals and no notes in a
 report either — the same rule that plugin applies everywhere else.
 
+With **redmine_issue_field_visibility** installed, a core field that plugin hides from the
+person's roles in the issue's project (assignee, estimated time, dates, category, target
+version, priority, description) is empty in a report too, under every name for it
+(`issue.assignee`, `issue.assigned_to_id`, `issue.total_estimated_hours`, …). A custom field
+shows only where Redmine itself would show it: for a role that may see it, and only when the
+field is enabled for the issue's project and tracker. One exception, recorded in the migration
+plan: the `{% sql_aggregate %}` tag still groups by and sums those core fields.
+
 Two bounds, both visible in the report's diagnostics when they bite: at most the 500 most
 recent journals per issue, and at most 20 000 journal rows per report. `issue.journals.all` is
 therefore safe; `issues.all` still is not, and the template editor still warns about it.

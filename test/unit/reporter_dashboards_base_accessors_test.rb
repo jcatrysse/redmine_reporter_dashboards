@@ -361,6 +361,90 @@ class ReporterDashboardsBaseAccessorsTest < ActiveSupport::TestCase
   end
 
   # ------------------------------------------------------------------
+  # redmine_issue_field_visibility: core fields hidden from the actor (2026-11-25)
+  # ------------------------------------------------------------------
+
+  FIELDS = '{% for issue in issues %}[{{ issue.estimated_hours }}][{{ issue.total_estimated_hours }}]' \
+           '[{{ issue.assigned_to_id }}][{{ issue.assignee.name }}][{{ issue.priority }}]{% endfor %}'
+
+  # Issue 3 is assigned to the developer; the Developer role hides the estimate and the
+  # assignee, the Manager role hides nothing.
+  def assert_field_visibility_per_actor
+    issue = Issue.find(3)
+    issue.update_columns(estimated_hours: 4.5)
+    priority = issue.priority.name
+    assert_equal "[][][][][#{priority}]", render(User.find(3), [3], FIELDS)
+    assert_equal "[4.5][4.5][3][Dave Lopper][#{priority}]", render(User.find(2), [3], FIELDS)
+    assert_equal "[4.5][4.5][3][Dave Lopper][#{priority}]", render(@admin, [3], FIELDS)
+  end
+
+  if Batch.field_visibility_rule?
+    def test_a_core_field_hidden_by_redmine_issue_field_visibility_reads_empty
+      with_settings(plugin_redmine_issue_field_visibility: {
+                      'hiddenfields' => { '2' => { 'estimated_hours' => '1', 'assigned_to_id' => '1' } }
+                    }) do
+        assert_field_visibility_per_actor
+      end
+    end
+  else
+    # Without the plugin its rule is simulated by the one method the batch calls, with the
+    # actor passed in; the constant is removed again in `ensure`.
+    def test_a_core_field_hidden_by_redmine_issue_field_visibility_reads_empty
+      rule = Module.new do
+        def self.hidden_core_fields(user, project = nil)
+          return [] if user.admin? || project.nil?
+
+          user.roles_for_project(project).map(&:id) == [2] ? %w[estimated_hours assigned_to_id] : []
+        end
+      end
+      Object.const_set(:RedmineIssueFieldVisibility, rule)
+      assert Batch.field_visibility_rule?
+      assert_field_visibility_per_actor
+    ensure
+      Object.send(:remove_const, :RedmineIssueFieldVisibility) if Object.const_defined?(:RedmineIssueFieldVisibility)
+    end
+
+    def test_without_redmine_issue_field_visibility_every_core_field_reads
+      Issue.find(3).update_columns(estimated_hours: 4.5)
+      assert_match(/\A\[4\.5\]\[4\.5\]\[3\]\[Dave Lopper\]\[.+\]\z/, render(User.find(3), [3], FIELDS))
+    end
+  end
+
+  # ------------------------------------------------------------------
+  # Custom fields: core's visible_custom_field_values
+  # ------------------------------------------------------------------
+
+  def test_custom_fields_follow_the_role_and_the_trackers_enabled_fields
+    restricted = IssueCustomField.create!(name: 'RRD restricted', field_format: 'string', is_for_all: true,
+                                          visible: false, role_ids: [1], tracker_ids: [1])
+    other_tracker = IssueCustomField.create!(name: 'RRD other tracker', field_format: 'string',
+                                             is_for_all: true, visible: true, tracker_ids: [2])
+    open_field = IssueCustomField.create!(name: 'RRD open', field_format: 'string', is_for_all: true,
+                                          visible: true, tracker_ids: [1])
+    [[restricted, 'secret'], [other_tracker, 'stale'], [open_field, 'plain']].each do |field, value|
+      CustomValue.create!(customized_type: 'Issue', customized_id: 1, custom_field_id: field.id, value: value)
+    end
+    source = each_issue('{% for cfv in issue.custom_field_values %}{{ cfv.name }}={{ cfv }};{% endfor %}')
+
+    manager = render(User.find(2), [1], source)
+    developer = render(User.find(3), [1], source)
+
+    assert_includes manager, 'RRD restricted=secret;'
+    assert_includes manager, 'RRD open=plain;'
+    assert_includes developer, 'RRD open=plain;'
+    assert_not_includes developer, 'RRD restricted'
+    # Issue 1 is a tracker-1 issue: core shows no value of a field enabled only for tracker 2.
+    assert_not_includes manager, 'RRD other tracker'
+    # Nothing beyond core's own answer, for either actor. (Core also lists available fields
+    # with no stored value; the drop lists stored values only, which is not a visibility
+    # question.)
+    { User.find(2) => manager, User.find(3) => developer }.each do |user, out|
+      core = Issue.find(1).visible_custom_field_values(user).map { |v| v.custom_field.name }
+      assert_empty out.scan(/([^;=]+)=/).flatten - core, "#{user.login} sees a field core does not show"
+    end
+  end
+
+  # ------------------------------------------------------------------
   # redmine_view_issue_description: see it, but not open it
   # ------------------------------------------------------------------
 

@@ -399,16 +399,23 @@ Recorded in `docs/DECISIONS-2026-11-25.md`.
 - **Found and fixed on the way**: `Support.each` raised on `{{ issues | group_by: … }}` and every
   other filter over the issue collection; `issue.description` and `issue.attachments` ignored
   redmine_view_issue_description; `issue.parent` printed a parent the actor may not see.
-- **Not fixed, recorded**: the core fields redmine_issue_field_visibility hides (dates, estimate,
-  assignee, …) are still printed by the drop; an issue outside the report's scope (parent,
-  related) is answered with per-issue queries rather than the batch.
+- **Follow-up, same day** (`ef7ac49`): the drop now hides the core fields
+  redmine_issue_field_visibility hides from the actor (every spelling, `*_id` included), and
+  custom fields follow core's `available_custom_fields` as well as the role rule.
+- **Not fixed, recorded**: `{% sql_aggregate %}` (`query_aggregator.rb`, the G7 kernel) still
+  groups by and sums the core fields redmine_issue_field_visibility hides; changing it needs a
+  declared kernel hunk and Jan's call. An issue outside the report's scope (parent, related) is
+  answered with per-issue queries rather than the batch.
 - **Tests** (Redmine 7.0-stable-GEOxyz 578730a, Ruby 3.3.6, PostgreSQL 16): alone, rspec 2961 /
   260 / 217, minitest 627 / 456 / 58, spec_liquid 396, all 0 failures. With the real
   redmineup_tags, redmine_agile, redmine_checklists, redmine_contacts,
   redmine_contacts_helpdesk, redmine_view_issue_description and redmine_issue_field_visibility
   (`redmine70-migration` branches): rspec 2961 / 260 / 217, minitest 625 / 456 / 58, 0 failures;
   the new unit test 19 runs green there (18–20 alone, depending on which halves apply).
-  Ruby 4.0.9 not run: this container's ruby-build stops at 4.0.6.
+  **Ruby 4.0.9** (built from ruby-lang.org's tarball, SHA-256 c35350682ff0…09511 checked against
+  the release announcement), after `ef7ac49`: alone rspec 2962 / 260 / 217, minitest
+  630 / 456 / 58; with the seven plugins rspec 2962 / 260 / 217, minitest 628 / 456 / 58; all
+  0 failures.
 - **e2e** (`test/e2e/base_accessors.mjs`, production mode, the seven plugins installed):
   4 screenshots, 0 problems, `docs/e2e/base_accessors-*.png`.
 - **Reviews**: independent subagent review (9 findings; the two leaks and the out-of-scope
