@@ -458,8 +458,31 @@ person's roles in the issue's project (assignee, estimated time, dates, category
 version, priority, description) is empty in a report too, under every name for it
 (`issue.assignee`, `issue.assigned_to_id`, `issue.total_estimated_hours`, …). A custom field
 shows only where Redmine itself would show it: for a role that may see it, and only when the
-field is enabled for the issue's project and tracker. One exception, recorded in the migration
-plan: the `{% sql_aggregate %}` tag still groups by and sums those core fields.
+field is enabled for the issue's project and tracker.
+
+The counting tags follow the same rule (decided by Jan on 2026-11-25). For a project in which
+a field is hidden from the person the report is rendered for:
+
+- **grouping** by it (`group_by: assignee`, `priority`, `category`, `version`, or
+  `age_field: due`) puts every issue of that project in one bucket labelled **Hidden**, and
+  that axis carries no drill-down links;
+- **summing or counting values** of it (`measure: sum of: estimated_hours`,
+  `measure: distinct of: assignee`, …) counts the projects where it is visible only;
+- the **flags** counters (`assigned`, `unassigned`, `with_due_date`, `without_due_date`,
+  `overdue`, `no_estimate`) and a **completeness** bar for it are computed over the projects
+  where it is visible only;
+- when the report's **query filters** on it (assignee, target version, category, priority,
+  dates, estimated time, description or "Search"), the issues of that project are left out;
+- `{% version_rollup %}` leaves out the issues of a project that hides the version, the
+  assignee, the estimate or a date;
+- spent time grouped by `version` or `category` leaves out the entries of a project that
+  hides that field.
+
+Whenever a value was hidden the result says so in `hidden_fields`, and whenever issues were
+left out the report's diagnostics say how many projects that concerned. Administrators,
+people with nothing hidden, and installations without the plugin get exactly the result they
+got before. On MariaDB with `ONLY_FULL_GROUP_BY` switched on (not the default), a grouping
+that has to show a Hidden bucket renders empty, the same limit the `age` grouping has there.
 
 Two bounds, both visible in the report's diagnostics when they bite: at most the 500 most
 recent journals per issue, and at most 20 000 journal rows per report. `issue.journals.all` is

@@ -44,9 +44,15 @@ RSpec.describe RrdGolden::KernelException do
       end
     end
 
-    it 'names the defect it is granted for, so an unrelated hunk cannot borrow the mechanism' do
+    # ONE GRANT PER ENTRY, BY ID. A single pattern accepting either grant would let any
+    # future hunk cite the 2026-11-25 decision and pass; this way a new entry has no grant
+    # until somebody writes one here, in the commit a reviewer reads.
+    it 'names the defect or curator decision it is granted for, so an unrelated hunk cannot borrow the mechanism' do
+      grants = { 'grouped-counts' => /D-1/, 'field-visibility' => %r{docs/DECISIONS-2026-11-25\.md} }
       described_class::ENTRIES.each do |entry|
-        expect(entry[:reason]).to match(/D-1/), "#{entry[:id]} does not say which finding it is for"
+        grant = grants[entry[:id]]
+        expect(grant).not_to be_nil, "#{entry[:id]} has no grant: argue for it and add one here"
+        expect(entry[:reason]).to match(grant), "#{entry[:id]} does not name its grant"
       end
     end
 

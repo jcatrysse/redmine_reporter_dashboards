@@ -5,6 +5,7 @@ require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
 require_relative '../redmine_reporter_dashboards/liquid/render_context'
 require_relative '../redmine_reporter_dashboards/liquid/tag_params'
 require_relative '../redmine_reporter_dashboards/liquid/drops'
+require_relative '../redmine_reporter_dashboards/aggregation/field_visibility'
 
 module SqlAggregation
   # Liquid tag: {% version_rollup ... %}
@@ -92,6 +93,12 @@ module SqlAggregation
         return ''
       end
 
+      # redmine_issue_field_visibility, for the render actor (curator decision 2026-11-25):
+      # a rollup per target version has no row a hidden bucket could live in, so the issues
+      # of a project that hides a field this rollup reads are left out, and the author is
+      # told. Nothing changes without that plugin, for an admin, or with nothing hidden.
+      scope = field_visibility(scope, context)
+
       statuses = str_param(@raw_params['closed_statuses'], context).split(/[;,]/).map(&:strip).reject(&:empty?)
       cost_ids = str_param(@raw_params['cost_fields'], context).split(/[;,]/).map(&:to_i).reject(&:zero?)
 
@@ -110,6 +117,18 @@ module SqlAggregation
     end
 
     private
+
+    def field_visibility(scope, context)
+      visibility     = RedmineReporterDashboards::Aggregation::FieldVisibility
+      render_context = RedmineReporterDashboards::Liquid::RenderContext.from(context)
+      hidden = visibility.hidden_projects(scope, render_context)
+      return scope if hidden.empty?
+
+      diagnostics   = render_context&.diagnostics
+      scope, hidden = visibility.apply_filter_rule(scope, resolve_query(context), hidden, diagnostics,
+                                                   tag: 'version_rollup')
+      visibility.apply_rollup_rule(scope, hidden, diagnostics)
+    end
 
     # Attach the version NAME and a version drop (absolute URLs, PDF-safe) to each
     # row via one batched query (no N+1). A nil version_id (issues without a target

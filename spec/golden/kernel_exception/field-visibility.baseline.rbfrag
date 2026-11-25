@@ -1,0 +1,37 @@
+    def self.dimension_breakdown(scope, group_by:, split_by: nil, sort: 'count', limit: 0,
+                                 other_label: DEFAULT_OTHER_LABEL, empty_label: nil,
+                                 user_label: 'name', period: 'month', periods: nil,
+                                 date_field: 'created', age_buckets: nil, age_field: 'created',
+                                 measure: 'count', of: nil)
+      sort = sanitize_sort(sort)
+      opts = { empty_label: empty_label, user_label: user_label, period: period,
+               periods: periods, date_field: date_field, age_buckets: age_buckets,
+               age_field: age_field }
+
+      group_dim = resolve_dimension(group_by, suffix: 'g', **opts)
+      return nil if group_dim.nil?
+
+      split_dim = nil
+      unless split_by.nil? || split_by.to_s.strip.empty?
+        split_dim = resolve_dimension(split_by, suffix: 's', **opts)
+        return nil if split_dim.nil?
+      end
+
+      measure_spec = resolve_measure(measure, of)
+      return nil if measure_spec.nil?
+
+      base = apply_dimension(scope.unscope(:order), group_dim)
+      base = apply_dimension(base, split_dim) if split_dim
+      base = apply_measure(base, measure_spec)
+
+      if split_dim
+        crosstab_result(base, group_dim, split_dim, sort: sort, limit: limit,
+                                                    other_label: other_label,
+                                                    group_by: group_by, split_by: split_by,
+                                                    measure: measure_spec)
+      else
+        single_result(base, group_dim, sort: sort, limit: limit, other_label: other_label,
+                                       group_by: group_by, measure: measure_spec)
+      end
+    end
+

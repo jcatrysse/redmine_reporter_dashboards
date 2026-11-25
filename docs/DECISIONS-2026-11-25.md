@@ -26,3 +26,43 @@ existing templates keep working: `notes`, `journals`, `relations_from`, `relatio
 `story_points`, `color`, `day_in_state`, `checklists`, `helpdesk_ticket`, the `tagged_with`
 filter, `textilize`. Built on `redmine70-migration`; each accessor answers as the report's actor
 and is batched. See `docs/admin-guide.md`, "What the old accessors answer".
+
+## The counting tags follow redmine_issue_field_visibility too
+
+Jan, 2026-11-25: "Ook de teltags afschermen."
+
+After `ef7ac49` the issue drop hides every core field redmine_issue_field_visibility hides from
+the report's actor, but `{% sql_aggregate %}` (and its alias `{% geo_aggregate %}`, used by six
+of GEOxyz's templates) still grouped by assignee, priority, category and version and summed the
+estimated time regardless. Jan explicitly approved changing the frozen aggregation kernel for
+this. It is declared as gate G7's second kernel hunk, `field-visibility`
+(`spec/golden/kernel_exception.rb`, RATCHET 1 → 2), and its reason names this record. The spec
+that checks every hunk names its grant now accepts D-1 or this file, and nothing else.
+
+What was chosen, per project in the report's scope, for a field hidden from the actor there:
+
+- **Group by it**: every issue of that project in one bucket labelled with core's "Hidden"
+  wording (`label_reporter_aggregation_hidden`, twelve locales); no drill-down URL on that axis,
+  not even for visible values, because an issue list for a visible value would also count it in
+  the hidden projects.
+- **Measure it** (sum, avg, distinct): those issues read NULL, so the value is the visible
+  projects' only. For a mixed scope this is "visible projects' values plus a marker"
+  (`hidden_fields` in the result) rather than an empty result: the visible part is data the
+  actor can already see, so it cannot leak a hidden value, and an empty result would hide
+  information the actor is entitled to.
+- **Flags and completeness**: the counters that read it are recomputed over the visible
+  projects, lose their drill filters, and are named in `hidden_fields`.
+- **A query condition on it**: the issues of the projects where it is hidden are left out (the
+  same rule as the drop: no value, so no match), with the diagnostic
+  `aggregation_hidden_filter`. Refusing the whole aggregation was the other option; leaving
+  out only the affected projects keeps the rest of the report useful.
+- **`{% version_rollup %}`** and spent time grouped by version or category: the affected
+  projects are left out, with a diagnostic. A per-version row has no place for a hidden bucket.
+- Admins, actors with nothing hidden, and installations without the plugin: byte-identical
+  output. Without the plugin, and for an admin, no extra query either; for anybody else each tag
+  adds one DISTINCT project pluck, one project query and the plugin's role lookup, which grows
+  with the number of projects in scope, never with the number of issues.
+- Known limit: a hidden grouping groups on a CASE expression. MariaDB with ONLY_FULL_GROUP_BY
+  switched on (not its default) rejects that, exactly as it already rejects the age dimension;
+  the tag then renders its empty result and logs the error, so it fails closed. PostgreSQL is
+  tested; MySQL and MariaDB were not run for this change.
