@@ -45,7 +45,7 @@ behind a link with an expiry, a use limit and an access log.
 | Database | PostgreSQL or MySQL/MariaDB. SQLite is not supported |
 | PDF rendering | Headless Chromium on the Redmine host (default), or Gotenberg |
 
-Every combination in that table runs in CI on every push. See
+Every combination in that table is in the CI matrix, which is started by hand (`workflow_dispatch`). See
 [`docs/engine-support-matrix.md`](docs/engine-support-matrix.md) for what each PDF engine
 can do.
 
@@ -108,6 +108,17 @@ bundle exec rake reporter_dashboards:migrate_from_reporter:plan RAILS_ENV=produc
 
 That writes nothing. It reports how many templates and schedules exist, which Liquid
 accessors they use, and which ones contain something that needs changing.
+
+**The issue accessors of `redmine_reporter` work here under the same names**:
+`issue.journals` (with `.all`), `issue.notes`, `issue.relations_from`, `issue.relations_to`,
+and the filters `| textilize` and `| tagged_with`. So do the ones that read other plugins:
+`issue.tags` (redmine_tags), `issue.story_points`, `issue.color`, `issue.day_in_state`
+(redmine_agile), `issue.checklists` (redmine_checklists) and `issue.helpdesk_ticket`
+(redmine_contacts_helpdesk); without that plugin they render empty. One difference on
+purpose: each answers for the person the report is rendered for, so a private note, a related
+issue in a project they cannot see, a checklist without "View checklists" or a helpdesk ticket
+without "View helpdesk tickets" is left out. See
+[What the old accessors answer](docs/admin-guide.md#what-the-old-accessors-answer).
 
 One thing to know up front: **this plugin's tags do not work inside a template that
 `redmine_reporter` renders.** They parse there but return zeros, because they need to know

@@ -429,6 +429,34 @@ overwritten if you ask for it with `RRD_REWRITE=1` — but the presentation is t
 source every time. If you want a report to print landscape and its source says portrait,
 change the source, or stop re-running the import for that template.
 
+### What the old accessors answer
+
+`redmine_reporter`'s issue accessors work here under the same names, so a template that uses
+them needs no change (restored on 2026-11-25). What changes is **whose view they show**: each
+answers for the person the report is rendered for — the viewer, the schedule's recipient, or
+anonymous for a share link — never for whoever happens to be signed in.
+
+| In the template | Answers | Left out for that person |
+|---|---|---|
+| `issue.journals` (`.all`, `.size`, `.first`, `.last`, or loop over it) | the journals with notes, oldest first; each with `notes`, `created_on` (in their time zone), `user`, `private_notes`, `attachments`, `url` | private notes, unless they have "View private notes" or wrote the note |
+| `issue.notes` | the same notes, as text | as above |
+| `issue.relations_from`, `issue.relations_to` | `relation_type`, `delay`, `issue_from`, `issue_to` | a relation whose other issue they cannot see |
+| `issue.tags` | the tag names (redmine_tags) | — |
+| `issue.story_points`, `issue.color`, `issue.day_in_state` | redmine_agile's values; `day_in_state` is the last status change they can see, else the creation | — |
+| `issue.checklists` | each item's `subject`, `is_done` (also `id_done`), `is_section` (redmine_checklists) | everything, without "View checklists" in the issue's project |
+| `issue.helpdesk_ticket` | the ticket's addresses, date, vote, times in minutes, `contact` and `messages` (redmine_contacts_helpdesk) | the ticket, without "View helpdesk tickets"; the contact, when they cannot see it in Contacts |
+| `\| textilize`, `\| textile` | Textile rendered by Redmine's own (sanitising) formatter | — |
+| `\| tagged_with: "a, b"` (`"any"`, `"exclude"`) | the issues carrying those tags | — |
+
+Without the plugin an accessor reads, it renders empty (an empty list, or nothing), not an
+error. With **redmine_view_issue_description** installed, an issue the person may see in a
+list but may not open shows no description, no attachments, no journals and no notes in a
+report either — the same rule that plugin applies everywhere else.
+
+Two bounds, both visible in the report's diagnostics when they bite: at most the 500 most
+recent journals per issue, and at most 20 000 journal rows per report. `issue.journals.all` is
+therefore safe; `issues.all` still is not, and the template editor still warns about it.
+
 ### One thing that will not work
 
 **This plugin's tags do not resolve inside a template that `redmine_reporter` renders.** Tag

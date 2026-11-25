@@ -1023,9 +1023,17 @@ class ReporterDashboardsScheduleRunnerTest < ActiveSupport::TestCase
     # runner wrote exactly one, stamping `started_at` and `finished_at` from the tick's
     # single clock reading. `finished_at` is derived from the monotonic measurement instead,
     # so `now:` stays the only clock input.
+    #
+    # MySQL and MariaDB store these `precision: nil` columns to the WHOLE SECOND, so a 20 ms
+    # delivery reads back as started == finished there and the strict assertion below failed
+    # on MariaDB with a correct runner. The delivery outlasts one second on those engines, so
+    # the same strict assertion still tells the two implementations apart everywhere. Keyed on
+    # the adapter, not the column's reported precision: that is nil on PostgreSQL too, which
+    # stores microseconds regardless.
     schedule = build_schedule
+    pause = ScheduleRun.connection.adapter_name.match?(/mysql|trilogy/i) ? 1.05 : 0.02
     delivery = RecordingDelivery.new do
-      sleep 0.02
+      sleep pause
       Runner::Delivered.new(recipients_count: 1, document_count: 1, bytes_total: 1)
     end
 

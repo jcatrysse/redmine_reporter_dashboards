@@ -311,7 +311,7 @@ Keep: `Issue`, `Issues`, `User`, `Users`, `Project`, `Projects`, `Version`, `Tim
 > across T-20's deletion of `issue_drop_patch.rb` — **twelve**, held as
 > `Liquid::Drops::CLASSES` and asserted by spec. Recorded as §Findings **F-9** rather than
 > resolved by picking whichever number reads better.
-Drop: `IssueRelation(s)`, `Journal(s)` `[OQ-H — narrowed: not part of the six required capabilities]`, `News(s)` (the double-`s` typo is itself
+Drop: ~~`IssueRelation(s)`, `Journal(s)` `[OQ-H — narrowed: not part of the six required capabilities]`~~ (restored 2026-11-25, Jan, option A — §3.2), `News(s)` (the double-`s` typo is itself
 disqualifying; the dashboard has a native news widget), `CustomFieldEnumeration` (folded in).
 
 ### 3.2 `IssueDrop` — explicit disposition
@@ -343,10 +343,18 @@ fallback, `report.rb:59-96`) unnecessary: absolute-by-construction beats rewriti
 **Keep:** `link author assignee project parent custom_field_values`; `attachments time_entries
 subtasks` **batched** (§3.4).
 
-**Drop:** `notes journals relations_from relations_to` `[OQ-H]`; and **all six**
+~~**Drop:** `notes journals relations_from relations_to` `[OQ-H]`; and **all six**
 `respond_to?`/`defined?` probes into other RedmineUP paid plugins — `tags story_points color
 day_in_state checklists helpdesk_ticket` (`issues_drop.rb:131-157`). Vendor-ecosystem coupling
-with no reason to be reproduced and dead weight everywhere else.
+with no reason to be reproduced and dead weight everywhere else.~~
+
+**Restored, Jan 2026-11-25 (option A).** GEOxyz runs redmine_tags, redmine_agile,
+redmine_checklists and redmine_contacts_helpdesk, and its templates use these accessors, so the
+drop above was wrong for it. All ten come back with the base plugin's names and meaning, plus
+`| textilize` (= `| textile`) and `| tagged_with`. Each answers **as the actor** (core's journal
+visibility, `IssueRelation` only to visible issues, `view_checklists`, `view_helpdesk_tickets`,
+redmine_view_issue_description's "may open" rule for description, attachments, journals and
+notes) and is **batched** (the keys below). Without the providing plugin each answers empty or nil.
 
 **Drop from reporter's own subclass:** `project_name` (fold into `project.name`); `images`
 (returns a drop whose `file_url` mints unexpiring token URLs — an explicit non-goal; replaced by
@@ -415,6 +423,11 @@ the full id set. The *first* `{{ issue.custom_field_value[20] }}` inside a 500-i
 | `:spent_hours` | `TimeEntry.where(issue_id: ids).group(:issue_id).sum(:hours)` | `spent_hours`, `total_spent_hours` |
 | `:attachments` / `:time_entries` / `:subtasks` | one query each | the matching accessors |
 | `:named_refs` | `IssueStatus/Tracker/… .where(id: ids).pluck(:id,:name)` | every `NamedRefDrop` |
+| `:todo_lists` | `IssueTodoListItem.where(issue_id: ids, issue_todo_list_id: IssueTodoList.visible(actor))` | `todolists_with_positions` (Jan, 2026-10-07: the to-do lists of `redmine_issue_todo_lists2`, with the actor's permissions; empty when that plugin is absent) |
+| `:openable` | `Issue.vid_openable_ids(issues, actor)` (redmine_view_issue_description; absent: every visible issue) | `description`, `attachments`, `journals`, `notes` (Jan, 2026-11-25) |
+| `:journals` / `:journal_attachments` | `Journal.visible(actor).where(journalized_id: ids).where.not(notes: [nil, ''])`, capped 500 per issue / 20 000 per render; the `attachment` details of those journals | `journals`, `notes`, `journal.attachments` |
+| `:relations` | `IssueRelation` from or to `ids`, then `Issue.visible(actor).where(id: other ends)` | `relations_from`, `relations_to` |
+| `:tags` / `:story_points` / `:color` / `:day_in_state` / `:checklists` / `:helpdesk_ticket` (+ `:helpdesk_contacts`, `:helpdesk_messages`) | one query each, through the providing plugin's `Issue` association; `view_checklists` / `view_helpdesk_tickets` checked once per project | the matching accessors; empty or nil without that plugin |
 
 **Cap** mirroring the aggregator's discipline: `MAX_MATERIALISED_RECORDS` default **5 000**; past
 it `each` stops, logs one line, and sets `Degradation(:collection_truncated, seen: n)` — visible,
@@ -1766,7 +1779,7 @@ sidebar. Neither is load-bearing for phases 0–2.
 | ~~**OQ-E**~~ | **CLOSED 2026-08-12 by measurement: Redmine 7.0 ships Propshaft.** `redmine/Gemfile.lock` → `propshaft (1.3.2)`, and `application_helper.rb`'s own overrides of `javascript_include_tag`/`stylesheet_link_tag`/`image_tag` carry the comment *"option keys is converted to a string in Propshaft::Helper"*. So the §6 sentence *"then neither pipeline is involved"* is **wrong for 7.0** — Redmine's override calls `super`, which IS Propshaft. **The design genuinely does not depend on it, and that was verified rather than assumed**: the PDF path reads the plugin's OWN `assets/` directory (`assets/bundled_assets.rb` — `PLUGIN_ROOT/assets`, mapped to the `/plugin_assets/<name>` URL prefix), never `public/plugin_assets/`, so a digested URL cannot cost it a stable on-disk path. The HTML path goes through Redmine's own override and works on 7.0 — the full-application suite is green there. **Still open, narrowly:** whether Propshaft digests the `plugin_assets/…` URL it is handed, which is cosmetic for the HTML path and load-bearing for nothing measured so far | §6 |
 | ~~**OQ-F**~~ | **CLOSED 2026-08-06 by curator decision — the question is void because the SETTING is deleted.** It asked which default `template_authoring` should take, and both answers were wrong for the same reason: a global switch cannot say *"this role, in this project"*. `:project_managers` would have **widened a code-execution privilege on upgrade, silently and installation-wide**, which is worse than the break it avoided because a break is visible. Replaced by §4.1's 13 role permissions in two modules, with `require: :member` **derived** from `authoring: true`, the upgrade situation **named** by preflight and `import:plan` instead of papered over by a default, and a parity spec that parses the controllers so an unguarded action cannot ship. **One claim in the first version of this row was refuted by T-40's review and is corrected in §4.1:** the plugin grants nothing, but *"no role holds one until an administrator grants it"* is not true in general — core's `DefaultData::Loader` gives the **Manager** role every setable permission on a fresh install, ours included, so `:admins_only` is not a construction guarantee and the diagnostic has to list our roles too. T-40 | §4.1 |
 | **OQ-G** | The 19-vs-17 delegated-accessor count in `reference/redmineup-gem-drop-surface.md` | §3.2 |
-| ~~**OQ-H**~~ | **CLOSED 2026-08-04 by curator decision.** The third template type is built — as a `source` field, not a branch (§7b.4). Still `[OQ]` and *scoped narrowly*: whether `JournalDrop` and `time_in_status` are built. Those two were never part of the six required capabilities, and `import:plan`'s usage counts now inform that one remaining call | §3.1 |
+| ~~**OQ-H**~~ | **CLOSED 2026-08-04 by curator decision.** The third template type is built — as a `source` field, not a branch (§7b.4). Still `[OQ]` and *scoped narrowly*: whether `JournalDrop` and `time_in_status` are built. **`JournalDrop` half answered 2026-11-25 (Jan, option A): built, with the base plugin's surface (§3.2); `time_in_status` still open.** Those two were never part of the six required capabilities, and `import:plan`'s usage counts now inform that one remaining call | §3.1 |
 | ~~**OQ-I**~~ | **CLOSED 2026-08-04 by OQ-4's answer.** Yes — `asset_policy: :redmine` / `:external`, allowlist-only, empty allowlist fails closed, and **the plugin fetches, not the engine** (§5.1). Now a supported, CI-tested mode rather than a documented-unverified one | §5.1 |
 | **OQ-J** | The concrete `resource_limits` constants — calibration, not design | §4 |
 | **OQ-K** | Is a separate-process `:ferrum_pdf` adapter worth maintaining beside a raw-CDP adapter that already works? A duplication question, not a capability one | §5.2 |

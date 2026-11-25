@@ -8,7 +8,7 @@ module RedmineReporterDashboards
   module Liquid
     module Filters
       # `currency duration wiki utc` — the four that turn a value into something a
-      # reader recognises.
+      # reader recognises — and `textile`/`textilize`, the base plugin's Textile filter.
       module Formatting
         THOUSANDS = /(\d)(?=(\d{3})+(?!\d))/.freeze
 
@@ -77,6 +77,36 @@ module RedmineReporterDashboards
           end
 
           ::Redmine::WikiFormatting.to_html(::Setting.text_formatting, text).to_s
+        end
+
+        # `{{ journal.notes | textilize }}` — Textile, whatever the configured text
+        # formatting, because that is what the base plugin's `textilize` was
+        # (`RedCloth3.new(input).to_html`). Restored on 2026-11-25 (Jan, option A) for the
+        # templates that carry it.
+        #
+        # THROUGH REDMINE'S TEXTILE FORMATTER, NOT A BARE RedCloth3. The base plugin's call
+        # passed author HTML straight through; Redmine's formatter is the same RedCloth3
+        # plus Redmine's HTML escaping and sanitiser. It does NOT resolve `#123`, wiki links
+        # or macros: that is `textilizable` in a view, which a template does not have.
+        # Where notes are Markdown (`Setting.text_formatting`), `| wiki` is the better
+        # filter: it follows the setting.
+        def textile(input)
+          text = input.to_s
+          return '' if text.empty?
+
+          unless defined?(::Redmine::WikiFormatting)
+            Support.degrade(@context, :wiki_unavailable,
+                            'Redmine::WikiFormatting is not available in this process, ' \
+                            'so Textile was rendered as escaped plain text')
+            return CGI.escapeHTML(text)
+          end
+
+          ::Redmine::WikiFormatting.to_html('textile', text).to_s
+        end
+
+        # The base plugin's name for the same filter.
+        def textilize(input)
+          textile(input)
         end
 
         # UTC, for a chart axis or an ISO timestamp. A report whose x-axis mixes zones

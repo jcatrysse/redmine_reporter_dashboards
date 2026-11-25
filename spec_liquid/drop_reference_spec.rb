@@ -91,11 +91,12 @@ RSpec.describe RedmineReporterDashboards::Liquid::DropReference do
                .map { |a| "#{section.klass}##{a.name}" }
       end
 
-      # `CollectionDrop`'s own three are the legitimate cases and the only ones: the BASE
-      # cannot know what its subclass holds, so each concrete collection overrides those
-      # rows with its element type. If a fifth collection drop is added and forgets to, this
-      # example names it.
-      expect(offenders).to eq(['CollectionDrop#first', 'CollectionDrop#visible',
+      # `CollectionDrop`'s own three and `ListDrop`'s four are the legitimate cases and the
+      # only ones: a BASE cannot know what its subclass holds, so each concrete collection
+      # overrides those rows with its element type. If another collection drop is added and
+      # forgets to, this example names it.
+      expect(offenders).to eq(['ListDrop#all', 'ListDrop#visible', 'ListDrop#first', 'ListDrop#last',
+                               'CollectionDrop#first', 'CollectionDrop#visible',
                                'CollectionDrop#all'])
     end
 
@@ -107,8 +108,13 @@ RSpec.describe RedmineReporterDashboards::Liquid::DropReference do
       issue = described_class.sections.find { |s| s.klass == 'IssueDrop' }
       batched = issue.accessors.select(&:batch?).map(&:name).sort
 
-      expect(batched).to eq(%w[attachments custom_field_value custom_field_values spent_hours
-                               subtasks time_entries])
+      # `description` is batched since 2026-11-25: redmine_view_issue_description's
+      # "may open" is one batch answer for the report. The rest of the second line are
+      # the base plugin's accessors restored that day.
+      expect(batched).to eq(%w[attachments checklists color custom_field_value custom_field_values
+                               day_in_state description helpdesk_ticket journals notes relations_from
+                               relations_to spent_hours story_points subtasks tags time_entries
+                               todolists_with_positions])
     end
 
     it 'does not claim an ordinary attribute reader is batched' do

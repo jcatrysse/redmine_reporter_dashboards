@@ -13,7 +13,7 @@ Reached from: assigned to a per-issue template; one issue of `issues`.
 |---|---|---|---|---|
 | `id` | integer |  | `{{ issue.id }}` |  |
 | `subject` | string |  | `{{ issue.subject }}` |  |
-| `description` | text |  | `{{ issue.description }}` |  |
+| `description` | text | yes | `{{ issue.description }}` | nil for an issue you may see but not open (redmine_view_issue_description) |
 | `start_date` | date |  | `{{ issue.start_date }}` |  |
 | `due_date` | date |  | `{{ issue.due_date }}` |  |
 | `done_ratio` | integer |  | `{{ issue.done_ratio }}` |  |
@@ -34,9 +34,20 @@ Reached from: assigned to a per-issue template; one issue of `issues`.
 | `parent` | drop (IssueDrop) |  | `{{ issue.parent }}` |  |
 | `version` | drop (VersionDrop) |  | `{{ issue.version }}` |  |
 | `target_version` | drop (VersionDrop) |  | `{{ issue.target_version }}` | the same object as `version` |
-| `attachments` | collection (AttachmentDrop) | yes | `{{ issue.attachments }}` |  |
+| `attachments` | collection (AttachmentDrop) | yes | `{{ issue.attachments }}` | empty for an issue you may not open (redmine_view_issue_description) |
 | `time_entries` | collection (TimeEntryDrop) | yes | `{{ issue.time_entries }}` |  |
 | `subtasks` | collection (IssueDrop) | yes | `{{ issue.subtasks }}` |  |
+| `todolists_with_positions` | drop (TodoListsDrop) | yes | `{{ issue.todolists_with_positions }}` | the to-do lists your role may see; empty without redmine_issue_todo_lists2 |
+| `journals` | drop (JournalsDrop) | yes | `{{ issue.journals }}` | the journals with notes you may read, oldest first; at most the 500 most recent |
+| `notes` | collection (string) | yes | `{{ issue.notes }}` | the notes of `journals`, oldest first |
+| `relations_from` | drop (IssueRelationsDrop) | yes | `{{ issue.relations_from }}` | relations from this issue to an issue you may see |
+| `relations_to` | drop (IssueRelationsDrop) | yes | `{{ issue.relations_to }}` | relations from an issue you may see to this issue |
+| `tags` | collection (string) | yes | `{{ issue.tags }}` | tag names, alphabetical; empty without redmine_tags |
+| `story_points` | integer | yes | `{{ issue.story_points }}` | nil when not set or without redmine_agile |
+| `color` | string | yes | `{{ issue.color }}` | the agile colour; nil when not set or without redmine_agile |
+| `day_in_state` | time | yes | `{{ issue.day_in_state }}` | when the issue entered its status; nil without redmine_agile |
+| `checklists` | collection (checklist item) | yes | `{{ issue.checklists }}` | `subject`, `is_done` (also `id_done`), `is_section`; empty without `view_checklists` or redmine_checklists |
+| `helpdesk_ticket` | drop (HelpdeskTicketDrop) | yes | `{{ issue.helpdesk_ticket }}` | nil without `view_helpdesk_tickets` or redmine_contacts_helpdesk |
 | `custom_field_values` | lookup (CustomFieldValuesDrop) | yes | `{{ issue.custom_field_values[42] }}` | by field id or by field name |
 | `custom_field_value` | lookup (CustomFieldValuesDrop) | yes | `{{ issue.custom_field_value[42] }}` | the same object as `custom_field_values` |
 | `status_id` | integer |  | `{{ issue.status_id }}` |  |
@@ -190,6 +201,147 @@ A BRACKET LOOKUP rather than a set of accessors: `{{ issue.custom_field_values[4
 
 _No accessors of its own._
 
+## TodoListsDrop
+
+Reached from: `issue.todolists_with_positions`.
+
+Iterate `items`: `{% for list in issue.todolists_with_positions.items %}`. Only lists in projects where your role may view to-do lists are listed, ordered by title, and the list is empty when redmine_issue_todo_lists2 is not installed or the issue is outside the report. A title is the author's text: print it as `{{ list.title | escape }}`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `items` | collection (TodoListDrop) |  | `{{ issue.todolists_with_positions.items }}` | already loaded by `issue.todolists_with_positions` |
+| `size` | integer |  | `{{ issue.todolists_with_positions.size }}` |  |
+| `first` | drop (TodoListDrop) |  | `{{ issue.todolists_with_positions.first }}` |  |
+
+## TodoListDrop
+
+Reached from: `issue.todolists_with_positions.items`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `id` | integer |  | `{{ list.id }}` | the to-do list's id |
+| `project_id` | integer |  | `{{ list.project_id }}` |  |
+| `title` | string |  | `{{ list.title }}` |  |
+| `description` | text |  | `{{ list.description }}` |  |
+| `last_updated` | time |  | `{{ list.last_updated }}` | in the report actor's own time zone |
+| `remove_closed_issues` | boolean |  | `{{ list.remove_closed_issues }}` |  |
+| `position` | integer |  | `{{ list.position }}` | the issue's position on this list |
+| `url` | url |  | `{{ list.url }}` |  |
+
+## JournalsDrop
+
+Reached from: `issue.journals`.
+
+Already loaded and bounded: at most the 500 most recent journals with notes per issue, oldest first, so `all` is safe here. Only journals you may read: private notes need "View private notes" (or being their author), and an issue you may not open under redmine_view_issue_description has none. A note is author text: print it with `| textilize` or `| wiki`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `all` | collection (JournalDrop) |  | `{{ issue.journals.all }}` |  |
+| `visible` | collection (JournalDrop) |  | `{{ issue.journals.visible }}` | the same as `all` |
+| `size` | integer |  | `{{ issue.journals.size }}` |  |
+| `first` | drop (JournalDrop) |  | `{{ issue.journals.first }}` |  |
+| `last` | drop (JournalDrop) |  | `{{ issue.journals.last }}` | the most recent |
+| `empty?` | boolean |  | `{{ issue.journals.empty? }}` |  |
+
+## JournalDrop
+
+Reached from: `issue.journals`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `id` | integer |  | `{{ journal.id }}` |  |
+| `notes` | text |  | `{{ journal.notes }}` |  |
+| `created_on` | time |  | `{{ journal.created_on }}` | in the report actor's own time zone |
+| `private_notes` | boolean |  | `{{ journal.private_notes }}` |  |
+| `user` | drop (UserDrop) |  | `{{ journal.user }}` |  |
+| `issue` | drop (IssueDrop) |  | `{{ journal.issue }}` | the issue that lists it |
+| `attachments` | collection (AttachmentDrop) | yes | `{{ journal.attachments }}` | the files added with this note |
+| `url` | url |  | `{{ journal.url }}` |  |
+
+## IssueRelationsDrop
+
+Reached from: `issue.relations_from`, `issue.relations_to`.
+
+Only relations whose other issue you may see.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `all` | collection (IssueRelationDrop) |  | `{{ issue.relations_from.all }}` |  |
+| `visible` | collection (IssueRelationDrop) |  | `{{ issue.relations_from.visible }}` | the same as `all` |
+| `size` | integer |  | `{{ issue.relations_from.size }}` |  |
+| `first` | drop (IssueRelationDrop) |  | `{{ issue.relations_from.first }}` |  |
+| `last` | drop (IssueRelationDrop) |  | `{{ issue.relations_from.last }}` |  |
+| `empty?` | boolean |  | `{{ issue.relations_from.empty? }}` |  |
+
+## IssueRelationDrop
+
+Reached from: `issue.relations_from`, `issue.relations_to`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `id` | integer |  | `{{ relation.id }}` |  |
+| `relation_type` | string |  | `{{ relation.relation_type }}` | `relates`, `blocks`, `precedes`, … |
+| `delay` | integer |  | `{{ relation.delay }}` | days, for `precedes`/`follows` |
+| `issue_from` | drop (IssueDrop) |  | `{{ relation.issue_from }}` |  |
+| `issue_to` | drop (IssueDrop) |  | `{{ relation.issue_to }}` |  |
+
+## HelpdeskTicketDrop
+
+Reached from: `issue.helpdesk_ticket` (redmine_contacts_helpdesk).
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `id` | integer |  | `{{ ticket.id }}` |  |
+| `from_address` | string |  | `{{ ticket.from_address }}` |  |
+| `to_address` | string |  | `{{ ticket.to_address }}` |  |
+| `cc_address` | string |  | `{{ ticket.cc_address }}` |  |
+| `message_id` | string |  | `{{ ticket.message_id }}` |  |
+| `is_incoming` | boolean |  | `{{ ticket.is_incoming }}` |  |
+| `ticket_date` | time |  | `{{ ticket.ticket_date }}` | in the report actor's own time zone |
+| `vote` | integer |  | `{{ ticket.vote }}` |  |
+| `vote_comment` | text |  | `{{ ticket.vote_comment }}` |  |
+| `reaction_time` | integer |  | `{{ ticket.reaction_time }}` | minutes |
+| `first_response_time` | integer |  | `{{ ticket.first_response_time }}` | minutes |
+| `resolve_time` | integer |  | `{{ ticket.resolve_time }}` | minutes |
+| `contact` | drop (ContactDrop) | yes | `{{ ticket.contact }}` | nil when you may not see the contact |
+| `messages` | collection (JournalMessageDrop) | yes | `{{ ticket.messages }}` | the journals carrying a message, oldest first |
+
+## JournalMessageDrop
+
+Reached from: `issue.helpdesk_ticket.messages`.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `id` | integer |  | `{{ message.id }}` |  |
+| `notes` | text |  | `{{ message.notes }}` |  |
+| `created_on` | time |  | `{{ message.created_on }}` | in the report actor's own time zone |
+| `private_notes` | boolean |  | `{{ message.private_notes }}` |  |
+| `user` | drop (UserDrop) |  | `{{ message.user }}` |  |
+| `is_incoming` | boolean |  | `{{ message.is_incoming }}` |  |
+| `to_address` | string |  | `{{ message.to_address }}` |  |
+| `cc_address` | string |  | `{{ message.cc_address }}` |  |
+| `bcc_address` | string |  | `{{ message.bcc_address }}` |  |
+| `message_id` | string |  | `{{ message.message_id }}` |  |
+
+## ContactDrop
+
+Reached from: `issue.helpdesk_ticket.contact` (redmine_contacts).
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `id` | integer |  | `{{ contact.id }}` |  |
+| `name` | string |  | `{{ contact.name }}` |  |
+| `first_name` | string |  | `{{ contact.first_name }}` |  |
+| `middle_name` | string |  | `{{ contact.middle_name }}` |  |
+| `last_name` | string |  | `{{ contact.last_name }}` |  |
+| `company` | string |  | `{{ contact.company }}` |  |
+| `job_title` | string |  | `{{ contact.job_title }}` |  |
+| `is_company` | boolean |  | `{{ contact.is_company }}` |  |
+| `primary_email` | string |  | `{{ contact.primary_email }}` |  |
+| `emails` | collection (string) |  | `{{ contact.emails }}` |  |
+| `phones` | collection (string) |  | `{{ contact.phones }}` |  |
+| `website` | string |  | `{{ contact.website }}` |  |
+
 ## NamedRefDrop
 
 Reached from: `issue.status`, `.tracker`, `.priority`, `.category`, `time_entry.activity`.
@@ -208,6 +360,21 @@ Reached from: the base of every single-record drop.
 | Accessor | Type | Batch | Snippet | Notes |
 |---|---|---|---|---|
 | `id` | integer |  | `{{ record.id }}` |  |
+
+## ListDrop
+
+Reached from: the base of every already-loaded, bounded list.
+
+Unlike a collection, `all` is answered: the rows are already in memory and their number is bounded.
+
+| Accessor | Type | Batch | Snippet | Notes |
+|---|---|---|---|---|
+| `all` | collection |  | `{{ list.all }}` |  |
+| `visible` | collection |  | `{{ list.visible }}` | the same as `all` |
+| `size` | integer |  | `{{ list.size }}` |  |
+| `first` | drop |  | `{{ list.first }}` |  |
+| `last` | drop |  | `{{ list.last }}` |  |
+| `empty?` | boolean |  | `{{ list.empty? }}` |  |
 
 ## CollectionDrop
 

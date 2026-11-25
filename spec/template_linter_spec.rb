@@ -574,7 +574,7 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
         <p>{{ issue.color }} {{ issue.tags }} {% if issue.color %}x{% endif %}</p>
       LIQUID
       usage = described_class.analyse(body).usage
-      group = usage.keys.find { |key| key.include?('paid-plugin') }
+      group = usage.keys.find { |key| key.include?('need another plugin') }
 
       expect(usage[group]['color']).to eq(2)
       expect(usage[group]['tags']).to eq(1)
@@ -610,6 +610,48 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
       # Still counted as usage as well, which is a different question: findings are
       # what breaks, usage is what the migration has to reproduce.
       expect(analysis.usage[group]['jsonify']).to eq(1)
+    end
+  end
+
+  # Restored on 2026-11-25 (Jan, option A). GEOxyz's templates carry these, and a linter
+  # that flagged them would tell an operator to fix templates that work.
+  describe 'the base plugin surface restored on 2026-11-25' do
+    it 'does not flag `all` on the bounded journal and relation lists' do
+      body = "{% assign last_comment = issue.journals.all|sort:'created_on'|reverse|first %}" \
+             '{{ issue.journals.all | size }}{% for r in issue.relations_from.all %}{% endfor %}' \
+             '{% for r in issue.relations_to.all %}{% endfor %}'
+
+      expect(described_class.analyse(body).findings.map(&:rule)).to eq([])
+    end
+
+    it 'still flags `all` on a name that merely ends like a bounded list' do
+      expect(described_class.analyse('{{ my_relations_from.all | size }}').findings.map(&:rule))
+        .to eq(%w[liquid.collection_all])
+    end
+
+    it 'still flags `all` on the issue collection' do
+      expect(described_class.analyse('{{ issues.all | size }}').findings.map(&:rule))
+        .to eq(%w[liquid.collection_all])
+    end
+
+    it 'does not flag `| textilize`, `| textile` or `| tagged_with`' do
+      body = '{{ journal.notes | textilize }}{{ issue.description | textile }}' \
+             '{% assign t = issues | tagged_with: "urgent" %}'
+
+      expect(described_class.analyse(body).findings.map(&:rule)).to eq([])
+    end
+
+    it 'counts the journal, note and plugin accessors as usage, not as findings' do
+      analysis = described_class.analyse('{{ issue.journals.size }}{{ issue.notes | size }}' \
+                                         '{{ issue.story_points }}{{ x | tagged_with: "a" }}')
+      core = analysis.usage.keys.find { |key| key.include?('— core') }
+      plugins = analysis.usage.keys.find { |key| key.include?('need another plugin') }
+      filters = analysis.usage.keys.find { |key| key.include?('gem filters') }
+
+      expect(analysis.findings).to eq([])
+      expect(analysis.usage[core]).to eq('journals' => 1, 'notes' => 1)
+      expect(analysis.usage[plugins]).to eq('story_points' => 1)
+      expect(analysis.usage[filters]).to eq('tagged_with (redmine_tags)' => 1)
     end
   end
 

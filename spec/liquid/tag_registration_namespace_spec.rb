@@ -22,9 +22,24 @@ RSpec.describe 'Liquid tag registration namespace safety' do
     expect(source).to match(/defined\?\(::Liquid::Tag\)/)
   end
 
-  it 'always calls register_tag on the top-level ::Liquid::Template' do
-    # Any Liquid::Template.register_tag NOT preceded by "::" is the bug.
-    expect(source).not_to match(/(?<!:)Liquid::Template\.register_tag/)
-    expect(source.scan(/::Liquid::Template\.register_tag/).size).to be >= 3
+  # The registration CALL moved into `Compat.register_liquid_tag` (Redmine 7 migration: Liquid
+  # 5.14 deprecates `Template.register_tag`), so the namespace rule is asserted where the
+  # constant is now named. A bare `Liquid::Environment` inside `module RedmineReporterDashboards`
+  # is the same bug with a new name: `defined?` answers false and the fallback hides it.
+  let(:compat) do
+    File.read(File.expand_path('../../lib/redmine_reporter_dashboards/compat.rb', __dir__), encoding: 'UTF-8')
+  end
+
+  it 'registers every tag through the one compat method' do
+    expect(source).not_to match(/Liquid::Template\.register_tag/)
+    expect(source.scan(/Compat\.register_liquid_tag\(/).size).to be >= 3
+  end
+
+  it 'names only the top-level ::Liquid constants in that compat method' do
+    body = compat[/def self\.register_liquid_tag.*?\n    end\n/m]
+    expect(body).not_to be_nil
+    expect(body).not_to match(/(?<!:)Liquid::(Template|Environment)/)
+    expect(body).to include('::Liquid::Environment.default.register_tag')
+    expect(body).to include('::Liquid::Template.register_tag')
   end
 end

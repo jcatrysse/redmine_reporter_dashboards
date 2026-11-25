@@ -187,7 +187,8 @@ engines:
     asset_models: [upload]
     deprecated: false
     verification_note: >-
-      MEASURED IN CI against Gotenberg 8.35.0, at the digest pinned in
+      MEASURED IN CI against Gotenberg 8.35.0; the pin moved to 8.37.0 on 2026-10-08 and that
+      digest has been measured LOCALLY only (service spec and corpus), not yet in CI. The digest is pinned in
       `docker-compose.gotenberg.yml` — which is the ONE place that digest is written, so
       that the nightly CVE scan and this note cannot come to disagree. Run 31408759956
       (2026-08-10) and every run since: 19 pass, 0 fail, 1 skip, the skip being

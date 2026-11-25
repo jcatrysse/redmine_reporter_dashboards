@@ -16,7 +16,7 @@
 # reason visible in context rather than swallowed.
 set -uo pipefail
 
-PINNED_BRANCH='claude/next-session-prompt-it4too'
+PINNED_BRANCH='redmine70-migration'
 
 say() { printf '%s\n' "$*"; }
 

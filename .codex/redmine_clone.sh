@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REDMINE_VERSION="${1:-5.1-stable}"   # 5.1-stable, 6.0-stable, 6.1-stable
+REDMINE_VERSION="${1:-5.1-stable}"   # 5.1-stable, 6.0-stable, 6.1-stable, 7.0-stable (7.0-stable-GEOxyz with REDMINE_REPO_URL)
 REDMINE_DIR="${REDMINE_DIR:-redmine}"
-REDMINE_REPO_URL="https://github.com/redmine/redmine.git"
+REDMINE_REPO_URL="${REDMINE_REPO_URL:-https://github.com/redmine/redmine.git}"   # GEOxyz: https://github.com/jcatrysse/redmine
 
 if ! git ls-remote --heads "$REDMINE_REPO_URL" "$REDMINE_VERSION" | grep -q "$REDMINE_VERSION"; then
   echo "ERROR: Redmine branch '$REDMINE_VERSION' not found on $REDMINE_REPO_URL" >&2
@@ -15,7 +15,8 @@ if [ ! -d "$REDMINE_DIR/.git" ]; then
 else
   (
     cd "$REDMINE_DIR"
-    git fetch --depth 1 origin "$REDMINE_VERSION:refs/remotes/origin/$REDMINE_VERSION"
+    # "+": the GEOxyz branch is rebased upstream from time to time; follow it.
+    git fetch --depth 1 origin "+$REDMINE_VERSION:refs/remotes/origin/$REDMINE_VERSION"
 
     # test_setup.sh appends a test-only gem to Redmine's OWN Gemfile, so after one
     # setup run this checkout is dirty and a plain `git checkout -B` refuses to switch

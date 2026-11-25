@@ -45,34 +45,13 @@
 ---
 name: Gotenberg CVE scan
 
+# MANUAL ONLY, by Jan's decision of 2026-10-07 for every GEOxyz plugin. This used to run
+# nightly and on any push or pull request touching the Gotenberg pin, the accepted-CVE list
+# or its gate scripts. Run it by hand (Actions -> Gotenberg CVE scan -> Run workflow) when
+# one of those files changes or before deploying a new Gotenberg digest.
+# spec/workflow_triggers_spec.rb fails if an automatic trigger comes back.
 on:
-  schedule:
-    # 04:17 UTC. Not on the hour: every scheduled workflow on GitHub fires at :00, and a
-    # queue is how a nightly job becomes a job that ran at 07:00 or not at all.
-    - cron: '17 4 * * *'
   workflow_dispatch:
-  # Also on a change to the pin itself, so the answer to "is this digest clean" arrives
-  # in the pull request that moves it rather than the following night — and on a change to
-  # the ACCEPTED LIST or the gate that reads it, because an edit to either is exactly the
-  # moment somebody needs to know whether the result still holds. Leaving the allowlist
-  # off this filter would let an exemption be added in a pull request that never ran the
-  # gate, which is how an allowlist stops meaning anything.
-  #
-  # AND ON PUSH, with the same paths. Without it a direct push that moves the pin or edits
-  # an acceptance never runs the comparison at all — only `ci.yml`'s record-validation
-  # half, which by construction cannot see a new vulnerability. Not every change to these
-  # files arrives as a pull request.
-  push:
-    paths: &pin_paths
-      - 'docker-compose.gotenberg.yml'
-      - '.github/workflows/gotenberg-cve.yml'
-      - 'script/gates/gotenberg_accepted_cves.allowlist'
-      - 'script/gates/cve_accepted_diff.sh'
-      - 'script/gates/cve_accepted_diff_selftest.sh'
-      - 'script/gates/cve_findings_from_trivy.sh'
-      - 'script/gates/fixtures/trivy-report.sample.json'
-  pull_request:
-    paths: *pin_paths
 
 permissions:
   contents: read

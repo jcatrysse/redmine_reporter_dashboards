@@ -1324,10 +1324,17 @@ RSpec.describe RedmineReporterDashboards::Reporting::ReportRun do
     # this was measured on. `#preview` still renders `@outcome.sections` beside the
     # diagnostic, so the failure return has to carry bound sections too — which is why the
     # bind is hoisted above `resolve_engine` rather than merely assigned to a local.
+    #
+    # THE EMPTY REGISTRY IS MADE, NOT ASSUMED. Adapters register when their files are required,
+    # so without `isolated` this example saw no engine only when no earlier example had loaded
+    # one: seed 56574 failed it on a host where Chromium can start, at this file's commit and
+    # before it alike (2026-10-07).
     it 'binds the charts even when the run fails for want of an engine' do
-      outcome = run(scope: ReportRunSpecSupport::FakeScope.new(1),
-                    engine: nil,
-                    renderer: ReportRunSpecSupport::ChartingRenderer.new).call(pdf: true)
+      outcome = RedmineReporterDashboards::Render::Registry.isolated do
+        run(scope: ReportRunSpecSupport::FakeScope.new(1),
+            engine: nil,
+            renderer: ReportRunSpecSupport::ChartingRenderer.new).call(pdf: true)
+      end
 
       expect(outcome).not_to be_ok
       expect(outcome.sections.first.body).not_to include('rrd-chart-placeholder')

@@ -288,13 +288,20 @@ module RedmineReporterDashboards
       # §3.2: "A template calling it gets a parse-time lint warning and a render-time
       # Degradation(:unbounded_collection)." This is the parse-time half; the drop layer
       # ships the other.
+      #
+      # NOT on the already-loaded lists (`issue.journals.all`, `relations_from.all`,
+      # `relations_to.all`, restored 2026-11-25): their rows are in memory and bounded
+      # (`BatchRelated::JOURNALS_PER_ISSUE`), so `all` answers there, as it did in the base
+      # plugin. Flagging GEOxyz's `issue.journals.all | sort: 'created_on'` would cry wolf.
       Rule.new(id: 'liquid.collection_all', severity: :warning, scope: :liquid,
-               pattern: /\.all\s*(?:\||%\}|\}\})/,
+               pattern: /(?<!\bjournals|\brelations_from|\brelations_to)\.all\s*(?:\||%\}|\}\})/,
                message: '`all` is not implemented on a collection: it builds one object ' \
                         'per record however many there are, which is the materialisation ' \
                         'the aggregator exists to avoid. Use the collection directly in a ' \
                         '`{% for %}`, or an aggregate. At render time this produces ' \
-                        'Degradation(:unbounded_collection) and no value')
+                        'Degradation(:unbounded_collection) and no value. (`issue.journals.all` ' \
+                        'and `issue.relations_from.all`/`relations_to.all` are bounded lists ' \
+                        'and answer.)')
     ].freeze
 
     # A filter this layer removed ON PURPOSE, with the reason. Built from
@@ -439,11 +446,17 @@ module RedmineReporterDashboards
     # them is a drop accessor.
     #
     # Grouped by the question each group answers, because different people read them:
-    # the first two decide what the owned drop layer must build (and what it may
-    # drop), the third which vendor filters need replacements, the fourth is this
+    # the first two say which base-plugin accessors a template leans on — since
+    # 2026-11-25 all of them answer again, the first group only with its providing plugin
+    # installed — the third which vendor filters need replacements, the fourth is this
     # plugin's own surface and says what a re-seam may not break.
     USAGE_GROUPS = {
-      'gem drop accessors — RedmineUP paid-plugin hooks, dead weight without those plugins' => {
+      # Restored on 2026-11-25 (Jan, option A): these answer again, so counting them says
+      # which templates depend on the providing plugin, not what is broken. Empty or nil
+      # without it.
+      'base plugin accessors — need another plugin (tags: redmine_tags; story_points, color, ' \
+      'day_in_state: redmine_agile; checklists: redmine_checklists; helpdesk_ticket: ' \
+      'redmine_contacts_helpdesk), empty without it' => {
         'tags' => /\.\s*tags\b/,
         'story_points' => /\.\s*story_points\b/,
         'color' => /\.\s*color\b/,
@@ -451,8 +464,9 @@ module RedmineReporterDashboards
         'checklists' => /\.\s*checklists\b/,
         'helpdesk_ticket' => /\.\s*helpdesk_ticket\b/
       },
-      'gem drop accessors — core, so the owned layer has to reproduce them' => {
+      'base plugin accessors — core' => {
         'journals' => /\.\s*journals\b/,
+        'notes' => /\bissue\s*\.\s*notes\b/,
         'relations_from' => /\.\s*relations_from\b/,
         'relations_to' => /\.\s*relations_to\b/,
         'subtasks' => /\.\s*subtasks\b/,
@@ -463,7 +477,8 @@ module RedmineReporterDashboards
         'call_method' => /\|\s*call_method\b/,
         'regex_replace' => /\|\s*regex_replace(?:_once)?\b/,
         'jsonify' => /\|\s*jsonify\b/,
-        'textile / textilize' => /\|\s*textiliz?e\b/,
+        'textile / textilize' => /\|\s*textil(?:e|ize)\b/,
+        'tagged_with (redmine_tags)' => /\|\s*tagged_with\b/,
         'where_exp' => /\|\s*where_exp\b/,
         'md5' => /\|\s*md5\b/,
         'group_by_custom_field' => /\|\s*group_by_custom_field\b/,

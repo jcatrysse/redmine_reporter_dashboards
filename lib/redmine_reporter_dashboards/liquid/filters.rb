@@ -53,6 +53,9 @@ module RedmineReporterDashboards
         'currency' => 'a number with thousands separators and a caller-supplied symbol',
         'duration' => "hours in Redmine's own `timespan_format`",
         'wiki' => "Redmine's own wiki/textile/markdown formatter; degrades visibly",
+        'textile' => "Textile through Redmine's own sanitising Textile formatter, whatever " \
+                     'the configured text formatting (restored 2026-11-25)',
+        'textilize' => "the base plugin's name for `textile` (restored 2026-11-25)",
         'utc' => 'a time in UTC, so one chart axis cannot mix zones',
         'hex_color' => 'normalise `abc` / `#AABBCC` to `#aabbcc`; nil for anything else',
         'contrasting_text_color' => 'black or white by WCAG relative luminance',
@@ -63,7 +66,9 @@ module RedmineReporterDashboards
         'where_custom_field' => "Liquid's `where` reads a property; a custom field is a lookup",
         'custom_field' => 'one custom field by name',
         'custom_field_by_id' => 'one custom field by id — survives a rename',
-        'custom_fields' => 'every field the actor may see, with ids and names'
+        'custom_fields' => 'every field the actor may see, with ids and names',
+        'tagged_with' => 'redmine_tags: the items carrying the tags (`all`, `any`, ' \
+                         '`exclude`), read from `tags` (restored 2026-11-25)'
       }.freeze
 
       # Provided by `Liquid::StandardFilters` on BOTH 4.0.4 and 5.13.0, measured, and
@@ -124,7 +129,6 @@ module RedmineReporterDashboards
         'rjust' => 'cosmetic padding; alignment belongs in the stylesheet',
         'multi_line' => "cosmetic; Liquid's `newline_to_br` covers the real case",
         'encode' => 'cosmetic; `url_encode` and `json` cover the real cases',
-        'tagged_with' => 'reaches into another RedmineUP paid plugin',
         'attachment' => 'attachment plumbing, superseded by the batched accessors',
         'container' => "the gem's internal helper for an object this plugin does not have",
         'container_currency' => "the gem's internal helper",
@@ -139,8 +143,6 @@ module RedmineReporterDashboards
         'parse_inline_attachments' => "the gem's internal helper",
         'sort_input' => "the gem's internal helper",
         'convert_to_brightness_value' => "the gem's internal helper",
-        'textile' => '`wiki` goes through Redmine\'s configured formatter instead',
-        'textilize' => "as `textile`: `wiki` goes through Redmine's configured formatter",
         'plus_days' => "Liquid's `date` plus arithmetic covers it",
         'date_range' => 'a range is two dates; the aggregator owns period windows',
         'concat' => 'Liquid provides it',
@@ -162,8 +164,8 @@ module RedmineReporterDashboards
       # future entry from reintroducing that mistake.
       LINTABLE_REMOVED = %w[
         call_method regex_replace regex_replace_once md5 file_url jsonify
-        random shuffle push pop shift unshift tagged_with where_exp
-        textile textilize dasherize underscore ljust rjust multi_line encode
+        random shuffle push pop shift unshift where_exp
+        dasherize underscore ljust rjust multi_line encode
         plus_days date_range container container_currency args_to_options as_liquid
         item_property inline_options sort_input convert_to_brightness_value attachment
         parse_comparison parse_condition parse_binary_comparison
