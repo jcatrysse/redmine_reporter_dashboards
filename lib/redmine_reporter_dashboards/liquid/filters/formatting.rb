@@ -86,7 +86,8 @@ module RedmineReporterDashboards
         #
         # THROUGH REDMINE'S TEXTILE FORMATTER, NOT A BARE RedCloth3. The base plugin's call
         # passed author HTML straight through; Redmine's formatter is the same RedCloth3
-        # plus Redmine's sanitiser and link handling, which is what the issue page shows.
+        # plus Redmine's HTML escaping and sanitiser. It does NOT resolve `#123`, wiki links
+        # or macros: that is `textilizable` in a view, which a template does not have.
         # Where notes are Markdown (`Setting.text_formatting`), `| wiki` is the better
         # filter: it follows the setting.
         def textile(input)

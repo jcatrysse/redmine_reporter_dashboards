@@ -51,7 +51,7 @@ module RedmineReporterDashboards
       def openable?(issue_id)
         return true unless self.class.openable_rule?
 
-        resolve(:openable, issue_id) do |id_set|
+        related_resolve(:openable, issue_id) do |id_set|
           ::Issue.vid_openable_ids(::Issue.where(id: id_set).to_a, @actor)
                  .index_with(true)
         end[issue_id] == true
@@ -67,7 +67,7 @@ module RedmineReporterDashboards
       # author and to `view_private_notes`). Nothing for an issue the actor may not open
       # under redmine_view_issue_description.
       def journals(issue_id)
-        resolve(:journals, issue_id) do |id_set|
+        related_resolve(:journals, issue_id) do |id_set|
           openable = id_set.select { |id| openable?(id) }
           next {} if openable.empty?
 
@@ -86,7 +86,7 @@ module RedmineReporterDashboards
       # `attachment` details), for the journals already loaded above. Two queries for the
       # whole report.
       def journal_attachments(journal_id, issue_id)
-        resolve(:journal_attachments, issue_id) do |id_set|
+        related_resolve(:journal_attachments, issue_id) do |id_set|
           journal_ids = id_set.flat_map { |id| journals(id) }.map(&:id)
           next {} if journal_ids.empty?
 
@@ -107,8 +107,10 @@ module RedmineReporterDashboards
       # count. nil without redmine_agile.
       def day_in_state(issue_id, created_on)
         return nil unless self.class.related_available?(:day_in_state)
+        # redmine_view_issue_description hides an unopenable issue's history; this is part of it.
+        return nil unless openable?(issue_id)
 
-        resolve(:day_in_state, issue_id) do |id_set|
+        related_resolve(:day_in_state, issue_id) do |id_set|
           ::Journal.visible(@actor)
                    .where(journalized_type: 'Issue', journalized_id: id_set)
                    .joins(:details)
@@ -126,7 +128,7 @@ module RedmineReporterDashboards
       # plugin's own filter (`other_issue.visible?`), but asked as the actor. The other
       # issues come preloaded with what `IssueDrop` reads.
       def relations(issue_id)
-        resolve(:relations, issue_id) do |id_set|
+        related_resolve(:relations, issue_id) do |id_set|
           rows = ::IssueRelation.where(issue_from_id: id_set)
                                 .or(::IssueRelation.where(issue_to_id: id_set))
                                 .order(:id).limit(RELATED_ROWS + 1).to_a
@@ -149,7 +151,7 @@ module RedmineReporterDashboards
       def tags(issue_id)
         return [] unless self.class.related_available?(:tags)
 
-        resolve(:tags, issue_id) do |id_set|
+        related_resolve(:tags, issue_id) do |id_set|
           tagging = ::Issue.reflect_on_association(:taggings).klass
           tag = ::Issue.reflect_on_association(:tags).klass
           tagging.joins(:tag)
@@ -172,13 +174,13 @@ module RedmineReporterDashboards
       def story_points(issue_id)
         return nil unless self.class.related_available?(:story_points)
 
-        resolve(:story_points, issue_id) { |id_set| one_to_one_values(:agile_data, :story_points, id_set) }[issue_id]
+        related_resolve(:story_points, issue_id) { |id_set| one_to_one_values(:agile_data, :story_points, id_set) }[issue_id]
       end
 
       def color(issue_id)
         return nil unless self.class.related_available?(:color)
 
-        resolve(:color, issue_id) { |id_set| one_to_one_values(:agile_color, :color, id_set) }[issue_id]
+        related_resolve(:color, issue_id) { |id_set| one_to_one_values(:agile_color, :color, id_set) }[issue_id]
       end
 
       # ------------------------------------------------------------------
@@ -192,7 +194,7 @@ module RedmineReporterDashboards
         return [] unless self.class.related_available?(:checklists)
         return [] unless allowed_in?(:view_checklists, project)
 
-        resolve(:checklists, issue_id) do |id_set|
+        related_resolve(:checklists, issue_id) do |id_set|
           klass = ::Issue.reflect_on_association(:checklists).klass
           rows = klass.where(issue_id: id_set).reorder(:issue_id, :position, :id)
                       .limit(RELATED_ROWS + 1).to_a
@@ -211,10 +213,7 @@ module RedmineReporterDashboards
         return nil unless self.class.related_available?(:helpdesk_ticket)
         return nil unless allowed_in?(:view_helpdesk_tickets, project)
 
-        resolve(:helpdesk_ticket, issue_id) do |id_set|
-          klass = ::Issue.reflect_on_association(:helpdesk_ticket).klass
-          klass.where(issue_id: id_set).to_a.index_by(&:issue_id)
-        end[issue_id]
+        helpdesk_ticket_row(issue_id)
       end
 
       # The contacts of the loaded tickets the actor may see, `{ id => contact }`, through
@@ -222,8 +221,8 @@ module RedmineReporterDashboards
       def helpdesk_contact(contact_id, issue_id)
         return nil if contact_id.nil?
 
-        resolve(:helpdesk_contacts, issue_id) do |id_set|
-          ids = id_set.filter_map { |id| (resolved(:helpdesk_ticket, id) || {})[id]&.contact_id }.uniq
+        related_resolve(:helpdesk_contacts, issue_id) do |id_set|
+          ids = id_set.filter_map { |id| helpdesk_ticket_row(id)&.contact_id }.uniq
           contact = ::Issue.reflect_on_association(:helpdesk_ticket).klass.reflect_on_association(:contact)&.klass
           next {} if ids.empty? || contact.nil? || !contact.respond_to?(:visible)
 
@@ -235,7 +234,7 @@ module RedmineReporterDashboards
       # `journal_message`), as `HelpdeskTicketDrop#messages` listed them — the same
       # journal visibility as `journals`, and nothing for an issue the actor may not open.
       def helpdesk_messages(issue_id)
-        resolve(:helpdesk_messages, issue_id) do |id_set|
+        related_resolve(:helpdesk_messages, issue_id) do |id_set|
           openable = id_set.select { |id| openable?(id) }
           next {} if openable.empty? || ::Journal.reflect_on_association(:journal_message).nil?
 
@@ -288,9 +287,57 @@ module RedmineReporterDashboards
 
       private
 
-      # A key's cached answer when it has already been resolved, without resolving it.
-      def resolved(key, issue_id)
-        @cache[scope? ? key : [key, issue_id]]
+      def helpdesk_ticket_row(issue_id)
+        related_resolve(:helpdesk_ticket, issue_id) do |id_set|
+          klass = ::Issue.reflect_on_association(:helpdesk_ticket).klass
+          klass.where(issue_id: id_set).to_a.index_by(&:issue_id)
+        end[issue_id]
+      end
+
+      # `resolve`, with two differences every key in this module needs (independent review,
+      # 2026-11-25).
+      #
+      # THE ISSUE ITSELF MUST BE VISIBLE. A scope is the actor's, but an issue also arrives
+      # without one — `issue.parent`, a related issue, a per-record render — and its tags,
+      # checklist or helpdesk ticket must not reach a template when the issue itself would
+      # not. So the id set is cut to `Issue.visible(actor)` first: one query per key and
+      # render, fail closed.
+      #
+      # AN ISSUE OUTSIDE THE SCOPE IS ASKED ABOUT ITSELF, not answered from the scope's
+      # memo — where it is absent and would read as "no journals", "no story points", the
+      # silent wrong answer `Batch#resolve`'s comment describes. That costs queries per such
+      # issue (a subtask, a parent, a related issue), which is the price of a right answer
+      # for an issue the report did not batch.
+      def related_resolve(key, issue_id, &block)
+        if scope? && !scope_id_set.include?(issue_id)
+          cache_key = [key, issue_id]
+          return @cache[cache_key] if @cache.key?(cache_key)
+
+          @budget.check!(:"batch_#{key}")
+          return @cache[cache_key] = visible_answer([issue_id], &block)
+        end
+
+        resolve(key, issue_id) { |id_set| visible_answer(id_set, &block) }
+      end
+
+      def visible_answer(id_set)
+        visible = visible_ids(id_set)
+        visible.empty? ? {} : yield(visible)
+      end
+
+      def scope_id_set
+        @scope_id_set ||= ids.to_set
+      end
+
+      # Memoised per issue id, so the keys of one render share one answer per issue.
+      def visible_ids(id_set)
+        @visible_issue ||= {}
+        unknown = id_set.reject { |id| @visible_issue.key?(id) }
+        if unknown.any?
+          found = ::Issue.visible(@actor).where(id: unknown).pluck(:id).to_set
+          unknown.each { |id| @visible_issue[id] = found.include?(id) }
+        end
+        id_set.select { |id| @visible_issue[id] }
       end
 
       # `{ issue_id => value }` off a `has_one` of `Issue`, through its reflection: the

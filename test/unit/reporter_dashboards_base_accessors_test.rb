@@ -39,7 +39,26 @@ class ReporterDashboardsBaseAccessorsTest < ActiveSupport::TestCase
     Role.find(2).remove_permission!(:view_private_notes)
     # With redmine_view_issue_description installed, no fixture role may OPEN an issue
     # until granted; the journal and relation cases are about other rules, so they grant it.
-    if Batch.openable_rule?
+    if Batch.openable_rule? && Batch.related_available?(:helpdesk_ticket)
+    # redmine_view_issue_description's helpdesk rule: `view_helpdesk_tickets` alone is not
+    # enough for an issue the viewer may not open.
+    def test_the_helpdesk_ticket_needs_the_issue_to_be_openable
+      @project.enable_module!(:contacts_helpdesk)
+      @project.enable_module!(:contacts)
+      contact = Contact.create!(first_name: 'Ann', last_name: 'Client', email: 'ann@acme.test',
+                                projects: [@project], visibility: 0)
+      HelpdeskTicket.create!(issue_id: 1, contact: contact, from_address: 'ann@acme.test',
+                             ticket_date: Time.utc(2026, 1, 4, 9, 0))
+      Role.find(2).add_permission!(:view_helpdesk_tickets)
+      source = each_issue('[{{ issue.helpdesk_ticket.from_address }}]')
+      assert_equal '[ann@acme.test]', render(User.find(3), [1], source)
+
+      Role.find(2).remove_permission!(:view_issue_description)
+      assert_equal '[]', render(User.find(3), [1], source)
+    end
+  end
+
+  if Batch.openable_rule?
       [Role.find(1), Role.find(2), Role.anonymous, Role.non_member].each do |role|
         role.add_permission!(:view_issue_description)
       end
@@ -175,6 +194,38 @@ class ReporterDashboardsBaseAccessorsTest < ActiveSupport::TestCase
                                            '{{ r.issue_from.subject }}/{{ r.issue_from.status }}{% endfor %}'))
     issue = Issue.find(4)
     assert_equal "2/#{issue.subject}/#{issue.status.name}", out
+  end
+
+  # ------------------------------------------------------------------
+  # An issue outside the scope: the parent (independent review, 2026-11-25)
+  # ------------------------------------------------------------------
+
+  PARENT = '{% for issue in issues %}[{{ issue.parent.id }}][{{ issue.parent.subject }}]' \
+           '[{{ issue.parent.journals.size }}][{{ issue.parent.notes | join: "," }}]{% endfor %}'
+
+  def private_parent_of_issue2
+    parent = Issue.create!(project: @project, tracker: Tracker.find(1), author: @admin,
+                           subject: 'Private parent', is_private: true)
+    Issue.find(2).update!(parent_issue_id: parent.id)
+    journal(parent.id, @admin, 'Parent note', Time.utc(2026, 1, 13, 9, 0))
+    parent
+  end
+
+  # The developer sees issue 2 (it is assigned to them) but not its private parent: not the
+  # parent, and so not its notes either.
+  def test_a_parent_the_actor_may_not_see_is_absent
+    parent = private_parent_of_issue2
+    assert_not parent.visible?(@developer), 'precondition: the parent is hidden from the developer'
+    assert Issue.find(2).visible?(@developer), 'precondition: the child is visible'
+
+    assert_equal '[][][][]', render(@developer, [2], PARENT)
+  end
+
+  # The parent is not in the report's scope, and its journals are still its own — not an
+  # empty answer from the scope's memo.
+  def test_a_visible_parent_outside_the_scope_answers_its_own_journals
+    parent = private_parent_of_issue2
+    assert_equal "[#{parent.id}][Private parent][1][Parent note]", render(@manager, [2], PARENT)
   end
 
   # ------------------------------------------------------------------

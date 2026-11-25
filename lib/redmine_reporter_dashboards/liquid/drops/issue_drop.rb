@@ -291,7 +291,11 @@ module RedmineReporterDashboards
         def parent
           return @parent if defined?(@parent)
 
-          @parent = record.parent && self.class.new(record.parent, context: render_context)
+          # Only a parent the ACTOR may see (independent review, 2026-11-25): a private parent
+          # of a visible subtask printed its subject, and with the restored accessors its tags,
+          # notes and helpdesk ticket too. `visible?` is core's answer, asked as the actor.
+          found = record.parent
+          @parent = found && visible_to_actor?(found) ? self.class.new(found, context: render_context) : nil
         end
 
         # ------------------------------------------------------------------
@@ -389,8 +393,8 @@ module RedmineReporterDashboards
         def helpdesk_ticket
           return @helpdesk_ticket if defined?(@helpdesk_ticket)
 
-          ticket = batch.helpdesk_ticket(id, record.project)
-          @helpdesk_ticket = ticket && HelpdeskTicketDrop.new(ticket, context: render_context)
+          ticket = helpdesk_allowed? && batch.helpdesk_ticket(id, record.project)
+          @helpdesk_ticket = ticket ? HelpdeskTicketDrop.new(ticket, context: render_context) : nil
         end
 
         # ------------------------------------------------------------------
@@ -453,6 +457,20 @@ module RedmineReporterDashboards
 
         def openable?
           batch.openable?(id)
+        end
+
+        def visible_to_actor?(issue)
+          !issue.respond_to?(:visible?) || issue.visible?(actor)
+        end
+
+        # redmine_view_issue_description's own helpdesk rule (`vid_helpdesk_access?`):
+        # `view_helpdesk_tickets` AND the description grant for this tracker. The permission
+        # is the batch's; the grant is asked here, of the record, AS THE ACTOR.
+        def helpdesk_allowed?
+          return false unless openable?
+          return true unless record.respond_to?(:description_access_granted?)
+
+          record.description_access_granted?(actor) == true
         end
 
         def relation_list(side)
