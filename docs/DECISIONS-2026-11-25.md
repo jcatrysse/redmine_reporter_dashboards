@@ -58,5 +58,11 @@ What was chosen, per project in the report's scope, for a field hidden from the 
   out only the affected projects keeps the rest of the report useful.
 - **`{% version_rollup %}`** and spent time grouped by version or category: the affected
   projects are left out, with a diagnostic. A per-version row has no place for a hidden bucket.
-- Admins, actors with nothing hidden, and installations without the plugin: no extra query and
-  byte-identical output.
+- Admins, actors with nothing hidden, and installations without the plugin: byte-identical
+  output. Without the plugin, and for an admin, no extra query either; for anybody else each tag
+  adds one DISTINCT project pluck, one project query and the plugin's role lookup, which grows
+  with the number of projects in scope, never with the number of issues.
+- Known limit: a hidden grouping groups on a CASE expression. MariaDB with ONLY_FULL_GROUP_BY
+  switched on (not its default) rejects that, exactly as it already rejects the age dimension;
+  the tag then renders its empty result and logs the error, so it fails closed. PostgreSQL is
+  tested; MySQL and MariaDB were not run for this change.

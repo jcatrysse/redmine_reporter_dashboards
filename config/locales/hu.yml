@@ -322,7 +322,7 @@ hu:
   text_reporter_degradation_aggregation_params_unsupported: "A %{params} nem használható ráfordított időről szóló jelentésben. Az aggregáció többi része elkészült."
   text_reporter_degradation_aggregation_query_id_unresolved: "Nem található mentett lekérdezés a következőhöz: query_id: %{query_id}, ezért semmi sem lett megszámolva. Ne feledje: az idézőjelben megadott érték szó szerinti szöveg — írja idézőjelek nélkül, ha változót szeretne beolvasni."
   text_reporter_degradation_aggregation_source_unsupported: "Ennek a jelentésnek az adatforrása (%{source}) nem összegezhető a %{tag} taggal."
-  text_reporter_degradation_aggregation_hidden_filter: "A jelentés lekérdezése a(z) %{fields} mezőre szűr, amely %{projects} projektben rejtett a jelentés felhasználója elől. Ezeknek a projekteknek a feladatai kimaradtak."
+  text_reporter_degradation_aggregation_hidden_filter: "A jelentés lekérdezése a(z) %{fields} mezőre szűr, amely %{projects} projektben rejtett a jelentés felhasználója elől. Ezek a projektek kimaradtak."
   text_reporter_degradation_aggregation_hidden_rollup: "A(z) %{fields} mező %{projects} projektben rejtett a jelentés felhasználója elől. Ezeknek a projekteknek a feladatai kimaradtak a verziók szerinti összesítésből."
   text_reporter_degradation_aggregation_hidden_group: "A(z) %{fields} mező %{projects} projektben rejtett a jelentés felhasználója elől. Ezeknek a projekteknek az időráfordításai kimaradtak ebből a csoportosításból."
   label_reporter_aggregation_hidden: "Rejtett"

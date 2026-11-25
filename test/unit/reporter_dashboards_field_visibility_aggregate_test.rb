@@ -15,7 +15,7 @@ require File.expand_path('../test_helper', __dir__)
 class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
   fixtures :projects, :users, :email_addresses, :roles, :members, :member_roles,
            :enabled_modules, :issues, :issue_statuses, :trackers, :projects_trackers,
-           :enumerations, :user_preferences, :versions, :issue_categories
+           :enumerations, :user_preferences, :versions, :issue_categories, :time_entries
 
   Template = RedmineReporterDashboards::Template
   ReportRun = RedmineReporterDashboards::Reporting::ReportRun
@@ -49,6 +49,9 @@ class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
     @manager = User.find(2)   # jsmith
     @developer = User.find(3) # dlopper
     User.current = nil
+    # The bucket label is translated; every assertion below is in English (§6).
+    @locale = I18n.locale
+    I18n.locale = :en
     {
       1 => { assigned_to_id: 2, estimated_hours: 2.0 },
       2 => { assigned_to_id: 3, estimated_hours: 3.0 },
@@ -59,6 +62,7 @@ class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
 
   def teardown
     User.current = nil
+    I18n.locale = @locale
   end
 
   # Runs the block with the Developer role's fields hidden, by the real plugin's setting or
@@ -144,7 +148,8 @@ class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
       assert_equal 'dlopper=2;Hidden=1;jsmith=1;|4|assigned_to_id',
                    render(@manager, [1, 2, 3, 4], tag('group_by: assignee'))
     end
-    assert_equal 'jsmith=2;dlopper=2;|4|', render(@manager, [1, 2, 3, 4], tag('group_by: assignee'))
+    # no tie left to the database's row order (§6)
+    assert_equal 'dlopper=2;jsmith=2;|4|', render(@manager, [1, 2, 3, 4], tag('group_by: assignee user_label: login'))
   end
 
   def test_a_crosstab_over_a_hidden_field_has_one_hidden_row
@@ -159,12 +164,52 @@ class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
     template = '{% sql_aggregate group_by: assignee drill: true assign_to: s %}' \
                '{{ s.drill_available }}|{% for b in s.buckets %}{{ b.label }}=[{{ b.url }}][{{ b.value }}];{% endfor %}'
     with_hidden do
-      assert_equal 'true|Hidden=[][-1];', render(@developer, [1, 2, 3], template)
+      # no URL, and no group key a template could mistake for a value
+      assert_equal 'true|Hidden=[][];', render(@developer, [1, 2, 3], template)
       # mixed: no link on a visible value either, or its issue list would also count the
       # hidden project's issues with that value
       mixed = render(@manager, [1, 2, 3, 4], template)
       assert_not_includes mixed, 'assigned_to_id'
       assert_no_match(/=\[http/, mixed)
+    end
+  end
+
+  def test_a_hidden_split_by_is_one_hidden_series
+    template = '{% sql_aggregate group_by: tracker split_by: assignee assign_to: s %}' \
+               '{{ s.series | join: "," }}|{% for e in s.series_entries %}[{{ e.value }}][{{ e.filter }}]{% endfor %}'
+    with_hidden do
+      assert_equal 'Hidden|[][]', render(@developer, [1, 2, 3], template)
+    end
+  end
+
+  def test_the_hidden_bucket_folded_into_other_leaves_no_trace_in_its_values
+    template = '{% sql_aggregate group_by: assignee limit: 1 user_label: login assign_to: s %}' \
+               '{% for b in s.buckets %}{{ b.label }}={{ b.count }}[{{ b.values | join: "," }}];{% endfor %}'
+    with_hidden do
+      assert_equal 'dlopper=2[];Other=2[2];', render(@manager, [1, 2, 3, 4], template)
+    end
+  end
+
+  def test_age_over_a_hidden_due_date_is_one_hidden_bucket
+    Issue.where(id: [1, 2, 3]).update_all(due_date: Date.new(2026, 1, 15))
+    template = '{% sql_aggregate group_by: age age_field: due assign_to: s %}' \
+               '{% for b in s.buckets %}{{ b.label }}={{ b.count }}[{{ b.value }}];{% endfor %}|{{ s.hidden_fields | join: "," }}'
+    with_hidden(2 => %w[due_date]) do
+      out = render(@developer, [1, 2, 3], template)
+      assert out.end_with?('Hidden=3[];|due_date'), out
+      assert_no_match(/[^n]=[1-9]/, out.delete_suffix('Hidden=3[];|due_date'))
+    end
+  end
+
+  def test_nothing_hidden_changes_no_path
+    paths = [tag('group_by: assignee'), tag('group_by: status measure: sum of: estimated_hours'),
+             '{% sql_aggregate group_by: flags assign_to: f %}{{ f.assigned }}|{{ f.no_estimate }}|{{ f.hidden_fields }}',
+             '{% sql_aggregate group_by: completeness fields: "assignee;estimated" assign_to: c %}' \
+             '{% for b in c.buckets %}{{ b.count }}/{{ b.total }}[{{ b.filter }}]{% endfor %}{{ c.hidden_fields }}',
+             '{% sql_aggregate period: month periods: 2 assign_to: t %}{{ t.total }}']
+    before = paths.map { |template| render(@developer, [1, 2, 3], template) }
+    with_hidden({}) do
+      assert_equal before, paths.map { |template| render(@developer, [1, 2, 3], template) }
     end
   end
 
@@ -221,6 +266,16 @@ class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
     end
   end
 
+  def test_a_hidden_funnel_stage_links_nowhere
+    template = '{% sql_aggregate group_by: flags drill: true assign_to: f %}' \
+               '{% for st in f.stages %}{{ st.key }}=[{{ st.url | size }}];{% endfor %}'
+    with_hidden do
+      out = render(@developer, [1, 2, 3], template)
+      assert_includes out, 'assigned=[0];'
+      assert_match(/total=\[[1-9]\d*\];/, out)
+    end
+  end
+
   # ------------------------------------------------------------------
   # A condition on a hidden field
   # ------------------------------------------------------------------
@@ -249,6 +304,26 @@ class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
     assert_nil FieldVisibility.filter_field('status_id')
   end
 
+  Recorder = Struct.new(:records) do
+    def degrade(code, **data)
+      records << [code, data]
+    end
+  end
+
+  def test_spent_time_grouped_by_a_hidden_issue_field_leaves_those_projects_out
+    scope = TimeEntry.where(project_id: [1, 3])
+    hidden = { 'fixed_version_id' => [1] }
+    diagnostics = Recorder.new([])
+
+    by_version = FieldVisibility.apply_time_entry_rule(scope, 'version', hidden, diagnostics)
+    assert_equal [], by_version.where(project_id: 1).pluck(:id)
+    assert_equal scope.where(project_id: 3).order(:id).pluck(:id), by_version.order(:id).pluck(:id)
+    assert_equal [:aggregation_hidden_group], diagnostics.records.map(&:first)
+
+    assert_same scope, FieldVisibility.apply_time_entry_rule(scope, 'activity', hidden, diagnostics)
+    assert_equal 1, diagnostics.records.length
+  end
+
   # ------------------------------------------------------------------
   # {% version_rollup %}
   # ------------------------------------------------------------------
@@ -275,6 +350,11 @@ class ReporterDashboardsFieldVisibilityAggregateTest < ActiveSupport::TestCase
       one = statements { render(@developer, [1], template) }.length
       many = statements { render(@developer, [1, 2, 3, 7, 8, 11, 12], template) }.length
       assert_equal one, many
+
+      # two projects, one of them hiding: more issues, the same statements
+      render(@manager, [1, 4], template)
+      two = statements { render(@manager, [1, 4], template) }.length
+      assert_equal two, statements { render(@manager, [1, 2, 3, 4, 7, 8], template) }.length
     end
   end
 end

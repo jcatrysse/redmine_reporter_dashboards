@@ -151,8 +151,10 @@ is hidden from the report's user, its issues are still counted but land in one b
 them out. The result then lists the field in `hidden_fields`, e.g.
 `{% if stats.hidden_fields.size > 0 %}Part of this data is hidden from you.{% endif %}`; the
 key is absent when nothing was hidden. A saved query that filters on such a field leaves those
-projects' issues out, and the report's diagnostics say so. The administrator guide lists every
-case.
+projects' issues out, and the report's diagnostics say so. For `group_by: flags`, `total`
+still counts every issue while `assigned` + `unassigned` (and the due-date and estimate
+counters) cover only the projects where that field is visible. The administrator guide lists
+every case.
 
 A dimension that does not exist logs a warning and yields an empty result. It never raises, so
 a typo cannot take down a dashboard or a PDF export.

@@ -322,7 +322,7 @@ de:
   text_reporter_degradation_aggregation_params_unsupported: "%{params} kann in einem Bericht über aufgewendete Zeit nicht verwendet werden. Der übrige Teil der Aggregation wurde berechnet."
   text_reporter_degradation_aggregation_query_id_unresolved: "Zu query_id: %{query_id} wurde keine gespeicherte Abfrage gefunden, daher wurde nichts gezählt. Beachten Sie: ein Wert in Anführungszeichen ist wörtlicher Text — schreiben Sie ihn ohne Anführungszeichen, um eine Variable zu lesen."
   text_reporter_degradation_aggregation_source_unsupported: "Die Datenquelle dieses Berichts (%{source}) kann von %{tag} nicht zusammengefasst werden."
-  text_reporter_degradation_aggregation_hidden_filter: "Die Abfrage des Berichts filtert nach %{fields}; dieses Feld ist für den Benutzer des Berichts in %{projects} Projekt(en) versteckt. Die Tickets dieser Projekte wurden ausgelassen."
+  text_reporter_degradation_aggregation_hidden_filter: "Die Abfrage des Berichts filtert nach %{fields}; dieses Feld ist für den Benutzer des Berichts in %{projects} Projekt(en) versteckt. Diese Projekte wurden ausgelassen."
   text_reporter_degradation_aggregation_hidden_rollup: "%{fields} ist für den Benutzer des Berichts in %{projects} Projekt(en) versteckt. Die Tickets dieser Projekte wurden in der Versionsübersicht ausgelassen."
   text_reporter_degradation_aggregation_hidden_group: "%{fields} ist für den Benutzer des Berichts in %{projects} Projekt(en) versteckt. Die Zeitbuchungen dieser Projekte wurden in dieser Gruppierung ausgelassen."
   label_reporter_aggregation_hidden: "Versteckt"

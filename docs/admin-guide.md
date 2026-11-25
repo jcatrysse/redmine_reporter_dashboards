@@ -481,7 +481,8 @@ a field is hidden from the person the report is rendered for:
 Whenever a value was hidden the result says so in `hidden_fields`, and whenever issues were
 left out the report's diagnostics say how many projects that concerned. Administrators,
 people with nothing hidden, and installations without the plugin get exactly the result they
-got before.
+got before. On MariaDB with `ONLY_FULL_GROUP_BY` switched on (not the default), a grouping
+that has to show a Hidden bucket renders empty, the same limit the `age` grouping has there.
 
 Two bounds, both visible in the report's diagnostics when they bite: at most the 500 most
 recent journals per issue, and at most 20 000 journal rows per report. `issue.journals.all` is

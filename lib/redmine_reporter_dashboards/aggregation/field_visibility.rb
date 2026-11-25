@@ -24,13 +24,14 @@ module RedmineReporterDashboards
     #   spent time by        entries of a project that hides version or category are left out
     #   version/category     when grouping by it, and the author is told
     #
-    # Without ifv, for an admin, or for an actor with no hidden field in the scope's
-    # projects, `hidden_projects` answers {} WITHOUT a query and every caller then runs
-    # exactly the code it ran before: the output is byte-identical.
+    # Without ifv, and for an admin, `hidden_projects` answers {} WITHOUT a query. For any
+    # other actor it costs, per tag, one DISTINCT project_id pluck, one Project query and
+    # ifv's role lookup per project (memoised on the render's Batch, shared with the drop);
+    # that grows with the number of PROJECTS in scope, never with the number of issues. When
+    # it answers {} every caller runs exactly the code it ran before: the output is
+    # byte-identical, only those statements are added.
     #
-    # Set-based throughout: one DISTINCT project_id pluck per tag, the projects, and ifv's
-    # own role lookup (memoised per project on the render's Batch, shared with the drop).
-    # Nothing here loops over issues.
+    # Set-based throughout. Nothing here loops over issues.
     module FieldVisibility
       # RedmineIssueFieldVisibility::HIDEABLE_CORE_FIELDS on Redmine 7 (Tracker::CORE_FIELDS
       # less done_ratio and parent_issue_id). Anything else ifv answers is ignored here.
@@ -76,11 +77,15 @@ module RedmineReporterDashboards
       # one project of `scope`. {} without ifv, without an actor or Batch, and for an admin,
       # in which case no query runs.
       def hidden_projects(scope, render_context, project_column: 'issues.project_id')
+        return {} unless ::RedmineReporterDashboards::Liquid::Batch.field_visibility_rule?
+
+        # FAIL CLOSED (INV-3): with the rule installed, a render that cannot say whose
+        # visibility applies must not count as "nothing hidden". The tags rescue this into
+        # their empty result.
         actor = render_context&.actor
         batch = render_context&.batch
-        return {} if actor.nil? || batch.nil?
-        return {} unless batch.class.respond_to?(:field_visibility_rule?) &&
-                         batch.class.field_visibility_rule?
+        raise ArgumentError, 'field visibility needs the render actor and its Batch' if actor.nil? || batch.nil?
+
         # ifv answers [] for an admin itself; asking first saves the pluck.
         return {} if actor.respond_to?(:admin?) && actor.admin?
 
@@ -129,14 +134,15 @@ module RedmineReporterDashboards
       # would let a count answer "how many issues there are assigned to X" for that project,
       # so the issues of those projects are left out and the author is told how many
       # projects that was. Answers [scope, hidden map of what remains].
-      def apply_filter_rule(scope, query, hidden, diagnostics, tag:, project_column: 'issues.project_id')
+      def apply_filter_rule(scope, query, hidden, diagnostics, tag:, project_column: 'issues.project_id',
+                            records: 'issues')
         fields   = filtered_fields(query) & hidden.keys
         excluded = projects_hiding(hidden, fields)
         return [scope, hidden] if excluded.empty?
 
         degrade(diagnostics, :aggregation_hidden_filter,
                 "the report query filters on #{fields.join(', ')}, which is hidden from this " \
-                "actor in #{excluded.length} project(s); their issues are left out",
+                "actor in #{excluded.length} project(s); their #{records} are left out",
                 tag: tag, fields: fields.join(', '), projects: excluded.length)
         remaining = hidden.transform_values { |ids| ids - excluded }.reject { |_, ids| ids.empty? }
         [without_projects(scope, excluded, project_column: project_column), remaining]
@@ -196,6 +202,8 @@ module RedmineReporterDashboards
 
             stage['count']  = visible[stage['key']]
             stage['filter'] = nil
+            # no URL at all: a nil filter alone means "the report query unchanged"
+            stage['hidden'] = true
           end
         end
         result['hidden_fields'] = fields
@@ -223,6 +231,24 @@ module RedmineReporterDashboards
           end
         end
         result['hidden_fields'] = fields
+        result
+      end
+
+      # The hidden bucket's group key (-1, or the kernel's text marker) is not a value a
+      # template should see: `value` reads nil and `values` (an Other row) leaves it out.
+      def scrub_sentinels(result)
+        return result unless result.is_a?(Hash) && result.key?('hidden_fields')
+
+        keys = [SqlAggregation::QueryAggregator::HIDDEN_ID_KEY.to_s,
+                SqlAggregation::QueryAggregator::HIDDEN_TEXT_KEY]
+        %w[buckets rows series_entries].each do |name|
+          Array(result[name]).each do |entry|
+            next unless entry.is_a?(Hash)
+
+            entry['value'] = nil if keys.include?(entry['value'])
+            entry['values'] -= keys if entry['values'].is_a?(Array)
+          end
+        end
         result
       end
 

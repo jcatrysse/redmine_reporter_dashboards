@@ -322,7 +322,7 @@ pt:
   text_reporter_degradation_aggregation_params_unsupported: "%{params} não pode ser usado num relatório de tempo gasto. O resto da agregação foi calculado."
   text_reporter_degradation_aggregation_query_id_unresolved: "Não foi encontrada nenhuma consulta guardada para query_id: %{query_id}, pelo que nada foi contado. Recorde que um valor entre aspas é texto literal — escreva-o sem aspas para ler uma variável."
   text_reporter_degradation_aggregation_source_unsupported: "A fonte de dados deste relatório (%{source}) não pode ser resumida por %{tag}."
-  text_reporter_degradation_aggregation_hidden_filter: "A consulta do relatório filtra por %{fields}, que está escondido para o utilizador do relatório em %{projects} projeto(s). As tarefas desses projetos foram omitidas."
+  text_reporter_degradation_aggregation_hidden_filter: "A consulta do relatório filtra por %{fields}, que está escondido para o utilizador do relatório em %{projects} projeto(s). Esses projetos foram omitidos."
   text_reporter_degradation_aggregation_hidden_rollup: "%{fields} está escondido para o utilizador do relatório em %{projects} projeto(s). As tarefas desses projetos foram omitidas do resumo por versão."
   text_reporter_degradation_aggregation_hidden_group: "%{fields} está escondido para o utilizador do relatório em %{projects} projeto(s). Os registos de tempo desses projetos foram omitidos deste agrupamento."
   label_reporter_aggregation_hidden: "Escondido"

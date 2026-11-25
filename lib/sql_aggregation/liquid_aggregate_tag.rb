@@ -182,14 +182,15 @@ module SqlAggregation
     # [scope, hidden]: the projects in which redmine_issue_field_visibility hides each core
     # field from the render actor, after the filter rule has left out the projects whose
     # hidden fields the report query filters on. See `Aggregation::FieldVisibility`.
-    def field_visibility(scope, context, project_column: 'issues.project_id')
+    def field_visibility(scope, context, project_column: 'issues.project_id', records: 'issues')
       render_context = RedmineReporterDashboards::Liquid::RenderContext.from(context)
       hidden = FieldVisibility.hidden_projects(scope, render_context, project_column: project_column)
       return [scope, hidden] if hidden.empty?
 
       FieldVisibility.apply_filter_rule(scope, resolve_query(context), hidden,
                                         render_context&.diagnostics,
-                                        tag: 'sql_aggregate', project_column: project_column)
+                                        tag: 'sql_aggregate', project_column: project_column,
+                                        records: records)
     end
 
     # THE OWNED TIME-ENTRY PATH. One dispatch, and everything about how a time entry is
@@ -224,7 +225,8 @@ module SqlAggregation
 
       report_unsupported_params(diagnostics, context)
 
-      scope, hidden = field_visibility(scope, context, project_column: 'time_entries.project_id')
+      scope, hidden = field_visibility(scope, context, project_column: 'time_entries.project_id',
+                                                       records: 'time entries')
       scope = FieldVisibility.apply_time_entry_rule(scope, group_by, hidden, diagnostics) unless hidden.empty?
 
       aggregator.breakdown(
@@ -399,9 +401,10 @@ module SqlAggregation
         of:          str_param(@raw_params['of'], context)
       }
       # Only when something is hidden, so every other call is the one it always was.
-      args.update(hidden: hidden, hidden_label: FieldVisibility.label) unless hidden.empty?
+      return SqlAggregation::QueryAggregator.dimension_breakdown(scope, **args) if hidden.empty?
 
-      SqlAggregation::QueryAggregator.dimension_breakdown(scope, **args)
+      args.update(hidden: hidden, hidden_label: FieldVisibility.label)
+      FieldVisibility.scrub_sentinels(SqlAggregation::QueryAggregator.dimension_breakdown(scope, **args))
     end
 
     # `count` when absent, so an existing template keeps the row-count behaviour.
@@ -466,7 +469,11 @@ module SqlAggregation
       # `total` has no filter, and that means "the report query unchanged" rather
       # than "not expressible", so it links to the base URL.
       entries(result['stages']).each do |stage|
-        stage['url'] = stage['filter'] ? element_url(builder, stage['filter']) : builder.base_url
+        stage['url'] =
+          if stage['hidden'] then nil
+          elsif stage['filter'] then element_url(builder, stage['filter'])
+          else builder.base_url
+          end
       end
 
       if result.key?('series_entries')
