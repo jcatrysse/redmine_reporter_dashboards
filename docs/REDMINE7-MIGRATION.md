@@ -402,10 +402,11 @@ Recorded in `docs/DECISIONS-2026-11-25.md`.
 - **Follow-up, same day** (`ef7ac49`): the drop now hides the core fields
   redmine_issue_field_visibility hides from the actor (every spelling, `*_id` included), and
   custom fields follow core's `available_custom_fields` as well as the role rule.
-- **Not fixed, recorded**: `{% sql_aggregate %}` (`query_aggregator.rb`, the G7 kernel) still
-  groups by and sums the core fields redmine_issue_field_visibility hides; changing it needs a
-  declared kernel hunk and Jan's call. An issue outside the report's scope (parent, related) is
-  answered with per-issue queries rather than the batch.
+- **Closed the same day** (Jan: "Ook de teltags afschermen"): `{% sql_aggregate %}` /
+  `{% geo_aggregate %}` and `{% version_rollup %}` follow redmine_issue_field_visibility too;
+  see "2026-11-25: the counting tags and redmine_issue_field_visibility" below.
+- **Not fixed, recorded**: an issue outside the report's scope (parent, related) is answered
+  with per-issue queries rather than the batch.
 - **Tests** (Redmine 7.0-stable-GEOxyz 578730a, Ruby 3.3.6, PostgreSQL 16): alone, rspec 2961 /
   260 / 217, minitest 627 / 456 / 58, spec_liquid 396, all 0 failures. With the real
   redmineup_tags, redmine_agile, redmine_checklists, redmine_contacts,

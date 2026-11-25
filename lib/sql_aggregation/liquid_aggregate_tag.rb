@@ -4,6 +4,7 @@ require_relative '../redmine_reporter_dashboards/liquid/execution_policy'
 require_relative '../redmine_reporter_dashboards/liquid/scope_binding'
 require_relative '../redmine_reporter_dashboards/liquid/tag_params'
 require_relative '../redmine_reporter_dashboards/aggregation/drill_through'
+require_relative '../redmine_reporter_dashboards/aggregation/field_visibility'
 
 module SqlAggregation
   # Liquid tag: {% sql_aggregate ... %}   (legacy alias: {% geo_aggregate ... %})
@@ -84,6 +85,9 @@ module SqlAggregation
     # of markup. The array stays dense and aligned; the entries are just nil.
     MAX_DRILL_CELLS = 5_000
 
+    # redmine_issue_field_visibility for the render actor; see that module.
+    FieldVisibility = RedmineReporterDashboards::Aggregation::FieldVisibility
+
     def initialize(tag_name, markup, tokens)
       super
       @raw_params = TagParams.parse(markup)
@@ -140,9 +144,14 @@ module SqlAggregation
       # Render-time state stays on the stack: Liquid parses a template once and
       # may render the same tag instance again, concurrently and with different
       # assigns, so nothing that depends on `context` may be memoised on self.
+      # redmine_issue_field_visibility, for the render actor (curator decision 2026-11-25).
+      # {} without that plugin, for an admin and for an actor with nothing hidden in these
+      # projects, and then every path below runs exactly as before.
+      scope, hidden = field_visibility(scope, context)
+
       drill     = bool_param(@raw_params['drill'], context)
       breakdown = @raw_params.key?('group_by') || @raw_params.key?('split_by')
-      result    = breakdown ? breakdown_result(scope, context, drill) : time_series_result(scope, context)
+      result    = breakdown ? breakdown_result(scope, context, drill, hidden) : time_series_result(scope, context)
 
       if result.nil?
         context.scopes.last[assign_to] = empty_result
@@ -169,6 +178,19 @@ module SqlAggregation
     end
 
     private
+
+    # [scope, hidden]: the projects in which redmine_issue_field_visibility hides each core
+    # field from the render actor, after the filter rule has left out the projects whose
+    # hidden fields the report query filters on. See `Aggregation::FieldVisibility`.
+    def field_visibility(scope, context, project_column: 'issues.project_id')
+      render_context = RedmineReporterDashboards::Liquid::RenderContext.from(context)
+      hidden = FieldVisibility.hidden_projects(scope, render_context, project_column: project_column)
+      return [scope, hidden] if hidden.empty?
+
+      FieldVisibility.apply_filter_rule(scope, resolve_query(context), hidden,
+                                        render_context&.diagnostics,
+                                        tag: 'sql_aggregate', project_column: project_column)
+    end
 
     # THE OWNED TIME-ENTRY PATH. One dispatch, and everything about how a time entry is
     # aggregated lives in `Aggregation::TimeEntryAggregator` — including the positional
@@ -201,6 +223,9 @@ module SqlAggregation
       end
 
       report_unsupported_params(diagnostics, context)
+
+      scope, hidden = field_visibility(scope, context, project_column: 'time_entries.project_id')
+      scope = FieldVisibility.apply_time_entry_rule(scope, group_by, hidden, diagnostics) unless hidden.empty?
 
       aggregator.breakdown(
         scope,
@@ -291,7 +316,7 @@ module SqlAggregation
       )
     end
 
-    def breakdown_result(scope, context, drill = false)
+    def breakdown_result(scope, context, drill = false, hidden = {})
       unless @raw_params.key?('group_by')
         Rails.logger.warn('[sql_aggregate] split_by needs a group_by — skipping aggregation')
         return nil
@@ -306,8 +331,15 @@ module SqlAggregation
         return nil
       end
 
+      legacy_labels = false
       if legacy_breakdown?(group_by, drill, measured?(context))
-        return SqlAggregation::QueryAggregator.breakdown(scope, group_by: group_by)
+        unless FieldVisibility.breakdown_hidden?(group_by, hidden)
+          return SqlAggregation::QueryAggregator.breakdown(scope, group_by: group_by)
+        end
+
+        # The legacy path has no hidden bucket; the dimension path does, and `login`
+        # keeps the legacy label text for the user axes.
+        legacy_labels = true
       end
 
       if group_by.casecmp('completeness').zero?
@@ -315,9 +347,14 @@ module SqlAggregation
           Rails.logger.warn('[sql_aggregate] measure: is ignored by group_by: completeness — it ' \
                             'counts issues per field')
         end
-        return SqlAggregation::QueryAggregator.completeness(
+        result = SqlAggregation::QueryAggregator.completeness(
           scope, fields: list_param(@raw_params['fields'], context)
         )
+        return result if hidden.empty?
+
+        return FieldVisibility.apply_to_completeness(result, scope, hidden) do |visible, fields|
+          SqlAggregation::QueryAggregator.completeness(visible, fields: fields)
+        end
       end
 
       if group_by.casecmp('flags').zero?
@@ -334,21 +371,25 @@ module SqlAggregation
                             "#{statuses.inspect}: the closed stage links to status_id=c (Redmine's " \
                             'is_closed flag), so its count and the linked issue list can differ')
         end
-        return SqlAggregation::QueryAggregator.flags(scope, closed_statuses: statuses)
+        result = SqlAggregation::QueryAggregator.flags(scope, closed_statuses: statuses)
+        return result if hidden.empty?
+
+        return FieldVisibility.apply_to_flags(result, scope, hidden) do |visible|
+          SqlAggregation::QueryAggregator.flags(visible, closed_statuses: statuses)
+        end
       end
 
       period      = str_param(@raw_params['period'], context, default: 'month')
       raw_periods = @raw_params['periods'] || (@raw_params['months'] if period == 'month')
 
-      SqlAggregation::QueryAggregator.dimension_breakdown(
-        scope,
+      args = {
         group_by:    group_by,
         split_by:    (split_by.empty? ? nil : split_by),
         sort:        str_param(@raw_params['sort'], context, default: 'count'),
         limit:       int_param(@raw_params['limit'], context, default: 0),
         other_label: str_param(@raw_params['other_label'], context, default: 'Other'),
         empty_label: (@raw_params.key?('empty_label') ? str_param(@raw_params['empty_label'], context) : nil),
-        user_label:  str_param(@raw_params['user_label'], context, default: 'name'),
+        user_label:  legacy_labels ? 'login' : str_param(@raw_params['user_label'], context, default: 'name'),
         period:      period,
         periods:     int_param(raw_periods, context, default: nil),
         date_field:  str_param(@raw_params['date_field'], context, default: 'created'),
@@ -356,7 +397,11 @@ module SqlAggregation
         age_field:   str_param(@raw_params['age_field'], context, default: 'created'),
         measure:     measure_param(context),
         of:          str_param(@raw_params['of'], context)
-      )
+      }
+      # Only when something is hidden, so every other call is the one it always was.
+      args.update(hidden: hidden, hidden_label: FieldVisibility.label) unless hidden.empty?
+
+      SqlAggregation::QueryAggregator.dimension_breakdown(scope, **args)
     end
 
     # `count` when absent, so an existing template keeps the row-count behaviour.

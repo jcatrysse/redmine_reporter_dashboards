@@ -428,7 +428,7 @@ module SqlAggregation
                                  other_label: DEFAULT_OTHER_LABEL, empty_label: nil,
                                  user_label: 'name', period: 'month', periods: nil,
                                  date_field: 'created', age_buckets: nil, age_field: 'created',
-                                 measure: 'count', of: nil)
+                                 measure: 'count', of: nil, hidden: nil, hidden_label: nil)
       sort = sanitize_sort(sort)
       opts = { empty_label: empty_label, user_label: user_label, period: period,
                periods: periods, date_field: date_field, age_buckets: age_buckets,
@@ -446,21 +446,102 @@ module SqlAggregation
       measure_spec = resolve_measure(measure, of)
       return nil if measure_spec.nil?
 
+      # redmine_issue_field_visibility (Jan, 2026-11-25). `hidden` is
+      # { ifv field name => [project ids where the actor may not see it] }; nil or empty
+      # leaves every dimension and measure exactly as resolved above.
+      masked       = []
+      group_dim    = hide_dimension(group_dim, hidden, hidden_label, masked)
+      split_dim    = hide_dimension(split_dim, hidden, hidden_label, masked) if split_dim
+      measure_spec = hide_measure(measure_spec, hidden, masked)
+
       base = apply_dimension(scope.unscope(:order), group_dim)
       base = apply_dimension(base, split_dim) if split_dim
       base = apply_measure(base, measure_spec)
 
-      if split_dim
-        crosstab_result(base, group_dim, split_dim, sort: sort, limit: limit,
-                                                    other_label: other_label,
-                                                    group_by: group_by, split_by: split_by,
-                                                    measure: measure_spec)
-      else
-        single_result(base, group_dim, sort: sort, limit: limit, other_label: other_label,
-                                       group_by: group_by, measure: measure_spec)
-      end
+      result =
+        if split_dim
+          crosstab_result(base, group_dim, split_dim, sort: sort, limit: limit,
+                                                      other_label: other_label,
+                                                      group_by: group_by, split_by: split_by,
+                                                      measure: measure_spec)
+        else
+          single_result(base, group_dim, sort: sort, limit: limit, other_label: other_label,
+                                         group_by: group_by, measure: measure_spec)
+        end
+      result['hidden_fields'] = masked.uniq if masked.any?
+      result
     end
 
+    # The group key of the hidden bucket: -1 for an id column (ids are positive), a
+    # marker string for a computed text axis (age over due_date).
+    HIDDEN_ID_KEY   = -1
+    HIDDEN_TEXT_KEY = '__rrd_hidden__'
+
+    # The ifv field behind each `of:` a measure can read.
+    MEASURE_HIDDEN_FIELDS = { 'estimated_hours' => 'estimated_hours', 'assignee' => 'assigned_to_id',
+                              'priority' => 'priority_id', 'category' => 'category_id',
+                              'version' => 'fixed_version_id' }.freeze
+
+    def self.hidden_project_ids(hidden, field)
+      return nil if hidden.nil? || field.nil?
+
+      ids = Array(hidden[field.to_s]).map(&:to_i).select(&:positive?).uniq.sort
+      ids.empty? ? nil : ids
+    end
+    private_class_method :hidden_project_ids
+
+    # Integers only, joined: the ids come from `pluck`, never from a template.
+    def self.hidden_case(ids, hidden_value, column)
+      "CASE WHEN issues.project_id IN (#{ids.join(',')}) THEN #{hidden_value} ELSE #{column} END"
+    end
+    private_class_method :hidden_case
+
+    # Every issue of a project that hides the dimension's field groups under ONE key,
+    # whatever its stored value, so no split of those issues reaches the result. The
+    # axis loses its drill-through filters (filter_field nil): an issue-list link for a
+    # visible value would also count that value in the hidden projects.
+    def self.hide_dimension(dim, hidden, hidden_label, masked)
+      ids = hidden_project_ids(hidden, dim.filter_field)
+      return dim if ids.nil?
+
+      masked << dim.filter_field
+      symbol = dim.sql.is_a?(Symbol)
+      key    = symbol ? HIDDEN_ID_KEY : HIDDEN_TEXT_KEY
+      value  = symbol ? key.to_s : ActiveRecord::Base.connection.quote(key)
+      column = symbol ? "issues.#{dim.sql}" : "(#{dim.sql})"
+      label  = hidden_label.to_s.strip.empty? ? 'Hidden' : hidden_label.to_s
+      labels = dim.label_map
+      order  = dim.order_map
+
+      copy = dim.dup
+      copy.sql = Arel.sql(hidden_case(ids, value, column))
+      copy.label_map = lambda { |raws|
+        rest = raws.reject { |raw| raw == key }
+        map  = rest.empty? || labels.nil? ? {} : labels.call(rest)
+        map  = {} unless map.is_a?(Hash)
+        raws.include?(key) ? map.merge(key => label) : map
+      }
+      copy.order_map    = order && ->(raws) { order.call(raws.reject { |raw| raw == key }) }
+      copy.filter_field = nil
+      copy.filter_for   = nil
+      copy
+    end
+    private_class_method :hide_dimension
+
+    # A hidden numeric or reference column reads NULL for the projects that hide it, so
+    # SUM, AVG and COUNT(DISTINCT) leave those issues out: the visible projects' values
+    # only. `masked` names the field, which the result carries as `hidden_fields`.
+    def self.hide_measure(measure, hidden, masked)
+      field = MEASURE_HIDDEN_FIELDS[measure.field.to_s]
+      ids   = hidden_project_ids(hidden, field)
+      return measure if ids.nil? || measure.expression.nil?
+
+      masked << field
+      copy = measure.dup
+      copy.expression = hidden_case(ids, 'NULL', measure.expression)
+      copy
+    end
+    private_class_method :hide_measure
     # ------------------------------------------------------------------
     # Governance flags — one row of scalars for KPI tiles / funnels
     # ------------------------------------------------------------------

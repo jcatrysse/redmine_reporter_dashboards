@@ -44,9 +44,10 @@ RSpec.describe RrdGolden::KernelException do
       end
     end
 
-    it 'names the defect it is granted for, so an unrelated hunk cannot borrow the mechanism' do
+    it 'names the defect or curator decision it is granted for, so an unrelated hunk cannot borrow the mechanism' do
       described_class::ENTRIES.each do |entry|
-        expect(entry[:reason]).to match(/D-1/), "#{entry[:id]} does not say which finding it is for"
+        expect(entry[:reason]).to match(/D-1|DECISIONS-2026-11-25\.md/),
+                                  "#{entry[:id]} does not say which finding or curator decision it is for"
       end
     end
 

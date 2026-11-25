@@ -42,6 +42,11 @@ module RrdGolden
   # The plan grants the exception to exactly one task and one defect. T-08's `Accept:`
   # line says it "owns the fix for defect D-1 … the only place the kernel may
   # legitimately change a byte". Anything else is a finding, not an entry.
+  #
+  # ONE FURTHER GRANT, BY THE CURATOR, 2026-11-25 (`docs/DECISIONS-2026-11-25.md`, "Ook de
+  # teltags afschermen"): the field-visibility hunk below. It is not a defect of the port
+  # but a confidentiality rule the kernel could not express. Its reason names that
+  # decision record, and the spec accepts exactly those two references and no third.
   module KernelException
     DIR = File.expand_path('kernel_exception', __dir__)
 
@@ -115,13 +120,31 @@ module RrdGolden
                 '`grouped_counts` does. Still ONE hunk and RATCHET stays 1 — the new ' \
                 'methods sit inside the region this entry already licenses, and a ' \
                 'second entry could not work anyway: its baseline text would no longer ' \
-                'be present once this one had been applied.' }
+                'be present once this one had been applied.' },
+      # CURATOR DECISION 2026-11-25 (docs/DECISIONS-2026-11-25.md). redmine_issue_field_
+      # visibility hides core fields per role and project; the issue drop honours it since
+      # ef7ac49, and this hunk makes `{% sql_aggregate %}`'s dimension path honour it too.
+      # ONE method region: `dimension_breakdown` takes `hidden:`/`hidden_label:` and the
+      # helpers that wrap a resolved dimension or measure sit directly below it. The flags,
+      # completeness, legacy-breakdown, rollup and spent-time paths are handled OUTSIDE the
+      # kernel (`Aggregation::FieldVisibility`), so this is the only region that moved.
+      { id: 'field-visibility', file: KERNEL,
+        reason: 'CURATOR DECISION 2026-11-25 (docs/DECISIONS-2026-11-25.md, Jan: "Ook de ' \
+                'teltags afschermen"): `dimension_breakdown` accepts `hidden:`, the projects ' \
+                'in which redmine_issue_field_visibility hides a core field from the render ' \
+                'actor, and wraps the grouped column in CASE WHEN issues.project_id IN (...) ' \
+                'so every issue of such a project lands in one hidden bucket with no drill ' \
+                'filter, and a measured column reads NULL there so SUM/AVG/COUNT(DISTINCT) ' \
+                'carry the visible projects only. With `hidden` nil or empty every dimension ' \
+                'and measure is the one resolved before and the result carries no new key: ' \
+                'byte-identical for admins, for actors without hidden fields and without ' \
+                'the plugin.' }
     ].freeze
 
     # The ratchet. Like AdapterOverlay's, it is the COMMITTED SIZE of ENTRIES and not a
     # budget: the spec fails when ENTRIES is longer AND when RATCHET is larger, so
     # neither a smuggled hunk nor a ratchet left high after one is removed can pass.
-    RATCHET = 1
+    RATCHET = 2
 
     class << self
       def entries_for(current_path)

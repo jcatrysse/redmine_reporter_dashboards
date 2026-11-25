@@ -145,6 +145,15 @@ enumeration field as an id, so grouping in Liquid would need a hardcoded id-to-l
 without one of those roles does not see its values — their issues are still counted, but land
 in the no-value bucket. A report can therefore be shared without leaking a restricted field.
 
+**So is redmine_issue_field_visibility**, when it is installed. In a project where a core field
+is hidden from the report's user, its issues are still counted but land in one bucket labelled
+*Hidden* (translated), with no `url`, and a sum, average or distinct count of that field leaves
+them out. The result then lists the field in `hidden_fields`, e.g.
+`{% if stats.hidden_fields.size > 0 %}Part of this data is hidden from you.{% endif %}`; the
+key is absent when nothing was hidden. A saved query that filters on such a field leaves those
+projects' issues out, and the report's diagnostics say so. The administrator guide lists every
+case.
+
 A dimension that does not exist logs a warning and yields an empty result. It never raises, so
 a typo cannot take down a dashboard or a PDF export.
 
