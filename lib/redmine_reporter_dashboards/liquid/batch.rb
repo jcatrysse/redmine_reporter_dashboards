@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'execution_policy'
+require_relative 'batch_related'
 
 module RedmineReporterDashboards
   module Liquid
@@ -66,8 +67,18 @@ module RedmineReporterDashboards
       # `todo_lists` is the seventh, by Jan's decision of 2026-10-07: the issue to-do lists of
       # redmine_issue_todo_lists2, offered by this plugin itself, with the permissions of the
       # report's actor. It is optional: without that plugin it answers an empty list.
+      #
+      # The rest are the base plugin's accessors restored by Jan's decision of 2026-11-25
+      # (option A), in `BatchRelated`: journals and notes, relations, and the data of
+      # redmine_tags, redmine_agile, redmine_checklists and redmine_contacts_helpdesk — each
+      # optional, each answered as the actor. `openable` is redmine_view_issue_description's
+      # rule for who may open an issue, which gates its description, notes and attachments.
       KEYS = %i[custom_field_values spent_hours attachments time_entries subtasks
-                named_refs todo_lists].freeze
+                named_refs todo_lists openable journals journal_attachments relations tags
+                story_points color day_in_state checklists helpdesk_ticket helpdesk_contacts
+                helpdesk_messages].freeze
+
+      include BatchRelated
 
       attr_reader :limit, :diagnostics, :actor
 

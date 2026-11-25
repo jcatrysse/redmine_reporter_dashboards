@@ -6,7 +6,7 @@ module RedmineReporterDashboards
   module Liquid
     module Filters
       # `group_by`, `group_by_custom_field`, `where_custom_field` — the three that turn a
-      # flat collection into the shape a table or a legend needs.
+      # flat collection into the shape a table or a legend needs — and `tagged_with`.
       #
       # --- `where` AND `sort_natural` ARE NOT HERE, AND THAT IS OQ-C's ANSWER ---
       #
@@ -53,6 +53,28 @@ module RedmineReporterDashboards
           Support.each(input).select do |item|
             found = Support.custom_field_value(item, field)
             value.nil? ? Support.truthy?(found) : found.to_s == value.to_s
+          end
+        end
+
+        # `{{ issues | tagged_with: "urgent, customer" }}` — the items carrying the tags
+        # (redmine_tags), the base plugin's filter restored on 2026-11-25. `match` is
+        # `all` (default: every tag), `any` (at least one) or `exclude` (none); anything else
+        # answers an empty list, as there. Tags are a comma-separated String or an Array.
+        #
+        # An item's tags are read through `Support.read` — `tags`, as `IssueDrop` names
+        # them, or `tag_list`, the base plugin's name, for a Hash. Without redmine_tags an
+        # issue has none, so `all` and `any` answer empty and `exclude` answers everything.
+        def tagged_with(input, tags, match = 'all')
+          wanted = (tags.is_a?(Array) ? tags : tags.to_s.split(',')).map { |tag| tag.to_s.strip }
+                                                                    .reject(&:empty?).uniq
+          Support.each(input).select do |item|
+            have = Array(Support.read(item, 'tags') || Support.read(item, 'tag_list')).map(&:to_s)
+            case match.to_s
+            when 'all' then (wanted - have).empty?
+            when 'any' then wanted.intersect?(have)
+            when 'exclude' then !wanted.intersect?(have)
+            else false
+            end
           end
         end
 

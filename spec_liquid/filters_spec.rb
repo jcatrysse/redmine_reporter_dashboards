@@ -357,6 +357,98 @@ module RedmineReporterDashboards
         end
       end
 
+      # Restored on 2026-11-25 (Jan, option A). Outside Redmine the formatter is absent, so
+      # this is the degrade path; the Textile rendering itself is
+      # `test/unit/reporter_dashboards_base_accessors_test.rb`'s.
+      describe 'textile / textilize' do
+        %w[textile textilize].each do |name|
+          it "`#{name}` escapes and degrades visibly when Redmine's formatter is absent" do
+            context = RenderContext.new(actor: DropFakes::User.new(id: 1, login: 'a', name: 'A'))
+            template = ::Liquid::Template.parse("{{ text | #{name} }}")
+            liquid_context = ::Liquid::Context.new(
+              [{ 'text' => 'a <b>bold</b> claim' }], {},
+              { RenderContext::REGISTER_KEY => context }, true
+            )
+            liquid_context.add_filters(Filters.modules)
+
+            expect(template.render(liquid_context)).to eq('a &lt;b&gt;bold&lt;/b&gt; claim')
+            expect(context.diagnostics).to be_include(:wiki_unavailable)
+          end
+
+          it "`#{name}` renders nothing for nil" do
+            expect(render("[{{ nothing | #{name} }}]")).to eq('[]')
+          end
+        end
+      end
+
+      # Regression, 2026-11-25: `Support.each` called `each_with_object`, which a drop that
+      # answers only `each` (`IssuesDrop`) does not have, so every aggregate and grouping
+      # filter over the issue collection raised NoMethodError.
+      describe 'a collection drop that answers only `each`' do
+        let(:only_each) do
+          Class.new(::Liquid::Drop) do
+            def each(&block)
+              [{ 'd' => 'a', 'h' => 1 }, { 'd' => 'b', 'h' => 2 }, { 'd' => 'a', 'h' => 4 }].each(&block)
+            end
+          end.new
+        end
+
+        it 'groups it' do
+          expect(render('{% assign g = rows | group_by: "d" %}{% for x in g %}{{ x.name }}{{ x.size }}{% endfor %}',
+                        rows: only_each)).to eq('a2b1')
+        end
+
+        it 'aggregates it' do
+          expect(render('{{ rows | avg: "h" }}', rows: only_each)).to eq('2.3333333333333335')
+        end
+      end
+
+      # The base plugin's `tagged_with`: `all` (default), `any`, `exclude`; tags as a
+      # comma-separated String or an Array; read from `tags` (IssueDrop) or `tag_list`.
+      describe 'tagged_with' do
+        let(:rows) do
+          [{ 'n' => 'a', 'tags' => %w[urgent customer] },
+           { 'n' => 'b', 'tags' => %w[urgent] },
+           { 'n' => 'c', 'tag_list' => %w[customer] },
+           { 'n' => 'd' }]
+        end
+
+        def names(source)
+          render("{% assign hit = rows | #{source} %}{% for r in hit %}{{ r.n }}{% endfor %}", rows: rows)
+        end
+
+        it 'keeps the items carrying every tag by default' do
+          expect(names('tagged_with: "urgent, customer"')).to eq('a')
+        end
+
+        it 'keeps the items carrying any of the tags' do
+          expect(names('tagged_with: "urgent,customer", "any"')).to eq('abc')
+        end
+
+        it 'keeps the items carrying none of the tags' do
+          expect(names('tagged_with: "urgent", "exclude"')).to eq('cd')
+        end
+
+        it 'answers nothing for an unknown match mode, as the base plugin did' do
+          expect(names('tagged_with: "urgent", "some"')).to eq('')
+        end
+
+        it 'ignores blanks and spaces in the tag list' do
+          expect(names('tagged_with: " urgent , ,"')).to eq('ab')
+        end
+
+        it 'reads the tags off an issue drop' do
+          batch = DropFakes::Batch.new(related: { tags: { 1 => %w[urgent], 2 => [] } })
+          context = RenderContext.new(actor: DropFakes::User.new(id: 1, login: 'a', name: 'A', time_zone: nil),
+                                      batch: batch)
+          issues = [1, 2].map do |id|
+            Drops::IssueDrop.new(DropFakes::Record.new(id: id, subject: "s#{id}"), context: context)
+          end
+          expect(render('{% assign hit = issues | tagged_with: "urgent" %}{% for i in hit %}{{ i.id }}{% endfor %}',
+                        issues: issues)).to eq('1')
+        end
+      end
+
       describe 'colors' do
         it 'normalises the three spellings to one' do
           expect(render('{{ "abc" | hex_color }}/{{ "#AABBCC" | hex_color }}')).to eq('#aabbcc/#aabbcc')

@@ -155,5 +155,86 @@ if Object.const_defined?(:IssueTodoList)
   end
 end
 
+# The base plugin's accessors, restored 2026-11-25 (Jan, option A): GEOxyz's journal idioms,
+# a relation into the private project, and, when installed, redmine_tags, redmine_agile,
+# redmine_checklists and redmine_contacts_helpdesk data. Who sees what is the scenario's
+# question (test/e2e/base_accessors.mjs), so the template prints everything it can.
+BASE_REPORT = <<~'LIQUID'
+  <h1>E2E base accessors</h1>
+  {% for issue in issues %}{% if issue.subject == "E2E assigned issue" %}
+  <h2>#{{ issue.id }} {{ issue.subject }}</h2>
+  <p>Description: {{ issue.description | size }} characters</p>
+  <h3>Journals ({{ issue.journals.all | size }})</h3>
+  {% for journal in issue.journals.all %}<div class="journal"><em>{{journal.created_on | date: "%a, %b %d, %y"}} - {{journal.user.name}}</em> {{journal.notes | textilize }}</div>{% endfor %}
+  {% assign last_comment = issue.journals.all|sort:'created_on'|reverse|first %}
+  <p>Last comment: {{ last_comment.notes }}</p>
+  <h3>Relations</h3>
+  {% for r in issue.relations_from %}<p>{{ r.relation_type }} #{{ r.issue_to.id }} {{ r.issue_to.subject }}</p>{% endfor %}
+  <h3>Other plugins</h3>
+  <p>Tags: [{{ issue.tags | join: ", " }}] Story points: [{{ issue.story_points }}] Colour: [{{ issue.color }}]</p>
+  <p>Checklist: {% for c in issue.checklists %}[{{ c.subject }} {% if c.is_done %}done{% else %}open{% endif %}]{% endfor %}</p>
+  <p>Helpdesk: [{{ issue.helpdesk_ticket.from_address }}]</p>
+  {% endif %}{% endfor %}
+LIQUID
+e2e_template('E2E base accessors',
+             project: project, author: manager, content: BASE_REPORT,
+             description: "The base plugin's journals, relations and plugin accessors",
+             source: 'issues', output: 'combined', visibility: Template::VISIBILITY_PUBLIC)
+
+assigned = Issue.find_by!(project_id: project.id, subject: 'E2E assigned issue')
+if assigned.journals.where(notes: 'E2E private note, *manager only*').none?
+  assigned.reload.init_journal(manager, 'E2E private note, *manager only*')
+  assigned.current_journal.private_notes = true
+  assigned.save!
+end
+hidden = Issue.find_by!(project_id: private_project.id, subject: 'E2E private issue')
+unless IssueRelation.where(issue_from_id: assigned.id, issue_to_id: hidden.id).exists?
+  Setting.cross_project_issue_relations = '1'
+  IssueRelation.create!(issue_from: assigned, issue_to: hidden, relation_type: 'blocks')
+end
+assigned.reload
+if assigned.respond_to?(:tag_list) && assigned.tag_list.empty?
+  assigned.tag_list = 'e2e, customer'
+  assigned.save!
+end
+if assigned.respond_to?(:agile_data) && assigned.agile_data.story_points.nil?
+  assigned.agile_data.update!(story_points: 3)
+  AgileColor.create!(container: assigned, color: 'green') if Object.const_defined?(:AgileColor)
+end
+if Object.const_defined?(:Checklist) && Checklist.where(issue_id: assigned.id).none?
+  Checklist.create!(issue_id: assigned.id, subject: 'E2E order parts', is_done: true, position: 1)
+  Checklist.create!(issue_id: assigned.id, subject: 'E2E fit parts', is_done: false, position: 2)
+end
+if Object.const_defined?(:HelpdeskTicket) && Object.const_defined?(:Contact) &&
+   HelpdeskTicket.where(issue_id: assigned.id).none?
+  contact = Contact.find_by(email: 'client@e2e.example') ||
+            Contact.create!(first_name: 'E2E', last_name: 'Client', email: 'client@e2e.example',
+                            projects: [project], visibility: 0)
+  HelpdeskTicket.create!(issue_id: assigned.id, contact: contact, from_address: 'client@e2e.example',
+                         ticket_date: Time.now.utc)
+end
+
+# "notesless": every permission of "E2E full" except private notes, checklists and the helpdesk
+# (and with redmine_view_issue_description, also without the right to open an issue: "closed").
+password = ENV.fetch('RMP_USER_PASSWORD', ENV.fetch('RMP_ADMIN_PASSWORD', 'Redmine7Test!'))
+def e2e_member(login, role_name, without, project, password)
+  role = Role.find_by(name: role_name) || Role.new(name: role_name, assignable: true)
+  role.permissions = Role.find_by!(name: 'E2E full').permissions - without
+  role.issues_visibility = 'all'
+  role.save!
+  user = User.find_by(login: login) ||
+         User.new(login: login, firstname: login.capitalize, lastname: 'E2E', mail: "#{login}@example.net")
+  user.password = user.password_confirmation = password
+  user.must_change_passwd = false
+  user.status = User::STATUS_ACTIVE
+  user.save!(validate: false)
+  Member.create!(principal: user, project: project, roles: [role]) unless Member.where(user_id: user.id, project_id: project.id).exists?
+end
+e2e_member('notesless', 'E2E without private notes',
+           %i[view_private_notes view_checklists view_helpdesk_tickets], project, password)
+if Redmine::AccessControl.permission(:view_issue_description)
+  e2e_member('closed', 'E2E may not open issues', %i[view_issue_description view_watched_issues], project, password)
+end
+
 puts "E2E plugin seed: #{Template.count} templates, #{Schedule.count} schedules, " \
      "#{TimeEntry.where(project_id: project.id).count} time entries"

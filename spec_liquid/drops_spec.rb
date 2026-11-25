@@ -533,21 +533,159 @@ module RedmineReporterDashboards
         # §3.2 — what is DROPPED. The half that rots if nobody asserts it.
         # --------------------------------------------------------------
 
+        # --------------------------------------------------------------
+        # Restored on 2026-11-25 (Jan, option A): the base plugin's journals, notes,
+        # relations and the six probes into other plugins, same names, same meaning.
+        # These specs prove the NAMES and the Liquid protocol over a fake batch; who may
+        # see what, and the query count, are proven against a real Redmine in
+        # `test/unit/reporter_dashboards_base_accessors_test.rb`.
+        # --------------------------------------------------------------
+
+        describe 'the restored base-plugin surface' do
+          let(:jane) { DropFakes::User.new(id: 7, login: 'jane', name: 'Jane Doe') }
+          let(:first_note) do
+            DropFakes::Record.new(id: 101, notes: 'First', private_notes: false, user: jane,
+                                  journalized_id: 42, created_on: DropFakes::Time.new('2026-01-05T08:00:00Z'))
+          end
+          let(:last_note) do
+            DropFakes::Record.new(id: 102, notes: 'Last', private_notes: true, user: nil,
+                                  journalized_id: 42, created_on: DropFakes::Time.new('2026-01-09T08:00:00Z'))
+          end
+          let(:other_issue) do
+            DropFakes::Record.new({ id: 77, subject: 'Pump spare', status: status, project: project },
+                                  loaded_associations: %i[status project])
+          end
+          let(:relation) { DropFakes::Record.new(id: 5, relation_type: 'blocks', delay: nil) }
+          let(:ticket) do
+            DropFakes::Record.new(id: 9, issue_id: 42, contact_id: 3, from_address: 'client@example.com',
+                                  to_address: 'support@example.com', cc_address: nil, message_id: '<m1>',
+                                  is_incoming: true, ticket_date: DropFakes::Time.new('2026-01-04T09:00:00Z'),
+                                  vote: 2, vote_comment: 'ok', reaction_time: 3600, first_response_time: 7260,
+                                  resolve_time: nil)
+          end
+          let(:contact) do
+            DropFakes::Record.new(id: 3, name: 'Ann Client', first_name: 'Ann', last_name: 'Client',
+                                  middle_name: nil, company: 'Acme', job_title: 'Buyer', is_company: false,
+                                  website: nil, primary_email: 'ann@acme.test', email: 'ann@acme.test, a@acme.test',
+                                  phone: nil)
+          end
+          let(:mail) do
+            DropFakes::Record.new(is_incoming: true, to_address: 'support@example.com', cc_address: nil,
+                                  bcc_address: nil, message_id: '<m1>')
+          end
+          let(:message) do
+            DropFakes::Record.new(id: 103, notes: 'Please help', private_notes: false, user: jane,
+                                  created_on: DropFakes::Time.new('2026-01-04T09:00:00Z'), journal_message: mail)
+          end
+          let(:item) { Struct.new(:subject, :is_done, :is_section) }
+          let(:related) do
+            { journals: { 42 => [first_note, last_note] },
+              relations: { 42 => { from: [[relation, other_issue]], to: [] } },
+              tags: { 42 => %w[customer urgent] },
+              story_points: { 42 => 5 },
+              color: { 42 => 'green' },
+              day_in_state: {},
+              checklists: { 42 => [item.new('Order', true, false), item.new('Fit', false, false)] },
+              helpdesk_ticket: { 42 => ticket },
+              helpdesk_contacts: { 3 => contact },
+              helpdesk_messages: { 42 => [message] } }
+          end
+          let(:batch) { DropFakes::Batch.new(custom_fields: custom_fields, related: related) }
+
+          # GEOxyz's own idioms, from the survey of its ten templates, unchanged.
+          it 'lists the journals with `all`, as the base plugin did' do
+            expect(render('{% for j in issue.journals.all %}{{ j.notes }}/{{ j.user.name }};{% endfor %}'))
+              .to eq('First/Jane Doe;Last/;')
+          end
+
+          it 'counts them with `all | size` and with `size`' do
+            expect(render('{{ issue.journals.all | size }}/{{ issue.journals.size }}')).to eq('2/2')
+          end
+
+          it 'finds the last comment with sort, reverse and first' do
+            expect(render("{% assign last_comment = issue.journals.all|sort:'created_on'|reverse|first %}" \
+                          '{{ last_comment.notes }}')).to eq('Last')
+          end
+
+          it 'iterates the journals drop directly, and offers first and last' do
+            expect(render('{% for j in issue.journals %}{{ j.id }},{% endfor %}' \
+                          '{{ issue.journals.first.id }}-{{ issue.journals.last.id }}')).to eq('101,102,101-102')
+          end
+
+          it 'converts a journal time to the actor\'s zone' do
+            expect(render('{{ issue.journals.first.created_on }}')).to eq("2026-01-05T08:00:00Z@#{zone}")
+          end
+
+          it 'answers private_notes, the issue that lists it, and its url' do
+            expect(render('{{ issue.journals.last.private_notes }}|{{ issue.journals.first.issue.id }}|' \
+                          '{{ issue.journals.first.url }}'))
+              .to eq('true|42|https://redmine.example/rm/issues/42#change-101')
+          end
+
+          it 'offers `notes` as the list of note strings, oldest first' do
+            expect(render('{{ issue.notes | join: "|" }}')).to eq('First|Last')
+          end
+
+          it 'offers the relations with their type and both issues' do
+            expect(render('{% for r in issue.relations_from %}{{ r.relation_type }} ' \
+                          '{{ r.issue_from.id }}->{{ r.issue_to.id }} {{ r.issue_to.subject }} ' \
+                          '{{ r.issue_to.status }}{% endfor %}|{{ issue.relations_to.all | size }}'))
+              .to eq('blocks 42->77 Pump spare Closed|0')
+          end
+
+          it 'offers the tags, the story points and the colour' do
+            expect(render('{{ issue.tags | join: ", " }}|{{ issue.tags }}|{{ issue.story_points }}|{{ issue.color }}'))
+              .to eq('customer, urgent|customerurgent|5|green')
+          end
+
+          it 'answers day_in_state with the creation time when the status never changed' do
+            expect(render('{{ issue.day_in_state }}')).to eq("2026-01-02T03:04:05Z@#{zone}")
+          end
+
+          it 'offers the checklist items with both spellings of done' do
+            expect(render('{% for c in issue.checklists %}{{ c.subject }}:{{ c.is_done }}/{{ c.id_done }}/' \
+                          '{{ c.is_section }};{% endfor %}'))
+              .to eq('Order:true/true/false;Fit:false/false/false;')
+          end
+
+          it 'offers the helpdesk ticket, its times in minutes, its contact and its messages' do
+            expect(render('{% assign t = issue.helpdesk_ticket %}{{ t.from_address }}|{{ t.reaction_time }}|' \
+                          '{{ t.first_response_time }}|[{{ t.resolve_time }}]|{{ t.contact.name }}|' \
+                          '{{ t.contact.emails | join: "+" }}|{{ t.messages.first.notes }}|' \
+                          '{{ t.messages.first.to_address }}'))
+              .to eq('client@example.com|60|121|[]|Ann Client|ann@acme.test+a@acme.test|' \
+                     'Please help|support@example.com')
+          end
+
+          it 'reads each key once however many accessors and journals ask' do
+            render('{% for j in issue.journals %}{{ j.notes }}{% endfor %}{{ issue.notes | size }}' \
+                   '{{ issue.journals.size }}')
+            expect(batch.asked.count(:journals)).to eq(2) # `journals` and `notes`, each memoised
+          end
+
+          context 'when the actor may see the issue but not open it (redmine_view_issue_description)' do
+            let(:batch) { DropFakes::Batch.new(custom_fields: custom_fields, related: related, closed_to: [42]) }
+
+            it 'answers no description and no attachments' do
+              expect(render('[{{ issue.description }}][{{ issue.attachments | size }}]')).to eq('[][0]')
+            end
+          end
+
+          context 'without the providing plugins' do
+            let(:batch) { DropFakes::Batch.new(custom_fields: custom_fields) }
+
+            it 'renders empty, without an error under strict variables' do
+              source = '[{{ issue.tags | size }}][{{ issue.story_points }}][{{ issue.color }}]' \
+                       '[{{ issue.day_in_state }}][{{ issue.checklists | size }}][{{ issue.helpdesk_ticket }}]' \
+                       '[{{ issue.journals.size }}][{{ issue.relations_from.size }}]'
+              template = ::Liquid::Template.parse(source, error_mode: :strict)
+              expect(template.render!({ 'issue' => drop }, strict_variables: true))
+                .to eq('[0][][][][0][][0][0]')
+            end
+          end
+        end
+
         describe 'the dropped surface' do
-          # All six probes into other RedmineUP paid plugins (`issues_drop.rb:131-157`).
-          %w[tags story_points color day_in_state checklists helpdesk_ticket].each do |accessor|
-            it "does not reproduce the vendor probe `#{accessor}`" do
-              expect_unreachable("{{ issue.#{accessor} }}")
-            end
-          end
-
-          # OQ-H, narrowed.
-          %w[notes journals relations_from relations_to].each do |accessor|
-            it "does not carry `#{accessor}` (OQ-H)" do
-              expect_unreachable("{{ issue.#{accessor} }}")
-            end
-          end
-
           # Dropped from the addon's own subclass, each for the reason §3.2 states.
           %w[images available_statuses spent_time_by_date total_spent_time_by_date
              watchers].each do |accessor|

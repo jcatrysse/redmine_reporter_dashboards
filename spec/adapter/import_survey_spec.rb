@@ -194,7 +194,7 @@ else
 
     it 'sweeps accessor usage across every template body (R-15 query 3)' do
       usage = result.usage
-      gem_only = usage.keys.find { |key| key.include?('paid-plugin') }
+      gem_only = usage.keys.find { |key| key.include?('need another plugin') }
       own      = usage.keys.find { |key| key.include?('own surface') }
 
       expect(usage[gem_only]).to eq('story_points' => 1)

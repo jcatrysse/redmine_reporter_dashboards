@@ -108,7 +108,9 @@ module RedmineReporterDashboards
           inherits: 'RecordDrop',
           accessors: {
             'subject' => { type: :string },
-            'description' => { type: :text },
+            'description' => { type: :text, batch: true,
+                               note: 'nil for an issue you may see but not open ' \
+                                     '(redmine_view_issue_description)' },
             'start_date' => { type: :date },
             'due_date' => { type: :date },
             'done_ratio' => { type: :integer },
@@ -133,12 +135,38 @@ module RedmineReporterDashboards
             'version' => { type: :drop, of: 'VersionDrop' },
             'target_version' => { type: :drop, of: 'VersionDrop',
                                   note: 'the same object as `version`' },
-            'attachments' => { type: :collection, of: 'AttachmentDrop', batch: true },
+            'attachments' => { type: :collection, of: 'AttachmentDrop', batch: true,
+                               note: 'empty for an issue you may not open ' \
+                                     '(redmine_view_issue_description)' },
             'time_entries' => { type: :collection, of: 'TimeEntryDrop', batch: true },
             'subtasks' => { type: :collection, of: 'IssueDrop', batch: true },
             'todolists_with_positions' => { type: :drop, of: 'TodoListsDrop', batch: true,
                                              note: 'the to-do lists your role may see; ' \
                                                    'empty without redmine_issue_todo_lists2' },
+            'journals' => { type: :drop, of: 'JournalsDrop', batch: true,
+                            note: 'the journals with notes you may read, oldest first; ' \
+                                  'at most the 500 most recent' },
+            'notes' => { type: :collection, of: 'string', batch: true,
+                         note: 'the notes of `journals`, oldest first' },
+            'relations_from' => { type: :drop, of: 'IssueRelationsDrop', batch: true,
+                                  note: 'relations from this issue to an issue you may see' },
+            'relations_to' => { type: :drop, of: 'IssueRelationsDrop', batch: true,
+                                note: 'relations from an issue you may see to this issue' },
+            'tags' => { type: :collection, of: 'string', batch: true,
+                        note: 'tag names, alphabetical; empty without redmine_tags' },
+            'story_points' => { type: :integer, batch: true,
+                                note: 'nil when not set or without redmine_agile' },
+            'color' => { type: :string, batch: true,
+                         note: 'the agile colour; nil when not set or without redmine_agile' },
+            'day_in_state' => { type: :time, batch: true,
+                                note: 'when the issue entered its status; nil without ' \
+                                      'redmine_agile' },
+            'checklists' => { type: :collection, of: 'checklist item', batch: true,
+                              note: '`subject`, `is_done` (also `id_done`), `is_section`; ' \
+                                    'empty without `view_checklists` or redmine_checklists' },
+            'helpdesk_ticket' => { type: :drop, of: 'HelpdeskTicketDrop', batch: true,
+                                   note: 'nil without `view_helpdesk_tickets` or ' \
+                                         'redmine_contacts_helpdesk' },
             'custom_field_values' => { type: :lookup, of: 'CustomFieldValuesDrop',
                                        batch: true,
                                        note: 'by field id or by field name' },
@@ -329,6 +357,116 @@ module RedmineReporterDashboards
             'url' => { type: :url }
           }
         },
+        'JournalsDrop' => {
+          variable: 'issue.journals',
+          reached_from: '`issue.journals`',
+          note: 'Already loaded and bounded: at most the 500 most recent journals with notes ' \
+                'per issue, oldest first, so `all` is safe here. Only journals you may read: ' \
+                'private notes need "View private notes" (or being their author), and an ' \
+                'issue you may not open under redmine_view_issue_description has none. A ' \
+                'note is author text: print it with `| textilize` or `| wiki`.',
+          inherits: 'ListDrop',
+          accessors: {
+            'all' => { type: :collection, of: 'JournalDrop' },
+            'visible' => { type: :collection, of: 'JournalDrop', note: 'the same as `all`' },
+            'first' => { type: :drop, of: 'JournalDrop' },
+            'last' => { type: :drop, of: 'JournalDrop', note: 'the most recent' }
+          }
+        },
+        'JournalDrop' => {
+          variable: 'journal',
+          reached_from: '`issue.journals`',
+          inherits: 'RecordDrop',
+          accessors: {
+            'notes' => { type: :text },
+            'created_on' => { type: :time, note: "in the report actor's own time zone" },
+            'private_notes' => { type: :boolean },
+            'user' => { type: :drop, of: 'UserDrop' },
+            'issue' => { type: :drop, of: 'IssueDrop', note: 'the issue that lists it' },
+            'attachments' => { type: :collection, of: 'AttachmentDrop', batch: true,
+                               note: 'the files added with this note' },
+            'url' => { type: :url }
+          }
+        },
+        'IssueRelationsDrop' => {
+          variable: 'issue.relations_from',
+          reached_from: '`issue.relations_from`, `issue.relations_to`',
+          note: 'Only relations whose other issue you may see.',
+          inherits: 'ListDrop',
+          accessors: {
+            'all' => { type: :collection, of: 'IssueRelationDrop' },
+            'visible' => { type: :collection, of: 'IssueRelationDrop', note: 'the same as `all`' },
+            'first' => { type: :drop, of: 'IssueRelationDrop' },
+            'last' => { type: :drop, of: 'IssueRelationDrop' }
+          }
+        },
+        'IssueRelationDrop' => {
+          variable: 'relation',
+          reached_from: '`issue.relations_from`, `issue.relations_to`',
+          inherits: 'RecordDrop',
+          accessors: {
+            'relation_type' => { type: :string, note: '`relates`, `blocks`, `precedes`, …' },
+            'delay' => { type: :integer, note: 'days, for `precedes`/`follows`' },
+            'issue_from' => { type: :drop, of: 'IssueDrop' },
+            'issue_to' => { type: :drop, of: 'IssueDrop' }
+          }
+        },
+        'HelpdeskTicketDrop' => {
+          variable: 'ticket',
+          reached_from: '`issue.helpdesk_ticket` (redmine_contacts_helpdesk)',
+          inherits: 'RecordDrop',
+          accessors: {
+            'from_address' => { type: :string },
+            'to_address' => { type: :string },
+            'cc_address' => { type: :string },
+            'message_id' => { type: :string },
+            'is_incoming' => { type: :boolean },
+            'ticket_date' => { type: :time, note: "in the report actor's own time zone" },
+            'vote' => { type: :integer },
+            'vote_comment' => { type: :text },
+            'reaction_time' => { type: :integer, note: 'minutes' },
+            'first_response_time' => { type: :integer, note: 'minutes' },
+            'resolve_time' => { type: :integer, note: 'minutes' },
+            'contact' => { type: :drop, of: 'ContactDrop', batch: true,
+                           note: 'nil when you may not see the contact' },
+            'messages' => { type: :collection, of: 'JournalMessageDrop', batch: true,
+                            note: 'the journals carrying a message, oldest first' }
+          }
+        },
+        'JournalMessageDrop' => {
+          variable: 'message',
+          reached_from: '`issue.helpdesk_ticket.messages`',
+          inherits: 'RecordDrop',
+          accessors: {
+            'notes' => { type: :text },
+            'created_on' => { type: :time, note: "in the report actor's own time zone" },
+            'private_notes' => { type: :boolean },
+            'user' => { type: :drop, of: 'UserDrop' },
+            'is_incoming' => { type: :boolean },
+            'to_address' => { type: :string },
+            'cc_address' => { type: :string },
+            'bcc_address' => { type: :string },
+            'message_id' => { type: :string }
+          }
+        },
+        'ContactDrop' => {
+          variable: 'contact',
+          reached_from: '`issue.helpdesk_ticket.contact` (redmine_contacts)',
+          inherits: 'RecordDrop',
+          accessors: {
+            'name' => { type: :string },
+            'first_name' => { type: :string },
+            'middle_name' => { type: :string },
+            'last_name' => { type: :string },
+            'company' => { type: :string },
+            'job_title' => { type: :string },
+            'is_company' => { type: :boolean },
+            'primary_email' => { type: :string },
+            'emails' => { type: :collection, of: 'string' },
+            'phones' => { type: :collection, of: 'string' },
+            'website' => { type: :string }
+          }
+        },
         'NamedRefDrop' => {
           variable: 'status',
           reached_from: '`issue.status`, `.tracker`, `.priority`, `.category`, `time_entry.activity`',
@@ -344,6 +482,20 @@ module RedmineReporterDashboards
           reached_from: 'the base of every single-record drop',
           accessors: {
             'id' => { type: :integer }
+          }
+        },
+        'ListDrop' => {
+          variable: 'list',
+          reached_from: 'the base of every already-loaded, bounded list',
+          note: 'Unlike a collection, `all` is answered: the rows are already in memory and ' \
+                'their number is bounded.',
+          accessors: {
+            'all' => { type: :collection },
+            'visible' => { type: :collection, note: 'the same as `all`' },
+            'size' => { type: :integer },
+            'first' => { type: :drop },
+            'last' => { type: :drop },
+            'empty?' => { type: :boolean }
           }
         },
         'CollectionDrop' => {

@@ -15,6 +15,11 @@ module RedmineReporterDashboards
     # than passing review. The gem shipped 17; seven were dropped with a reason
     # (`IssueRelation(s)`, `Journal(s)` — OQ-H, narrowed — `News(s)`, whose double-`s`
     # typo is itself disqualifying, and `CustomFieldEnumeration`, folded in).
+    #
+    # `IssueRelation(s)` and `Journal(s)` came back on 2026-11-25 by Jan's decision
+    # (option A, GEOxyz's templates use them), together with the helpdesk plugin's
+    # `HelpdeskTicketDrop`, `JournalMessageDrop` and `ContactDrop`, and `ListDrop`, the
+    # base of the already-loaded lists. See `IssueDrop`'s class comment.
     module Drops
       # The three bases and the twelve concrete drops.
       #
@@ -27,7 +32,7 @@ module RedmineReporterDashboards
       # `issue_drop_patch.rb`. That makes twelve. The discrepancy is recorded in
       # `implementation-plan.md` §Findings (F-9) rather than resolved by picking a
       # number that matches.
-      BASES = %w[RecordDrop CollectionDrop NamedRefDrop].freeze
+      BASES = %w[RecordDrop CollectionDrop NamedRefDrop ListDrop].freeze
 
       CLASSES = %w[
         IssueDrop IssuesDrop
@@ -38,16 +43,15 @@ module RedmineReporterDashboards
         AttachmentDrop
         CustomFieldValueDrop CustomFieldValuesDrop
         TodoListDrop TodoListsDrop
+        JournalDrop JournalsDrop
+        IssueRelationDrop IssueRelationsDrop
+        HelpdeskTicketDrop JournalMessageDrop ContactDrop
       ].freeze
 
       # What the gem had and this layer deliberately does not, each with the reason
       # §3.1 gives. Asserted by spec, so a later session that "adds the missing
       # JournalDrop" has to delete a line that says why it is missing.
       DROPPED = {
-        'IssueRelationDrop' => 'OQ-H, narrowed: not part of the six required capabilities',
-        'IssueRelationsDrop' => 'OQ-H, narrowed: not part of the six required capabilities',
-        'JournalDrop' => 'OQ-H, narrowed: not part of the six required capabilities',
-        'JournalsDrop' => 'OQ-H, narrowed: not part of the six required capabilities',
         'NewsDrop' => 'the dashboard has a native news widget',
         'NewssDrop' => 'the double-s typo is itself disqualifying; native news widget',
         'CustomFieldEnumerationDrop' => 'folded into CustomFieldValueDrop'
@@ -73,5 +77,9 @@ require_relative 'drops/time_entry_drop'
 require_relative 'drops/time_entries_drop'
 require_relative 'drops/todo_list_drop'
 require_relative 'drops/todo_lists_drop'
+require_relative 'drops/list_drop'
+require_relative 'drops/journal_drop'
+require_relative 'drops/issue_relation_drop'
+require_relative 'drops/helpdesk_ticket_drop'
 require_relative 'drops/issue_drop'
 require_relative 'drops/issues_drop'

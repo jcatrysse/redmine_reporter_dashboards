@@ -11,6 +11,10 @@ require_relative 'time_entry_drop'
 require_relative 'user_drop'
 require_relative 'version_drop'
 require_relative 'todo_lists_drop'
+require_relative 'list_drop'
+require_relative 'journal_drop'
+require_relative 'issue_relation_drop'
+require_relative 'helpdesk_ticket_drop'
 
 module RedmineReporterDashboards
   module Liquid
@@ -45,12 +49,20 @@ module RedmineReporterDashboards
       #     one-line methods, and the escape hatch if drop-versus-String semantics bite
       #     in a shape the spec did not enumerate.
       #
-      #   DROPPED — `notes journals relations_from relations_to` (OQ-H, narrowed: not
-      #     part of the six required capabilities) and ALL SIX `respond_to?`/`defined?`
-      #     probes into other RedmineUP paid plugins: `tags story_points color
-      #     day_in_state checklists helpdesk_ticket` (`issues_drop.rb:131-157`). Vendor
-      #     ecosystem coupling with no reason to be reproduced and dead weight
-      #     everywhere else.
+      #   RESTORED, 2026-11-25 (Jan, option A) — `notes journals relations_from
+      #     relations_to` and the six probes into other plugins, `tags story_points color
+      #     day_in_state checklists helpdesk_ticket` (`issues_drop.rb:120-157` in the
+      #     vendor gem). They were dropped here as vendor coupling (OQ-H, narrowed); GEOxyz
+      #     runs redmine_tags, redmine_agile, redmine_checklists and
+      #     redmine_contacts_helpdesk, and its templates use them. Same names, same meaning,
+      #     with two differences that are the point of this plugin: every one answers AS THE
+      #     ACTOR (private notes, hidden relation targets, the checklist and helpdesk
+      #     permissions), and every one is batched (`BatchRelated`). Without the providing
+      #     plugin each answers empty or nil, where the base plugin answered `false`.
+      #
+      #   GATED — `description`, `attachments`, `notes` and `journals` are empty for an issue
+      #     the actor may see but not OPEN under redmine_view_issue_description, which is that
+      #     plugin's rule for exactly these four (`Batch#openable?`). Without it, unchanged.
       #
       #   DROPPED FROM THE ADDON'S OWN SUBCLASS — `images` (returns a drop whose
       #     `file_url` mints unexpiring token URLs — an explicit non-goal, replaced by
@@ -71,8 +83,9 @@ module RedmineReporterDashboards
           record.subject
         end
 
+        # nil for an issue the actor may not open (redmine_view_issue_description).
         def description
-          record.description
+          openable? ? record.description : nil
         end
 
         def start_date
@@ -285,9 +298,10 @@ module RedmineReporterDashboards
         # The batched collections (§3.4)
         # ------------------------------------------------------------------
 
+        # Empty for an issue the actor may not open (redmine_view_issue_description).
         def attachments
-          @attachments ||= batch.attachments(id)
-                                .map { |a| AttachmentDrop.new(a, context: render_context) }
+          @attachments ||= (openable? ? batch.attachments(id) : [])
+                           .map { |a| AttachmentDrop.new(a, context: render_context) }
         end
 
         def time_entries
@@ -306,6 +320,77 @@ module RedmineReporterDashboards
           @todolists_with_positions ||= TodoListsDrop.new(
             batch.todo_lists(id).map { |item| TodoListDrop.new(item, context: render_context) }
           )
+        end
+
+        # ------------------------------------------------------------------
+        # Restored from the base plugin (Jan, 2026-11-25). See the class comment.
+        # ------------------------------------------------------------------
+
+        # The notes of the journals below, oldest first: an Array of Strings, as the base
+        # plugin returned it.
+        def notes
+          @notes ||= batch.journals(id).map(&:notes)
+        end
+
+        # The journals with notes the actor may read, oldest first. `all`, `size`, `each`,
+        # `first`, `last`; at most `BatchRelated::JOURNALS_PER_ISSUE` (the most recent).
+        def journals
+          @journals ||= JournalsDrop.new(
+            batch.journals(id).map { |journal| JournalDrop.new(journal, context: render_context, issue: self) }
+          )
+        end
+
+        # Relations in which this issue is `issue_from`, each only when the actor may see
+        # `issue_to`.
+        def relations_from
+          @relations_from ||= relation_list(:from) { |other| { issue_from: self, issue_to: other } }
+        end
+
+        # Relations in which this issue is `issue_to`, each only when the actor may see
+        # `issue_from`.
+        def relations_to
+          @relations_to ||= relation_list(:to) { |other| { issue_from: other, issue_to: self } }
+        end
+
+        # redmine_tags: the tag names, alphabetical. `[]` without that plugin.
+        def tags
+          batch.tags(id)
+        end
+
+        # redmine_agile: the story points, nil when not set or without that plugin.
+        def story_points
+          batch.story_points(id)
+        end
+
+        # redmine_agile: the issue's colour, nil when not set or without that plugin.
+        def color
+          batch.color(id)
+        end
+
+        # redmine_agile: when the issue entered its current status — the last status change
+        # the actor may see, else its creation — in the actor's zone. nil without that plugin.
+        def day_in_state
+          in_actor_zone(batch.day_in_state(id, record.created_on))
+        end
+
+        # redmine_checklists: the items in their order, each `{ subject, is_done, is_section }`
+        # plus `id_done`, the base plugin's misspelling of `is_done`, kept because templates
+        # carry it. `[]` without `view_checklists` in the issue's project, or without that plugin.
+        def checklists
+          @checklists ||= batch.checklists(id, record.project).map do |item|
+            done = item.is_done ? true : false
+            { 'subject' => item.subject.to_s, 'is_done' => done, 'id_done' => done,
+              'is_section' => item.respond_to?(:is_section) && item.is_section ? true : false }
+          end
+        end
+
+        # redmine_contacts_helpdesk: the ticket, when the actor holds `view_helpdesk_tickets`
+        # in the issue's project. nil otherwise, or without that plugin.
+        def helpdesk_ticket
+          return @helpdesk_ticket if defined?(@helpdesk_ticket)
+
+          ticket = batch.helpdesk_ticket(id, record.project)
+          @helpdesk_ticket = ticket && HelpdeskTicketDrop.new(ticket, context: render_context)
         end
 
         # ------------------------------------------------------------------
@@ -364,6 +449,19 @@ module RedmineReporterDashboards
 
         def visible_values
           @visible_values ||= batch.custom_field_values(id, record.project)
+        end
+
+        def openable?
+          batch.openable?(id)
+        end
+
+        def relation_list(side)
+          IssueRelationsDrop.new(
+            batch.relations(id)[side].map do |relation, other|
+              IssueRelationDrop.new(relation, context: render_context,
+                                              **yield(self.class.new(other, context: render_context)))
+            end
+          )
         end
 
         def field_name(field_id)

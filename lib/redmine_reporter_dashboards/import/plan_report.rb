@@ -12,8 +12,10 @@ module RedmineReporterDashboards
     #   1. WHAT IS THERE      — if reporter's tables are absent, nothing else matters
     #   2. TEMPLATES BY TYPE  — R-15 query 1, the blast radius by count
     #   3. SCHEDULES          — R-15 query 2, the blast radius that mails people
-    #   4. USAGE              — R-15 query 3, the evidence for what the owned drop
-    #                           layer must build and what it may drop
+    #   4. USAGE              — R-15 query 3: which base-plugin accessors and filters
+    #                           the templates lean on. Since 2026-11-25 all of them
+    #                           answer again; the plugin-backed ones (tags, agile,
+    #                           checklists, helpdesk) only with that plugin installed
     #   5. REWORK             — which templates break, with line numbers
     #   6. NOT ANSWERED HERE  — R-15 query 4 and every column the survey could not find
     #
@@ -137,8 +139,8 @@ module RedmineReporterDashboards
 
           if usage.empty?
             lines << '  no tracked accessor, filter or tag appears in any template body.'
-            lines << '  For the gem-only groups that is the answer the keep/drop decision needs:'
-            lines << '  nothing here depends on them.'
+            lines << '  So no template needs redmine_tags, redmine_agile, redmine_checklists or'
+            lines << '  redmine_contacts_helpdesk for its accessors: nothing here depends on them.'
           else
             usage.each do |group, markers|
               lines << ''

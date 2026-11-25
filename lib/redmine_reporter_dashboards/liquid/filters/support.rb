@@ -51,7 +51,15 @@ module RedmineReporterDashboards
         def each(input)
           return [] if input.nil?
           return input.to_a if input.is_a?(::Array)
-          return input.each_with_object([]) { |item, out| out << item } if input.respond_to?(:each)
+
+          # `each` and nothing else: a drop answers `each` without being Enumerable, so
+          # `each_with_object` (what this said until 2026-11-25) raised NoMethodError on
+          # `{{ issues | group_by: … }}` and every other filter over the issue collection.
+          if input.respond_to?(:each)
+            out = []
+            input.each { |item| out << item }
+            return out
+          end
 
           [input]
         end

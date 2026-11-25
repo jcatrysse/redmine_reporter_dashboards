@@ -50,6 +50,8 @@ module DropFakes
   # assert the CONVERSION rather than assert a formatted string — which would only
   # prove that the fixture and the expectation agree.
   class Time
+    include Comparable
+
     attr_reader :label, :zone
 
     def initialize(label, zone: nil)
@@ -63,6 +65,12 @@ module DropFakes
 
     def to_s
       @zone.nil? ? @label : "#{@label}@#{@zone}"
+    end
+
+    # Liquid's `sort: 'created_on'` compares the values; the labels are ISO times, so
+    # their order is the times' order.
+    def <=>(other)
+      other.is_a?(self.class) ? label <=> other.label : nil
     end
 
     # Liquid asks every value for this before printing it. Without it the drop's
@@ -222,7 +230,7 @@ module DropFakes
 
     def initialize(limit: 5_000, custom_field_values: {}, custom_fields: {},
                    spent_hours: {}, attachments: {}, time_entries: {}, subtasks: {},
-                   named_refs: {}, todo_lists: {})
+                   named_refs: {}, todo_lists: {}, closed_to: [], related: {})
       @limit = limit
       @custom_field_values = custom_field_values
       @custom_fields = custom_fields
@@ -232,7 +240,71 @@ module DropFakes
       @subtasks = subtasks
       @named_refs = named_refs
       @todo_lists = todo_lists
+      # The keys restored on 2026-11-25 (`BatchRelated`). `closed_to` lists the issue ids
+      # the actor may see but not OPEN (redmine_view_issue_description); `related` holds
+      # the other answers by key, `{ journals: { 42 => [...] }, tags: { 42 => [...] } … }`.
+      @closed_to = closed_to
+      @related = related
       @asked = []
+    end
+
+    def openable?(issue_id)
+      @asked << :openable
+      !@closed_to.include?(issue_id)
+    end
+
+    def journals(issue_id)
+      related_answer(:journals, issue_id, [])
+    end
+
+    def journal_attachments(journal_id, _issue_id)
+      related_answer(:journal_attachments, journal_id, [])
+    end
+
+    def relations(issue_id)
+      related_answer(:relations, issue_id, { from: [], to: [] })
+    end
+
+    def tags(issue_id)
+      related_answer(:tags, issue_id, [])
+    end
+
+    def story_points(issue_id)
+      related_answer(:story_points, issue_id, nil)
+    end
+
+    def color(issue_id)
+      related_answer(:color, issue_id, nil)
+    end
+
+    # Like the real one: nil when redmine_agile is absent (no `:day_in_state` key given),
+    # else the last change or the fallback.
+    def day_in_state(issue_id, created_on)
+      @asked << :day_in_state
+      return nil unless @related.key?(:day_in_state)
+
+      @related[:day_in_state][issue_id] || created_on
+    end
+
+    def checklists(issue_id, _project)
+      related_answer(:checklists, issue_id, [])
+    end
+
+    def helpdesk_ticket(issue_id, _project)
+      related_answer(:helpdesk_ticket, issue_id, nil)
+    end
+
+    def helpdesk_contact(contact_id, _issue_id)
+      related_answer(:helpdesk_contacts, contact_id, nil)
+    end
+
+    def helpdesk_messages(issue_id)
+      related_answer(:helpdesk_messages, issue_id, [])
+    end
+
+    def related_answer(key, id, default)
+      @asked << key
+      (@related[key] || {}).fetch(id, default)
     end
 
     def custom_field_values(issue_id, _project)
