@@ -324,7 +324,7 @@ it:
   text_reporter_degradation_aggregation_source_unsupported: "L'origine dati di questo report (%{source}) non può essere riepilogata da %{tag}."
   text_reporter_degradation_aggregation_hidden_filter: "La query del report filtra su %{fields}, che è nascosto all'utente del report in %{projects} progetto/i. Quei progetti sono stati esclusi."
   text_reporter_degradation_aggregation_hidden_rollup: "%{fields} è nascosto all'utente del report in %{projects} progetto/i. Le segnalazioni di quei progetti sono state escluse dal riepilogo per versione."
-  text_reporter_degradation_aggregation_hidden_group: "%{fields} è nascosto all'utente del report in %{projects} progetto/i. Le registrazioni di tempo di quei progetti sono state escluse da questo raggruppamento."
+  text_reporter_degradation_aggregation_hidden_group: "%{fields} è nascosto all'utente del report in %{projects} progetto/i. I tempi impiegati di quei progetti sono stati esclusi da questo raggruppamento."
   label_reporter_aggregation_hidden: "Nascosto"
   text_reporter_degradation_legacy_engine: "Disegnato con wkhtmltopdf, un motore di compatibilità destinato alla rimozione; il CSS moderno non è supportato."
   text_reporter_degradation_asset_structural_fallback: "Un file è stato incorporato in forma alternativa, perché incorporarlo direttamente ne avrebbe cambiato il significato nel documento."

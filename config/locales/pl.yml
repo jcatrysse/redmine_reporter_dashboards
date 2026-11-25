@@ -324,7 +324,7 @@ pl:
   text_reporter_degradation_aggregation_source_unsupported: "Źródło danych tego raportu (%{source}) nie może być podsumowane przez %{tag}."
   text_reporter_degradation_aggregation_hidden_filter: "Kwerenda raportu filtruje według pola %{fields}, które jest ukryte przed użytkownikiem raportu w %{projects} projekcie(-ach). Te projekty zostały pominięte."
   text_reporter_degradation_aggregation_hidden_rollup: "Pole %{fields} jest ukryte przed użytkownikiem raportu w %{projects} projekcie(-ach). Zagadnienia z tych projektów zostały pominięte w zestawieniu według wersji."
-  text_reporter_degradation_aggregation_hidden_group: "Pole %{fields} jest ukryte przed użytkownikiem raportu w %{projects} projekcie(-ach). Wpisy czasu z tych projektów zostały pominięte w tym grupowaniu."
+  text_reporter_degradation_aggregation_hidden_group: "Pole %{fields} jest ukryte przed użytkownikiem raportu w %{projects} projekcie(-ach). Przepracowany czas z tych projektów został pominięty w tym grupowaniu."
   label_reporter_aggregation_hidden: "Ukryte"
   text_reporter_degradation_legacy_engine: "Narysowane przez wkhtmltopdf, silnik zgodności przeznaczony do usunięcia; nowoczesny CSS nie jest obsługiwany."
   text_reporter_degradation_asset_structural_fallback: "Plik osadzono w formie alternatywnej, ponieważ bezpośrednie osadzenie zmieniłoby znaczenie dokumentu."
