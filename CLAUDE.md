@@ -273,7 +273,7 @@ PASS.
 
 ## 9. Commit and PR discipline
 
-- **ALL work lands on one long-lived branch: `claude/next-session-prompt-it4too`.** Every session,
+- **ALL work lands on one long-lived branch: `redmine70-migration`.** Every session,
   every task. Do **not** open a per-task branch, and do **not** open a pull request, unless the
   curator asks. The merge into `main` is the curator's call and happens when the curator says so.
 
@@ -294,6 +294,10 @@ PASS.
   It then read *"currently `<branch>` … if the working branch changes, change it here"* until
   2026-08-13, and a session read that as licence to accept the harness's branch and update the line
   to match. The instruction each time was the same: *"blijf in deze branch, maak geen nieuwe."*
+  It read `claude/next-session-prompt-it4too` until 2026-11-25, when Jan chose one line:
+  `redmine70-migration`, which already held everything on the old branch (its one own commit,
+  `86fba98`, is patch-identical to `b4c16a2`). Recorded in `docs/DECISIONS-2026-11-25.md`. The old
+  branch is kept, merged up to `redmine70-migration`, and is no longer where work lands.
 - Commit subject carries the task id: `T-07: replace ScopeResolution with ScopeBinding`.
 - The PR body is the task's `Accept:` list as a checklist, plus **which invariants the change
   touches** (INV-1…INV-9) and how each is still held.
