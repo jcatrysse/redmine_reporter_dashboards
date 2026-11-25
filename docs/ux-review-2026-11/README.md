@@ -6,314 +6,305 @@ Rails 8.1, Ruby 3.3.6, PostgreSQL 16, production mode, Chromium) with this plugi
 
 - **Before** is the real page.
 - **After** is the same real page with a mockup layer injected by Playwright
-  ([`mockup/`](mockup/)). The layer only restyles, moves or rewrites DOM the page already
-  has, using Redmine's own idioms (core `.tabs`, `.contextual`, `em.info`, `p.nodata`,
-  `p.warning`, `.box.tabular`, `table.list`, `.mypage-box`, `sprite_icon` ids). What you see
-  can be built with core markup on Redmine 6.0 to 7.0.
+  ([`mockup/`](mockup/)). The layer restyles, moves and rewrites the page's DOM, and adds
+  elements (a tab bar, headings, foot lines, links) built only from Redmine's own idioms:
+  core `.tabs`, `.contextual`, `em.info`, `p.nodata`, `p.warning`, `.box.tabular`,
+  `table.list`, `.mypage-box`, sprite icon ids. Only **Redmine 7.0** was run; the markup
+  used also exists on 6.x, but that is not tested here.
 - Data: 45 issues (3 trackers, 5 statuses, 4 priorities, 6 assignees, 3 versions), 49 time
   entries, 5 templates made from `starters/`, public queries, 4 sent reports, and a 3-tab
   dashboard (Overview, Charts, Versions) whose rows hold 1, 2 and 3 widgets.
 - Users: `manager` (every permission), `viewer` (core Reporter + the plugin's view
-  permissions, no edit rights), `admin`.
+  permissions, no edit rights, own time entries only), `admin`.
 - Screenshots: 1440 wide, deviceScaleFactor 2, PNG quantised to 256 colours.
 
-Re-run: see [How to reproduce](#how-to-reproduce).
-
-**Constraints held by every proposal:** no change to permissions, visibility or what data
-anyone sees; no page gets slower (per-proposal note); Redmine 6.0 to 7.0 core markup;
-English wording proposed here, translations later.
+**Constraints:** no change to permissions, visibility or what data anyone sees, unless named
+below as a decision for Jan; no page slower; English wording here, translations later.
 
 ## Summary
 
 | # | Finding | Proposal in one line | Effort | Queries |
 |---|---|---|---|---|
-| 1 | Templates, Schedules, Sent reports only reachable via Settings | One menu item, one core tab bar on all four pages; Settings tab removed | 1.5 d | fewer (Settings loses 3 counts) |
-| 2 | Yellow boxes used for explanations | Yellow only for no-data and real warnings; help as `em.info`; cron notice to admins only | 0.5 d | none |
-| 3 | Dashboard widgets heavy and noisy | No inner frames, Redmine table idiom, one title, charts at widget width, quiet empty and technical states | 3 d | none |
-| 4 | "New report template" is 4535 px | Starter cards in a grid, reference collapsed, chart helper as a button, large editor, lint only when it has findings | 1.5 d | none |
-| 5 | Plugin settings full of internal jargon | One short line per field; engine table in words; details on Render preflight | 0.5 d | none |
-| 6 | Permission labels too long | Short labels plus one explanatory line | 0.5 d | none |
+| 1 | Templates, Schedules, Sent reports only reachable via Settings | One menu item, one core tab bar on all four pages | 1.5 d | +1 small on 3 pages; settings page lighter |
+| 2 | Yellow boxes used for explanations | Yellow only for no-data and real warnings; help as `em.info` | 0.5 d | none |
+| 3 | Dashboard widgets heavy and noisy | No inner frames, Redmine table idiom, one title, charts at widget width, quiet empty states | 3 d | none (fewer for editors with an on-demand form) |
+| 4 | "New report template" is 4535 px | Starter cards in a grid, reference collapsed, chart helper as a button, large editor, clean lint as one line | 1.5 d | none |
+| 5 | Plugin settings full of internal jargon | One short line per field; engine table in words | 0.5 d | none |
+| 6 | Permission labels too long | Shorter labels that keep the warning | 0.5 d | none |
 
 Total about **7.5 days** including locales (12 files), tests and the four-role review.
 
+## Decisions this reopens (report-and-ask, CLAUDE.md §11)
+
+These are not plain UX calls: each one reverses a recorded decision or a spec control.
+
+| # | What | Recorded where | What the proposal does |
+|---|---|---|---|
+| D1 | Templates and Schedules live under Project settings, one entry point per page | Curator decision 2026-08-21 (`init.rb:136-152`, `settings_tab.rb:7-11`) | Moves them to the project menu item's tab bar; Settings tab removed (choice 1c) |
+| D2 | The Settings tab is the way in for roles without the dashboard permission, and for projects with Reports on and Dashboards off | `settings_tab.rb:44-49`, `permissions.rb:122-164` (`settings_tab: true` maps `projects#settings`) | Needs a replacement entry point, see 1 "Access" |
+| D3 | INV-9: the authoring permission labels say they run code, plus a warning on the permissions screen | `technical-spec.md:580-581`, `:1146` | Labels shortened but keep "(runs code)"; see 6 |
+| D4 | A clean lint result is shown, and the rake task is named on the page | `test/functional/reporter_dashboards_lint_panel_test.rb:267-285` | Kept, as one grey line instead of a yellow box |
+
 ### Corrections to the brief (measured on this branch)
 
-1. **Linter findings on a template page are shown to editors only**, not to every viewer
-   (`lint_for_editors`). `viewer` sees no lint box: [07-viewer-before-template-show.png](img/07-viewer-before-template-show.png).
-   The proposal still applies to editors (hide the box when there is nothing to say).
-2. **`.mypage-box` on 7.0 is not square**: 1px solid `#ced4da` (`--oc-gray-4`),
-   `border-radius: 3px`, padding 8px. Identical on core My page and on the dashboard
-   (same class, measured with `getComputedStyle`), so the outer frame is already core's and
-   stays as it is: [03-core-my-page.png](img/03-core-my-page.png).
-3. **New: a viewer sees an unconfigured report widget as an untitled yellow
-   "No data to display" box** (no heading at all): [07-viewer-before-overview.png](img/07-viewer-before-overview.png), bottom right.
-4. **The report frame has `default-src 'none'`**, so it cannot load Redmine's web font. See
-   choice 3c.
+1. **Linter findings on a template page are shown to editors only** (`lint_for_editors`,
+   `templates_controller.rb:63`), not to every viewer:
+   [07-viewer-before-template-show.png](img/07-viewer-before-template-show.png).
+2. **`.mypage-box` on 7.0 is not square**: 1px solid `#ced4da` (`--oc-gray-4`), radius 3px,
+   padding 8px (`application.css:2063`). Identical on core My page and on the dashboard
+   (same class, measured): [03-core-my-page.png](img/03-core-my-page.png). The outer frame
+   stays as it is.
+3. **New: a reader sees an unconfigured report widget as an untitled yellow
+   "No data to display" box**: [07-viewer-before-overview.png](img/07-viewer-before-overview.png), bottom right.
+4. **The report frame's CSP is `default-src 'none'`** (`report_frame.rb:104`), so it cannot
+   load Redmine's web font. See choice 3c.
+5. **The Settings tab is more than counts and links**: the Schedules fieldset carries the
+   FR-44 "not running" warning (second surface), and the Sent reports fieldset has no count.
 
 ---
 
 ## 1. Navigation
 
 **Problem.** Only "Project dashboard" is in the project menu. Templates, Schedules and Sent
-reports are reachable only via Settings > "Reports and dashboards", four fieldsets with a
-count and a link each. On those pages no menu item is selected and there are no tabs
-between them.
+reports are reachable only via Settings > "Reports and dashboards". On those pages no menu
+item is selected and there are no tabs between them.
 
 | Before | After (recommended: one tab bar) |
 |---|---|
-| ![](img/01-nav-before-settings.png) Settings tab of counts and links | ![](img/01-nav-after-dashboard.png) Dashboard: its pages left, management tabs right |
-| ![](img/01-nav-before-templates.png) Templates: no menu item selected, no tabs | ![](img/01-nav-after-templates.png) Templates: menu item stays selected, same tab bar |
-| ![](img/01-nav-before-schedules.png) Schedules | ![](img/01-nav-after-schedules.png) Schedules |
+| ![](img/01-nav-before-settings.png) Settings tab | ![](img/01-nav-after-dashboard.png) Dashboard: its pages left, management tabs right |
+| ![](img/01-nav-before-templates.png) Templates: no menu item selected, no tabs | ![](img/01-nav-after-templates.png) Templates: menu item selected, same tab bar |
+| ![](img/01-nav-before-schedules.png) Schedules | ![](img/01-nav-after-schedules.png) Schedules (FR-44 warning kept, one line) |
 | | ![](img/01-nav-after-sent.png) Sent reports |
-| | ![](img/01-nav-after-settings.png) Settings without the plugin tab |
+| | ![](img/01-nav-after-settings.png) Settings without the plugin tab (choice 1c) |
 
-Variant: two levels, as described in the brief (Dashboard | Templates | Schedules |
-Sent reports on top, the dashboard's pages as a second row):
+Variant: two levels, as in the brief (Dashboard | Templates | Schedules | Sent reports on top,
+the dashboard's pages as a second row):
 
 | Two-level, dashboard | Two-level, templates |
 |---|---|
 | ![](img/01-nav-variant-two-level-dashboard.png) | ![](img/01-nav-variant-two-level-templates.png) |
 
-Menu label variant ("Project dashboard" vs "Reports"):
-![](img/01-compare-menu-label.png)
+Menu label variant ("Project dashboard" vs "Reports"): ![](img/01-compare-menu-label.png)
 
 **Proposal (one tab bar).**
-- One project menu item (`:reporter_project_page`, unchanged route). It is `selected` on
-  every subpage: each controller sets `menu_item :reporter_project_page` (core
-  `MenuManager` idiom; `TimelogController` does `menu_item :time_entries`).
-- One shared partial renders core `.tabs` markup (`<div class="tabs"><ul><li><a>`, as
-  `app/views/common/_tabs.html.erb` does) on all four pages: the dashboard's pages, then
-  **Templates, Schedules, Sent reports** at the end of the same bar. Each management tab is
-  shown only when its action is permitted (`User.current.allowed_to?(…, project)`; the same
-  permission each controller already authorises). Tab order and labels are fixed.
-- List pages (templates, schedules, sent reports) drop their `h2`: the selected tab names
-  the page. Subpages (new, show, edit) keep their `h2` under the tab bar.
-- Action links stay in `.contextual` (New report template, New schedule, Add widget).
-- **Settings:** the "Reports and dashboards" tab is removed. It holds no configuration
-  today, only counts and links, and core renders every settings tab's partial on every
-  settings page, so removing it also removes its count queries. If configuration ever
-  lands there, it comes back as a `remote` tab (content loaded on click) holding settings
-  only, never a list.
-- **Does not change:** routes, permissions, what any list shows. A deep link to an old
-  URL still works.
+- One project menu item (`:reporter_project_page`, same route). Selected on every subpage:
+  `menu_item :reporter_project_page` in the templates, schedules, mail and share-links
+  controllers (`reporter_project_pages_controller.rb:4` already has it; core idiom:
+  `TimelogController` has `menu_item :time_entries`).
+- One shared partial renders core `.tabs` markup on all four pages: the dashboard's pages,
+  then **Templates, Schedules, Sent reports** at the end of the same bar. Each tab is shown
+  only when its action is permitted for this user in this project (the same permission
+  the controller authorises).
+- List pages drop their `h2` (the selected tab names the page). Subpages (new, show, edit)
+  keep their `h2` under the tab bar. Action links stay in `.contextual`.
+- **Access (D2).** Today the menu item needs the Dashboards module and
+  `view_reporter_project_page` (`init.rb:154-161`). To keep every current way in, its
+  condition becomes "the user may open at least one of the four tabs", and the item links
+  to the first permitted tab. Then a role with only Reports permissions, or a project with
+  Reports on and Dashboards off, still gets a menu item, landing on Templates.
+- **Settings (D1, choice 1c).** Remove the "Reports and dashboards" tab. Consequences, said
+  out loud: the `settings_tab: true` mapping of `projects#settings` for our permissions
+  (`SETTINGS_TAB_ACTIONS`, `permissions.rb:123`) goes too, so a role holding only our permissions can no longer open
+  Project settings (where there would be nothing of ours). That is a permission change and
+  needs Jan's yes. If configuration ever lands there, it returns as a `remote` tab holding
+  settings only.
+- **Does not change:** routes, what any list shows, who can open which page (with the menu
+  condition above).
 
-**Performance.** No new queries: the tab bar needs the dashboard tab titles (one query the
-dashboard page already runs; on the three management pages it is one extra
-`SELECT id, title FROM reporter_project_tabs WHERE project_id = ?`, indexed, a few rows)
-and `allowed_to?` checks that are in memory. Settings gets lighter.
+**Performance.** The tab bar needs the dashboard tab titles: on the dashboard none extra; on
+Templates, Schedules and Sent reports +1 indexed query
+(`SELECT id, title FROM reporter_project_tabs WHERE project_id = ?`, a few rows; tabs are not
+filtered per user today). `allowed_to?` is in memory. Every project settings page loses up
+to 3 counts and the heartbeat check (core renders every tab's partial on every settings
+page).
 
-**Effort.** 1.5 days (partial, `menu_item` in 4 controllers, settings tab removal,
-locale keys, functional tests per permission combination).
+**Effort.** 1.5 days.
 
-**Open choices for Jan**
-- **1a. One tab bar (recommended) or two levels?** One bar: no nested tabs, one click
-  everywhere, a reader without management rights sees only the dashboard's pages (plus the
-  tabs their permissions open). Two levels match the brief literally but stack two tab
-  bars on the dashboard, which core never does.
-- **1b. Menu label: "Project dashboard" (recommended, keeps what users know and says what
-  most people open it for) or "Reports"** (better if templates and mailing become the main
-  use).
-- **1c. Settings tab: remove (recommended)** or keep as a remote tab with configuration
-  only. There is no project-level configuration to put in it today.
+**Open choices**
+- **1a. One tab bar (recommended) or two levels.** One bar: no nested tabs, one click
+  everywhere, readers see only the tabs their permissions open. Two levels stack two tab bars
+  on the dashboard, which core never does.
+- **1b. Label: "Project dashboard" (recommended) or "Reports".** Keep what users know; switch
+  only if templates and mailing become the main use.
+- **1c. Settings tab: remove (recommended, reopens D1 and changes the `projects#settings`
+  mapping) or keep** as a remote, configuration-only tab.
 
 ---
 
 ## 2. Yellow boxes
 
-**Problem.** `.nodata`/`.warning` is core styling and Redmine 7 made it louder
-(`--oc-yellow-1` background, `--oc-pink-9` text). Core uses it almost only for "No data to
-display" and real warnings; this plugin also uses it for explanations, for an operator
-notice shown to every user, and for "nothing found".
+**Problem.** `.nodata`/`.warning` is core styling, louder on 7.0 (`--oc-yellow-1` background,
+`--oc-pink-9` text). Core uses it for "No data to display" and real warnings; this plugin also
+uses it for explanations and for "nothing found".
 
 | Before | After |
 |---|---|
-| ![](img/02-yellow-before-sent.png) Sent reports: an explanation as a yellow box | ![](img/02-yellow-after-sent.png) Grey `em.info`; "success" as "Sent", a failure in red text |
-| ![](img/02-yellow-before-schedules.png) Schedules: cron notice to every user | ![](img/02-yellow-after-schedules.png) Project member: no notice |
-| | ![](img/02-yellow-after-schedules-admin.png) Administrator: one-line `p.warning` with a link to Render preflight |
+| ![](img/02-yellow-before-sent.png) Sent reports: scope line as a yellow box | ![](img/02-yellow-after-sent.png) Same text, grey `em.info`; "Sent"/"Failed" |
+| ![](img/02-yellow-before-schedules.png) Schedules: two-line notice | ![](img/02-yellow-after-schedules.png) Non-admin: one-line `p.warning` |
+| | ![](img/02-yellow-after-schedules-admin.png) Admin: same line, with a link to Render preflight |
 
 Composite: ![](img/02-compare-sent.png)
 
 **Proposal.**
-- Rule: `p.nodata` only for "No data to display" (core text `:label_no_data`);
-  `p.warning` / `.flash.warning` only for something the reader must act on; everything
-  else is `em.info` (grey, small, core class).
-- Sent reports: "The reports you have mailed from this project." becomes
-  `<p><em class="info">Reports mailed from this project, newest first.</em></p>`.
-  Status words: "Sent" / "Failed" (failure in core's error colour); empty recipient cell
-  instead of "none".
-- Schedules: the cron notice is shown only to administrators (`User.current.admin?`), as
-  one line: "No schedule has run yet. Check the cron task in Render preflight." The full
-  operator text moves to Render preflight.
-- Template lint: "Nothing found…" is no longer a yellow box; the panel is omitted when
-  there are no findings (finding 4).
-- Widget settings with no usable template ("There is no report template this widget can
-  use yet…"): `em.info` with a link "New report template" for users who may create one.
-- A grep-based gate (like `script/gates/chrome_no_design_tokens.sh`) keeps `nodata` to
-  `l(:label_no_data)` only, so the rule stays mechanical.
+- Rule: `p.nodata` only for `l(:label_no_data)`; `p.warning` for something the reader must
+  know or act on; everything else `em.info`. A grep gate like
+  `script/gates/chrome_no_design_tokens.sh` keeps it mechanical. About 50 places to triage
+  (56 lines in `app/views` match `nodata`/`warning`, comments included).
+- **Sent reports:** both scope lines stay (admin "Every report mailed from this project.",
+  others "The reports you have mailed from this project."; the controller filters that way,
+  `mail_controller.rb:115-123`), as `em.info`. The truncation notice ("list stops at 100",
+  `mail/index.html.erb:23-30`) is a real warning: `p.warning`. Status words "Sent"/"Failed".
+- **Schedules (FR-44):** the warning stays for everyone who can open the page (that is what
+  `view_reporter_dashboards_schedules` is for), shortened to one line worded per state
+  (`warning?` = never run, overdue or undetermined, `heartbeat.rb:86-88`), reusing existing
+  text ("No scheduled report has run yet."). Non-admins: "An administrator can check the
+  scheduler."; admins: a link to Render preflight, where the cron detail lives.
+- Template lint "Nothing found": one grey line (finding 4).
+- Widget settings with no usable template: `em.info`, with a "New report template" link for
+  users who may create one.
 
-**Performance.** None. **Effort.** 0.5 day (about 49 view occurrences to triage; most become
-`em.info`).
+**Performance.** None. **Effort.** 0.5 day.
 
-**Open choice:** 2a. Admin cron notice on the Schedules page (recommended, one line, only
-when no schedule has ever run or the last run is older than twice its interval) or only on
-Render preflight.
+**Open choice 2a.** If the Settings tab stays (1c), keep its copy of the FR-44 warning
+(recommended) or leave it to the Schedules page only.
 
 ---
 
 ## 3. Dashboard widgets
 
-**Problem.** The outer frame is core's (`.mypage-box`). What makes widgets heavy is inside
-it: a second dark-bordered report frame, a card border per table/chart, the title twice
-("Open work summary (E2E project | UX open issues ) (38)" and "Issue report — E2E project",
-with stray spaces), Arial and underlined links in a Noto page, charts 640 px wide in a full
-width card, a resize grip, technical lines ("Counted in SQL over the issues this report's
-reader may see."), degradation notes as a bold block on top, and unconfigured widgets as a
-full settings form.
-
-Full tabs (manager):
+**Problem.** The outer frame is core's. Inside it: a second dark-bordered frame, a card border
+per table/chart, the title twice ("Open work summary (E2E project | UX open issues ) (38)" and
+"Issue report — E2E project"), Arial and underlined links in a Noto page, charts 640 px wide in
+full-width cards, a resize grip, degradation notes as a bold block on top, and unconfigured
+widgets as a full settings form.
 
 | Before | After |
 |---|---|
-| ![](img/03-widgets-before-overview.png) Overview, 2396 px | ![](img/03-widgets-after-overview.png) Overview, 2303 px |
-| ![](img/03-widgets-before-charts.png) Charts, 4485 px | ![](img/03-widgets-after-charts.png) Charts, 3411 px |
+| ![](img/03-widgets-before-overview.png) Overview, 2396 px | ![](img/03-widgets-after-overview.png) Overview, about 2300 px |
+| ![](img/03-widgets-before-charts.png) Charts, 4485 px | ![](img/03-widgets-after-charts.png) Charts, about 3400 px |
 | ![](img/03-widgets-before-versions.png) Versions, 1110 px | ![](img/03-widgets-after-versions.png) Versions, 900 px |
 
-Single widgets (element screenshots):
+Single widgets:
 
 ![](img/03-compare-report.png)
 ![](img/03-compare-chart.png)
 ![](img/03-compare-degraded.png)
 ![](img/03-compare-unconfigured.png)
 
-Reader without edit rights (`viewer`):
+Reader `viewer` (no edit rights, own time entries only):
 
 | Before | After |
 |---|---|
 | ![](img/07-viewer-before-overview.png) unconfigured widget = untitled yellow box | ![](img/07-viewer-after-overview.png) "Issue report / Not set up yet." |
 | ![](img/07-viewer-before-charts.png) | ![](img/07-viewer-after-charts.png) |
 
+The S-14 narrowing notice stays exactly as today (visible, `p.warning`):
+![](img/07-compare-time-widget.png)
+
 **Proposal.**
-- **Outer frame unchanged** (core `.mypage-box`, same as My page).
-- **Heading, one line, core style:** `Template name · <a>Query name</a> (count)`. No project
-  name (it is this project; core's own query block shows it only on My page, which spans
-  projects). Count without spaces inside the parentheses. Without a query:
-  `Template name (count)`.
-- **Controls in `.contextual`**: PDF export joins move/remove there; core shows
-  `.mypage-box > .contextual` on hover (`application.css:2074`), as on My page.
+- **Outer frame unchanged** (core `.mypage-box`).
+- **One heading:** `Template name · <a>Query name</a> (count) [PDF]`. No project name (it is
+  this project), no stray spaces. The PDF export stays visible in the heading: core hides
+  `.contextual` until hover (`application.css:2074`), which suits edit controls, not a reader's
+  export.
 - **Report frame without chrome** (`border: 0; resize: none`), auto-height as today.
-- **A "widget" variant of the report stylesheet** inside the frame
-  (`ReportFrame::WIDGET_CHROME` already exists as a class): no `h1` and no "N issues in
-  scope" line (the heading has both), no `.rrd-card` borders, `h2` at 13px bold
-  `#495057`, links without underline in core blue, tables in core `table.list` colours
-  (header `#e9ecef`, 2px `#ced4da` rule, row lines `#e9ecef`), numbers right-aligned.
-  The PDF and the full report page keep the print stylesheet (§9b: one type scale; the
-  widget variant only removes chrome and sets colours).
-- **Charts at the widget's width**: `max-width` removed on `.rrd-chart-frame`; height by
-  widgets in the row: 1 = 300px, 2 = 260px, 3 = 220px (Chart.js is already responsive).
-- **Technical notes hidden for readers**: the "how it was counted" lines are marked in the
-  stylesheet (e.g. `.rrd-note`) and hidden in the widget; an editor gets one `help` sprite
-  icon in the heading whose tooltip holds them.
-- **Degradations**: one grey `em.info` line under the report, for every reader (it is a
-  fact about the numbers on screen), worded plainly: "15 issues listed, 11 more under
-  "(other)"." instead of a bold block on top. The time-entry visibility notice
-  (`p.warning`, S-14) stays as it is: that one must stay visible.
-- **Unconfigured widget**: editor: heading + `em.info` "Not set up yet. Choose a report
-  template with ⚙." and a gear (`icon-settings`, as core blocks use) in `.contextual` that
-  toggles the existing form (`$('#…-settings').toggle()`, the core block idiom). Reader:
-  heading + "Not set up yet." (today: no heading, yellow box).
-- **Does not change:** what a widget computes, for whom, the PDF, the sandbox and CSP
-  (except possibly `font-src`, choice 3c).
+- **A widget variant of the report stylesheet** inside the frame (the frame already carries
+  the CSS class constant `ReportFrame::WIDGET_CHROME`, `report_frame.rb:136`): no `h1`, no
+  "N issues in scope" line (the heading has both), no `.rrd-card` borders, `h2` 13px bold
+  `#495057`, links without underline in core blue, tables in `table.list` colours (header
+  `#e9ecef`, 2px `#ced4da` rule), numbers right-aligned. PDF and the full report page keep
+  the print stylesheet.
+- **Charts at the widget's width**: no `max-width` on `.rrd-chart-frame`; height by widgets
+  in the row, 1 = 300px, 2 = 260px, 3 = 220px (Chart.js is already responsive).
+- **Scope and degradation lines as one grey foot line, for every reader.** "Counted in SQL
+  over the issues this report's reader may see." is a visibility disclosure (same family as
+  S-14) and comes from the template, so it is styled, not hidden. Degradations read plainly:
+  "15 issues listed, 11 more under "(other)"." instead of a bold block on top.
+- **Unconfigured widget**: editor: heading + "Not set up yet. Choose a report template under
+  Options." and the core gear (`icon-settings`) in `.contextual` toggling the existing form.
+  Reader: heading + "Not set up yet." (today: no heading, yellow box).
+- **Does not change:** what a widget computes, for whom, the PDF, the sandbox, the S-14
+  notice, the CSP (unless choice 3c option 2).
 
-**Performance.** No queries added. Rendering gets cheaper (fewer nodes; no settings forms
-with query and template selects for unconfigured widgets until opened; today each
-unconfigured widget renders `IssueQuery.visible` and the template list on every page view,
-so making the form load on demand (`remote`) would save those queries).
+**Performance.** No queries added. For editors only, today every unconfigured widget runs
+`IssueQuery.visible` and the template list on each page view
+(`report_blocks/_report_by_issues.erb:35-43`); loading the form on demand (`remote`, one
+request per click) saves those. Readers are unaffected.
 
-**Effort.** 3 days (stylesheet variant + its spec, heading partial, widget states, on-demand
-settings form, chart sizing, tests for editor/reader states, locales).
+**Effort.** 3 days.
 
-**Open choices for Jan**
-- **3a. Technical notes for readers: hide (recommended)** or keep as a small grey line.
-- **3b. Unconfigured widget for readers: one grey line (recommended)** or hide the widget
-  entirely for readers.
-- **3c. Font inside the report frame.** The frame's CSP is `default-src 'none'` and Noto
-  Sans is ~215 KB per weight, so the mockup embeds it only for the screenshot. Options:
-  (1) **system font stack** `"Noto Sans", system-ui, sans-serif` (recommended: zero bytes,
-  close to Redmine everywhere, exact where Noto is installed); (2) embed a Latin subset of
-  Noto Sans Regular+Bold (~60 KB per widget, needs `font-src data:`), exact match but
-  every widget gets heavier; (3) keep Arial.
-- **3d. Degradation line for every reader (recommended)** or only for editors as the brief
-  suggested. Recommendation follows the existing code's reasoning: truncation changes the
-  numbers the reader sees.
+**Open choices**
+- **3a. Scope line in a widget: grey foot line (recommended)** or hidden behind an icon for
+  editors only (not recommended: it is a disclosure, and a `title` tooltip is out of reach
+  for keyboard and touch).
+- **3b. Unconfigured widget for readers: one grey line (recommended)** or hidden.
+- **3c. Font inside the report frame.** Noto Sans is ~215 KB per weight and the CSP has no
+  `font-src`; the mockup embeds it only for the screenshot. (1) **System font stack**
+  `"Noto Sans", system-ui, sans-serif` (recommended: zero bytes, close to Redmine
+  everywhere); (2) a Latin subset of Noto Sans Regular+Bold embedded (~60 KB per widget,
+  `font-src data:`); (3) keep Arial.
 
 ---
 
 ## 4. Template pages
 
-**Problem.** "New report template" is 4535 px: starter gallery as a bulleted list of huge
-thumbnails, then the form, a small Content textarea, a "Linter findings" box that says
-"Nothing found", an "Insert a chart" form at the bottom and a sidebar listing 60+ accessors
-open.
+**Problem.** "New report template" is 4535 px: starters as a bulleted list of huge
+thumbnails, a small Content textarea, a yellow "Nothing found" lint box, the chart form at
+the bottom, a sidebar listing 60+ accessors open.
 
-| Before (4535 px) | After (1906 px) |
+| Before (4535 px) | After (about 1900 px) |
 |---|---|
 | ![](img/04-template-new-before.png) | ![](img/04-template-new-after.png) |
 
-| Template page before (editor) | After |
+| Template page, editor, before | After |
 |---|---|
-| ![](img/04-template-show-before.png) report in a dark frame, lint box with rake command | ![](img/04-template-show-after.png) report without frame, no lint box (no findings) |
-| ![](img/07-viewer-before-template-show.png) reader: no lint box today | ![](img/07-viewer-after-template-show.png) reader after |
+| ![](img/04-template-show-before.png) | ![](img/04-template-show-after.png) |
+| ![](img/07-viewer-before-template-show.png) reader, before (no lint today) | ![](img/07-viewer-after-template-show.png) reader, after |
 
 **Proposal.**
-- **Starter gallery as a grid of five cards** (CSS grid on the existing `ul`, thumbnail
-  110px high, `object-fit: cover`, name as the link, description as grey text). Same
-  links (`?starter=<id>`), no JavaScript.
-- **Reference sidebar collapsed**: every `<details>` closed by default (today the first is
-  `open`), intro "Everything a template can print. Open a group to see its fields." The
-  sidebar is then a 25-line index.
-- **Chart helper as a button** "Insert a chart" (`icon icon-stats`) directly above the
-  editor; it opens the existing form (already `hidden` and script-driven) as a core modal
-  (`showModal`) instead of a box at the bottom.
+- **Starters as a grid of five cards** (CSS grid on the existing `ul`, thumbnail 110px high,
+  name as the link, description grey). Same links (`?starter=<id>`), no JavaScript.
+- **Reference collapsed**: every `<details>` closed (today the first is `open`); intro
+  "Everything a template can print. Open a group to see its fields."
+- **Chart helper as a button** "Insert a chart" (`icon-stats`) above the editor; it opens the
+  existing (already script-driven) form as a core modal instead of a box at the bottom.
 - **Larger editor**: 520px high, monospace.
-- **Lint only when there are findings** (editors only, as today); the rake hint moves to the
-  admin guide.
-- **Shorter help lines** under Data source, Output, Margins, "Produce a failure document";
-  "A report template is executed on the server. Anyone who can edit one can run code as
-  the application." becomes "Templates run on the server." (the permission label and
-  Render preflight carry the full warning, finding 6).
-- Template page: the report without the `.box` and dark frame, as in the widget; actions
-  stay in `.contextual`.
+- **Clean lint as one grey line (D4)**: "Linter: no findings. For every template in this
+  installation: `rake reporter_dashboards:lint_templates`". The panel still shows that the
+  linter ran and still names the task (both tested). Findings keep today's table.
+- **Shorter help lines** under Data source, Output, Margins, "Produce a failure document".
+  The INV-9 line keeps its statement: "Templates run on the server: whoever can edit one can
+  run code as the application."
+- Template page: the report without the `.box` and dark frame, as in the widget.
 
-**Performance.** None (same render; the hidden lint box is not rendered at all).
+**Performance.** None (the linter still runs for editors; only the markup is smaller).
 **Effort.** 1.5 days.
 
-**Open choice:** 4a. **Card grid (recommended)** or a "Start from" select with one small
-preview. The grid keeps the thumbnails, which is what makes the starters understandable.
+**Open choice 4a. Card grid (recommended)** or a "Start from" select with one small preview.
 
 ---
 
 ## 5. Admin plugin settings
 
-**Problem.** Long help texts with internal jargon ("G7's "≈3 commands" is honestly…"),
-symbol lists (":outline, :tagged_pdf").
+**Problem.** Long help texts with internal jargon ("G7's "≈3 commands" is honestly…"), symbol
+lists (":outline, :tagged_pdf").
 
-| Before (1652 px) | After (1129 px) |
+| Before (1652 px) | After (about 1130 px) |
 |---|---|
 | ![](img/05-plugin-settings-before.png) | ![](img/05-plugin-settings-after.png) |
 
-**Proposal.** One short `em.info` line per field (wording in the screenshot). Engine table:
-four columns (engine with one-line description, needs a service, works offline, not
-supported in words: "outline, tagged PDF"), the generated capability data stays the source,
-only its presentation changes. One link "What each engine can do on this server: Render
-preflight." The long explanations move to `docs/admin-guide.md`.
+**Proposal.** One short `em.info` per field, keeping each field's essential fact (scripts
+and fail-closed for Asset policy; "on engines that support it" for the embed threshold;
+"0 turns ad-hoc mail off"). Engine table: engine with a one-line description, needs a
+service, works offline, not supported in words ("outline, tagged PDF"); the generated
+capability data stays the source (G9 unaffected, only labels change). One link to Render
+preflight; the long explanations move to `docs/admin-guide.md`.
 
-**Performance.** None. **Effort.** 0.5 day. **Note:** the engine table is generated from
-`config/capabilities.yml`; G9 (matrix generated from the run) is unaffected because only
-labels change, not the data.
+**Performance.** None. **Effort.** 0.5 day.
 
 ---
 
-## 6. Role permission labels
+## 6. Role permission labels (D3)
 
 ![](img/06-compare-permissions.png)
 
@@ -321,40 +312,37 @@ labels change, not the data.
 |---|---|
 | View report templates and documents | View reports |
 | View report schedules and their run history | View report schedules |
-| Author report templates (executes server-side code) | Create report templates |
-| Edit and delete own report templates (executes server-side code) | Edit own report templates |
-| Edit and delete any report template (executes server-side code) | Edit all report templates |
-| Manage public report templates (executes server-side code) | Manage public report templates |
-| Render reports as another user — grants access to everything that user can see | Render reports as another user |
+| Author report templates (executes server-side code) | Create report templates (runs code) |
+| Edit and delete own report templates (executes server-side code) | Edit own report templates (runs code) |
+| Edit and delete any report template (executes server-side code) | Edit all report templates (runs code) |
+| Manage public report templates (executes server-side code) | Manage public report templates (runs code) |
+| Render reports as another user — grants access to everything that user can see | Render reports as another user (sees all they see) |
 | Send a report by e-mail | Send reports by e-mail |
 
-Plus one line under the Reports fieldset: *"Template authors run code on the server.
-"Render reports as another user" shows what that user can see."*
+The labels are locale keys (`permission_<name>`), so this is a locale change, and the
+warning stays in the label itself (INV-9, `technical-spec.md:580`). The extra line under the
+fieldset in the screenshot has no core place: `app/views/roles/` on 7.0 has no `call_hook`
+(checked). It would need a plugin script on a core admin page; recommendation: skip it and
+keep the full warning on Render preflight, which already lists the roles holding an authoring
+permission.
 
-**Buildable?** The permission labels are locale keys (`permission_<name>`), so the short
-labels are a locale change. The explanatory line has no core place: `app/views/roles/` on
-7.0-stable-GEOxyz contains no `call_hook` (checked). Options: (a) a small script in the
-plugin's assets that appends the line to the Reports fieldset (works, but it is a
-plugin script on a core admin page), (b) put the warning in Render preflight, which already
-lists which roles hold an authoring permission. **Recommendation: short labels + (b).**
-**Effort.** 0.5 day. **Performance.** None.
+**Performance.** None. **Effort.** 0.5 day.
 
 ---
 
-## Open choices for Jan (all in one place)
+## Open choices for Jan
 
 | # | Choice | Recommendation |
 |---|---|---|
 | 1a | One tab bar or two levels | One tab bar |
 | 1b | Menu label "Project dashboard" or "Reports" | Project dashboard |
-| 1c | Settings tab: remove or remote config-only tab | Remove |
-| 2a | Cron notice: admins on Schedules page, or Render preflight only | Admins, one line, only when overdue |
-| 3a | Technical notes for readers | Hide; help icon for editors |
+| 1c | Settings tab: remove (reopens D1, changes `projects#settings` mapping) or keep config-only | Remove, with the wider menu condition |
+| 2a | FR-44 warning in Settings too, if the tab stays | Yes |
+| 3a | Scope line in widgets | Grey foot line for everyone |
 | 3b | Unconfigured widget for readers | One grey line |
-| 3c | Font in report frame | System font stack (no bytes added) |
-| 3d | Degradation line | For every reader, one grey line |
+| 3c | Font in the report frame | System font stack |
 | 4a | Starter gallery | Card grid |
-| 6 | Explanatory line on the role form | Short labels; warning on Render preflight |
+| 6 | Shorter permission labels keeping "(runs code)" (D3) | Yes; no script on the roles page |
 
 ## How to reproduce
 
@@ -367,15 +355,23 @@ node docs/ux-review-2026-11/mockup/capture.mjs          # or: capture.mjs 03 07 
 python3 docs/ux-review-2026-11/mockup/compress.py       # composites + 256-colour PNGs
 ```
 
+`seed.rb` is for a **local checkout only**: it rebuilds e2e-project's dashboard tabs when they
+differ from Overview/Charts/Versions and resets the passwords of the users it creates. Dates
+are relative to today, so a re-run is similar, not byte-identical.
+
 | File | What it does |
 |---|---|
-| `mockup/seed.rb` | Realistic data (idempotent, keeps tab ids stable) |
+| `mockup/seed.rb` | Realistic data |
 | `mockup/ux.css`, `mockup/ux.js` | The "after" layer on the Redmine page (`window.UX.<step>`) |
 | `mockup/report-frame.css`, `mockup/report-frame.js` | The widget variant inside the report frame |
 | `mockup/capture.mjs` | Logs in per user, captures before, injects, captures after |
 | `mockup/compress.py` | Composites and PNG quantisation |
 
-Mockup notes: the capture uses Playwright's `bypassCSP` only to inject the layer into the
-sandboxed frame; full-page captures set the viewport to the page height so off-screen
-frames paint. The review of this document was done by an independent subagent; see the
-commit message.
+The capture uses Playwright's `bypassCSP` only to inject the layer into the sandboxed frame;
+full-page captures set the viewport to the page height so off-screen frames paint.
+
+**Review.** An independent subagent reviewed the first version and rejected it: several
+proposals dropped controls the spec or a curator decision requires (FR-44 warning, the
+per-actor Sent reports line, the INV-9 labels, the lint clean state, the scope disclosure in
+widgets) or cut access for roles without the dashboard permission. This version fixes those
+in the mockup and names D1 to D4 above.

@@ -6,8 +6,11 @@
 #   (cd redmine && RAILS_ENV=production bundle exec rails runner \
 #      ../docs/ux-review-2026-11/mockup/seed.rb)
 #
-# Idempotent: records are found by name first. Not test data: dates are relative to today
-# on purpose, so the screenshots look like a live project.
+# LOCAL CHECKOUT ONLY, AND NOT HARMLESS: it rebuilds e2e-project's dashboard tabs when they
+# are not exactly Overview/Charts/Versions (delete_all), and it resets the passwords of the
+# users it creates (anna, pieter, sofie, tom, viewer). Records are otherwise found by name
+# first, so a second run adds nothing. Dates are relative to today on purpose (a live-looking
+# project), so a re-run does not reproduce the screenshots byte for byte.
 Template = RedmineReporterDashboards::Template
 Schedule = RedmineReporterDashboards::Schedule
 
@@ -43,6 +46,8 @@ viewer_role.permissions = (reporter_role ? reporter_role.permissions : %i[view_i
                              view_reporter_dashboards_schedules view_time_entries view_news]
 viewer_role.permissions.uniq!
 viewer_role.issues_visibility = 'all'
+# Own time entries only, so the time widget shows the S-14 narrowing notice to this reader.
+viewer_role.time_entries_visibility = 'own' if viewer_role.respond_to?(:time_entries_visibility=)
 viewer_role.save!
 viewer = ux_user('viewer', 'Vera', 'Viewer', password)
 Member.create!(principal: viewer, project: project, roles: [viewer_role]) unless Member.where(user_id: viewer.id, project_id: project.id).exists?

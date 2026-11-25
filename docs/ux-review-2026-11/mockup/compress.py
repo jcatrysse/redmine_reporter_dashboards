@@ -18,6 +18,7 @@ COMPOSITES = [
     ('01-compare-menu-label', '01-menu-label-before', '01-menu-label-after', 'stack'),
     ('06-compare-permissions', '06-permissions-before', '06-permissions-after', 'stack'),
     ('02-compare-sent', '02-yellow-before-sent', '02-yellow-after-sent', 'side'),
+    ('07-compare-time-widget', '07-viewer-before-time-widget', '07-viewer-after-time-widget', 'side'),
 ]
 
 

@@ -81,10 +81,12 @@
   }
 
   // ---------------------------------------------------------------- 2. yellow boxes
+  // The scope line differs by actor today (admin: every report; others: their own), and the
+  // controller filters accordingly, so both variants stay; only the yellow goes.
   function sentReports() {
     textMatches(/mailed from this project/).forEach((n) => {
       const box = n.closest('.nodata, .warning, p') || n;
-      box.replaceWith(el('<p><em class="info">Reports mailed from this project, newest first.</em></p>'));
+      box.replaceWith(el(`<p><em class="info">${esc(n.textContent.trim())}</em></p>`));
     });
     // Status as a word in its column; a failure reads as one, without colour noise.
     $$('table.list td').forEach((td) => {
@@ -101,11 +103,13 @@
     const box = textMatches(/periodic task outside Redmine/)[0];
     const container = box && (box.closest('.warning, .nodata, .flash, div') || box);
     if (!container) return;
-    if (o.admin) {
-      container.replaceWith(el(`<p class="warning">No schedule has run yet. Check the cron task in <a href="/admin/reporter_dashboards/preflight">Render preflight</a>.</p>`));
-    } else {
-      container.remove();
-    }
+    // FR-44: the warning stays for everyone who can open the page (it answers "did it
+    // run?"), as one line in the state's own words; the cron detail is for administrators.
+    const headline = (container.querySelector('strong, b, h3, p') || container).textContent.trim() || 'No scheduled report has run yet';
+    const tail = o.admin
+      ? ` Check the scheduler in <a href="/admin/reporter_dashboards/preflight">Render preflight</a>.`
+      : ' An administrator can check the scheduler.';
+    container.replaceWith(el(`<p class="warning">${esc(headline.replace(/\.?$/, '.'))}${tail}</p>`));
   }
 
   // ---------------------------------------------------------------- 3. dashboard widgets
@@ -127,10 +131,9 @@
         const count = (h3.textContent.match(/\((\d+)\)\s*$/m) || h3.textContent.match(/\((\d+)\)(?!.*\(\d+\))/s) || [])[1];
         const pdf = $('a.reporter-report-pdf', h3);
         h3.innerHTML = `${esc(name)}${query ? ` <span class="ux-widget-query">· <a href="${query.getAttribute('href')}">${esc(query.textContent.trim())}</a></span>` : ''}${count ? ` (${count})` : ''}`;
-        // The PDF export joins the widget's other controls (core .contextual, shown on hover
-        // like My page's).
-        const ctx = $(':scope > .contextual', box) || box.insertBefore(el('<div class="contextual"></div>'), box.firstChild);
-        if (pdf) { pdf.classList.add('ux-pdf'); ctx.insertBefore(pdf, ctx.firstChild); }
+        // The PDF export stays visible in the heading: it is a reader's action, and core
+        // hides .contextual until hover (application.css:2074), which suits only edit controls.
+        if (pdf) { h3.appendChild(document.createTextNode(' ')); h3.appendChild(pdf); }
 
         const notes = (o.notes && o.notes[box.id]) || [];
         const deg = $('.reporter-degradations', box);
@@ -138,13 +141,11 @@
           .replace(/^(\w+) has too many values to show: (\d+) are listed and (\d+) were folded together\.?/,
             (m, what, shown, folded) => `${shown} ${what === 'issue' ? 'issues' : what} listed, ${folded} more under "(other)".`)) : [];
         if (deg) deg.remove();
-        // A degradation is a fact about the numbers on screen: one quiet line under the
-        // report, for every reader.
-        if (degText.length) frame.insertAdjacentElement('afterend', el(`<p class="ux-widget-foot"><em class="info">${esc(degText.join(' '))}</em></p>`));
-        // How the report was computed is for whoever can change it: one help icon.
-        if (o.editor && notes.length) {
-          h3.insertAdjacentHTML('beforeend', ` <span class="ux-widget-help" title="${esc(notes.join('\n'))}">${svg('help')}</span>`);
-        }
+        // Degradations and the report's own scope lines ("Counted in SQL over the issues
+        // this report's reader may see.") are facts about the numbers and who they cover:
+        // one quiet grey foot line under the report, for every reader.
+        const foot = degText.concat(notes);
+        if (foot.length) frame.insertAdjacentElement('afterend', el(`<p class="ux-widget-foot"><em class="info">${esc(foot.join(' '))}</em></p>`));
       }
 
       if (settings) {
@@ -152,7 +153,7 @@
         settings.style.display = 'none';
         const ctx = $(':scope > .contextual', box) || box.insertBefore(el('<div class="contextual"></div>'), box.firstChild);
         ctx.insertAdjacentHTML('afterbegin', iconOnly('settings', 'Options', 'href="#"'));
-        settings.insertAdjacentElement('beforebegin', el('<p><em class="info">Not set up yet. Choose a report template with <span class="ux-inline-gear">' + svg('settings') + '</span>.</em></p>'));
+        settings.insertAdjacentElement('beforebegin', el('<p><em class="info">Not set up yet. Choose a report template under <a href="#">Options</a>.</em></p>'));
         if (h3) h3.textContent = WIDGET_LABEL[base] || h3.textContent;
       } else if (!frame && WIDGET_LABEL[base]) {
         // Unconfigured, reader: today an untitled yellow "No data to display" box.
@@ -187,8 +188,7 @@
     }
     const chart = $('#reporter-chart-form');
     if (chart) chart.style.display = 'none';
-    // Lint only when there is something to say.
-    if ($('#reporter-template-lint-clean')) $('#reporter-template-lint').style.display = 'none';
+    lintClean();
     // Reference: every group closed, so the sidebar is a short index rather than 60 lines.
     $$('details.reporter-drop-reference').forEach((d) => d.removeAttribute('open'));
     const refInfo = $('#sidebar em.info');
@@ -207,25 +207,34 @@
       const info = $('em.info', p);
       if (key && info) info.textContent = short[key];
     });
-    textMatches(/executed on the server/).forEach((n) => { n.textContent = 'Templates run on the server.'; });
+    // INV-9 at the point of authoring: shorter, the statement itself kept.
+    textMatches(/executed on the server/).forEach((n) => { n.textContent = 'Templates run on the server: whoever can edit one can run code as the application.'; });
+  }
+
+  // A clean lint result stays visible (an absent panel cannot be told from one that did
+  // not run, lint_panel_test.rb:267) but as one grey line instead of a yellow box; the
+  // rake task stays named on the page (:281).
+  function lintClean() {
+    if (!$('#reporter-template-lint-clean')) return;
+    $('#reporter-template-lint').replaceWith(el('<p id="reporter-template-lint"><em class="info">Linter: no findings. For every template in this installation: <code>rake reporter_dashboards:lint_templates</code></em></p>'));
   }
 
   function templateShow() {
-    if ($('#reporter-template-lint-clean')) $('#reporter-template-lint').style.display = 'none';
+    lintClean();
     $$('#content > .box').forEach((b) => { if ($('iframe.reporter-report-frame', b)) b.classList.add('ux-report-box'); });
   }
 
   // ---------------------------------------------------------------- 5. plugin settings
   function pluginSettings() {
     const rewrite = [
-      [/^Asset policy/, 'Where images, stylesheets and fonts in a report may come from.'],
+      [/^Asset policy/, 'Where images, stylesheets, fonts and scripts in a report may come from. A report whose asset cannot be obtained is not produced.'],
       [/^Asset host allowlist/, 'One host name per line. Empty means bundled only.'],
-      [/^Embed assets up to/, 'Larger assets are sent next to the document.'],
+      [/^Embed assets up to/, 'Larger assets are sent next to the document, on engines that support it.'],
       [/^Refuse assets above/, 'A report with a larger asset is not produced.'],
       [/^Render engine/, 'Draws the PDF for every report. A template can name its own engine.'],
       [/^Allow external e-mail/, 'Off: reports go to Redmine users only.'],
       [/^Permitted domains/, 'One domain per line.'],
-      [/^Sends per user/, 'Most reports one user may send, per number of minutes. 0 turns it off.'],
+      [/^Sends per user/, 'Maximum reports one user may send within the given minutes. 0 turns ad-hoc mail off.'],
     ];
     $$('.tabular p, .box p').forEach((p) => {
       const label = $('label', p);
@@ -246,7 +255,7 @@
         wkhtmltopdf: ['wkhtmltopdf (deprecated)', 'For old templates only.'],
       };
       const head = $('thead tr', table) || table.rows[0];
-      head.innerHTML = '<th>Render engine</th><th>Needs a service</th><th>Works offline</th><th>Not supported</th>';
+      head.innerHTML = '<th>Engine</th><th>Needs a service</th><th>Works offline</th><th>Not supported</th>';
       $$('tbody tr', table).forEach((tr) => {
         const key = Object.keys(short).find((k) => tr.textContent.includes(k));
         if (!key) return;
@@ -268,12 +277,13 @@
     const labels = {
       'View report templates and documents': 'View reports',
       'View report schedules and their run history': 'View report schedules',
-      'Author report templates (executes server-side code)': 'Create report templates',
-      'Edit and delete own report templates (executes server-side code)': 'Edit own report templates',
-      'Edit and delete any report template (executes server-side code)': 'Edit all report templates',
-      'Manage public report templates (executes server-side code)': 'Manage public report templates',
+      // INV-9 (technical-spec.md:580): the label itself says the permission runs code.
+      'Author report templates (executes server-side code)': 'Create report templates (runs code)',
+      'Edit and delete own report templates (executes server-side code)': 'Edit own report templates (runs code)',
+      'Edit and delete any report template (executes server-side code)': 'Edit all report templates (runs code)',
+      'Manage public report templates (executes server-side code)': 'Manage public report templates (runs code)',
       'Manage report schedules': 'Manage report schedules',
-      'Render reports as another user — grants access to everything that user can see': 'Render reports as another user',
+      'Render reports as another user — grants access to everything that user can see': 'Render reports as another user (sees all they see)',
       'Send a report by e-mail': 'Send reports by e-mail',
       'Create report share links': 'Create report share links',
       'Make report share links public': 'Make report share links public',

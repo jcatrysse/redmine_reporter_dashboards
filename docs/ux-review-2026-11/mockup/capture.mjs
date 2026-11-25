@@ -264,10 +264,12 @@ if (want('07')) {
   await page.waitForTimeout(500);
   await shot('07-viewer-after-overview');
   await go(chartsUrl); await shot('07-viewer-before-charts');
+  await shot('07-viewer-before-time-widget', { element: '#reporter-block-report_by_spent_time' });
   await go(chartsUrl); await navAfter('dashboard', { manage: VIEWER_TABS });
   const notes2 = await frames();
   await page.evaluate((n) => window.UX.widgets({ editor: false, notes: n }), notes2);
   await shot('07-viewer-after-charts');
+  await shot('07-viewer-after-time-widget', { element: '#reporter-block-report_by_spent_time' });
   await go(`${P}/reporter/templates`); await shot('07-viewer-before-templates', { full: false });
   const viewerShow = await page.evaluate(() => { const a = Array.from(document.querySelectorAll('table.list a')).find((x) => x.textContent.trim() === 'Open work summary'); return a && a.getAttribute('href'); });
   await go(viewerShow); await shot('07-viewer-before-template-show', { full: false });
