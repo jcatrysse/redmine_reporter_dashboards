@@ -324,7 +324,7 @@ zh:
   text_reporter_degradation_aggregation_source_unsupported: "本报告的数据源（%{source}）无法由 %{tag} 汇总。"
   text_reporter_degradation_aggregation_hidden_filter: "报表的查询按 %{fields} 过滤，而该字段在 %{projects} 个项目中对报表用户隐藏。这些项目已被排除。"
   text_reporter_degradation_aggregation_hidden_rollup: "%{fields} 在 %{projects} 个项目中对报表用户隐藏。这些项目的问题已从版本汇总中排除。"
-  text_reporter_degradation_aggregation_hidden_group: "%{fields} 在 %{projects} 个项目中对报表用户隐藏。这些项目的耗时记录已从此分组中排除。"
+  text_reporter_degradation_aggregation_hidden_group: "%{fields} 在 %{projects} 个项目中对报表用户隐藏。这些项目的耗时已从此分组中排除。"
   label_reporter_aggregation_hidden: "隐藏"
   text_reporter_degradation_legacy_engine: "由 wkhtmltopdf 绘制，这是一个计划移除的兼容性引擎；不支持现代 CSS。"
   text_reporter_degradation_asset_structural_fallback: "某个文件以替代形式嵌入，因为直接嵌入会改变文档的含义。"

@@ -324,7 +324,7 @@ pt:
   text_reporter_degradation_aggregation_source_unsupported: "A fonte de dados deste relatório (%{source}) não pode ser resumida por %{tag}."
   text_reporter_degradation_aggregation_hidden_filter: "A consulta do relatório filtra por %{fields}, que está escondido para o utilizador do relatório em %{projects} projeto(s). Esses projetos foram omitidos."
   text_reporter_degradation_aggregation_hidden_rollup: "%{fields} está escondido para o utilizador do relatório em %{projects} projeto(s). As tarefas desses projetos foram omitidas do resumo por versão."
-  text_reporter_degradation_aggregation_hidden_group: "%{fields} está escondido para o utilizador do relatório em %{projects} projeto(s). Os registos de tempo desses projetos foram omitidos deste agrupamento."
+  text_reporter_degradation_aggregation_hidden_group: "%{fields} está escondido para o utilizador do relatório em %{projects} projeto(s). Os tempos registados desses projetos foram omitidos deste agrupamento."
   label_reporter_aggregation_hidden: "Escondido"
   text_reporter_degradation_legacy_engine: "Desenhado pelo wkhtmltopdf, um motor de compatibilidade cuja remoção está prevista; CSS moderno não é suportado."
   text_reporter_degradation_asset_structural_fallback: "Um ficheiro foi embutido numa forma alternativa, porque embuti-lo diretamente teria alterado o significado do documento."
