@@ -16,7 +16,7 @@ what is left. Written 2026-10-06 from a measured analysis (report at the bottom)
 | | |
 |---|---|
 | Plugin id | `redmine_reporter_dashboards` |
-| GEOxyz runs today | `claude/next-session-prompt-it4too` |
+| GEOxyz runs today | `claude/next-session-prompt-it4too`; development line since 2026-11-25: `redmine70-migration` |
 | Upstream | geen |
 | Runs on Redmine 7 as is | JA |
 | Upstream sync | GEEN UPSTREAM |
@@ -383,6 +383,37 @@ Recorded from `docs/DECISIONS-2026-10-07.md`, section "Round 6, 2026-10-12".
   removed or one stale added); `release.sh` 12 passed, "every gate passes at its release
   configuration". Re-check when Gotenberg ships Chromium 154.
 - **Q8**: CLAUDE.md updated by Jan in `b2f8691`.
+
+### 2026-11-25: one line, and the base plugin's accessors (option A)
+
+Recorded in `docs/DECISIONS-2026-11-25.md`.
+
+- **One line** (`6dbc6eb`): CLAUDE.md §9 and the session-start hook pin `redmine70-migration`;
+  `claude/next-session-prompt-it4too` is merged up to it and no longer receives work.
+- **Option A, built** (`0519c60`, review fixes `827b3f1`, `3eefa33`): `issue.notes`, `journals`
+  (with `all`), `relations_from`, `relations_to`, `tags`, `story_points`, `color`,
+  `day_in_state`, `checklists`, `helpdesk_ticket`, `| textilize` / `| textile`, `| tagged_with`,
+  same names and meaning as redmineup 1.1.18's drops. Each answers as the report's actor and is
+  batched (`liquid/batch_related.rb`); see the admin guide, "What the old accessors answer".
+  Bounds: 500 journals per issue (most recent), 20 000 rows per render, degradation when hit.
+- **Found and fixed on the way**: `Support.each` raised on `{{ issues | group_by: … }}` and every
+  other filter over the issue collection; `issue.description` and `issue.attachments` ignored
+  redmine_view_issue_description; `issue.parent` printed a parent the actor may not see.
+- **Not fixed, recorded**: the core fields redmine_issue_field_visibility hides (dates, estimate,
+  assignee, …) are still printed by the drop; an issue outside the report's scope (parent,
+  related) is answered with per-issue queries rather than the batch.
+- **Tests** (Redmine 7.0-stable-GEOxyz 578730a, Ruby 3.3.6, PostgreSQL 16): alone, rspec 2961 /
+  260 / 217, minitest 627 / 456 / 58, spec_liquid 396, all 0 failures. With the real
+  redmineup_tags, redmine_agile, redmine_checklists, redmine_contacts,
+  redmine_contacts_helpdesk, redmine_view_issue_description and redmine_issue_field_visibility
+  (`redmine70-migration` branches): rspec 2961 / 260 / 217, minitest 625 / 456 / 58, 0 failures;
+  the new unit test 19 runs green there (18–20 alone, depending on which halves apply).
+  Ruby 4.0.9 not run: this container's ruby-build stops at 4.0.6.
+- **e2e** (`test/e2e/base_accessors.mjs`, production mode, the seven plugins installed):
+  4 screenshots, 0 problems, `docs/e2e/base_accessors-*.png`.
+- **Reviews**: independent subagent review (9 findings; the two leaks and the out-of-scope
+  answers fixed in `827b3f1`, the rest recorded above or accepted); OpenAI review
+  `docs/reviews/openai-2026-11-25-827b3f1.md` (2 fixed, 4 answered).
 
 ## Open questions for Jan
 
