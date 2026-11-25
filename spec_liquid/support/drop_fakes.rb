@@ -248,6 +248,16 @@ module DropFakes
       @asked = []
     end
 
+    # redmine_issue_field_visibility and core's available fields: nothing hidden, no filter,
+    # unless the fixture says so (`related: { hidden_core_fields: [...] }`).
+    def hidden_core_fields(_project)
+      @related.fetch(:hidden_core_fields, [])
+    end
+
+    def available_custom_field_ids(_project, _tracker_id)
+      @related[:available_custom_field_ids]
+    end
+
     def openable?(issue_id)
       @asked << :openable
       !@closed_to.include?(issue_id)
