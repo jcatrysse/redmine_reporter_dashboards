@@ -1,0 +1,81 @@
+/* UX review 2026-11, mockup only: NOT plugin code. Injected into the real pages for the
+   "after" screenshots. Values are Redmine 7.0's own (read from the running page). Classes
+   prefixed ux- are mockup scaffolding; a real build uses the core class named beside each. */
+
+/* 1. Navigation ----------------------------------------------------------------------- */
+/* one-row: the management tabs at the end of the core tab bar */
+#content .tabs ul { display: flex; }
+#content .tabs li.ux-tabs-right { margin-inline-start: auto; }
+/* two-level variant: the dashboard's pages as a lighter second row */
+#content .tabs.ux-subtabs { margin-top: 6px; }
+#content .tabs.ux-subtabs a { font-size: 12px; padding: 2px 8px; }
+
+/* 3. Dashboard widgets ------------------------------------------------------------------ */
+/* The report is the widget's content: no second frame, no resize grip. */
+#reporter-project-page iframe.reporter-report-frame--widget {
+  border: 0 !important;
+  padding: 0 !important;
+  resize: none !important;
+  background: transparent;
+  margin-top: 2px;
+}
+.mypage-box h3 .ux-widget-query { font-weight: normal; }
+.mypage-box h3 .ux-widget-help svg { width: 14px; height: 14px; vertical-align: -2px; stroke: #868e96; }
+.mypage-box h3 .ux-widget-help { cursor: help; }
+.mypage-box .contextual a.ux-pdf { margin-inline-end: 4px; }
+.mypage-box p.ux-widget-foot { margin: 4px 0 0; }
+.ux-inline-gear svg { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* 2. Sent reports: a failure reads as one */
+table.list td.ux-failed { color: #c92a2a; }
+
+/* 4. Template pages ---------------------------------------------------------------------- */
+/* Starter gallery: a compact grid of cards (core .box, a CSS grid instead of a bulleted list) */
+#reporter-starter-gallery.ux-gallery ul.reporter-starter-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+#reporter-starter-gallery.ux-gallery li.reporter-starter {
+  border: 1px solid #ced4da;
+  border-radius: 3px;
+  background: #fff;
+  padding: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+#reporter-starter-gallery.ux-gallery li.reporter-starter img {
+  display: block;
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid #e9ecef;
+  margin-bottom: 6px;
+}
+#reporter-starter-gallery.ux-gallery li.reporter-starter strong { display: block; }
+#reporter-starter-gallery.ux-gallery .reporter-starter-description { display: block; font-size: 12px; color: #868e96; margin-top: 2px; }
+
+textarea.ux-editor {
+  height: 520px !important;
+  width: 100% !important;
+  font-family: "Noto Sans Mono", ui-monospace, monospace;
+  font-size: 13px;
+}
+.ux-editor-bar { margin: 0 0 4px; }
+.ux-editor-bar a.icon { font-size: 13px; }
+
+#content .box.ux-report-box { background: none; border: 0; padding: 0; }
+#content .box.ux-report-box iframe.reporter-report-frame { border: 0 !important; resize: none !important; }
+
+/* 5. Plugin settings ---------------------------------------------------------------------- */
+table.ux-engines td, table.ux-engines th { text-align: start; vertical-align: top; padding: 4px 8px; }
+table.ux-engines td.name em.info { margin-top: 2px; }
+
+/* 6. Role permissions */
+p.ux-perm-note { clear: both; margin: 4px 0 0; padding-top: 2px; }
+/* em.info lines in a fieldset or under a table read left-aligned, as core's do */
+p.ux-perm-note, p.ux-perm-note em.info, table.ux-engines + p, table.ux-engines + p em.info { text-align: start; }

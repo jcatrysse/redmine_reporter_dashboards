@@ -1,0 +1,62 @@
+/* UX review 2026-11, mockup only. Injected INTO a report widget's frame (the sandboxed
+   srcdoc iframe) to show the proposed "widget" variant of the report stylesheet:
+   Redmine's font and table idiom, no inner cards, no duplicate title, charts at the
+   widget's width. The PDF and the full report page keep the print stylesheet. */
+html, body { background: transparent; }
+body {
+  font-family: "Noto Sans", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #212529;               /* core body text on 7.0 */
+}
+/* The widget's own heading already names the report and its count. */
+body > h1, body > h1 + p.rrd-muted { display: none; }
+
+.rrd-card {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  padding: 0 !important;
+  margin: 0 0 14px !important;
+  box-shadow: none !important;
+}
+h2, h3 {
+  font-family: "Noto Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #495057;               /* core h3 colour */
+  margin: 0 0 4px;
+}
+a { color: #1864ab; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* core table.list */
+table { border-collapse: collapse; width: 100%; margin: 0 0 6px; }
+th {
+  background: #e9ecef;
+  color: #212529;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-bottom: 2px solid #ced4da;
+  text-align: start;
+}
+th.rrd-number, td.rrd-number { text-align: end; }
+tbody th, tfoot th, tfoot td {
+  background: none;
+  border-bottom: 0;
+  border-top: 1px solid #ced4da;
+}
+td {
+  font-size: 13px;
+  padding: 3px 6px;
+  border-bottom: 1px solid #e9ecef;
+}
+tbody tr:hover td { background: #fff9db; }
+tfoot td, tr.rrd-total td, tr:last-child td strong { font-weight: 700; }
+
+/* Charts use the widget's width; the height is set per row by report-frame.js. */
+.rrd-chart-frame { max-width: none !important; margin: 0 0 6px !important; }
+
+/* Notes for the author, not for the reader: report-frame.js marks them. */
+.ux-tech { display: none !important; }
