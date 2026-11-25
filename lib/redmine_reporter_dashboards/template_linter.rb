@@ -294,7 +294,7 @@ module RedmineReporterDashboards
       # (`BatchRelated::JOURNALS_PER_ISSUE`), so `all` answers there, as it did in the base
       # plugin. Flagging GEOxyz's `issue.journals.all | sort: 'created_on'` would cry wolf.
       Rule.new(id: 'liquid.collection_all', severity: :warning, scope: :liquid,
-               pattern: /(?<!journals|relations_from|relations_to)\.all\s*(?:\||%\}|\}\})/,
+               pattern: /(?<!\bjournals|\brelations_from|\brelations_to)\.all\s*(?:\||%\}|\}\})/,
                message: '`all` is not implemented on a collection: it builds one object ' \
                         'per record however many there are, which is the materialisation ' \
                         'the aggregator exists to avoid. Use the collection directly in a ' \

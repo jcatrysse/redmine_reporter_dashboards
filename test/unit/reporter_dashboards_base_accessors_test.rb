@@ -39,26 +39,7 @@ class ReporterDashboardsBaseAccessorsTest < ActiveSupport::TestCase
     Role.find(2).remove_permission!(:view_private_notes)
     # With redmine_view_issue_description installed, no fixture role may OPEN an issue
     # until granted; the journal and relation cases are about other rules, so they grant it.
-    if Batch.openable_rule? && Batch.related_available?(:helpdesk_ticket)
-    # redmine_view_issue_description's helpdesk rule: `view_helpdesk_tickets` alone is not
-    # enough for an issue the viewer may not open.
-    def test_the_helpdesk_ticket_needs_the_issue_to_be_openable
-      @project.enable_module!(:contacts_helpdesk)
-      @project.enable_module!(:contacts)
-      contact = Contact.create!(first_name: 'Ann', last_name: 'Client', email: 'ann@acme.test',
-                                projects: [@project], visibility: 0)
-      HelpdeskTicket.create!(issue_id: 1, contact: contact, from_address: 'ann@acme.test',
-                             ticket_date: Time.utc(2026, 1, 4, 9, 0))
-      Role.find(2).add_permission!(:view_helpdesk_tickets)
-      source = each_issue('[{{ issue.helpdesk_ticket.from_address }}]')
-      assert_equal '[ann@acme.test]', render(User.find(3), [1], source)
-
-      Role.find(2).remove_permission!(:view_issue_description)
-      assert_equal '[]', render(User.find(3), [1], source)
-    end
-  end
-
-  if Batch.openable_rule?
+    if Batch.openable_rule?
       [Role.find(1), Role.find(2), Role.anonymous, Role.non_member].each do |role|
         role.add_permission!(:view_issue_description)
       end
@@ -385,6 +366,25 @@ class ReporterDashboardsBaseAccessorsTest < ActiveSupport::TestCase
 
   OPENABLE = '{% for issue in issues %}{{ issue.id }}:[{{ issue.description | size }}]' \
              '[{{ issue.journals.size }}][{{ issue.notes | size }}][{{ issue.attachments | size }}];{% endfor %}'
+
+  if Batch.openable_rule? && Batch.related_available?(:helpdesk_ticket)
+    # redmine_view_issue_description's helpdesk rule: `view_helpdesk_tickets` alone is not
+    # enough for an issue the viewer may not open.
+    def test_the_helpdesk_ticket_needs_the_issue_to_be_openable
+      @project.enable_module!(:contacts_helpdesk)
+      @project.enable_module!(:contacts)
+      contact = Contact.create!(first_name: 'Ann', last_name: 'Client', email: 'ann@acme.test',
+                                projects: [@project], visibility: 0)
+      HelpdeskTicket.create!(issue_id: 1, contact: contact, from_address: 'ann@acme.test',
+                             ticket_date: Time.utc(2026, 1, 4, 9, 0))
+      Role.find(2).add_permission!(:view_helpdesk_tickets)
+      source = each_issue('[{{ issue.helpdesk_ticket.from_address }}]')
+      assert_equal '[ann@acme.test]', render(User.find(3), [1], source)
+
+      Role.find(2).remove_permission!(:view_issue_description)
+      assert_equal '[]', render(User.find(3), [1], source)
+    end
+  end
 
   if Batch.openable_rule?
     # With the real plugin: a role without `view_issue_description` sees the issue in the

@@ -624,6 +624,11 @@ RSpec.describe RedmineReporterDashboards::TemplateLinter do
       expect(described_class.analyse(body).findings.map(&:rule)).to eq([])
     end
 
+    it 'still flags `all` on a name that merely ends like a bounded list' do
+      expect(described_class.analyse('{{ my_relations_from.all | size }}').findings.map(&:rule))
+        .to eq(%w[liquid.collection_all])
+    end
+
     it 'still flags `all` on the issue collection' do
       expect(described_class.analyse('{{ issues.all | size }}').findings.map(&:rule))
         .to eq(%w[liquid.collection_all])
