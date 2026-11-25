@@ -412,7 +412,10 @@ Recorded in `docs/DECISIONS-2026-11-25.md`.
   redmine_contacts_helpdesk, redmine_view_issue_description and redmine_issue_field_visibility
   (`redmine70-migration` branches): rspec 2961 / 260 / 217, minitest 625 / 456 / 58, 0 failures;
   the new unit test 19 runs green there (18–20 alone, depending on which halves apply).
-  Ruby 4.0.9 not run: this container's ruby-build stops at 4.0.6.
+  **Ruby 4.0.9** (built from ruby-lang.org's tarball, SHA-256 c35350682ff0…09511 checked against
+  the release announcement), after `ef7ac49`: alone rspec 2962 / 260 / 217, minitest
+  630 / 456 / 58; with the seven plugins rspec 2962 / 260 / 217, minitest 628 / 456 / 58; all
+  0 failures.
 - **e2e** (`test/e2e/base_accessors.mjs`, production mode, the seven plugins installed):
   4 screenshots, 0 problems, `docs/e2e/base_accessors-*.png`.
 - **Reviews**: independent subagent review (9 findings; the two leaks and the out-of-scope
