@@ -21,6 +21,61 @@ Rails 8.1, Ruby 3.3.6, PostgreSQL 16, production mode, Chromium) with this plugi
 **Constraints:** no change to permissions, visibility or what data anyone sees, unless named
 below as a decision for Jan; no page slower; English wording here, translations later.
 
+## Final design
+
+Every proposal applied together, on every page, for both navigation variants. Each image is
+**Before | After A (one tab bar, recommended) | After B (two levels)**, 1440 px per panel.
+The single shots are next to them in [`img/final/`](img/final/) (`<page>-before.png`,
+`-a.png`, `-b.png`).
+
+**Manager (all permissions)**
+
+| Page | Composite |
+|---|---|
+| Dashboard, Overview (rows of 1, 2, 3 widgets) | [![](img/final/dashboard-overview.png)](img/final/dashboard-overview.png) |
+| Dashboard, Charts (charts 3 per row in a wide widget, 1 per row in narrow ones) | [![](img/final/dashboard-charts.png)](img/final/dashboard-charts.png) |
+| Dashboard, Versions | [![](img/final/dashboard-versions.png)](img/final/dashboard-versions.png) |
+| Templates | [![](img/final/templates.png)](img/final/templates.png) |
+| New template | [![](img/final/template-new.png)](img/final/template-new.png) |
+| Template page | [![](img/final/template-show.png)](img/final/template-show.png) |
+| Schedules (project member) | [![](img/final/schedules.png)](img/final/schedules.png) |
+| Schedules (administrator) | [![](img/final/schedules-admin.png)](img/final/schedules-admin.png) |
+| Sent reports | [![](img/final/sent-reports.png)](img/final/sent-reports.png) |
+| Project settings (plugin tab removed, choice 1c) | [![](img/final/settings.png)](img/final/settings.png) |
+| Dashboard controls at 1100 px | [![](img/final/controls-1100.png)](img/final/controls-1100.png) |
+
+**Reader without edit rights (`viewer`)**
+
+| Page | Composite |
+|---|---|
+| Dashboard, Overview | [![](img/final/reader-overview.png)](img/final/reader-overview.png) |
+| Dashboard, Charts (S-14 notice stays) | [![](img/final/reader-charts.png)](img/final/reader-charts.png) |
+| Templates | [![](img/final/reader-templates.png)](img/final/reader-templates.png) |
+| Template page | [![](img/final/reader-template-show.png)](img/final/reader-template-show.png) |
+| Schedules | [![](img/final/reader-schedules.png)](img/final/reader-schedules.png) |
+
+What the final pages add to the per-finding shots below:
+- **Dashboard controls.** Variant A: "Add:" and the gear get their own right-aligned
+  `.contextual` line under the tab bar, so they never crowd Templates | Schedules | Sent
+  reports, also at 1100 px. Variant B: they sit on the dashboard's own (second) tab row.
+- **Charts in widgets.** Chart cards side by side: 3 per row from 1100 px widget width, 2 from
+  720 px, else 1; a single chart is at most 720 px wide; 230 to 240 px high. Axis, legend and
+  title text 12 to 13 px Noto Sans, ticks and legend grey `#868e96` (core `em.info` grey),
+  chart title `#495057`, grid lines `#e9ecef`.
+- **Scope line in plain words:** "Only issues you can see are counted." (and "Only time
+  entries you can see are counted.", "Versions without issues in this report are not
+  listed."). These lines are template text, so the change is in `starters/*.liquid`.
+  Caveat: in a document rendered as another user (a schedule's "render as", a share link)
+  "you" is not the reader; there the starter should name the render actor ("Only issues
+  Manager E2E can see are counted."). Proposed wording on screen: **"Only issues you can see
+  are counted."**
+- **"Visible" as core's query form** (`app/views/queries/_form.html.erb:20-29, :118-121`): to me
+  only, to any users, to these roles only:, then the roles indented (`label.block.role-visibility`)
+  and disabled until "to these roles only" is chosen.
+- **Lint, no findings:** one plain grey line "No linter findings.", without the rake command
+  (authors are not admins). This changes D4: `lint_panel_test.rb:281-285` asserts the task
+  name on the page and must change with it.
+
 ## Summary
 
 | # | Finding | Proposal in one line | Effort | Queries |
@@ -43,7 +98,7 @@ These are not plain UX calls: each one reverses a recorded decision or a spec co
 | D1 | Templates and Schedules live under Project settings, one entry point per page | Curator decision 2026-08-21 (`init.rb:136-152`, `settings_tab.rb:7-11`) | Moves them to the project menu item's tab bar; Settings tab removed (choice 1c) |
 | D2 | The Settings tab is the way in for roles without the dashboard permission, and for projects with Reports on and Dashboards off | `settings_tab.rb:44-49`, `permissions.rb:122-164` (`settings_tab: true` maps `projects#settings`) | Needs a replacement entry point, see 1 "Access" |
 | D3 | INV-9: the authoring permission labels say they run code, plus a warning on the permissions screen | `technical-spec.md:580-581`, `:1146` | Labels shortened but keep "(runs code)"; see 6 |
-| D4 | A clean lint result is shown, and the rake task is named on the page | `test/functional/reporter_dashboards_lint_panel_test.rb:267-285` | Kept, as one grey line instead of a yellow box |
+| D4 | A clean lint result is shown, and the rake task is named on the page | `test/functional/reporter_dashboards_lint_panel_test.rb:267-285` | Clean state kept as one grey line "No linter findings."; the rake command is dropped (test :281-285 changes) |
 
 ### Corrections to the brief (measured on this branch)
 
@@ -214,11 +269,15 @@ The S-14 narrowing notice stays exactly as today (visible, `p.warning`):
   `#495057`, links without underline in core blue, tables in `table.list` colours (header
   `#e9ecef`, 2px `#ced4da` rule), numbers right-aligned. PDF and the full report page keep
   the print stylesheet.
-- **Charts at the widget's width**: no `max-width` on `.rrd-chart-frame`; height by widgets
-  in the row, 1 = 300px, 2 = 260px, 3 = 220px (Chart.js is already responsive).
+- **Charts laid out by the widget's width**: consecutive chart cards in a CSS grid, 3 per row
+  from 1100px, 2 from 720px, else 1; a lone chart at most 720px wide; 230 to 240px high; axis
+  and legend text 12px grey `#868e96`, chart title 13px `#495057` (Chart.js is already
+  responsive; the fonts are chart options the report stylesheet's widget variant sets). See
+  [final/dashboard-charts.png](img/final/dashboard-charts.png).
 - **Scope and degradation lines as one grey foot line, for every reader.** "Counted in SQL
   over the issues this report's reader may see." is a visibility disclosure (same family as
-  S-14) and comes from the template, so it is styled, not hidden. Degradations read plainly:
+  S-14) and comes from the template, so it is styled, not hidden, and reworded to "Only
+  issues you can see are counted." (see Final design for the render-as caveat). Degradations read plainly:
   "15 issues listed, 11 more under "(other)"." instead of a bold block on top.
 - **Unconfigured widget**: editor: heading + "Not set up yet. Choose a report template under
   Options." and the core gear (`icon-settings`) in `.contextual` toggling the existing form.
@@ -269,9 +328,13 @@ the bottom, a sidebar listing 60+ accessors open.
 - **Chart helper as a button** "Insert a chart" (`icon-stats`) above the editor; it opens the
   existing (already script-driven) form as a core modal instead of a box at the bottom.
 - **Larger editor**: 520px high, monospace.
-- **Clean lint as one grey line (D4)**: "Linter: no findings. For every template in this
-  installation: `rake reporter_dashboards:lint_templates`". The panel still shows that the
-  linter ran and still names the task (both tested). Findings keep today's table.
+- **Clean lint as one plain grey line (D4)**: "No linter findings." The line still shows
+  that the linter ran (tested, :267); the rake command goes, since authors are not admins
+  (test :281-285 changes with it). Findings keep today's table.
+- **"Visible" exactly as core's query form**: to me only, to any users, to these roles only:,
+  roles indented (`label.block.role-visibility`) and disabled until that option is chosen
+  (core JS at `queries/_form.html.erb:118-121`). See
+  [final/template-new.png](img/final/template-new.png).
 - **Shorter help lines** under Data source, Output, Margins, "Produce a failure document".
   The INV-9 line keeps its statement: "Templates run on the server: whoever can edit one can
   run code as the application."
@@ -343,6 +406,8 @@ permission.
 | 3c | Font in the report frame | System font stack |
 | 4a | Starter gallery | Card grid |
 | 6 | Shorter permission labels keeping "(runs code)" (D3) | Yes; no script on the roles page |
+| 7 | Scope line wording | "Only issues you can see are counted."; in a document rendered as another user, name that user |
+| 8 | Lint clean state: one grey line "No linter findings." or nothing (D4) | One grey line |
 
 ## How to reproduce
 

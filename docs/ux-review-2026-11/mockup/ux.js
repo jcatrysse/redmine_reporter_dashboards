@@ -41,6 +41,9 @@
       if (o.current === 'dashboard' && tabs) {
         tabs.classList.add('ux-subtabs');
         tabs.parentNode.insertBefore(top, tabs);
+        // "Add:" and the gear belong to the dashboard, so they sit on its own tab row.
+        const ctx = $('#content > .contextual');
+        if (ctx) tabs.parentNode.insertBefore(ctx, tabs);
       } else {
         content.insertBefore(top, $('#content > h2') ? $('#content > h2').nextSibling : content.firstChild);
       }
@@ -53,6 +56,10 @@
     const right = manageTabs.map((t, i) => li(t, o.current === t.key, i === 0 ? ' class="ux-tabs-right"' : '')).join('');
     if (o.current === 'dashboard' && tabs) {
       $('ul', tabs).insertAdjacentHTML('beforeend', right);
+      // The dashboard's own controls ("Add:" and the gear) leave the tab row so they never
+      // crowd the management tabs: a .contextual line of their own, right-aligned, under it.
+      const ctx = $('#content > .contextual');
+      if (ctx) { ctx.classList.add('ux-dash-controls'); tabs.insertAdjacentElement('afterend', ctx); }
     } else {
       const pages = o.dashTabs.map((t) => li(t, false)).join('');
       tabs = el(`<div class="tabs"><ul>${pages}${right}</ul></div>`);
@@ -115,6 +122,14 @@
   // ---------------------------------------------------------------- 3. dashboard widgets
   // o = { editor, notes: { boxId: [text] } }
   const WIDGET_LABEL = { report_by_issues: 'Issue report', report_by_spent_time: 'Spent time report' };
+  // The starters' scope lines in Redmine's own register (they are template text, so the
+  // real change is in starters/*.liquid).
+  function plainNote(text) {
+    return text
+      .replace(/^Counted in SQL over the issues this report's reader may see\.?/, 'Only issues you can see are counted.')
+      .replace(/^Versions with no issues in this report do not appear.*$/, 'Versions without issues in this report are not listed.')
+      .replace(/^Hours are summed in SQL.*$/, 'Only time entries you can see are counted.');
+  }
   function widgets(o) {
     $$('#reporter-project-page .mypage-box').forEach((box) => {
       const base = box.id.replace(/^reporter-block-/, '').replace(/__\d+$/, '');
@@ -144,7 +159,7 @@
         // Degradations and the report's own scope lines ("Counted in SQL over the issues
         // this report's reader may see.") are facts about the numbers and who they cover:
         // one quiet grey foot line under the report, for every reader.
-        const foot = degText.concat(notes);
+        const foot = degText.concat(notes.map(plainNote));
         if (foot.length) frame.insertAdjacentElement('afterend', el(`<p class="ux-widget-foot"><em class="info">${esc(foot.join(' '))}</em></p>`));
       }
 
@@ -189,6 +204,7 @@
     const chart = $('#reporter-chart-form');
     if (chart) chart.style.display = 'none';
     lintClean();
+    coreVisibility();
     // Reference: every group closed, so the sidebar is a short index rather than 60 lines.
     $$('details.reporter-drop-reference').forEach((d) => d.removeAttribute('open'));
     const refInfo = $('#sidebar em.info');
@@ -211,12 +227,36 @@
     textMatches(/executed on the server/).forEach((n) => { n.textContent = 'Templates run on the server: whoever can edit one can run code as the application.'; });
   }
 
-  // A clean lint result stays visible (an absent panel cannot be told from one that did
-  // not run, lint_panel_test.rb:267) but as one grey line instead of a yellow box; the
-  // rake task stays named on the page (:281).
+  // A clean lint result: one plain grey line (an absent panel cannot be told from one that
+  // did not run, lint_panel_test.rb:267). The rake command goes: authors are not admins.
   function lintClean() {
     if (!$('#reporter-template-lint-clean')) return;
-    $('#reporter-template-lint').replaceWith(el('<p id="reporter-template-lint"><em class="info">Linter: no findings. For every template in this installation: <code>rake reporter_dashboards:lint_templates</code></em></p>'));
+    $('#reporter-template-lint').replaceWith(el('<p id="reporter-template-lint"><em class="info">No linter findings.</em></p>'));
+  }
+
+  // "Visible" exactly as core's query form (app/views/queries/_form.html.erb:20-29 and
+  // :118-121): private, public, then "to these roles only:" with the roles indented
+  // (label.block.role-visibility) and enabled only while that option is chosen.
+  function coreVisibility() {
+    const radios = $$('input[type=radio][name="template[visibility]"]');
+    if (!radios.length) return;
+    const p = radios[0].closest('p');
+    const labelOf = (v) => { const r = radios.find((x) => x.value === String(v)); return r && (r.closest('label') || r.parentNode); };
+    const roles = $$('input[type=checkbox][name="template[role_ids][]"]');
+    const roleLabels = roles.map((cb) => cb.closest('label') || cb.parentNode);
+    const hidden = $('input[type=hidden][name="template[role_ids][]"]', p);
+    [labelOf(0), labelOf(2), labelOf(1)].forEach((l) => { if (l) { l.classList.add('block'); p.appendChild(l); } });
+    const rolesLabel = labelOf(1);
+    if (rolesLabel && !/:\s*$/.test(rolesLabel.textContent)) {
+      const last = Array.from(rolesLabel.childNodes).reverse().find((n) => n.nodeType === 3 && n.textContent.trim());
+      if (last) last.textContent = last.textContent.replace(/\s+$/, '') + ':';
+    }
+    roleLabels.forEach((l) => { l.classList.add('block', 'role-visibility'); p.appendChild(l); });
+    if (hidden) p.appendChild(hidden);
+    $$('span', p).forEach((s) => { if (!s.textContent.trim()) s.remove(); });
+    const sync = () => { const on = radios.find((x) => x.value === '1')?.checked; roles.forEach((cb) => { cb.disabled = !on; }); };
+    radios.forEach((r) => r.addEventListener('change', sync));
+    sync();
   }
 
   function templateShow() {

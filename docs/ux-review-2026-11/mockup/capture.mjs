@@ -67,14 +67,15 @@ async function login(user) {
 
 async function reportFrames() { return page.frames().filter((f) => f !== page.mainFrame()); }
 
+let W = 1440; // viewport width; the final section also captures at 1100
 async function go(url) {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: W, height: 900 });
   await page.goto(BASE + url);
   await page.waitForLoadState('load');
   // Give every report frame the full page height so off-screen frames paint, then wait
   // for Chart.js to finish.
   const h = await page.evaluate(() => document.documentElement.scrollHeight);
-  await page.setViewportSize({ width: 1440, height: Math.min(Math.max(h, 900), 12000) });
+  await page.setViewportSize({ width: W, height: Math.min(Math.max(h, 900), 12000) });
   await page.waitForTimeout(2500);
 }
 
@@ -121,10 +122,10 @@ async function shot(name, { full = true, clip, element } = {}) {
   } else if (clip) {
     await page.screenshot({ path: file, clip });
   } else {
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setViewportSize({ width: W, height: 900 });
     await page.waitForTimeout(200);
     const h = await page.evaluate(() => document.documentElement.scrollHeight);
-    await page.setViewportSize({ width: 1440, height: full ? Math.max(h, 600) : 900 });
+    await page.setViewportSize({ width: W, height: full ? Math.max(h, 600) : 900 });
     await page.waitForTimeout(400);
     await page.screenshot({ path: file, fullPage: full });
   }
@@ -275,6 +276,72 @@ if (want('07')) {
   await go(viewerShow); await shot('07-viewer-before-template-show', { full: false });
   await go(viewerShow); await navAfter('templates', { manage: VIEWER_TABS, keepTitle: true }); await frames();
   await page.evaluate(() => window.UX.templateShow()); await shot('07-viewer-after-template-show', { full: false });
+}
+
+// ---------------------------------------------------------------------------------------
+// final/: EVERY proposal applied together, for both navigation variants (a = one tab bar,
+// b = two levels). Per page: <page>-before, <page>-a, <page>-b; compress.py composes them.
+const VARIANTS = [['a', 'one-row'], ['b', 'two-level']];
+async function finalPage(key, url, { current, manage, keepTitle = false, apply = async () => {}, before = true } = {}) {
+  if (before) { await go(url); await shot(`final/${key}-before`); }
+  for (const [suffix, variant] of VARIANTS) {
+    await go(url);
+    if (current) await navAfter(current, { variant, manage, keepTitle });
+    else await inject();
+    await apply();
+    await page.waitForTimeout(400);
+    await shot(`final/${key}-${suffix}`);
+  }
+}
+const widgetsAll = (editor) => async () => {
+  const notes = await frames();
+  await page.evaluate((o) => window.UX.widgets(o), { editor, notes });
+};
+const findTemplate = async () => {
+  await go(`${P}/reporter/templates`);
+  return page.evaluate(() => { const a = Array.from(document.querySelectorAll('table.list a')).find((x) => x.textContent.trim() === 'Open work summary'); return a && a.getAttribute('href'); });
+};
+
+if (want('final')) {
+  console.log('final: every proposal together, both variants');
+  await login('manager');
+  await finalPage('dashboard-overview', `${P}/reporter`, { current: 'dashboard', manage: MANAGER_TABS, apply: widgetsAll(true) });
+  await finalPage('dashboard-charts', chartsUrl, { current: 'dashboard', manage: MANAGER_TABS, apply: widgetsAll(true) });
+  await finalPage('dashboard-versions', versionsUrl, { current: 'dashboard', manage: MANAGER_TABS, apply: widgetsAll(true) });
+  await finalPage('templates', `${P}/reporter/templates`, { current: 'templates', manage: MANAGER_TABS });
+  await finalPage('template-new', `${P}/reporter/templates/new`, { current: 'templates', manage: MANAGER_TABS, keepTitle: true,
+    apply: async () => page.evaluate(() => window.UX.templateNew()) });
+  const showUrl = await findTemplate();
+  await finalPage('template-show', showUrl, { current: 'templates', manage: MANAGER_TABS, keepTitle: true,
+    apply: async () => { await frames(); await page.evaluate(() => window.UX.templateShow()); } });
+  await finalPage('schedules', `${P}/reporter/schedules`, { current: 'schedules', manage: MANAGER_TABS,
+    apply: async () => page.evaluate(() => window.UX.schedules({ admin: false })) });
+  await finalPage('sent-reports', `${P}/reporter/mail`, { current: 'mail', manage: MANAGER_TABS,
+    apply: async () => page.evaluate(() => window.UX.sentReports()) });
+  await finalPage('settings', `${P}/settings`, { apply: async () => page.evaluate(() => window.UX.settingsWithoutTab()) });
+
+  // The dashboard's controls at a narrower window, both variants.
+  W = 1100;
+  for (const [suffix, variant] of VARIANTS) {
+    await go(`${P}/reporter`); await navAfter('dashboard', { variant, manage: MANAGER_TABS });
+    await shot(`final/controls-1100-${suffix}`, { clip: { x: 0, y: 0, width: 1100, height: 330 } });
+  }
+  await go(`${P}/reporter`); await shot('final/controls-1100-before', { clip: { x: 0, y: 0, width: 1100, height: 330 } });
+  W = 1440;
+
+  await login('admin');
+  await finalPage('schedules-admin', `${P}/reporter/schedules`, { current: 'schedules', manage: MANAGER_TABS,
+    apply: async () => page.evaluate(() => window.UX.schedules({ admin: true })) });
+
+  await login('viewer');
+  await finalPage('reader-overview', `${P}/reporter`, { current: 'dashboard', manage: VIEWER_TABS, apply: widgetsAll(false) });
+  await finalPage('reader-charts', chartsUrl, { current: 'dashboard', manage: VIEWER_TABS, apply: widgetsAll(false) });
+  await finalPage('reader-templates', `${P}/reporter/templates`, { current: 'templates', manage: VIEWER_TABS });
+  const readerShow = await findTemplate();
+  await finalPage('reader-template-show', readerShow, { current: 'templates', manage: VIEWER_TABS, keepTitle: true,
+    apply: async () => { await frames(); await page.evaluate(() => window.UX.templateShow()); } });
+  await finalPage('reader-schedules', `${P}/reporter/schedules`, { current: 'schedules', manage: VIEWER_TABS,
+    apply: async () => page.evaluate(() => window.UX.schedules({ admin: false })) });
 }
 
 await browser.close();

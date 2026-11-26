@@ -6,8 +6,11 @@
 /* one-row: the management tabs at the end of the core tab bar */
 #content .tabs ul { display: flex; }
 #content .tabs li.ux-tabs-right { margin-inline-start: auto; }
-/* two-level variant: the dashboard's pages as a lighter second row */
-#content .tabs.ux-subtabs { margin-top: 6px; }
+/* one-row: the dashboard's own controls on a line under the tab bar */
+#content > .contextual.ux-dash-controls { float: none; text-align: end; margin: 6px 0 8px; }
+/* two-level variant: the dashboard's pages as a lighter second row, its controls beside it */
+#content .tabs.ux-subtabs { margin-top: 0; }
+#content .tabs.ux-feature-tabs { margin-bottom: 10px; }
 #content .tabs.ux-subtabs a { font-size: 12px; padding: 2px 8px; }
 
 /* 3. Dashboard widgets ------------------------------------------------------------------ */

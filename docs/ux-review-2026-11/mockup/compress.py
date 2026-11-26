@@ -62,14 +62,46 @@ for spec in COMPOSITES:
     if all(os.path.exists(os.path.join(IMG, f + '.png')) for f in spec[1:3]):
         composite(*spec)
 
+FINAL = os.path.join(IMG, 'final')
+
+
+def triptych(key, labels=('Before', 'After A: one tab bar', 'After B: two levels'), scale=0.5):
+    """before | after A | after B, each panel at 1x (half the 2x capture)."""
+    panels = []
+    for suffix, label in zip(('before', 'a', 'b'), labels):
+        im = Image.open(os.path.join(FINAL, f'{key}-{suffix}.png')).convert('RGB')
+        if im.width > 2000:  # a fresh 2x capture; a re-run finds them already at 1x
+            im = im.resize((int(im.width * scale), int(im.height * scale)), Image.LANCZOS)
+        panels.append(labelled(im, label))
+    gap = 24
+    out = Image.new('RGB', (sum(p.width for p in panels) + gap * 2, max(p.height for p in panels)), 'white')
+    x = 0
+    for p in panels:
+        out.paste(p, (x, 0))
+        x += p.width + gap
+    out.save(os.path.join(FINAL, f'{key}.png'))
+
+
+if os.path.isdir(FINAL):
+    keys = sorted({f[:-len('-before.png')] for f in os.listdir(FINAL) if f.endswith('-before.png')})
+    for key in keys:
+        if all(os.path.exists(os.path.join(FINAL, f'{key}-{s}.png')) for s in ('a', 'b')):
+            triptych(key)
+
 total = 0
-for f in sorted(os.listdir(IMG)):
+files = [os.path.join(IMG, f) for f in os.listdir(IMG)]
+if os.path.isdir(FINAL):
+    files += [os.path.join('final', f) for f in os.listdir(FINAL)]
+for f in sorted(files):
     if not f.endswith('.png'):
         continue
     path = os.path.join(IMG, f)
     im = Image.open(path)
+    # final/<page>-{before,a,b}: kept at 1x; the composites are what people look at.
+    if os.path.dirname(f) == 'final' and f.endswith(('-before.png', '-a.png', '-b.png')) and im.width > 2000:
+        im = im.convert('RGB').resize((im.width // 2, im.height // 2), Image.LANCZOS)
     if im.mode != 'P':
         im = im.convert('RGB').quantize(colors=256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
         im.save(path, optimize=True)
     total += os.path.getsize(path)
-print(f'{len([f for f in os.listdir(IMG) if f.endswith(".png")])} images, {total / 1e6:.1f} MB')
+print(f'{len([f for f in files if f.endswith(".png")])} images, {total / 1e6:.1f} MB')
